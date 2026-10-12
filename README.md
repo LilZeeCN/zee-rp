@@ -7,7 +7,7 @@
 *Turn screenshots, HTML, or specs into editable Axure widgets. Let AI read, modify,
 and generate real `.rp` files — verified against the native Axure app.*
 
-[Quick Start](#-quick-start) • [MCP Setup](#-mcp-integration) • [Capabilities](#-capability-matrix) • [Safety](#-safety-model)
+[English](README.md) • [简体中文](README.zh-CN.md) • [Quick Start](#-quick-start) • [MCP Setup](#-mcp-integration) • [Capabilities](#-capability-matrix) • [Safety](#-safety-model)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Node Version](https://img.shields.io/badge/Node.js-%3E%3D18-brightgreen.svg)](package.json)
