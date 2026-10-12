@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // 统一 CLI 入口：node bin/axure.mjs <command> [args...] → 经 AxureSession 透传执行 scripts/ 存量脚本。
 // --help 列注册表全部命令与一句话用途；<command> --help 显示该命令 usage；退出码透传子进程退出码。
 // 命令名解析只消费 argv[0] 一个词，但先按两词再按一词查注册表——axvg 三个子命令在注册表里各占一条

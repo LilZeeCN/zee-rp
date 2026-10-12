@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { listMcpTools, callCommandTool, jobTools, validateInput } from '../scripts/mcp-tools.mjs';
 import { JobManager } from '../scripts/jobs.mjs';
 
