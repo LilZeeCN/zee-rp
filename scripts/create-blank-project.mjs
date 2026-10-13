@@ -6,10 +6,12 @@ import { readRp } from './rp-read.mjs';
 import { parsePayload, field } from './parse-payload.mjs';
 
 import { resolveBlankTemplate } from './blank-template.mjs';
+import { assertNotProtected } from './engine.mjs';
 
 export function createBlankProject(outputPath) {
   const TEMPLATE = resolveBlankTemplate();
   const output = resolve(outputPath);
+  assertNotProtected(output);
   if (extname(output).toLowerCase() !== '.rp') throw new Error('Output path must end in .rp');
 
   const template = readFileSync(TEMPLATE);
@@ -22,7 +24,7 @@ export function createBlankProject(outputPath) {
   const objects = field(diagram?.body ?? {}, 'diagram-objects')?.items ?? [];
 
   if (summary.pages.length !== 1 || summary.counts.widgets !== 0 || summary.counts.panelStates !== 0 || objects.length !== 0) {
-    throw new Error('Bundled Axure template is no longer a one-page blank project');
+    throw new Error('Resolved Axure template is no longer a one-page blank project');
   }
   copyFileSync(TEMPLATE, output, constants.COPYFILE_EXCL);
   return {

@@ -123,7 +123,7 @@ Axure 把 `height:0` + `strokes` 的 widget 渲染成 SVG 线段，颜色粗细�
 
 ## spec 与原始格式的区别
 
-`axvg.mjs` 当前展开 rect/card、circle/ellipse、hline、text、line、image、shape、pie。原始 Axvg 格式中已有渐变与阴影字段（见 官方序列化资料（本地研究参考不随发布包）），但 spec 展开器尚未提供这些参数。需要这些效果时明确手工编码及待验证范围，不能把传入未知 spec 字段视为已经生效。
+`axvg.mjs` 当前展开 rect/card、circle/ellipse、hline、text、line、image、shape、pie。原始 Axvg 格式中已有渐变与阴影字段（见 官方序列化资料（历史研究资料未随仓库分发）），当前 spec 展开器已提供 linear/radial 渐变和内外阴影参数，范围与示例见下文。angular 会被拒绝，其他未登记字段不表示生效。
 
 文本元件当前以内容自动命名，`text` 的自定义 `name` 不会覆盖它；通道 B 定位前以 `rp-read` 实际输出为准。多行排版优先分行建 text。
 

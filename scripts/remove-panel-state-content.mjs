@@ -15,13 +15,57 @@ const nameOf = object => field(field(object.body, 'name-block') ?? {}, 'text')?.
 const tableOf = graph => graph.roots.find(node => node.tag === 0x1e).values;
 const packageGuid = graph => tableOf(graph)[graph.roots.find(node => node.tag === 0x12).value - 1];
 
+// A state's packages are siblings under the Page or Master that owns the panel.
+export function resolvePanelState(input, { page, master, panel, state }) {
+  if (Boolean(page) === Boolean(master)) throw new Error('Choose exactly one Page or Master owner');
+  const records = readRecords(input);
+  let ownerRecord, stateRecord;
+  if (page) {
+    const meta = unique(readRp(input).pages.filter(item => item.name === page), `Page ${page}`);
+    const widget = unique(meta.widgets.filter(item => item.name === panel && item.type === 'DynamicPanel'), `Panel ${panel}`);
+    const selected = unique(widget.panel.filter(item => item.name === state), `State ${state}`);
+    ownerRecord = records.find(item => item.index === meta.record);
+    stateRecord = records.find(item => item.index === selected.record && item.className === 'Axure:PanelState');
+  } else {
+    const doc = parsePayload(records.find(item => item.className === 'Axure:DesignDocument'));
+    const info = unique([...doc.objects.values()].filter(item => item.className === 'Axure:MasterPackageInfo'
+      && field(item.body, 'package-name')?.text === master), `Master ${master}`);
+    const guid = tableOf(doc)[field(info.body, 'package-id').values[1] - 1];
+    ownerRecord = unique(records.filter(item => item.className === 'Axure:Master'
+      && packageGuid(parsePayload(item)) === guid), `Master package ${master}`);
+    const graph = parsePayload(ownerRecord), root = graph.objects.get(graph.roots.find(item => item.tag === 0xf).value);
+    const diagram = graph.objects.get(field(root.body, 'diagram').value);
+    const widget = unique(field(diagram.body, 'diagram-objects').items.map(ref => graph.objects.get(ref.value))
+      .filter(item => item.className === 'Axure:DiagramObject:DynamicPanel' && nameOf(item) === panel), `Panel ${panel}`);
+    const states = field(widget.body, 'panel-diagrams').items.map(pair => {
+      if (pair.tag !== 0x13) throw new Error('Panel state requires a native package reference');
+      const guid = tableOf(graph)[pair.values[1] - 1];
+      const record = unique(records.filter(item => item.className === 'Axure:PanelState'
+        && packageGuid(parsePayload(item)) === guid), `PanelState package ${guid}`);
+      const stateGraph = parsePayload(record);
+      const diagram = unique([...stateGraph.objects.values()].filter(item => item.className === 'Axure:PanelDiagram'), 'PanelDiagram');
+      return { record, name: field(diagram.body, 'Name')?.text };
+    });
+    stateRecord = unique(states.filter(item => item.name === state), `State ${state}`).record;
+  }
+  if (!ownerRecord || !stateRecord) throw new Error('Panel owner or state package is missing');
+  const ownerGuid = packageGuid(parsePayload(ownerRecord)), stateGuid = packageGuid(parsePayload(stateRecord));
+  const manifest = readManifest(input);
+  const ownerNode = manifest.value.root.children?.[guidKey(ownerGuid)];
+  const node = ownerNode?.children?.[guidKey(stateGuid)];
+  if (ownerNode?.parts?.package !== ownerRecord.offset - 8 - manifest.dataStart
+    || node?.parts?.package !== stateRecord.offset - 8 - manifest.dataStart)
+    throw new Error('PanelState package must belong to the selected Page or Master');
+  return { ownerRecord, stateRecord, ownerGuid };
+}
+
 // Native deletion removes owned states, but keeps shared Master definitions.
-function removeStatePackage(input, guid, pageGuid) {
-  const manifest = readManifest(input), parent = manifest.value.root.children?.[guidKey(pageGuid)];
+function removeStatePackage(input, guid, ownerGuid) {
+  const manifest = readManifest(input), parent = manifest.value.root.children?.[guidKey(ownerGuid)];
   const key = guidKey(guid), node = parent?.children?.[key];
   if (!node || Object.keys(node.parts ?? {}).length !== 1 || node.parts.package === undefined
     || Object.keys(node.children ?? {}).length)
-    throw new Error('Removed panel states require a package-only entry under the owning Page');
+    throw new Error('Removed panel states require a package-only entry under the owning Page or Master');
   const record = unique(readRecords(input).filter(record => record.className === 'Axure:PanelState'
     && packageGuid(parsePayload(record)) === guid), `PanelState package ${guid}`);
   const start = record.offset - 8 - manifest.dataStart, length = record.compressedSize + 8;
@@ -39,17 +83,15 @@ function removeStatePackage(input, guid, pageGuid) {
     input.subarray(record.offset + record.compressedSize)]);
 }
 
-export function removePanelStateContent(input, { page: pageName, panel, state, widgets, widgetIds, all = false }) {
+export function removePanelStateContent(input, { page: pageName, master, panel, state, widgets, widgetIds, all = false }) {
   if ([all, Boolean(widgets?.length), Boolean(widgetIds?.length)].filter(Boolean).length !== 1)
     throw new Error('Choose all:true, a nonempty widgets array, or a nonempty widgetIds array');
   if (widgets && (!Array.isArray(widgets) || widgets.some(name => typeof name !== 'string' || !name)
     || new Set(widgets).size !== widgets.length)) throw new Error('widgets must contain unique nonempty names');
   if (widgetIds && (!Array.isArray(widgetIds) || widgetIds.some(id => !Number.isInteger(id) || id < 1)
     || new Set(widgetIds).size !== widgetIds.length)) throw new Error('widgetIds must contain unique positive integer IDs');
-  const page = unique(readRp(input).pages.filter(page => page.name === pageName), `Page ${pageName}`);
-  const owner = unique(page.widgets.filter(widget => widget.name === panel && widget.type === 'DynamicPanel'), `Panel ${panel}`);
-  const meta = unique(owner.panel.filter(item => item.name === state), `State ${state}`);
-  const records = readRecords(input), record = records.find(record => record.index === meta.record && record.className === 'Axure:PanelState');
+  const { stateRecord: record, ownerGuid } = resolvePanelState(input, { page: pageName, master, panel, state });
+  const records = readRecords(input);
   const graph = parsePayload(record), guids = graph.roots.find(node => node.tag === 0x1e).values;
   const diagram = unique([...graph.objects.values()].filter(object => object.className === 'Axure:PanelDiagram'), 'PanelDiagram');
   const roots = field(diagram.body, 'diagram-objects');
@@ -66,8 +108,7 @@ export function removePanelStateContent(input, { page: pageName, panel, state, w
   const removed = [...candidates].filter(id => graph.objects.has(id) && !retained.has(id));
   const removedWidgets = new Set(removed.filter(id => graph.objects.get(id).className.startsWith('Axure:DiagramObject:')));
   const removedGuids = new Set(removed.map(id => guids[id - 1]));
-  const pageGraph = parsePayload(records.find(record => record.index === page.record));
-  const pageGuid = packageGuid(pageGraph), stateGuid = packageGuid(graph);
+  const stateGuid = packageGuid(graph);
   const packages = new Map(records.filter(record => record.className === 'Axure:PanelState').map(record => {
     const graph = parsePayload(record);
     return [packageGuid(graph), { record, graph }];
@@ -115,19 +156,21 @@ export function removePanelStateContent(input, { page: pageName, panel, state, w
   const removedIds = new Set(removed);
   graph.roots = graph.roots.filter(node => node.tag !== 9 || !removedIds.has(node.id));
   let file = replaceRecord(input, record, encodeRecord(record, record.strings, encodePayload(graph.roots)));
-  for (const guid of removedStates.keys()) file = removeStatePackage(file, guid, pageGuid);
-  return { file, report: { page: pageName, panel, state, record: record.index, all,
+  for (const guid of removedStates.keys()) file = removeStatePackage(file, guid, ownerGuid);
+  return { file, report: { ...(master ? { master } : { page: pageName }), panel, state, record: record.index, all,
     removedWidgets: [...removedWidgets].map(id => ({ id, guid: guids[id - 1], name: nameOf(graph.objects.get(id)) ?? '' })),
     removedObjects: removed.length, removedStates: [...removedStates.keys()],
     retainedRoots: roots.items.length, stateGuid } };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const [source, output, page, panel, state, ...names] = process.argv.slice(2);
+  const [source, output, owner, panel, state, ...options] = process.argv.slice(2);
+  const master = options.includes('--master'), names = options.filter(item => item !== '--master');
+  if (options.filter(item => item === '--master').length > 1) throw new Error('Duplicate --master option');
   if (!state || !names.length || (names.includes('--all') && names.length !== 1)
     || names[0] === '--ids' && (names.length < 2 || names.slice(1).some(id => !/^[1-9]\d*$/.test(id))))
-    throw new Error('Usage: node remove-panel-state-content.mjs source.rp new.rp <page> <panel> <state> (--all | --ids <id>... | <widgetName>...)');
-  const result = removePanelStateContent(readFileSync(source), { page, panel, state, all: names[0] === '--all',
+    throw new Error('Usage: node remove-panel-state-content.mjs source.rp new.rp <pageOrMaster> <panel> <state> [--master] (--all | --ids <id>... | <widgetName>...)');
+  const result = removePanelStateContent(readFileSync(source), { ...(master ? { master: owner } : { page: owner }), panel, state, all: names[0] === '--all',
     widgets: ['--all', '--ids'].includes(names[0]) ? undefined : names,
     widgetIds: names[0] === '--ids' ? names.slice(1).map(Number) : undefined });
   writeFileSync(output, result.file, { flag: 'wx' });

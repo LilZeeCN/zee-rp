@@ -7,27 +7,24 @@ import { parsePayload, encodePayload, field } from './parse-payload.mjs';
 import { readRp } from './rp-read.mjs';
 import { closureOf, cloneInto } from './clone-closure.mjs';
 import { guidKey } from './duplicate-page.mjs';
-import { removePanelStateContent } from './remove-panel-state-content.mjs';
+import { removePanelStateContent, resolvePanelState } from './remove-panel-state-content.mjs';
 
 const unique = (items, label) => {
   if (items.length !== 1) throw new Error(`${label} must be unique; found ${items.length}`);
   return items[0];
 };
 
-export function fillPanelState(source, target, { sourcePage, targetPage, panel, state, append = false, replace = false }) {
+export function fillPanelState(source, target, { sourcePage, targetPage, targetMaster, panel, state, append = false, replace = false }) {
   if (append && replace) throw new Error('append and replace cannot be combined');
   let removal;
   if (replace) {
-    const result = removePanelStateContent(target, { page: targetPage, panel, state, all: true });
+    const result = removePanelStateContent(target, { page: targetPage, master: targetMaster, panel, state, all: true });
     target = result.file;
     removal = result.report;
   }
   const sourceMeta = unique(readRp(source).pages.filter(p => p.name === sourcePage), `Source page ${sourcePage}`);
-  const page = unique(readRp(target).pages.filter(p => p.name === targetPage), `Target page ${targetPage}`);
-  const widget = unique(page.widgets.filter(w => w.name === panel && w.type === 'DynamicPanel'), `Panel ${panel}`);
-  const stateMeta = unique(widget.panel.filter(s => s.name === state), `State ${state}`);
+  const { ownerRecord, stateRecord: targetRecord } = resolvePanelState(target, { page: targetPage, master: targetMaster, panel, state });
   const sourceRecord = readRecords(source).find(r => r.index === sourceMeta.record);
-  const targetRecord = readRecords(target).find(r => r.index === stateMeta.record && r.className === 'Axure:PanelState');
   if (!targetRecord) throw new Error('Target PanelState record not found');
   const sg = parsePayload(sourceRecord), tg = parsePayload(targetRecord);
   const sourcePageObject = [...sg.objects.values()].find(o => o.className === 'Axure:Page');
@@ -41,7 +38,7 @@ export function fillPanelState(source, target, { sourcePage, targetPage, panel, 
 
   const closure = new Set();
   for (const id of roots) for (const item of closureOf(sg, id)) closure.add(item);
-  const supported = new Set(['VectorShape', 'TextBox', 'TextArea', 'Checkbox', 'RadioButton', 'ComboBox', 'ListBox', 'Layer', 'Table', 'TableCell', 'ImageBox', 'DynamicPanel', 'Repeater', 'ReferenceDiagramObject']);
+  const supported = new Set(['VectorShape', 'TextBox', 'TextArea', 'Checkbox', 'RadioButton', 'ComboBox', 'ListBox', 'Layer', 'Table', 'TableCell', 'ImageBox', 'DynamicPanel', 'Repeater', 'ReferenceDiagramObject', 'Connector']);
   const existingNames = new Set([...tg.objects.values()].filter(o => o.className.startsWith('Axure:DiagramObject:'))
     .map(o => field(field(o.body, 'name-block') ?? {}, 'text')?.text).filter(Boolean));
   const packageGuid = graph => graph.roots.find(n => n.tag === 0x1e).values[graph.roots.find(n => n.tag === 0x12).value - 1];
@@ -64,10 +61,33 @@ export function fillPanelState(source, target, { sourcePage, targetPage, panel, 
   const visitingMasters = new Set(), masterOrder = [], pageMasters = new Set();
   const validate = (graph, ids, checkNames, owner = null) => {
     const repeaters = [...ids].map(id => graph.objects.get(id)).filter(o => o?.className === 'Axure:DiagramObject:Repeater');
-    const columns = new Set(repeaters.flatMap(repeater => {
-      const data = graph.objects.get(field(repeater.body, 'Data')?.value);
-      return field(data?.body ?? {}, 'columns')?.items.map(item => field(graph.objects.get(item.value).body, 'name')?.text) ?? [];
-    }));
+    const dataSetToColumns = new Map();
+    const dataSetToColumnIds = new Map();
+    const expressionOwners = new Map();
+    const repeaterToDataSet = new Map();
+    for (const repeater of repeaters) {
+      const dataId = field(repeater.body, 'Data')?.value;
+      repeaterToDataSet.set(repeater.id, dataId);
+      const data = graph.objects.get(dataId);
+      const cols = new Set(field(data?.body ?? {}, 'columns')?.items.map(item => field(graph.objects.get(item.value)?.body, 'name')?.text).filter(Boolean) ?? []);
+      dataSetToColumns.set(dataId, cols);
+      dataSetToColumnIds.set(dataId, new Set((field(data?.body ?? {}, 'columns')?.items ?? [])
+        .map(item => field(graph.objects.get(item.value)?.body ?? {}, 'variable-id')?.value).filter(Boolean)));
+      const item = graph.objects.get(field(repeater.body, 'BaseDiagram')?.value);
+      const owners = [repeater, ...(field(item?.body ?? {}, 'diagram-objects')?.items ?? [])
+        .map(ref => graph.objects.get(ref.value)).filter(Boolean)];
+      for (const owner of owners) {
+        const map = field(owner.body, 'InteractionMap')?.value;
+        if (!map) continue;
+        for (const id of closureOf(graph, map)) {
+          if (graph.objects.get(id)?.className !== 'Axure:Expr:StringLiteral') continue;
+          if (!expressionOwners.has(id)) expressionOwners.set(id, new Set());
+          expressionOwners.get(id).add(dataId);
+        }
+      }
+    }
+    const sourceGuids = graph.roots.find(n => n.tag === 0x1e).values;
+    const nonNullScope = id => id && sourceGuids[id - 1] !== '0'.repeat(32) ? id : undefined;
     const localDataset = id => graph.roots.find(n => n.tag === 0x1e).values[id - 1] === '0'.repeat(32)
       || (ids.has(id) && graph.objects.get(id)?.className === 'Axure:DocumentModel:DataSet');
     const overridePaths = new Set();
@@ -134,16 +154,95 @@ export function fillPanelState(source, target, { sourcePage, targetPage, panel, 
         || !field(value ?? {}, 'Extension')?.text)
         throw new Error('State import images require an embedded Stream and Extension in the local native style');
     }
-    if (object?.className.startsWith('Axure:Interaction') && !['Axure:InteractionTreeMap', 'Axure:InteractionCase', 'Axure:InteractionEvent', 'Axure:InteractionSetPanelStateAction', 'Axure:InteractionAddItemsToDataSetAction', 'Axure:InteractionDeleteItemsFromDataSetAction', 'Axure:InteractionUpdateEditItemsInDataSetAction'].includes(object.className))
+    const isInteractionAction = cls => cls && (
+      cls.startsWith('Axure:Interaction') ||
+      cls.startsWith('Axure.Interaction') ||
+      cls.startsWith('Axure:Interation') ||
+      cls.endsWith('Action')
+    );
+    const verifiedActions = new Set([
+      'Axure:InteractionTreeMap', 'Axure:InteractionCase', 'Axure:InteractionEvent',
+      'Axure:InteractionSetPanelStateAction', 'Axure:InteractionAddItemsToDataSetAction',
+      'Axure:InteractionDeleteItemsFromDataSetAction', 'Axure:InteractionUpdateEditItemsInDataSetAction',
+      'Axure:InteractionFadeWidgetAction', 'Axure:InteractionWaitAction',
+      'Axure:InteractionMoveWidgetAction', 'Axure:InteractionEnableDisableWidgetsAction',
+      'Axure:InteractionSetFocusOnWidgetAction',
+      'Axure:InterationActionSetFunction',
+      'Axure:InteractionSetWidgetSizeAction',
+      'Axure:InteractionRotateWidgetAction',
+      'Axure:InteractionSetOpacityAction',
+      'Axure:InteractionSetPanelOrderAction',
+      'Axure.InteractionAddFilterToRepeaterAction',
+      'Axure:InteractionAddFilterToRepeaterAction',
+      'Axure:InteractionRemoveFilterFromRepeaterAction',
+      'Axure:InteractionRemoveSortFromRepeaterAction',
+      'Axure:InteractionSetItemPerRepeaterPageAction'
+    ]);
+    if (isInteractionAction(object?.className) && !verifiedActions.has(object.className))
       throw new Error(`State import has not verified ${object.className}; add the interaction after importing`);
-    if (object?.className === 'Axure:Expr:FCall' && !['SetWidgetFormText', 'SetWidgetRichText'].includes(field(object.body, 'function-name')?.text))
+    if (object?.className === 'Axure:InterationActionSetFunction' && !['SetWidgetFormText', 'SetWidgetRichText'].includes(field(object.body, 'SetFunction')?.text))
+      throw new Error(`State import has not verified set function ${field(object.body, 'SetFunction')?.text}`);
+    if (object?.className === 'Axure:FadeWidgetInfo' && field(object.body, 'show-type')?.value !== 0)
+      throw new Error('State import only preserves standard fade show/hide actions; lightbox/flyout are not verified');
+    if (object?.className === 'Axure:MoveWidgetInfo') {
+      const boundary = field(object.body, 'BoundaryCondition')?.value;
+      const boundaryGuid = boundary ? graph.roots.find(n => n.tag === 0x1e)?.values[boundary - 1] : null;
+      if (boundaryGuid && boundaryGuid !== '0'.repeat(32))
+        throw new Error('State import move actions require boundary condition to be unconstrained');
+      if (field(object.body, 'scope')?.entries?.length)
+        throw new Error('State import move actions require empty variable scope');
+    }
+    if (object?.className === 'Axure:Expr:FCall' && !['SetWidgetFormText', 'SetWidgetRichText', 'GetWidgetText'].includes(field(object.body, 'function-name')?.text))
       throw new Error('State import only preserves local form/rich text assignment; external scopes are not copied');
     if (object?.className === 'Axure:Expr:StringLiteral') {
       const text = field(object.body, 'value')?.text;
       if (text?.includes('[[')) {
-        const row = /^\[\[Item\.([A-Za-z_][A-Za-z_0-9]*)(?:\s*==\s*(?:'[^']*'|"[^"]*"))?\]\]$/.exec(text);
-        if (!row || !columns.has(row[1]) || field(object.body, 'scope')?.entries.length)
-          throw new Error('State import expressions must be local repeater column values or single-column equality rules');
+        const itemCols = [...text.matchAll(/Item\.([A-Za-z_][A-Za-z0-9_]*)/g)].map(m => m[1]);
+        const userCols = itemCols.filter(c => !['index', 'Repeater'].includes(c));
+        const scopeEntries = field(object.body, 'scope')?.entries ?? [];
+        let isRepeaterRule = false;
+        if (itemCols.length > 0 && scopeEntries.length === 0) {
+          let targetScopeId = nonNullScope(field(object.body, 'TargetRepeaterScope')?.value)
+            ?? nonNullScope(field(object.body, 'repeater-scope')?.value);
+          let targetDataSetId = repeaterToDataSet.has(targetScopeId) ? repeaterToDataSet.get(targetScopeId) : targetScopeId;
+          if (!targetDataSetId) {
+            // Native Item-load literals can carry null scopes; their column identities
+            // identify the owning dataset even when multiple repeaters share a name.
+            const columnIds = (field(object.body, 'variable-identifiers')?.items ?? [])
+              .map(item => field(graph.objects.get(item.value)?.body ?? {}, 'Id')?.value).filter(Boolean);
+            const candidates = [...dataSetToColumnIds].filter(([, ids]) =>
+              columnIds.length > 0 && columnIds.every(id => ids.has(id))).map(([id]) => id);
+            if (candidates.length === 1) targetDataSetId = candidates[0];
+            if (!targetDataSetId && expressionOwners.get(object.id)?.size === 1)
+              targetDataSetId = [...expressionOwners.get(object.id)][0];
+          }
+          if (!targetDataSetId && repeaters.length === 1) {
+            targetDataSetId = repeaterToDataSet.get(repeaters[0].id);
+          }
+          if (targetDataSetId && dataSetToColumns.has(targetDataSetId)) {
+            const allowedCols = dataSetToColumns.get(targetDataSetId);
+            if (userCols.length > 0) {
+              isRepeaterRule = userCols.every(col => allowedCols.has(col));
+              if (!isRepeaterRule)
+                throw new Error(`State import rule column does not belong to the target dataset`);
+            } else {
+              // 仅包含 Item.index 或 Item.Repeater 内置属性的合法中继器规则
+              isRepeaterRule = true;
+            }
+          } else {
+            throw new Error(`State import rule expression cannot resolve target dataset scope; ambiguous or unmapped repeater target (object #${object.id}: ${text})`);
+          }
+        }
+        const isLocalVarBinding = scopeEntries.length > 0 && scopeEntries.every(([k, v]) => {
+          const callObj = graph.objects.get(v.value);
+          if (callObj?.className !== 'Axure:Expr:FCall' || field(callObj.body, 'function-name')?.text !== 'GetWidgetText') return false;
+          const arg = field(callObj.body, 'args')?.items?.[0];
+          const pathObj = graph.objects.get(arg?.value);
+          const targetId = field(pathObj?.body ?? {}, 'object-id')?.value;
+          return ids.has(targetId);
+        });
+        if (!isRepeaterRule && !isLocalVarBinding)
+          throw new Error('State import expressions must be local repeater column values or local variable bindings inside the imported layout');
       }
       for (const key of ['repeater-scope', 'TargetRepeaterScope']) {
         const scope = field(object.body, key);
@@ -156,6 +255,18 @@ export function fillPanelState(source, target, { sourcePage, targetPage, panel, 
       if (!ids.has(localId) || field(object.body, 'rdo-path')?.items.length
         || repeaterPath.some(item => !ids.has(item.value) || graph.objects.get(item.value)?.className !== 'Axure:DiagramObject:Repeater'))
         throw new Error('State import interaction targets must belong to the imported layout');
+    }
+    if (object?.className === 'Axure:DiagramObject:Connector') {
+      const sourceGuids = graph.roots.find(n => n.tag === 0x1e).values;
+      for (const side of ['start', 'end']) {
+        const shapeId = field(object.body, side + '-diagram-object')?.value;
+        if (shapeId && sourceGuids[shapeId - 1] !== '0'.repeat(32)) {
+          if (!ids.has(shapeId)) throw new Error('Connector endpoints must belong to the imported layout');
+          const shape = graph.objects.get(shapeId);
+          if (shape?.className !== 'Axure:DiagramObject:VectorShape')
+            throw new Error('Only flat VectorShape endpoints are supported for imported connectors');
+        }
+      }
     }
     if (object?.className === 'Axure:DiagramObject:DynamicPanel') {
       const sourceGuids = graph.roots.find(n => n.tag === 0x1e).values;
@@ -195,9 +306,16 @@ export function fillPanelState(source, target, { sourcePage, targetPage, panel, 
     for (const id of ids) {
       const object = graph.objects.get(id);
       if (object?.className !== 'Axure:SetPanelStateInfo') continue;
-      const guid = sourceGuids[field(object.body, 'diagram-id')?.value - 1];
-      if (field(object.body, 'set-state-type')?.value !== 0 || !packages.has(guid))
-        throw new Error('State import only preserves explicit state switches within copied panel packages');
+      const stateType = field(object.body, 'set-state-type')?.value;
+      if (stateType === 0) {
+        const guid = sourceGuids[field(object.body, 'diagram-id')?.value - 1];
+        if (!packages.has(guid))
+          throw new Error('State import only preserves explicit state switches within copied panel packages');
+      } else if (stateType === 1 || stateType === 2) {
+        // next(1) 或 previous(2) 相对切换：无需绑定固定 GUID，作用于闭包内 target panel
+      } else {
+        throw new Error(`State import only preserves explicit state switches (0) or relative transitions (next=1, previous=2); received type ${stateType}`);
+      }
     }
   }
   const guids = tg.roots.find(n => n.tag === 0x1e).values;
@@ -213,6 +331,55 @@ export function fillPanelState(source, target, { sourcePage, targetPage, panel, 
       field(props, 'parent-diagram-id').value = targetDiagram.id;
   }
   field(targetDiagram.body, 'diagram-objects').items.push(...roots.map(id => ({ tag: 3, value: clone.idMap.get(id) })));
+  const keepGuid = raw => { let index = guids.indexOf(raw) + 1; if (!index) { guids.push(raw); index = guids.length; } return index; };
+  const ensureString = text => { let index = strings.indexOf(text); if (index < 0) { index = strings.length; strings.push(text); } return { tag: 8, value: index + 1, text }; };
+  const sourceGuids = sg.roots.find(n => n.tag === 0x1e).values;
+  for (const oldId of closure) {
+    const oldObj = sg.objects.get(oldId);
+    if (oldObj?.className !== 'Axure:DiagramObject:Connector') continue;
+    const currentConn = tg.objects.get(clone.idMap.get(oldId));
+    if (!currentConn) continue;
+    for (const side of ['start', 'end']) {
+      const oldShapeId = field(oldObj.body, side + '-diagram-object')?.value;
+      if (!oldShapeId || sourceGuids[oldShapeId - 1] === '0'.repeat(32)) continue;
+      const oldKeyGuid = sourceGuids[field(oldObj.body, side + '-connector-id')?.value - 1];
+      if (oldKeyGuid) field(currentConn.body, side + '-connector-id').value = keepGuid(oldKeyGuid);
+      const dirVal = field(oldObj.body, side + '-point-direction')?.value;
+      if (dirVal !== undefined) {
+        const dirNode = field(currentConn.body, side + '-point-direction');
+        if (dirNode) dirNode.value = dirVal;
+      }
+      const oldShape = sg.objects.get(oldShapeId);
+      const targetShape = tg.objects.get(clone.idMap.get(oldShapeId));
+      const srcPoints = field(oldShape?.body ?? {}, 'ConnectorPoints');
+      if (targetShape && srcPoints?.tag === 1 && Array.isArray(srcPoints.entries)) {
+        const dstPointsEntries = [];
+        for (const [k, v] of srcPoints.entries) {
+          const ptGuid = sourceGuids[k.value - 1];
+          const ptGuidIdx = keepGuid(ptGuid);
+          const x = field(v, 'X')?.value ?? 0;
+          const y = field(v, 'Y')?.value ?? 0;
+          dstPointsEntries.push([
+            { tag: 0x11, value: ptGuidIdx },
+            { tag: 1, entries: [
+              [ensureString('X'), { tag: 6, value: x }],
+              [ensureString('Y'), { tag: 6, value: y }]
+            ]}
+          ]);
+        }
+        let targetPoints = field(targetShape.body, 'ConnectorPoints');
+        if (!targetPoints) {
+          targetPoints = { tag: 1, entries: dstPointsEntries };
+          const key = ensureString('ConnectorPoints');
+          const insertion = targetShape.body.entries.findIndex(([name]) => name.text === 'AutoFitHeight');
+          if (insertion < 0) targetShape.body.entries.push([key, targetPoints]);
+          else targetShape.body.entries.splice(insertion, 0, [key, targetPoints]);
+        } else {
+          targetPoints.entries = dstPointsEntries;
+        }
+      }
+    }
+  }
   tg.roots.splice(tg.roots.length - 1, 0, ...clone.created);
   let output = replaceRecord(target, targetRecord, encodeRecord(targetRecord, strings, encodePayload(tg.roots)));
   if (packages.size || masters.size) {
@@ -224,7 +391,7 @@ export function fillPanelState(source, target, { sourcePage, targetPage, panel, 
       if (!identities.has(guid)) identities.set(guid, randomBytes(16).toString('hex'));
       return identities.get(guid);
     };
-    const pageRecord = readRecords(target).find(r => r.index === page.record);
+    const pageRecord = ownerRecord;
     const originalManifest = readManifest(target);
     const findNode = (node, predicate) => {
       for (const [key, child] of Object.entries(node.children ?? {})) {
@@ -272,8 +439,8 @@ export function fillPanelState(source, target, { sourcePage, targetPage, panel, 
         field(tree.body, 'children').items.push(ref(nodeId));
         doc.roots.splice(doc.roots.length - 1, 0, ...infoClone.created, node);
       }
-      const pageInfo = [...doc.objects.values()].find(o => o.className === 'Axure:PackageInfo'
-        && docGuids[field(o.body, 'package-id')?.values?.[1] - 1] === packageGuid(parsePayload(pageRecord)));
+      const pageInfo = unique([...doc.objects.values()].filter(o => o.className === (targetMaster ? 'Axure:MasterPackageInfo' : 'Axure:PackageInfo')
+        && docGuids[field(o.body, 'package-id')?.values?.[1] - 1] === packageGuid(parsePayload(pageRecord))), 'Owner package info');
       const pageDependencies = field(pageInfo.body, 'dependencies').items;
       for (const guid of pageMasters) {
         const index = packageIndices.get(guid);
@@ -284,7 +451,9 @@ export function fillPanelState(source, target, { sourcePage, targetPage, panel, 
         const pkg = masters.get(guid);
         const copied = structuredClone(pkg.graph.roots), table = copied.find(n => n.tag === 0x1e).values;
         for (let i = 0; i < table.length; i++) table[i] = mapIdentity(table[i]);
-        const before = readRecords(output).find(r => r.className === 'Axure:DesignDocument');
+        const before = readRecords(output).find(r => targetMaster
+          ? r.className === 'Axure:Master' && packageGuid(parsePayload(r)) === packageGuid(parsePayload(ownerRecord))
+          : r.className === 'Axure:DesignDocument');
         output = insertRecord(output, guidKey(mapIdentity(guid)), encodeRecord(pkg.record, pkg.record.strings, encodePayload(copied)), before);
       }
     }
@@ -314,14 +483,14 @@ export function fillPanelState(source, target, { sourcePage, targetPage, panel, 
     }
     output = Buffer.concat([encodeManifest(output, manifest.value), output.subarray(manifest.dataStart)]);
   }
-  return { file: output, report: { sourcePage, targetPage, panel, state, append, replace, ...(removal ? { removal } : {}), record: targetRecord.index, roots: roots.length, objects: clone.created.length, statePackages: packages.size, masterPackages: masters.size } };
+  return { file: output, report: { sourcePage, ...(targetMaster ? { targetMaster } : { targetPage }), panel, state, append, replace, ...(removal ? { removal } : {}), record: targetRecord.index, roots: roots.length, objects: clone.created.length, statePackages: packages.size, masterPackages: masters.size } };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const [sourceFile, targetFile, outputFile, sourcePage, targetPage, panel, state, ...options] = process.argv.slice(2);
-  const [option] = options;
-  if (!state || options.length > 1 || (option && !['--append', '--replace'].includes(option))) throw new Error('Usage: node fill-panel-state.mjs <source.rp> <target.rp> <new.rp> <sourcePage> <targetPage> <panel> <state> [--append | --replace]');
-  const result = fillPanelState(readFileSync(sourceFile), readFileSync(targetFile), { sourcePage, targetPage, panel, state, append: option === '--append', replace: option === '--replace' });
+  const [sourceFile, targetFile, outputFile, sourcePage, owner, panel, state, ...options] = process.argv.slice(2);
+  if (!state || new Set(options).size !== options.length || options.some(item => !['--append', '--replace', '--master'].includes(item)))
+    throw new Error('Usage: node fill-panel-state.mjs <source.rp> <target.rp> <new.rp> <sourcePage> <pageOrMaster> <panel> <state> [--master] [--append | --replace]');
+  const result = fillPanelState(readFileSync(sourceFile), readFileSync(targetFile), { sourcePage, ...(options.includes('--master') ? { targetMaster: owner } : { targetPage: owner }), panel, state, append: options.includes('--append'), replace: options.includes('--replace') });
   writeFileSync(outputFile, result.file, { flag: 'wx' });
   console.log(JSON.stringify(result.report, null, 2));
 }

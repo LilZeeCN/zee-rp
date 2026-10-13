@@ -1,51 +1,11 @@
-# Contributing to zee-rp
+# Contributing
 
-Thanks for your interest! A few ground rules that keep this project safe and
-verifiable:
+Use Node.js 18 or newer. Run `npm test` before submitting a change. For changes to `.rp` writers, also run `npm run test:native` with a local native blank template and library. For MCP changes, install dependencies with `npm ci` and run `npm run test:mcp`. See [validation](docs/validation.md) for prerequisites and historical fixture checks.
 
-## Hard rules
+Include a reproducible public recipe or test for the changed behavior. Report offline structure, native load, preview behavior, and GUI edit/save/reopen separately. Do not describe skipped prerequisites or mock GUI jobs as real native acceptance.
 
-1. **No Axure-owned assets.** Never commit `.rp`, `.rplib`, `.dll`, or any
-   file derived from an official Axure template, widget library, or the Axure
-   application itself. This includes test fixtures — generate sample files
-   from your own local blank template instead.
-2. **No copied vendor code.** zee-rp is a clean-room, independent
-   implementation. Decompiled or extracted Axure source must not enter this
-   repository in any form.
-3. **Trademark respect.** Don't rename the project or its branding to include
-   the word "Axure", and don't use Axure's logo/icon. Descriptive uses like
-   "works with Axure RP 11" are fine.
+Never commit native `.rp`/`.rplib` files, the Axure application/runtime, vendor assets, decompiled code, private paths, credentials, or user documents. Tests must create new output files and clean temporary data. Public examples contain authored specifications and source recipes, not redistributed native inputs.
 
-## Development setup
+The script registry must cover all production `.mjs` files. Generate command documentation with `node scripts/gen-capabilities.mjs -o <new-file.md>`, review it, then replace the tracked command document. After an intentional production change, explicitly migrate the changed SHA in `test/baseline-shas.json` and explain the behavior change in the changelog; never update historical native fixture fingerprints to hide a regression.
 
-* Node.js ≥ 18. Core scripts use only built-in modules — no install needed.
-* Functional testing requires a local **Axure RP 11** install (verified on
-  macOS, build 11.0.0.4137). Save a single-page empty project from Axure and
-  export its path:
-
-  ```bash
-  export AXURE_BLANK_TEMPLATE=/absolute/my-native-blank.rp
-  ```
-
-* Run the shipped checks:
-
-  ```bash
-  node test/parity-check.mjs   # CLI parity + safety rejections + baseline SHAs
-  npm ci --ignore-scripts      # optional MCP SDK, only needed for MCP work
-  node test/jobs-check.mjs     # GUI job manager (mock runner, macOS)
-  ```
-
-## Verification discipline
-
-This project separates *structure correct* → *loads in Axure* → *preview
-behavior* → *GUI edit/save/reopen verified*. When you add a capability,
-state which level your evidence covers and don't extrapolate beyond your
-samples. See `references/verification.md`.
-
-## Reporting issues
-
-Include: Axure build number, OS, the zee-rp command or MCP tool you used, and
-whether your `.rp` file can be shared (never attach files you can't license).
-
-zee-rp is not affiliated with Axure Software Solutions, Inc. Axure RP is a
-registered trademark of Axure Software Solutions, Inc.
+Check the release with `node scripts/pack-release.mjs -o <new-directory>` and `npm pack --dry-run`. The release must retain source, schemas, tests, both READMEs, docs, and example recipes. Excluded native inputs remain the user's responsibility.

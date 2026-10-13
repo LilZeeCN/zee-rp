@@ -8,9 +8,45 @@ import { extname } from 'node:path';
 import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
 import { parsePayload, encodePayload, field, walkNodes } from './parse-payload.mjs';
 
+// Complete FCall function registry recovered statically from
+// Axure.DocumentModel.Expressions.ExprFunctions on RP 11.0.0.4137 (2026-10-12).
+// Serializing a name outside this set produces an undefined-function FCall that
+// fails at preview runtime (the historical Concat failure).
+export const REGISTERED_FCALLS = new Set([
+  'GetGlobalVariableLength', 'GetGlobalVariableValue', 'GetWidgetRectangles', 'GetWidgetText',
+  'GetWidgetValueLength', 'GetWidgetVisibility', 'IsValueAlpha', 'IsValueAlphaNumeric',
+  'IsValueNotAlpha', 'IsValueNotAlphaNumeric', 'IsValueNotNumeric', 'IsValueNotOneOf',
+  'IsValueNumeric', 'IsValueOneOf', 'SetGlobalVariableValue', 'ToLowerCase', 'ValueContains',
+  'ValueNotContains'
+]);
+export const WIDGET_PATH_FCALLS = new Set([
+  'GetWidgetText', 'GetWidgetValueLength', 'GetWidgetVisibility', 'GetWidgetRectangles'
+]);
+export const FCALL_SPECS = {
+  GetWidgetText: { arity: 1, paramTypes: ['widgetPath'] },
+  GetWidgetValueLength: { arity: 1, paramTypes: ['widgetPath'] },
+  GetWidgetVisibility: { arity: 1, paramTypes: ['widgetPath'] },
+  GetWidgetRectangles: { arity: 1, paramTypes: ['widgetPath'] },
+  GetGlobalVariableValue: { arity: 1, paramTypes: ['globalVariable'] },
+  GetGlobalVariableLength: { arity: 1, paramTypes: ['globalVariable'] },
+  SetGlobalVariableValue: { arity: 2, paramTypes: ['globalVariable', 'scalar'] },
+  IsValueAlpha: { arity: 1, paramTypes: ['scalar'] },
+  IsValueNumeric: { arity: 1, paramTypes: ['scalar'] },
+  IsValueAlphaNumeric: { arity: 1, paramTypes: ['scalar'] },
+  IsValueNotAlpha: { arity: 1, paramTypes: ['scalar'] },
+  IsValueNotNumeric: { arity: 1, paramTypes: ['scalar'] },
+  IsValueNotAlphaNumeric: { arity: 1, paramTypes: ['scalar'] },
+  ToLowerCase: { arity: 1, paramTypes: ['scalar'] },
+  ValueContains: { arity: 2, paramTypes: ['scalar', 'scalar'] },
+  ValueNotContains: { arity: 2, paramTypes: ['scalar', 'scalar'] },
+  IsValueOneOf: { arity: 2, paramTypes: ['scalar', 'unsupportedSet'] },
+  IsValueNotOneOf: { arity: 2, paramTypes: ['scalar', 'unsupportedSet'] }
+};
+export const FCALL_ARITIES = Object.fromEntries(
+  Object.entries(FCALL_SPECS).map(([k, v]) => [k, v.arity])
+);
 // Axure.Constants.IxEventType (values verified against Axure's own assemblies)
-export const EVENTS = {
-  OnClick: 16, OnDoubleClick: 17, OnMouseOver: 18, OnMouseMove: 19, OnMouseOut: 20,
+export const EVENTS = {  OnClick: 16, OnDoubleClick: 17, OnMouseOver: 18, OnMouseMove: 19, OnMouseOut: 20,
   OnMouseDown: 21, OnMouseUp: 22, OnKeyDown: 32, OnKeyUp: 33, OnFocus: 48, OnLostFocus: 49,
   OnTextChange: 50, OnSelectionChange: 51, OnSelectedChange: 52, OnSelect: 53, OnUnselect: 54,
   OnErrorSet: 55, OnErrorRemoved: 56, OnSwipeLeft: 256, OnSwipeRight: 257, OnSwipeUp: 258,
@@ -45,7 +81,10 @@ const TARGET_TYPE = { url: 0, page: 1, reload: 2, back: 3 };
 const num = v => (typeof v === 'string' ? Number(v) : v);
 function pick(table, value, what) {
   if (value === undefined || value === null) return undefined;
-  if (typeof value === 'number') return value;
+  if (typeof value === 'number') {
+    if (Object.values(table).includes(value)) return value;
+    throw new Error(`Unknown ${what} numeric code ${value}. Known values: ${[...new Set(Object.values(table))].join(', ')}`);
+  }
   const key = String(value);
   if (table[key] !== undefined) return table[key];
   const ci = Object.keys(table).find(k => k.toLowerCase() === key.toLowerCase());
@@ -73,7 +112,8 @@ export function resolvePageRecord(file, pageName) {
     if (r.className !== 'Axure:Page') return false;
     let g; try { g = parsePayload(r); } catch { return false; }
     const gl = g.roots.find(n => n.tag === 0x1e)?.values ?? [];
-    return gl[1] === packageGuid || gl.includes(packageGuid);
+    const packageIndex = g.roots.find(n => n.tag === 0x12)?.value;
+    return gl[packageIndex - 1] === packageGuid;
   });
   if (!rec) throw new Error(`Page record not found for "${pageName}"`);
   return rec;
@@ -234,34 +274,127 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
   // ---- 条件构造器：取自自带控件库的真实 BinaryExpr ----
   const OPS = { '&&': 1, '||': 2, '==': 3, '!=': 4, '>': 5, '<': 6, '>=': 7, '<=': 8 };
   const buildCondition = when => {
+    if (!when || typeof when !== 'object') throw new Error('Condition "when" must be a non-null object');
     // when: { op:'==', left:{widget:'X', fn:'GetWidgetText'} | {value:'abc'}, right:{value:'Yes'} | {widget} }
+    const operation = expression => {
+      const op = typeof expression.op === 'number' ? expression.op : OPS[expression.op];
+      if (op === undefined) throw new Error(`Unknown condition operator "${expression.op}". Known: ${Object.keys(OPS).join(', ')}`);
+      return op;
+    };
     const side = e => {
-      if (e === undefined) throw new Error('condition side 不能为空');
-      if (typeof e === 'string' || typeof e === 'number') return ref(literal(e).id);
+      if (e === undefined || e === null) throw new Error('condition side 不能为空');
+      if (typeof e === 'string' || typeof e === 'number' || typeof e === 'boolean') return ref(literal(e).id);
+      if (typeof e !== 'object') throw new Error(`Unsupported condition side expression type: ${typeof e}`);
+      const semanticCount = [
+        e.value !== undefined,
+        e.op !== undefined,
+        e.globalVariable !== undefined || e.variable !== undefined,
+        e.widgetPath !== undefined,
+        (e.fn !== undefined && Array.isArray(e.args)),
+        e.widget !== undefined,
+      ].filter(Boolean).length;
+      if (semanticCount > 1) {
+        throw new Error(`Ambiguous condition side expression: contains multiple semantic forms in ${JSON.stringify(e)}`);
+      }
       if (e.value !== undefined) return ref(literal(e.value).id);
+      if (e.op !== undefined) {
+        if (e.left === undefined || e.right === undefined)
+          throw new Error('nested condition expressions require both left and right sides');
+        return ref(obj(newGuid(), 'Axure:Expr:BinaryExpr', {
+          'left-expr': side(e.left), 'right-expr': side(e.right), operation: int(operation(e))
+        }).id);
+      }
+      if (e.globalVariable !== undefined) {
+        const varName = String(e.globalVariable);
+        const varInfo = globalVariableInfo(varName);
+        return ref(obj(newGuid(), 'Axure:Expr:GlobalVariableLiteral', {
+          value: { tag: 0x11, value: varInfo.pageGuidIndex },
+          'is-dummy': bool(false),
+          'variable-name': str(varName)
+        }).id);
+      }
+      if (e.widgetPath !== undefined) {
+        const path = pathTo(findWidget(e.widgetPath).id);
+        return ref(obj(newGuid(), 'Axure:Expr:DiagramObjectPathLiteral', { value: ref(path.id) }).id);
+      }
       if (typeof e.fn === 'string' && Array.isArray(e.args)) {
         if (e.fn === 'Concat')
           throw new Error('Concat is not an Axure RP 11.0.0.4137 FCall; use a StringLiteral value such as [["A".concat("B")]]');
-        const args = e.args.map(side);
+        if (!REGISTERED_FCALLS.has(e.fn))
+          throw new Error(`Unknown FCall function "${e.fn}". Registered functions (Axure.DocumentModel.Expressions.ExprFunctions on RP 11.0.0.4137): ${[...REGISTERED_FCALLS].join(', ')}`);
+        const spec = FCALL_SPECS[e.fn];
+        if (spec && spec.arity !== undefined && e.args.length !== spec.arity)
+          throw new Error(`FCall function "${e.fn}" expects ${spec.arity} argument${spec.arity === 1 ? '' : 's'}, received ${e.args.length}`);
+        if (e.fn === 'IsValueOneOf' || e.fn === 'IsValueNotOneOf')
+          throw new Error(`FCall function "${e.fn}" candidate set has no native .rp Literal ground truth in Axure RP 11 sample library; unsupported`);
+
+        const args = e.args.map((arg, idx) => {
+          const expectedType = spec?.paramTypes?.[idx];
+          if (expectedType === 'widgetPath') {
+            if (arg?.widgetPath !== undefined) return side(arg);
+            if (arg?.widget !== undefined) {
+              const path = pathTo(findWidget(arg.widget).id);
+              return ref(obj(newGuid(), 'Axure:Expr:DiagramObjectPathLiteral', { value: ref(path.id) }).id);
+            }
+            throw new Error(`FCall function "${e.fn}" argument #${idx + 1} expects a widget target, received ${JSON.stringify(arg)}`);
+          }
+          if (expectedType === 'globalVariable') {
+            if (arg?.globalVariable !== undefined) return side(arg);
+            if (arg?.variable !== undefined) {
+              const varName = String(arg.variable);
+              const varInfo = globalVariableInfo(varName);
+              return ref(obj(newGuid(), 'Axure:Expr:GlobalVariableLiteral', {
+                value: { tag: 0x11, value: varInfo.pageGuidIndex },
+                'is-dummy': bool(false),
+                'variable-name': str(varName)
+              }).id);
+            }
+            throw new Error(`FCall function "${e.fn}" argument #${idx + 1} expects a global variable identifier, received ${JSON.stringify(arg)}`);
+          }
+          if (expectedType === 'scalar') {
+            if (arg?.widgetPath !== undefined || arg?.globalVariable !== undefined)
+              throw new Error(`FCall function "${e.fn}" argument #${idx + 1} expects a scalar expression or literal, received target reference`);
+          }
+          return side(arg);
+        });
+
         return ref(obj(newGuid(), 'Axure:Expr:FCall', {
           'function-name': str(e.fn), args: list(args)
         }).id);
       }
+      if (e.variable !== undefined) {
+        const varName = String(e.variable);
+        const varInfo = globalVariableInfo(varName);
+        const varLiteral = obj(newGuid(), 'Axure:Expr:GlobalVariableLiteral', {
+          value: { tag: 0x11, value: varInfo.pageGuidIndex },
+          'is-dummy': bool(false),
+          'variable-name': str(varName)
+        });
+        return ref(obj(newGuid(), 'Axure:Expr:FCall', {
+          'function-name': str('GetGlobalVariableValue'),
+          args: list([ref(varLiteral.id)])
+        }).id);
+      }
       if (e.widget) {
+        const fnName = e.fn ?? 'GetWidgetText';
+        if (!REGISTERED_FCALLS.has(fnName))
+          throw new Error(`Unknown FCall function "${fnName}". Registered functions: ${[...REGISTERED_FCALLS].join(', ')}`);
+        if (!WIDGET_PATH_FCALLS.has(fnName))
+          throw new Error(`FCall function "${fnName}" does not accept a single widget target path. Supported widget path functions: ${[...WIDGET_PATH_FCALLS].join(', ')}`);
         const path = pathTo(findWidget(e.widget).id);
         return ref(obj(newGuid(), 'Axure:Expr:FCall', {
-          'function-name': str(e.fn ?? 'GetWidgetText'),
+          'function-name': str(fnName),
           args: list([ref(obj(newGuid(), 'Axure:Expr:DiagramObjectPathLiteral', { value: ref(path.id) }).id)])
         }).id);
       }
       throw new Error('无法识别的 condition side: ' + JSON.stringify(e));
     };
-    const op = typeof when.op === 'number' ? when.op : OPS[when.op ?? '=='];
-    if (op === undefined) throw new Error(`Unknown condition operator "${when.op}". Known: ${Object.keys(OPS).join(', ')}`);
+    const leftSide = when.left !== undefined ? when.left : (widget ? { widget: nameOf(widget), fn: 'GetWidgetText' } : undefined);
+    const rightSide = when.right !== undefined ? when.right : { value: '' };
     return obj(newGuid(), 'Axure:Expr:BinaryExpr', {
-      'left-expr': side(when.left ?? (widget ? { widget: nameOf(widget), fn: 'GetWidgetText' } : undefined)),
-      'right-expr': side(when.right ?? { value: '' }),
-      operation: int(op)
+      'left-expr': side(leftSide),
+      'right-expr': side(rightSide),
+      operation: int(operation({ ...when, op: when.op ?? '==' }))
     });
   };
 
@@ -273,9 +406,21 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
     const info = (cls, props) => obj(newGuid(), cls, props);
     switch (type) {
       case 'link': {
+        if (Boolean(spec.page) === Boolean(spec.url)) throw new Error('link requires exactly one of page or url');
+        if (spec.window !== undefined && !['current', 'new'].includes(spec.window))
+          throw new Error('link window must be current or new');
+        let pageTypeIndex = spec.pageTypeIndex ?? 1, pageGuidIndex = spec.pageGuidIndex ?? nullId;
+        if (spec.page) {
+          const destination = parsePayload(resolvePageRecord(file, String(spec.page)));
+          const table = destination.roots.find(n => n.tag === 0x1e).values;
+          const pageGuid = table[destination.roots.find(n => n.tag === 0x12).value - 1];
+          pageGuidIndex = guids.indexOf(pageGuid) + 1;
+          if (!pageGuidIndex) { guids.push(pageGuid); pageGuidIndex = guids.length; }
+          pageTypeIndex = str('Axure:Page').value;
+        }
         const target = obj(newGuid(), 'Axure:InteractionTarget', {
           'target-type': int(spec.page ? TARGET_TYPE.page : TARGET_TYPE.url),
-          'target-page-id': { tag: 0x13, values: [spec.pageTypeIndex ?? 1, spec.pageGuidIndex ?? nullId] },
+          'target-page-id': { tag: 0x13, values: [pageTypeIndex, pageGuidIndex] },
           'target-literal': ref(literal(spec.url ?? spec.page).id)
         });
         return obj(newGuid(), 'Axure:InteractionLinkWindowAction',
@@ -284,6 +429,10 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
       case 'show': case 'hide': case 'toggle': {
         const { path } = paths();
         const fade = type === 'show' ? 1 : type === 'hide' ? 0 : 2;
+        if (spec.duration !== undefined) {
+          const dur = num(spec.duration);
+          if (!Number.isFinite(dur) || dur < 0) throw new Error('fade duration must be a non-negative finite number');
+        }
         const duration = spec.duration !== undefined ? num(spec.duration) : 250;
         const easing = pick(FADE_EASE, spec.animation ?? 'fade', 'animation');
         const fold = info('Axure:FadeWidgetInfo', {
@@ -305,7 +454,16 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
       }
       case 'move': case 'set-position': {
         const { path } = paths();
-        const delta = (spec.mode ?? (type === 'move' ? 'delta' : 'location')) !== 'location';
+        const validModes = ['location', 'delta', 'drag', 'withThis'];
+        const mode = spec.mode !== undefined ? String(spec.mode) : (type === 'move' ? 'delta' : 'location');
+        if (!validModes.includes(mode)) {
+          throw new Error(`Unknown move mode "${spec.mode}". Supported: ${validModes.join(', ')}`);
+        }
+        if (spec.duration !== undefined) {
+          const dur = num(spec.duration);
+          if (!Number.isFinite(dur) || dur < 0) throw new Error('move duration must be a non-negative finite number');
+        }
+        const delta = mode !== 'location';
         const moveInfo = info('Axure:MoveWidgetInfo', {
           Easing: int(pick(EASE, spec.easing ?? 'swing', 'easing')), Duration: f64(spec.duration ?? 300),
           XValue: ref(literal(spec.x ?? 0).id), YValue: ref(literal(spec.y ?? 0).id),
@@ -403,12 +561,18 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         });
       }
       case 'set-text': case 'set-check': case 'set-selected': {
-        const { path } = paths();
-        const fn = { 'set-text': 'SetWidgetFormText', 'set-check': 'SetCheckState', 'set-selected': 'SetSelectedOption' }[type];
+        const { widget: targetWidget, path } = paths();
+        let fn = { 'set-check': 'SetCheckState', 'set-selected': 'SetSelectedOption' }[type];
+        if (type === 'set-text') {
+          if (targetWidget.className === 'Axure:DiagramObject:TextBox') fn = 'SetWidgetFormText';
+          else if (targetWidget.className === 'Axure:DiagramObject:VectorShape') fn = 'SetWidgetRichText';
+          else throw new Error(`set-text target "${targetName}" must be a TextBox or VectorShape; found ${targetWidget.className}`);
+        }
         const arg = type === 'set-text' ? (spec.text ?? '') : (spec.checked ?? spec.value ?? 'true');
         const pathLiteral = obj(newGuid(), 'Axure:Expr:DiagramObjectPathLiteral', { value: ref(path.id) });
-        const call = obj(newGuid(), 'Axure:Expr:FCall',
-          { 'function-name': str(fn), args: list([ref(pathLiteral.id), ref(literal(arg).id)]) });
+        const args = [ref(pathLiteral.id), ref(literal(arg).id)];
+        if (fn === 'SetWidgetRichText') args.push(ref(obj(newGuid(), 'Axure:Expr:BooleanLiteral', { value: str('True') }).id));
+        const call = obj(newGuid(), 'Axure:Expr:FCall', { 'function-name': str(fn), args: list(args) });
         const block = obj(newGuid(), 'Axure:Expr:Block', { subexpressions: list([ref(call.id)]) });
         return obj(newGuid(), 'Axure:InterationActionSetFunction',
           { Disabled: bool(false), action: ref(block.id), SetFunction: str(fn) });
@@ -910,10 +1074,18 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
       }
       case 'apply-style': {
         // Native saved truth: InteractionApplyStyle + InteractionApplyStyleInfo.
-        // This writer currently exposes solid fill and clearing prior runtime styles.
+        // Border width: native UI truth c000000f / Float64, saved 2026-10-09.
+        // Opacity: native UI truth c0000046 / Float64, saved 2026-10-10.
+        // Typeface: DefaultStyle DOA ID 1 stores the family name as a string.
+        // Font size: native UI value 28 saves as DOA ID 2 / Float64 21, saved 2026-10-10.
+        // Bold: native checked/unchecked fields save as DOA ID 3 / Integer 0/2,
+        // with the unchecked state captured from Apply Style UI on 2026-10-10.
+        // Italic: native checked field saves as DOA ID 4 / Integer 0, saved 2026-10-10.
+        // Underline: native checked field saves as DOA ID 5 / Boolean true, saved 2026-10-10.
+        // Strikethrough uses native RichText Style DOA ID 95; preview behavior is separately verified.
         const { path, widget: targetWidget } = paths();
-        if (spec.fill === undefined && !spec.clearPrevious)
-          throw new Error('apply-style requires fill=#RRGGBB or clearPrevious=true');
+        if (spec.fill === undefined && spec.borderColor === undefined && spec.textColor === undefined && spec.borderWidth === undefined && spec.opacity === undefined && spec.fontSize === undefined && spec.fontFamily === undefined && spec.bold === undefined && spec.italic === undefined && spec.underline === undefined && spec.strikethrough === undefined && !spec.clearPrevious)
+          throw new Error('apply-style requires fill=#RRGGBB, textColor=#RRGGBB, borderColor=#RRGGBB, borderWidth, opacity=0..100, fontSize>0, fontFamily, bold=true|false, italic=true, underline=true, strikethrough=true or clearPrevious=true');
         const properties = [];
         if (spec.fill !== undefined) {
           if (!/^#[0-9a-f]{6}$/i.test(String(spec.fill)))
@@ -921,13 +1093,104 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
           const color = 0xff000000 + parseInt(String(spec.fill).slice(1), 16);
           properties.push(map({ DOAName: int(3221225479), Value: map({ 'fill-type': str('solid'), 'fill-color': int(color) }) }));
         }
+        if (spec.borderColor !== undefined) {
+          if (!/^#[0-9a-f]{6}$/i.test(String(spec.borderColor)))
+            throw new Error('apply-style borderColor must be #RRGGBB');
+          const color = 0xff000000 + parseInt(String(spec.borderColor).slice(1), 16);
+          // Native RP 11.0.0.4137 ApplyStyle UI saved border color as property ID 8.
+          properties.push(map({ DOAName: int(3221225480), Value: map({ 'fill-type': str('solid'), 'fill-color': int(color) }) }));
+        }
+        if (spec.textColor !== undefined) {
+          if (!/^#[0-9a-f]{6}$/i.test(String(spec.textColor)))
+            throw new Error('apply-style textColor must be #RRGGBB');
+          const color = 0xff000000 + parseInt(String(spec.textColor).slice(1), 16);
+          // Native RP 11.0.0.4137 Apply Style UI saved font color as property ID 6.
+          properties.push(map({ DOAName: int(3221225478), Value: map({ 'fill-type': str('solid'), 'fill-color': int(color) }) }));
+        }
+        if (spec.borderWidth !== undefined) {
+          const width = num(spec.borderWidth);
+          if (!Number.isFinite(width) || width < 0)
+            throw new Error('apply-style borderWidth must be a finite non-negative number');
+          properties.push(map({ DOAName: int(3221225487), Value: f64(width) }));
+        }
+        if (spec.opacity !== undefined) {
+          const opacity = num(spec.opacity);
+          if (!Number.isFinite(opacity) || opacity < 0 || opacity > 100)
+            throw new Error('apply-style opacity must be a finite number from 0 to 100');
+          properties.push(map({ DOAName: int(3221225542), Value: f64(opacity / 100) }));
+        }
+        if (spec.fontSize !== undefined) {
+          const fontSize = num(spec.fontSize);
+          if (!Number.isFinite(fontSize) || fontSize <= 0)
+            throw new Error('apply-style fontSize must be a finite positive number');
+          // Axure's UI displays CSS-style px, while style DOA ID 2 stores 3/4 of that value.
+          properties.push(map({ DOAName: int(3221225474), Value: f64(fontSize * 0.75) }));
+        }
+        if (spec.fontFamily !== undefined) {
+          if (typeof spec.fontFamily !== 'string' || !spec.fontFamily.trim())
+            throw new Error('apply-style fontFamily must be a non-empty string');
+          properties.push(map({ DOAName: int(3221225473), Value: str(spec.fontFamily) }));
+        }
+        if (spec.bold !== undefined) {
+          if (targetWidget?.className === 'Axure:DiagramObject:TextBox')
+            throw new Error('apply-style bold is unavailable on TextBox: the serialized action did not change computed fontWeight in the tested Axure RP 11 preview');
+          if (typeof spec.bold !== 'boolean')
+            throw new Error('apply-style bold must be a boolean');
+          properties.push(map({ DOAName: int(3221225475), Value: int(spec.bold ? 0 : 2) }));
+        }
+        if (spec.italic !== undefined) {
+          if (typeof spec.italic !== 'boolean')
+            throw new Error('apply-style italic must be a boolean');
+          throw new Error(`apply-style italic=${spec.italic} is unavailable: the serialized action did not change computed fontStyle in the tested Axure RP 11 preview`);
+        }
+        if (spec.underline !== undefined) {
+          if (spec.underline !== true)
+            throw new Error('apply-style underline currently supports true only');
+          properties.push(map({ DOAName: int(3221225477), Value: bool(true) }));
+        }
+        if (spec.strikethrough !== undefined) {
+          if (spec.strikethrough !== true)
+            throw new Error('apply-style strikethrough currently supports true only');
+          properties.push(map({ DOAName: int(3221225567), Value: bool(true) }));
+        }
+        // The native editor needs the unchecked default properties too (including
+        // Typeface). Sparse styles preview correctly but fail when edited.
+        const docRecord = readRecords(file).find(record => record.className === 'Axure:DesignDocument');
+        const docGraph = parsePayload(docRecord);
+        const doc = [...docGraph.objects.values()].find(object => object.className === 'Axure:DesignDocument');
+        const sheet = docGraph.objects.get(field(doc.body, 'StyleSheet').value);
+        const defaults = docGraph.objects.get(field(sheet.body, 'DefaultStyle').value);
+        const docGuids = docGraph.roots.find(node => node.tag === 0x1e).values;
+        const styleProperties = structuredClone(field(defaults.body, 'PropList'));
+        walkNodes([styleProperties], node => {
+          if (![1, 2, 5, 6, 8, 17, 25].includes(node.tag))
+            throw new Error(`Unsupported default style value tag ${node.tag}`);
+          if (node.tag === 8) Object.assign(node, str(node.text));
+          if (node.tag === 17) {
+            const guid = docGuids[node.value - 1];
+            if (!guid) throw new Error('Default style GUID reference is missing');
+            let index = guids.indexOf(guid) + 1;
+            if (!index) { guids.push(guid); index = guids.length; }
+            node.value = index;
+          }
+        });
+        for (const property of styleProperties.items) {
+          const key = field(property, 'DOAName');
+          key.value = (key.value & 0x3fffffff) + 0x80000000;
+        }
+        for (const property of properties) {
+          const key = field(property, 'DOAName').value & 0x3fffffff;
+          const index = styleProperties.items.findIndex(item => (field(item, 'DOAName').value & 0x3fffffff) === key);
+          if (index < 0) throw new Error(`Default style lacks property ${key}`);
+          styleProperties.items[index] = property;
+        }
         const nativeStyle = graph.objects.get(field(targetWidget.body, 'MyStyle')?.value);
         const style = obj(newGuid(), 'Axure:Style', {
           LibraryId: { tag: 0x11, value: nullId }, LibraryName: str(''), LegacyName: str(''),
           'style-name': str('IxApplyStyle'), Id: { tag: 0x11, value: newGuid() },
-          PropList: list(properties),
+          PropList: styleProperties,
           Capabilities: field(nativeStyle?.body ?? {}, 'Capabilities') ?? { tag: 0x1d, value: 'bf7fdeffffeddff5' },
-          All: bool(false)
+          All: bool(true)
         });
         const styleInfo = info('Axure:InteractionApplyStyleInfo', {
           style: ref(style.id), 'clear-previous': bool(spec.clearPrevious ?? false)
@@ -1183,7 +1446,10 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
       obj(caseNodeId, 'Axure:Node', { children: list(actionNodeIds.map(id => ref(id))), 'parent-node': ref(eventNodeId), tree: ref(treeId) });
       for (const id of actionNodeIds) obj(id, 'Axure:Node', { children: list([]), 'parent-node': ref(caseNodeId), tree: ref(treeId) });
 
-      const condRef = c.when ? ref(buildCondition(c.when).id) : ref(nullId);
+      if (c.when !== undefined) {
+        if (c.when === null || typeof c.when !== 'object') throw new Error('Condition "when" must be a non-null object');
+      }
+      const condRef = c.when !== undefined ? ref(buildCondition(c.when).id) : ref(nullId);
       obj(caseId, 'Axure:InteractionCase', {
         Disabled: bool(false), Description: str(c.description ?? ''),
         Condition: condRef, IsNewIfGroup: bool(!!c.isNewIfGroup)

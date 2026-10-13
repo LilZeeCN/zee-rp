@@ -42,6 +42,7 @@ export function placeMaster(file, { masterName, pageIndex, x = 100, y = 100 }) {
   const str = t => { let i = strings.indexOf(t); if (i < 0) { i = strings.length; strings.push(t); } return { tag: 8, value: i + 1, text: t }; };
   const ref = v => ({ tag: 3, value: v });
   const int = v => ({ tag: 5, value: v });
+  const guid = v => ({ tag: 0x11, value: v });
   const bool = v => ({ tag: 0x19, value: !!v });
   const list = items => ({ tag: 2, items });
   const dictOf = e => ({ tag: 1, entries: e });
@@ -75,7 +76,7 @@ export function placeMaster(file, { masterName, pageIndex, x = 100, y = 100 }) {
       [str('SubmitButton'), ref(nullId)], [str('Disabled'), bool(false)], [str('Selected'), bool(false)],
       [str('Error'), bool(false)], [str('VisibleFromSettings'), bool(true)],
       // 核心：pair(字符串表里的 "Axure:Master", 本页 GUID 表里的母版包 GUID 索引)
-      [str('ReferredMaster'), { tag: 0x13, values: [str('Axure:Master').value, masterGuidIdx] }],
+      [str('ReferredMaster'), { tag: 0x10, values: [str('Axure:Master').value, masterGuidIdx] }],
       [str('IsBackground'), bool(false)],
       [str('IsolateRadioGroups'), bool(true)], [str('IsolateSelectionGroups'), bool(true)],
       [str('ObjectOverrides'), list([])], [str('Propagate'), bool(false)]
@@ -84,12 +85,12 @@ export function placeMaster(file, { masterName, pageIndex, x = 100, y = 100 }) {
   const style = {
     tag: 9, id: sId, classIndex: str('Axure:Style').value, className: 'Axure:Style',
     body: dictOf([
-      [str('LibraryId'), int(3)], [str('LibraryName'), str('')], [str('LegacyName'), str('')],
-      [str('style-name'), str('MyStyle')], [str('Id'), int(0)],
+      [str('LibraryId'), guid(nullId)], [str('LibraryName'), str('')], [str('LegacyName'), str('')],
+      [str('style-name'), str('MyStyle')], [str('Id'), guid(newId())],
       [str('PropList'), list([
         dictOf([[str('DOAName'), int(3221225573)], [str('Value'), dictOf([[str('X'), f64(x)], [str('Y'), f64(y)]])]])
       ])],
-      [str('Capabilities'), { tag: 0x1d, value: 'ffffffffffffffff' }], [str('All'), bool(false)]
+      [str('Capabilities'), { tag: 0x1d, value: '0000000400200008' }], [str('All'), bool(false)]
     ])
   };
 

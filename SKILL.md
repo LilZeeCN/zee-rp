@@ -1,8 +1,12 @@
 ---
 name: zee-rp
-description: 读取、加工 Axure RP 11 原型，使用统一 CLI、可选 MCP 和 macOS GUI roundtrip jobs。
+description: Read and edit Axure RP 11 prototypes using the CLI, optional MCP sessions, and macOS GUI jobs.
 ---
 
 # zee-rp
 
-先读 [README](README.md)、[能力边界](references/capabilities.md) 和 [验证流程](references/verification.md)。使用 `node bin/axure.mjs --help` 查询命令，输出必须使用新文件名；结构通过不等于 GUI、预览或编辑通过。空白模板及元件库来自用户本机 Axure，不随代码包提供。MCP 配置、任务句柄和取消行为见 README。研究材料及原型样本不随发布包。
+Read [README](README.md), [capabilities](references/capabilities.md), and [validation](docs/validation.md) before producing a prototype. Query actual commands using `node bin/axure.mjs --help` or the MCP tool schemas.
+
+Use a user-supplied blank template and local native libraries; these assets are not bundled. All `.rp` mutations use new output names. Respect configured `AXURE_WRITE_ROOT` and `AXURE_PROTECTED_PATHS` through the unified CLI/MCP.
+
+Report structure, native loading, preview behavior, and GUI edit/save/reopen separately. A successful command or three-zero structure check is not native acceptance. Public recipes and tests are included; historical fixture binaries are external and unavailable prerequisites must be reported explicitly.

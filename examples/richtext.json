@@ -1,0 +1,12 @@
+{
+  "page": "Page 1",
+  "widget": "StatusBanner",
+  "paragraphs": [{
+    "list": true,
+    "lineSpacing": 72,
+    "runs": [
+      {"text": "Notice: ", "style": {"bold": true, "size": 16}},
+      {"text": "Documentation", "style": {"color": "#2563EB"}, "link": {"url": "https://example.com", "window": "new"}}
+    ]
+  }]
+}

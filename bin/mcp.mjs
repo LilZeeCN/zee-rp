@@ -8,7 +8,7 @@ try {
     import('@modelcontextprotocol/sdk/server/stdio.js'),
     import('@modelcontextprotocol/sdk/types.js')
   ]);
-  const server = new Server({ name: 'zee-rp', version: '0.1.0' }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'zee-rp', version: '0.1.1' }, { capabilities: { tools: {} } });
   const jobs = new JobManager();
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...listMcpTools(), ...jobTools] }));
   server.setRequestHandler(CallToolRequestSchema, async request => {

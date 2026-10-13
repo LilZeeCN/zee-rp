@@ -5,6 +5,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
 import { parsePayload, encodePayload, field } from './parse-payload.mjs';
 
+import { readRp } from './rp-read.mjs';
+
 const [source, destination, pageIndexArg, ...pairs] = process.argv.slice(2);
 if (!source || !destination || !pageIndexArg || pairs.length < 2 || pairs.length % 2) {
   throw new Error('用法: node name-widget.mjs <source.rp> <new.rp> <pageRecordsIndex|页名> <widgetId> <newName> [...]');
@@ -12,10 +14,12 @@ if (!source || !destination || !pageIndexArg || pairs.length < 2 || pairs.length
 const file = readFileSync(source);
 const recs = readRecords(file);
 const pageRecords = recs.filter(r => r.className === 'Axure:Page');
-// pageIndexArg 可以是页名（在 Page 记录字符串表中唯一出现）或 Page 记录序号（0 起，纯数字）
-const byName = /^\d+$/.test(pageIndexArg) ? undefined
-  : recs.find(r => r.className === 'Axure:Page' && r.strings.includes(pageIndexArg));
-const page = byName ?? pageRecords[Number(pageIndexArg)];
+// pageIndexArg 可以是页名（由 readRp 权威定位）或 Page 记录序号（0 起，纯数字）
+const summary = readRp(file);
+const pageMeta = summary.pages.find(p => p.name === pageIndexArg);
+const page = pageMeta
+  ? recs.find(r => r.index === pageMeta.record && r.className === 'Axure:Page')
+  : (/^\d+$/.test(pageIndexArg) ? pageRecords[Number(pageIndexArg)] : undefined);
 if (!page) throw new Error(`Page not found: ${pageIndexArg}`);
 
 const g = parsePayload(page);

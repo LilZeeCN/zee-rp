@@ -91,9 +91,15 @@ export function setMasterOverrides(input, spec) {
         if (target.object.className !== 'Axure:DiagramObject:ImageBox' || typeof item.imagePath !== 'string')
           throw new Error('Image overrides require imagePath and an ImageBox target');
         const bytes = readFileSync(item.imagePath);
-        if (!bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex')))
-          throw new Error('Image overrides currently require PNG bytes');
-        image = map({ Stream: { tag: 4, value: bytes.toString('base64') }, Extension: str('.png'),
+        let ext = null;
+        if (bytes.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'))) {
+          ext = '.png';
+        } else if (bytes.toString('utf8', 0, 100).toLowerCase().includes('<svg')) {
+          ext = '.svg';
+        } else {
+          throw new Error('Image overrides currently require PNG or SVG bytes');
+        }
+        image = map({ Stream: { tag: 4, value: bytes.toString('base64') }, Extension: str(ext),
           Hash: str(createHash('md5').update(bytes).digest('base64')) });
       }
       const value = map({ Text: str(text), Image: image, ViewId: { tag: 0x11, value: nullId } });

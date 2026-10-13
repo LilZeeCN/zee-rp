@@ -1,9 +1,9 @@
 {
   "name": "zee-rp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": false,
   "type": "module",
-  "description": "Open-source engine and MCP server for Axure RP 11 prototype (.rp) files",
+  "description": "Independent tools and MCP server for reading and editing Axure RP 11 prototype files",
   "bin": {
     "zee-rp": "./bin/axure.mjs",
     "zee-rp-mcp": "./bin/mcp.mjs"
@@ -13,11 +13,36 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node test/parity-check.mjs",
+    "test": "node test/regression.mjs",
+    "test:native": "node test/native-check.mjs",
+    "test:parity": "node test/parity-check.mjs",
+    "test:mcp": "node test/mcp-check.mjs",
+    "test:historical": "node test/historical-regression.mjs",
+    "test:historical-mcp": "node test/historical-mcp-check.mjs",
     "test:jobs": "node test/jobs-check.mjs",
     "mcp": "node bin/mcp.mjs"
   },
   "optionalDependencies": {
     "@modelcontextprotocol/sdk": "1.32.1"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "references/",
+    "examples/",
+    "test/",
+    "docs/",
+    "assets/*.json",
+    "assets/*.svg",
+    "README.md",
+    "README.zh-CN.md",
+    "CONTRIBUTING.md",
+    "CHANGELOG.md",
+    "SKILL.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/LilZeeCN/zee-rp.git"
   }
 }

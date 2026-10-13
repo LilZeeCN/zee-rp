@@ -10,10 +10,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 
-// 受保护路径（硬规则）：任何参数解析为 AXURE_PROTECTED_PATHS 列表内路径时拒绝执行；本 CLI 本无路径参数，纯防御。
-function protectedPaths() {
-  return (process.env.AXURE_PROTECTED_PATHS || '').split(':').filter(Boolean).map(p => resolve(p));
-}
+// 受保护成品（硬规则）：任何参数解析为该绝对路径时拒绝执行；本 CLI 本无路径参数，纯防御。
+function protectedPaths() { return (process.env.AXURE_PROTECTED_PATHS || '').split(':').filter(Boolean).map(p => resolve(p)); }
 
 // evidence 枚举 = 盘点实际使用的六级；internal 仅用于无 CLI 入口的库脚本。
 const EVIDENCE_LEVELS = ['structure', 'loaded', 'preview', 'gui-roundtrip', 'channel-a', 'internal'];
@@ -22,7 +20,7 @@ const EVIDENCE_LEVELS = ['structure', 'loaded', 'preview', 'gui-roundtrip', 'cha
 const OUTPUT_PATTERN = /^(?:index:\d+|flag:-[A-Za-z0-9][A-Za-z0-9-]*|none)$/;
 
 const META = {
-  generatedAt: '2026-10-07',
+  generatedAt: '2026-10-13',
   source: 'scripts',
   evidenceSource: 'references/capabilities.md',
   cliEntryRules: 'output 的 index:N 指 process.argv 索引（argv[2] 即第 1 个用户位置参数）；判定依据为各脚本 main guard 的解构顺序',
@@ -31,245 +29,253 @@ const META = {
 // CliEntry 全集：command（调度名，axvg 三个子命令各占一条）/ script / summary / usage / output / evidence。
 const COMMANDS = [
   {
-    command: 'create-blank-project',
-    script: 'create-blank-project.mjs',
-    summary: '复制用户本机的 RP 11 原生空白模板生成单页空白 .rp 工程',
-    usage: 'node create-blank-project.mjs <output.rp>',
-    output: 'index:2',
-    evidence: 'loaded',
+    "command": "create-blank-project",
+    "script": "create-blank-project.mjs",
+    "summary": "复制用户本机的 RP 11 原生空白模板生成单页空白 .rp 工程",
+    "usage": "node create-blank-project.mjs <output.rp>",
+    "output": "index:2",
+    "evidence": "loaded"
   },
   {
-    command: 'create-blank-page',
-    script: 'create-blank-page.mjs',
-    summary: '把用户本机空白模板的 Page 记录追加到已有 .rp 生成新空白页',
-    usage: 'node create-blank-page.mjs <input.rp> <output.rp> <newPageName>',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "create-global-variable",
+    "script": "create-global-variable.mjs",
+    "summary": "创建具名全局变量及字符串默认值（离线结构级）",
+    "usage": "node create-global-variable.mjs <source.rp> <output.rp> <VariableName> [--default-value \"Value\"]",
+    "output": "index:3",
+    "evidence": "structure"
   },
   {
-    command: 'duplicate-page',
-    script: 'duplicate-page.mjs',
-    summary: '按页名（或 --index 记录号）复制已有页面生成新页',
-    usage: 'node duplicate-page.mjs source.rp output.rp sourceName newName',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "create-blank-page",
+    "script": "create-blank-page.mjs",
+    "summary": "把用户本机空白模板的 Page 记录追加到已有 .rp 生成新空白页",
+    "usage": "node create-blank-page.mjs <input.rp> <output.rp> <newPageName>",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'create-master',
-    script: 'create-master.mjs',
-    summary: '复制已有 Axure:Master 记录并注册为新命名的母版',
-    usage: 'node create-master.mjs <source.rp> <output.rp> <SourceMasterName> <NewMasterName>',
-    output: 'index:3',
-    evidence: 'preview',
+    "command": "duplicate-page",
+    "script": "duplicate-page.mjs",
+    "summary": "按页名（或 --index 记录号）复制已有页面生成新页",
+    "usage": "node duplicate-page.mjs source.rp output.rp sourceName newName",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'place-master',
-    script: 'place-master.mjs',
-    summary: '在指定页面上放置母版实例（ReferenceDiagramObject）',
-    usage: 'node place-master.mjs <src.rp> <out.rp> <masterName> <pageIndex> [--x N --y N]',
-    output: 'index:3',
-    evidence: 'preview',
+    "command": "create-master",
+    "script": "create-master.mjs",
+    "summary": "复制已有 Axure:Master 记录并注册为新命名的母版",
+    "usage": "node create-master.mjs <source.rp> <output.rp> <SourceMasterName> <NewMasterName>",
+    "output": "index:3",
+    "evidence": "preview"
   },
   {
-    command: 'create-panel-clone',
-    script: 'create-panel-clone.mjs',
-    summary: '克隆真实模板离线创建动态面板并插入状态包',
-    usage: 'node create-panel-clone.mjs <src.rp> <out.rp> <pageName> <panelName> [state...] [--x N --y N --w N --h N] [--page-index N]',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "place-master",
+    "script": "place-master.mjs",
+    "summary": "在指定页面上放置母版实例（ReferenceDiagramObject）",
+    "usage": "node place-master.mjs <src.rp> <out.rp> <masterName> <pageIndex> [--x N --y N]",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'fill-panel-state',
-    script: 'fill-panel-state.mjs',
-    summary: '把一个 Page 的控件闭包导入空 PanelState（支持 --append/--replace、嵌套面板/中继器/母版）',
-    usage: 'node fill-panel-state.mjs <source.rp> <target.rp> <new.rp> <sourcePage> <targetPage> <panel> <state> [--append | --replace]',
-    output: 'index:4',
-    evidence: 'gui-roundtrip',
+    "command": "create-panel-clone",
+    "script": "create-panel-clone.mjs",
+    "summary": "克隆真实模板离线创建动态面板并插入状态包",
+    "usage": "node create-panel-clone.mjs <src.rp> <out.rp> <pageName> <panelName> [state...] [--x N --y N --w N --h N] [--page-index N]",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'remove-panel-state-content',
-    script: 'remove-panel-state-content.mjs',
-    summary: '按顶层元件名删除、--ids 按 ID 删除或 --all 清空一个 PanelState',
-    usage: 'node remove-panel-state-content.mjs source.rp new.rp <page> <panel> <state> (--all | --ids <id>... | <widgetName>...)',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "fill-panel-state",
+    "script": "fill-panel-state.mjs",
+    "summary": "把一个 Page 的控件闭包导入 Page 或 Master 所属 PanelState（支持 --master、--append/--replace、嵌套面板/中继器/母版/连接线自定义锚点及闭合内部交互）",
+    "usage": "node fill-panel-state.mjs <source.rp> <target.rp> <new.rp> <sourcePage> <pageOrMaster> <panel> <state> [--master] [--append | --replace]",
+    "output": "index:4",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'set-panel-fit-to-content',
-    script: 'set-panel-fit-to-content.mjs',
-    summary: '按记录/元件 ID 写 native boolean fit-to-content 开关',
-    usage: 'node set-panel-fit-to-content.mjs source.rp new.rp spec.json',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "remove-panel-state-content",
+    "script": "remove-panel-state-content.mjs",
+    "summary": "按顶层元件名删除、--ids 按 ID 删除或 --all 清空一个 PanelState",
+    "usage": "node remove-panel-state-content.mjs source.rp new.rp <pageOrMaster> <panel> <state> [--master] (--all | --ids <id>... | <widgetName>...)",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'add-adaptive-view',
-    script: 'add-adaptive-view.mjs',
-    summary: '为页面写入自适应视图集（Base+子视图）并按视图覆盖元件尺寸位置',
-    usage: 'node add-adaptive-view.mjs <src.rp> <out.rp> [断点宽度...] [--override "<视图名>:<元件名>:w=<宽>[,h=<高>][,x=<x>,y=<y>]"]',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "set-panel-fit-to-content",
+    "script": "set-panel-fit-to-content.mjs",
+    "summary": "按记录/元件 ID 写 native boolean fit-to-content 开关",
+    "usage": "node set-panel-fit-to-content.mjs source.rp new.rp spec.json",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'add-interaction',
-    script: 'add-interaction.mjs',
-    summary: '向元件或页面追加事件+动作交互（支持 --replace-event、--on-page、--json 条件/多 Case）',
-    usage: 'node add-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] [--replace-event] --event <EventName> --action <type> [key=value ...]',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "add-adaptive-view",
+    "script": "add-adaptive-view.mjs",
+    "summary": "为页面写入自适应视图集（Base+子视图）并按视图覆盖元件尺寸位置",
+    "usage": "node add-adaptive-view.mjs <src.rp> <out.rp> [断点宽度...] [--override \"<视图名>:<元件名>:w=<宽>[,h=<高>][,x=<x>,y=<y>]\"]",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'remove-interaction',
-    script: 'remove-interaction.mjs',
-    summary: '按事件类型移除活动事件，或按 Case/Action 序号移除单个活动动作',
-    usage: 'node remove-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] --event <EventName> (--remove-event | --remove-action --case-index <n> --action-index <n>)',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "add-interaction",
+    "script": "add-interaction.mjs",
+    "summary": "向元件或页面追加事件+动作交互（支持 --replace-event、--on-page、--json 条件/多 Case；FCall 函数名按 18 项注册表白名单校验）",
+    "usage": "node add-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] [--replace-event] --event <EventName> --action <type> [key=value ...]",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'add-click-link',
-    script: 'add-click-link.mjs',
-    summary: '给无交互的具名元件添加点击打开链接交互（capabilities.md 未列此工具，仅结构级）',
-    usage: 'node add-click-link.mjs source.rp output.rp widgetName url [current|new]',
-    output: 'index:3',
-    evidence: 'structure',
+    "command": "remove-interaction",
+    "script": "remove-interaction.mjs",
+    "summary": "按事件类型移除活动事件，或按 Case/Action 序号移除单个活动动作",
+    "usage": "node remove-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] --event <EventName> (--remove-event | --remove-action --case-index <n> --action-index <n>)",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'clone-library-widget',
-    script: 'clone-library-widget.mjs',
-    summary: '从 .rplib 克隆单个原生控件到目标 .rp 页面',
-    usage: 'node clone-library-widget.mjs <source.rplib> <target.rp> <output.rp> <sourcePage> <targetPage> <newName> [--x N --y N --w N --h N]',
-    output: 'index:4',
-    evidence: 'gui-roundtrip',
+    "command": "add-click-link",
+    "script": "add-click-link.mjs",
+    "summary": "给无交互的具名元件添加点击打开链接交互（capabilities.md 未列此工具，仅结构级）",
+    "usage": "node add-click-link.mjs source.rp output.rp widgetName url [current|new]",
+    "output": "index:3",
+    "evidence": "structure"
   },
   {
-    command: 'clone-library-page-content',
-    script: 'clone-library-page-content.mjs',
-    summary: '把 .rplib 库页的全部内容闭包导入目标 .rp 页面',
-    usage: 'node clone-library-page-content.mjs <source.rplib> <target.rp> <output.rp> <sourcePage> <targetPage> [--x N --y N]',
-    output: 'index:4',
-    evidence: 'gui-roundtrip',
+    "command": "clone-library-widget",
+    "script": "clone-library-widget.mjs",
+    "summary": "从 .rplib 克隆单个原生控件到目标 .rp 页面",
+    "usage": "node clone-library-widget.mjs <source.rplib> <target.rp> <output.rp> <sourcePage> <targetPage> <newName> [--x N --y N --w N --h N]",
+    "output": "index:4",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'set-combobox-options',
-    script: 'set-combobox-options.mjs',
-    summary: '设置唯一原生 ComboBox 的选项与选中项',
-    usage: 'node set-combobox-options.mjs <source.rp> <output.rp> <pageName> <widgetName> <options-json> [--selected <zeroBasedIndex>]',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "clone-library-page-content",
+    "script": "clone-library-page-content.mjs",
+    "summary": "把 .rplib 库页的全部内容闭包导入目标 .rp 页面",
+    "usage": "node clone-library-page-content.mjs <source.rplib> <target.rp> <output.rp> <sourcePage> <targetPage> [--x N --y N]",
+    "output": "index:4",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'set-listbox-options',
-    script: 'set-listbox-options.mjs',
-    summary: '设置唯一原生 ListBox 的选项、多选与选中索引',
-    usage: 'node set-listbox-options.mjs <source.rp> <output.rp> <pageName> <widgetName> <options-json> [--selected <indices-json>] [--single]',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "set-combobox-options",
+    "script": "set-combobox-options.mjs",
+    "summary": "设置唯一原生 ComboBox 的选项与选中项",
+    "usage": "node set-combobox-options.mjs <source.rp> <output.rp> <pageName> <widgetName> <options-json> [--selected <zeroBasedIndex>]",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'set-native-table',
-    script: 'set-native-table.mjs',
-    summary: '改写已有原生 Table 的矩阵/行高/列宽，扩容时克隆原生单元格',
-    usage: 'node set-native-table.mjs input.rp output.rp table.json',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "set-listbox-options",
+    "script": "set-listbox-options.mjs",
+    "summary": "设置唯一原生 ListBox 的选项、多选与选中索引",
+    "usage": "node set-listbox-options.mjs <source.rp> <output.rp> <pageName> <widgetName> <options-json> [--selected <indices-json>] [--single]",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'clone-native-connector',
-    script: 'clone-native-connector.mjs',
-    summary: '克隆原生 Connector 与端点闭包到目标页面并保留默认四边点键',
-    usage: 'node clone-native-connector.mjs <source.rp> <target.rp> <output.rp> <sourceRecord> <connectorId> <targetPage> [options-json]',
-    output: 'index:4',
-    evidence: 'gui-roundtrip',
+    "command": "set-native-table",
+    "script": "set-native-table.mjs",
+    "summary": "改写原生 Table 矩阵/行高/列宽，扩容时克隆单元格，格支持 {runs} 多 run；可选用同页 VectorShape 模板生成视觉合并覆盖块",
+    "usage": "node set-native-table.mjs input.rp output.rp table.json",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'set-connector-anchors',
-    script: 'set-connector-anchors.mjs',
-    summary: '把连接线两端定向挂接到元件或脱开为自由端',
-    usage: 'node set-connector-anchors.mjs <source.rp> <output.rp> <pageName> <connectorName> <endpoints-json>',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "clone-native-connector",
+    "script": "clone-native-connector.mjs",
+    "summary": "克隆原生 Connector 与端点闭包到目标页面（支持自定义锚点 GUID/坐标/方向保留及 PanelState 源图，跨 diagram 端点拒绝）",
+    "usage": "node clone-native-connector.mjs <source.rp> <target.rp> <output.rp> <sourceRecord> <connectorId> <targetPage> [options-json]",
+    "output": "index:4",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'set-widget-text',
-    script: 'set-widget-text.mjs',
-    summary: '按页内名称、记录索引+对象 ID 或容器路径精确定位改写一个既有文本片段',
-    usage: 'node set-widget-text.mjs <source.rp> <output.rp> <pageName> <widgetName> <text>',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "set-connector-anchors",
+    "script": "set-connector-anchors.mjs",
+    "summary": "在同一 Page 或 PanelState 记录内把连接线端点挂接到元件或脱开为自由端",
+    "usage": "node set-connector-anchors.mjs <source.rp> <output.rp> <pageName> <connector-name-or-selector-json> <endpoints-json>",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'set-widget-richtext',
-    script: 'set-widget-richtext.mjs',
-    summary: '整段重写原生 RichTextBlock 的段落与 runs（字体/字号/样式/对齐）',
-    usage: 'node set-widget-richtext.mjs source.rp new.rp richtext.json',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "set-widget-text",
+    "script": "set-widget-text.mjs",
+    "summary": "按页内名称、记录索引+对象 ID 或容器路径精确定位改写一个既有文本片段",
+    "usage": "node set-widget-text.mjs <source.rp> <output.rp> <pageName> <widgetName> <text>",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'set-master-overrides',
-    script: 'set-master-overrides.mjs',
-    summary: '按实例 ID 创建/更新/清除母版实例的文字覆盖或写入内嵌 PNG，不改共享定义',
-    usage: 'node set-master-overrides.mjs source.rp new.rp overrides.json',
-    output: 'index:3',
-    evidence: 'gui-roundtrip',
+    "command": "set-widget-richtext",
+    "script": "set-widget-richtext.mjs",
+    "summary": "整段重写原生 RichTextBlock 的段落与 runs（字体/字号/行距/对齐/原生列表级别/wrapping/trimming 及 run 全量键）",
+    "usage": "node set-widget-richtext.mjs source.rp new.rp richtext.json",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'name-widget',
-    script: 'name-widget.mjs',
-    summary: '按 Page 记录序号/页名与对象 ID 设置元件名称（name-block）',
-    usage: 'node name-widget.mjs <source.rp> <new.rp> <pageRecordsIndex|页名> <widgetId> <newName> [...]',
-    output: 'index:3',
-    evidence: 'preview',
+    "command": "set-master-overrides",
+    "script": "set-master-overrides.mjs",
+    "summary": "按实例 ID 创建/更新/清除母版实例的文字覆盖或写入内嵌 PNG，不改共享定义",
+    "usage": "node set-master-overrides.mjs source.rp new.rp overrides.json",
+    "output": "index:3",
+    "evidence": "gui-roundtrip"
   },
   {
-    command: 'patch-link-window',
-    script: 'patch-link-window.mjs',
-    summary: '字节级改写唯一 Page 记录里链接打开方式 current/new（capabilities.md 未列，仅结构级研究工具）',
-    usage: 'node patch-link-window.mjs <source.rp> <new.rp> <current|new>',
-    output: 'index:3',
-    evidence: 'structure',
+    "command": "name-widget",
+    "script": "name-widget.mjs",
+    "summary": "按 Page 记录序号/页名与对象 ID 设置元件名称（name-block）",
+    "usage": "node name-widget.mjs <source.rp> <new.rp> <pageRecordsIndex|页名> <widgetId> <newName> [...]",
+    "output": "index:3",
+    "evidence": "preview"
   },
   {
-    command: 'patch-string',
-    script: 'patch-string.mjs',
-    summary: '替换唯一 Page 记录中的一个已有字符串（研究用，capabilities.md 未列）',
-    usage: 'node patch-string.mjs <source.rp> <new.rp> <old string> <new string>',
-    output: 'index:3',
-    evidence: 'structure',
+    "command": "patch-link-window",
+    "script": "patch-link-window.mjs",
+    "summary": "字节级改写唯一 Page 记录里链接打开方式 current/new（capabilities.md 未列，仅结构级研究工具）",
+    "usage": "node patch-link-window.mjs <source.rp> <new.rp> <current|new>",
+    "output": "index:3",
+    "evidence": "structure"
   },
   {
-    command: 'rp-read',
-    script: 'rp-read.mjs',
-    summary: '只读解析 .rp 输出页面/元件/交互摘要或 JSON（含 dangling refs 检查）',
-    usage: 'node rp-read.mjs <file.rp> [--json] [--full]',
-    output: 'none',
-    evidence: 'structure',
+    "command": "patch-string",
+    "script": "patch-string.mjs",
+    "summary": "替换唯一 Page 记录中的一个已有字符串（研究用，capabilities.md 未列）",
+    "usage": "node patch-string.mjs <source.rp> <new.rp> <old string> <new string>",
+    "output": "index:3",
+    "evidence": "structure"
   },
   {
-    command: 'axvg build',
-    script: 'axvg.mjs',
-    summary: '把布局规格 JSON 展开为完整 Axvg JSON（几何/样式编码）',
-    usage: 'node axvg.mjs build <spec.json> -o <out.axvg.json>',
-    output: 'flag:-o',
-    evidence: 'channel-a',
+    "command": "rp-read",
+    "script": "rp-read.mjs",
+    "summary": "只读解析 .rp 输出页面/元件/交互摘要或 JSON（含 dangling refs 检查）",
+    "usage": "node rp-read.mjs <file.rp> [--json] [--full]",
+    "output": "none",
+    "evidence": "structure"
   },
   {
-    command: 'axvg paste',
-    script: 'axvg.mjs',
-    summary: '把 Axvg JSON 写入剪贴板并触发 Axure 粘贴上画布',
-    usage: 'node axvg.mjs paste <file.axvg.json> [--no-menu]',
-    output: 'none',
-    evidence: 'channel-a',
+    "command": "axvg build",
+    "script": "axvg.mjs",
+    "summary": "把布局规格 JSON 展开为完整 Axvg JSON（几何/样式编码）",
+    "usage": "node axvg.mjs build <spec.json> -o <out.axvg.json>",
+    "output": "flag:-o",
+    "evidence": "channel-a"
   },
   {
-    command: 'axvg selftest',
-    script: 'axvg.mjs',
-    summary: '内置几何/编码断言自检，不产出文件',
-    usage: 'node axvg.mjs selftest',
-    output: 'none',
-    evidence: 'channel-a',
+    "command": "axvg paste",
+    "script": "axvg.mjs",
+    "summary": "把 Axvg JSON 写入剪贴板并触发 Axure 粘贴上画布",
+    "usage": "node axvg.mjs paste <file.axvg.json> [--no-menu]",
+    "output": "none",
+    "evidence": "channel-a"
   },
+  {
+    "command": "axvg selftest",
+    "script": "axvg.mjs",
+    "summary": "内置几何/编码断言自检，不产出文件",
+    "usage": "node axvg.mjs selftest",
+    "output": "none",
+    "evidence": "channel-a"
+  }
 ];
 
 // 无 CLI 入口（或仅自测 main guard）的库/研究脚本，只参与存在性与 evidence 校验。
@@ -472,6 +478,11 @@ const LIB_SCRIPTS = [
               "type": "string",
               "minLength": 1
             },
+            "targetMaster": {
+              "type": "string",
+              "minLength": 1,
+              "description": "目标母版名；与 targetPage 必须且只能填写一个"
+            },
             "panel": {
               "type": "string",
               "minLength": 1
@@ -494,7 +505,6 @@ const LIB_SCRIPTS = [
             "target",
             "output",
             "sourcePage",
-            "targetPage",
             "panel",
             "state"
           ],
@@ -591,8 +601,49 @@ const LIB_SCRIPTS = [
           "action"
         ],
         "tail": "parameters"
+      },
+      "create-global-variable": {
+        "positionals": [
+          "source",
+          "output",
+          "name"
+        ],
+        "values": {
+          "defaultValue": "--default-value"
+        },
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": "string",
+              "minLength": 1
+            },
+            "output": {
+              "type": "string",
+              "minLength": 1
+            },
+            "name": {
+              "type": "string",
+              "minLength": 1
+            },
+            "defaultValue": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "source",
+            "output",
+            "name"
+          ],
+          "additionalProperties": false
+        }
       }
     }
+  },
+  {
+    "script": "gen-capabilities.mjs",
+    "summary": "由注册表和完整离线回归生成确定性命令文档，-o 输出新文件",
+    "evidence": "internal"
   },
   {
     "script": "rp-records.mjs",
@@ -615,11 +666,22 @@ const LIB_SCRIPTS = [
     "evidence": "internal"
   },
   {
+    "script": "expr-schema.mjs",
+    "summary": "一次性研究工具：扫描本机 .rplib 提取条件表达式语法统计（顶层直接执行，按任务指定归入库清单）",
+    "evidence": "internal"
+  },
+  {
+    "script": "widget-schema.mjs",
+    "summary": "一次性研究工具：扫描本机 .rplib 提取各元件类型字段清单统计（顶层直接执行，按任务指定归入库清单）",
+    "evidence": "internal"
+  },
+  {
     "script": "engine.mjs",
     "summary": "编排引擎库（AxureSession 按注册表分发、受保护成品红线与 AXURE_WRITE_ROOT 白名单），spawn 透传存量脚本，无 CLI 入口",
     "evidence": "internal"
   }
 ];
+
 // ---- 库接口 ----
 // 返回副本（structuredClone），调用方改写不会污染注册表本体。
 export function listCommands() {
@@ -681,9 +743,8 @@ function registryData() {
 // ---- CLI ----
 const IS_MAIN = import.meta.url === pathToFileURL(process.argv[1] || import.meta.url).href;
 if (IS_MAIN) {
-  const protectedHit = process.argv.find(a => protectedPaths().some(pp => resolve(a) === pp));
-  if (protectedHit) {
-    console.error(`拒绝执行：${protectedHit} 命中 AXURE_PROTECTED_PATHS 受保护路径，禁止作为任何路径参数`);
+  if (process.argv.some(a => protectedPaths().includes(resolve(a)))) {
+    console.error(`拒绝执行：AXURE_PROTECTED_PATHS 是受保护路径，禁止作为任何路径参数`);
     process.exit(1);
   }
   const sub = process.argv[2];

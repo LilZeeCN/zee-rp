@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1080 640" role="img" aria-label="zee-rp public reference layout">
+<rect width="1080" height="640" fill="#F1F5F9"/>
+<rect x="0" y="0" width="230" height="640" rx="0" fill="#0F172A" stroke="none" stroke-width="1"/>
+<text x="28" y="65" font-family="Arial,sans-serif" font-size="30" font-weight="700" fill="#FFFFFF">zee-rp</text>
+<text x="28" y="94" font-family="Arial,sans-serif" font-size="11" font-weight="700" fill="#94A3B8">PROTOTYPE TOOLKIT</text>
+<rect x="18" y="142" width="194" height="46" rx="8" fill="#2563EB" stroke="none" stroke-width="1"/>
+<text x="34" y="169" font-family="Arial,sans-serif" font-size="16" font-weight="700" fill="#FFFFFF">Overview</text>
+<text x="34" y="234" font-family="Arial,sans-serif" font-size="16" font-weight="400" fill="#94A3B8">Pages</text>
+<text x="34" y="299" font-family="Arial,sans-serif" font-size="16" font-weight="400" fill="#94A3B8">Interactions</text>
+<text x="34" y="364" font-family="Arial,sans-serif" font-size="16" font-weight="400" fill="#94A3B8">Validation</text>
+<text x="28" y="581" font-family="Arial,sans-serif" font-size="11" font-weight="400" fill="#94A3B8">Public reference layout</text>
+<text x="270" y="64" font-family="Arial,sans-serif" font-size="28" font-weight="700" fill="#0F172A">Prototype workspace</text>
+<text x="270" y="94" font-family="Arial,sans-serif" font-size="14" font-weight="400" fill="#64748B">An authored example. Verify native output separately.</text>
+<rect x="270" y="140" width="240" height="122" rx="12" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text x="292" y="173" font-family="Arial,sans-serif" font-size="14" font-weight="400" fill="#64748B">Pages</text>
+<text x="292" y="225" font-family="Arial,sans-serif" font-size="36" font-weight="700" fill="#0F172A">03</text>
+<rect x="530" y="140" width="240" height="122" rx="12" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text x="552" y="173" font-family="Arial,sans-serif" font-size="14" font-weight="400" fill="#64748B">Widgets</text>
+<text x="552" y="225" font-family="Arial,sans-serif" font-size="36" font-weight="700" fill="#0F172A">12</text>
+<rect x="790" y="140" width="240" height="122" rx="12" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text x="812" y="173" font-family="Arial,sans-serif" font-size="14" font-weight="400" fill="#64748B">Interactions</text>
+<text x="812" y="225" font-family="Arial,sans-serif" font-size="36" font-weight="700" fill="#0F172A">04</text>
+<rect x="270" y="292" width="760" height="280" rx="12" fill="#FFFFFF" stroke="none" stroke-width="1"/>
+<text x="294" y="330" font-family="Arial,sans-serif" font-size="19" font-weight="700" fill="#0F172A">Validation steps</text>
+<text x="294" y="379" font-family="Arial,sans-serif" font-size="15" font-weight="400" fill="#334155">Structure and semantic fields</text>
+<text x="884" y="376" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#2563EB">CHECK</text>
+<line x1="294" y1="398" x2="1006" y2="398" stroke="#E2E8F0" stroke-width="1"/>
+<text x="294" y="424" font-family="Arial,sans-serif" font-size="15" font-weight="400" fill="#334155">Native loading</text>
+<text x="884" y="421" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#2563EB">VERIFY</text>
+<line x1="294" y1="443" x2="1006" y2="443" stroke="#E2E8F0" stroke-width="1"/>
+<text x="294" y="469" font-family="Arial,sans-serif" font-size="15" font-weight="400" fill="#334155">Preview interactions</text>
+<text x="884" y="466" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#2563EB">VERIFY</text>
+<line x1="294" y1="488" x2="1006" y2="488" stroke="#E2E8F0" stroke-width="1"/>
+<text x="294" y="514" font-family="Arial,sans-serif" font-size="15" font-weight="400" fill="#334155">Edit, save and reopen</text>
+<text x="884" y="511" font-family="Arial,sans-serif" font-size="12" font-weight="700" fill="#2563EB">VERIFY</text>
+<text x="270" y="616" font-family="Arial,sans-serif" font-size="12" font-weight="400" fill="#64748B">Generated from the public JSON specification; no personal or repository data.</text>
+</svg>

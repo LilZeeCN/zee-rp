@@ -1,0 +1,8 @@
+**/*.rp
+**/*.rplib
+**/fixtures/**
+**/node_modules/**
+**/.DS_Store
+outputs/
+release/
+gui-jobs-check/

@@ -45,7 +45,7 @@ export function createBlankPage(file, newName) {
 
   const template = readFileSync(resolveBlankTemplate());
   const blankPage = readRecords(template).find(record => record.className === 'Axure:Page');
-  if (!blankPage) throw new Error('Bundled blank Page record not found');
+  if (!blankPage) throw new Error('Native blank Page record not found in template');
   const page = parsePayload(blankPage);
   const pageObject = [...page.objects.values()].find(object => object.className === 'Axure:Page');
   const diagram = page.objects.get(field(pageObject?.body ?? {}, 'diagram')?.value);
@@ -53,7 +53,7 @@ export function createBlankPage(file, newName) {
   const hasWidgets = [...page.objects.values()].some(object =>
     object.className.startsWith('Axure:DiagramObject:') || object.className.startsWith('Axure:Repeater'));
   if (!pageObject || diagramObjects.length || hasWidgets) {
-    throw new Error('Bundled Page record is no longer blank');
+    throw new Error('Resolved template Page record is no longer blank');
   }
 
   const pageGuids = page.roots.find(root => root.tag === 0x1e)?.values;

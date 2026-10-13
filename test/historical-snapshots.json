@@ -1,0 +1,576 @@
+{
+  "connector-single-cloner-roundtrip.rp": {
+    "filename": "connector-single-cloner-roundtrip.rp",
+    "category": "连接线",
+    "sha256": "80b28861d957297668281bd6eab66e62937be8062f6b4f0fcc2923bdca6df214",
+    "bytes": 49811,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "b24ea6cd3d77ff03abfcceb5d3ecc190e3de33a00587c5c6297e44945ad427a7"
+  },
+  "connector-double-preserved-roundtrip.rp": {
+    "filename": "connector-double-preserved-roundtrip.rp",
+    "category": "连接线",
+    "sha256": "3b936cc9f647126a92cfd8a6fe8f3ef405605521dbea065fe9d0d19d073562d5",
+    "bytes": 44464,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "03585e9293afed6980b7ea25c6839faecb0b268ebd2f481d3f660f95655b88ad"
+  },
+  "connector-free-cloner-roundtrip.rp": {
+    "filename": "connector-free-cloner-roundtrip.rp",
+    "category": "连接线",
+    "sha256": "87837b667fe7526390860cd7f25f668b50d8435b7543b2e70edb716b1e86a683",
+    "bytes": 41886,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "e60a7726993e93e3c0746b61cd142d3de63d882660fe5127aaf7feb0f4e4feb2"
+  },
+  "listbox-multiselect-roundtrip.rp": {
+    "filename": "listbox-multiselect-roundtrip.rp",
+    "category": "ListBox",
+    "sha256": "be82b1172e1b865c2c1bfad3e3236e39dd5a8856c48a6d6f5427a9c9b3a0ff82",
+    "bytes": 41551,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "feefd058497e3b060678491a9c292c659f569ef8b8bc1fac190898c197446bda"
+  },
+  "listbox-single-control.rp": {
+    "filename": "listbox-single-control.rp",
+    "category": "ListBox",
+    "sha256": "60c0b015a124b169d3b566d528d80e28043d79a4fee9e82d7a66e3e381d2a835",
+    "bytes": 41547,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "3032be70c755664adeb26f3dbe45e859fe0f23d4c1258dc00fc2746fd8bcf48a"
+  },
+  "table-native-writer-roundtrip.rp": {
+    "filename": "table-native-writer-roundtrip.rp",
+    "category": "原生表格",
+    "sha256": "61bba26912b4cc73b412b5b11a687844bec3c56fc152fa09c43f1757e0917fb4",
+    "bytes": 44723,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "517979ff0fec5363f60d2f0fbd00c6d53611f2205f6f7bf4b3ce5211aa8ccbf7"
+  },
+  "table-expanded-roundtrip.rp": {
+    "filename": "table-expanded-roundtrip.rp",
+    "category": "原生表格",
+    "sha256": "9bd33c9ff1a0f024cbb154d13ccca7eb5338b19b0e0888b7db51961849d510c8",
+    "bytes": 47326,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "39edfec96bc8a888919de9fa59bf2a52672e5ff2cd193f40d2be67fd21bc0e02"
+  },
+  "table-expanded-gui-edit.rp": {
+    "filename": "table-expanded-gui-edit.rp",
+    "category": "原生表格",
+    "sha256": "bd35282c3e801ac4facd08bdf86c5fc53e52c754f9f48f176243ca6a2fd5b704",
+    "bytes": 57875,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "99a82e52105da68f40d11e407116e4de8848889a21e57ca283f6f1608fc269dc"
+  },
+  "richtext-hyperlink-template.rp": {
+    "filename": "richtext-hyperlink-template.rp",
+    "category": "富文本-链接",
+    "sha256": "1c84fc5e2345032e2d92e7a9892741eb8d441e8fefcc7f00b0f022c8278c0eb2",
+    "bytes": 62635,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "f26678ec2eca919e6a0364ded9ed481f3fc221c394db919720e98c677b48db13"
+  },
+  "richtext-whole-block-v2-roundtrip.rp": {
+    "filename": "richtext-whole-block-v2-roundtrip.rp",
+    "category": "富文本",
+    "sha256": "76ca0f7fc9ca72c1148e5b6e3ddea7413b0f12d91f0a9fc526f677d5268c9e8e",
+    "bytes": 53952,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "13ea15b17d2fcb614c0bdb8396ba6de380c73959e4c8f894ed84017fa915d458"
+  },
+  "richtext-v2-gui-edit.rp": {
+    "filename": "richtext-v2-gui-edit.rp",
+    "category": "富文本",
+    "sha256": "00808da56d28dc022e1824591cc1bf618fc49736ce3559c7052afe7e3a9e7a10",
+    "bytes": 55294,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "24d333a5e58b289e77526d119308a391b8299ca34e086fd8c08d54b3b8c0019f"
+  },
+  "panel-nested-two-level-roundtrip.rp": {
+    "filename": "panel-nested-two-level-roundtrip.rp",
+    "category": "面板-嵌套",
+    "sha256": "72124855c1347973722409228eec1ee17956e509790a2ba0fc773a569197fd76",
+    "bytes": 71141,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "5b80d643db20c3a8c87129156b2e464a390953dfba2c532159f00a6e7024dc4f"
+  },
+  "panel-nested-three-level-gui-edit.rp": {
+    "filename": "panel-nested-three-level-gui-edit.rp",
+    "category": "面板-嵌套",
+    "sha256": "73c1435959c904bcf97e12fff434d83ba1eae5bb3ed67a46f9d841ba136b0fa8",
+    "bytes": 81734,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "30e88c22ffc6ae5eadd2f534248e135219008af48a6953a2afe100a39612492e"
+  },
+  "panel-image-appended-right-roundtrip.rp": {
+    "filename": "panel-image-appended-right-roundtrip.rp",
+    "category": "面板-内嵌图片",
+    "sha256": "7a64d0d5a37c986c325305b81f0a9ffe2decff98309f73086e8e3751c8c73655",
+    "bytes": 68506,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "9d94d3a2ffa120defffc1f51f51800d35ab5a67b7bb822f42f9683740f0990f3"
+  },
+  "panel-image-gui-edit.rp": {
+    "filename": "panel-image-gui-edit.rp",
+    "category": "面板-内嵌图片",
+    "sha256": "c96e18e1db66997fbf092b9c1e38b4e6982aeeec7b0abbb29d21a4286ea46890",
+    "bytes": 77013,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "aed23658dde7b1a6c499bfbe4b2a2948c09e2036f8eedc3f2c2edfb1a75232a5"
+  },
+  "panel-repeater-direct-roundtrip.rp": {
+    "filename": "panel-repeater-direct-roundtrip.rp",
+    "category": "面板-中继器",
+    "sha256": "7e5c235631124180a4d03aae7f9b73e11daa2f1e3d851a8cae873aab52ece81b",
+    "bytes": 54994,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "41919478eb567c9d7cd059b05f6f9a6e11daa4dca3b94daf56717a23c7de7fa0"
+  },
+  "panel-repeater-gui-edit.rp": {
+    "filename": "panel-repeater-gui-edit.rp",
+    "category": "面板-中继器",
+    "sha256": "fe5c3630aedeae590cc480dcf42d2e695fd9903dac64701f54ab4cfda842788e",
+    "bytes": 61344,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "de50ec17c0d374e3d41ab2bc78d9b80394d7eab4c90ec1d993c1b88da8697d89"
+  },
+  "panel-master-twins-gui.rp": {
+    "filename": "panel-master-twins-gui.rp",
+    "category": "面板-母版",
+    "sha256": "2fa1000b63816dcf2d5166600024c22fa642695346b968e4047fa52068cb328e",
+    "bytes": 60469,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "cb82ca26979c37a3860e1f584267de6a132e6c05dc534b4aab20e63ddab41e9c"
+  },
+  "panel-master-dependency-panel-gui-edit.rp": {
+    "filename": "panel-master-dependency-panel-gui-edit.rp",
+    "category": "面板-母版",
+    "sha256": "694c0057daf37b2d40c4b5cf87701ef210312bb8ccdd10a07095da6cd59905b2",
+    "bytes": 89742,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "daf9fd4d05cfafba64634466197fa279c7e5432e503f2658357e3c0b43a63325"
+  },
+  "master-override-writer-image-roundtrip.rp": {
+    "filename": "master-override-writer-image-roundtrip.rp",
+    "category": "面板-覆盖",
+    "sha256": "d3443ec91f9aeae1ecd47e8d1384e06c6d18a36dbec2cc6ca3045e837e9fedb3",
+    "bytes": 104218,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "e78889d637987bc5c191ebf3cac49c42e3495ca126d4fab5b04f15cee2b320b2"
+  },
+  "master-override-import-dependency-gui-edit.rp": {
+    "filename": "master-override-import-dependency-gui-edit.rp",
+    "category": "面板-覆盖",
+    "sha256": "f3fddd8ef9476d1a528fbd8b7f2e1ef2c6bd25b1b7c95af0930fd4ba0d8c0bff",
+    "bytes": 93638,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "c626ab861df59ae2bc63625916ed3df7779f03fce013df0c75e907c0f2462095"
+  },
+  "panel-replace-roundtrip.rp": {
+    "filename": "panel-replace-roundtrip.rp",
+    "category": "面板-替换",
+    "sha256": "c0acebed346edaed9c4b743d2116f2cb3298515c4df1352b87893228b1b595b1",
+    "bytes": 64036,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "06d121277205808f26db1e283828ef82bb9ac65b00ee30390164f6340331326b"
+  },
+  "panel-replace-gui-edit.rp": {
+    "filename": "panel-replace-gui-edit.rp",
+    "category": "面板-替换",
+    "sha256": "eeff2afc1494ab450ee28dbe411caf8af2e18eab0cdf2e65e368107f94a225a2",
+    "bytes": 62949,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "398bf1b8d87b794bb312a437db40caacdc11f273c94840bd809370a6620804c6"
+  },
+  "var-set-counter-roundtrip.rp": {
+    "filename": "var-set-counter-roundtrip.rp",
+    "category": "变量与条件",
+    "sha256": "1ec3bc0a2422a5bb8c2d72050fbeba8d59f04ab124bceec71b05be26c352efcc",
+    "bytes": 45972,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "f78f240f07cde955a7617bd6bf36d1cb67b2368e822135b438e20b3861acc6bb"
+  },
+  "var-set-from-widget-roundtrip.rp": {
+    "filename": "var-set-from-widget-roundtrip.rp",
+    "category": "变量与条件",
+    "sha256": "329013e87a3b6c0536b1db38c24dfbdc0dfba3a8e7fdb18289dd3fdf749b2770",
+    "bytes": 46583,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "ee2b646a42319c269629387936be780ce0bf652312494325bb01aa13c1ed9df7"
+  },
+  "tree-expandable-branch-isolated-roundtrip.rp": {
+    "filename": "tree-expandable-branch-isolated-roundtrip.rp",
+    "category": "树",
+    "sha256": "2968399c1ee1d48680f76217b9f33c71799a66b47a77bcd81aa574d72ff718ee",
+    "bytes": 536121,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "696640de13e81d1b2caf370efd77c2a55b8e50b576a515110a9ac3a0d14e60f9"
+  },
+  "adaptive-labels-resumed-roundtrip.rp": {
+    "filename": "adaptive-labels-resumed-roundtrip.rp",
+    "category": "自适应",
+    "sha256": "f05c474b3eabeb6c6789c0f5363c7f0642fb144c211ec727c6ff24ee404cb348",
+    "bytes": 529235,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "60ef20fe1eac3ed0549759808d9393918126edb19fb5180df1f8081603dcb623"
+  },
+  "adaptive-repeater-views-final.rp": {
+    "filename": "adaptive-repeater-views-final.rp",
+    "category": "自适应",
+    "sha256": "e32d3416593bf49a69ec717f8174c8e43703ed2b3e600d26337e00fd36a896fb",
+    "bytes": 531203,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "7cf177aeb2ac93cbe7ff846c53cd6e117cfbe8b77fd15afb4f6f3d595922481a"
+  },
+  "blank-ui-native.rp": {
+    "filename": "blank-ui-native.rp",
+    "category": "空白工程/页面",
+    "sha256": "9696a206d4040f332d138c5fabcac2a6b9d93faa6fe4ff469a7c7891fa7079a5",
+    "bytes": 40675,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "b732caa9b3716a03312b7efc4259df2b6b613483684ebe8727b3ab3235c50268"
+  },
+  "blank-page-in-existing-project-v2-gui.rp": {
+    "filename": "blank-page-in-existing-project-v2-gui.rp",
+    "category": "空白工程/页面",
+    "sha256": "d24c80e29afe6a2d655337ee866bb97e91de259c07e67ee6f20c99a0dcff611c",
+    "bytes": 531994,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "9293dccc04ed9b1e638d1b08ab9f4beac16a0c74379739ebe9ac7fa9f25b01f7"
+  },
+  "blank-page-prototype-starter-gui.rp": {
+    "filename": "blank-page-prototype-starter-gui.rp",
+    "category": "空白工程/页面",
+    "sha256": "0d856d9884f01149367d688431c0cb0ab1790994de3e01b7d97c5652468192a0",
+    "bytes": 563976,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "22c3fccee6991430864458909de2b5df06f85cc72639e85407da2edc3cd14a7d"
+  },
+  "master-state-form-source.rp": {
+    "filename": "master-state-form-source.rp",
+    "category": "panel-state-ownership",
+    "sha256": "0a352060a57d86ec4f965da371fdbbcb86afdc4473cd39bd6503f87533ecb3e7",
+    "bytes": 43631,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "438c4d520aed23267f0d9a9f27afb79a82227ffd2b2d9827288e75c346a50d64"
+  },
+  "panel-direct-image-base.rp": {
+    "filename": "panel-direct-image-base.rp",
+    "category": "母版实例覆盖",
+    "sha256": "b2f1a75fa094f94c7c499e2d5082144ca0efeaea80fdb99007d6e58229addd5c",
+    "bytes": 85524,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "73695e62c7f94c29ddf45600981a1869313fa01c866f8bce6a751180c26fb461"
+  },
+  "master-direct-image-base.rp": {
+    "filename": "master-direct-image-base.rp",
+    "category": "母版实例覆盖",
+    "sha256": "a6451eecf3b84a947a9320e8dc818bb9e1b5a81ad9bac5041a37fdc690794d6f",
+    "bytes": 100405,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "0ce9885a531788e5fcccf119d0f53356b4b1df44226e40c40bc22d38524749b1"
+  },
+  "master-repeater-import.rp": {
+    "filename": "master-repeater-import.rp",
+    "category": "面板-中继器",
+    "sha256": "61dbdaa172aad6ef91ee088318931c0e296dd1b9996bbd6f45dcfdf1b5faffc8",
+    "bytes": 71663,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "999054cad219c991c9412b75fcf7ee66b2e6620902bf6be946e641e831f76f16"
+  },
+  "master-repeater-nested-import.rp": {
+    "filename": "master-repeater-nested-import.rp",
+    "category": "面板-中继器",
+    "sha256": "e74f668b518299ca2e5cbf9a9f38a5e09c10d5e972f23d5ad6800dbb8de0a3de",
+    "bytes": 78984,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "5a615c86c6049b85163bb3d52c1dfa8a6ddfcb51c2112bffa8c702ff01b5f597"
+  },
+  "layer-page-replace.rp": {
+    "filename": "layer-page-replace.rp",
+    "category": "panel-state-ownership",
+    "sha256": "6167bdd78ffe94931c23ad716e6ee2d37e7b3fa91016d5c43a7afb4920bfee80",
+    "bytes": 76929,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "cbb57968d0637efae96ce99eaba8e75dca632661bb73dc239fd77ccd65c12e86"
+  },
+  "layer-master-append.rp": {
+    "filename": "layer-master-append.rp",
+    "category": "panel-state-ownership",
+    "sha256": "4b7dd9bf4145c164abf32f33804ca7ba99241bd9274fd9e11e595aa81877831d",
+    "bytes": 90848,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "82c3c217e573e798b779873663cf16e5b192b7c45b475532237b144a429e4017"
+  },
+  "scroll-horizontal-verified.rp": {
+    "filename": "scroll-horizontal-verified.rp",
+    "category": "滚动动作",
+    "sha256": "af141ebf68b570e77d0db74e59b595afdc9738d3a7e84aaece257a24cefd4b24",
+    "bytes": 45013,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "1e8e410519df4cf932877b4e9ab9920ffa0e63c61d79c82c02cfa8ad08a8b9cc"
+  },
+  "scroll-swing-verified.rp": {
+    "filename": "scroll-swing-verified.rp",
+    "category": "滚动动作",
+    "sha256": "8a2bd36575736502c0e17cfc8b4913a7bb60f4a360e23b44489242078dfa5fcb",
+    "bytes": 45022,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "a5b4b1e624c8b9f41793b10f16c5b44b2dacc0c9e222dde26dc124d4007674e5"
+  },
+  "scroll-gui-reopened.rp": {
+    "filename": "scroll-gui-reopened.rp",
+    "category": "滚动动作",
+    "sha256": "31f26e728e49dc8b6850121f45f3dc1c9d52b0c66ec144584202ebe8e540f15b",
+    "bytes": 45324,
+    "records": {
+      "unparseable": 0
+    },
+    "counts": {
+      "danglingRefs": 0,
+      "problems": 0
+    },
+    "summarySha256": "7b928df85031d789f93ff67728e974d754cef73fc6b7178f5a620f87104630aa"
+  }
+}

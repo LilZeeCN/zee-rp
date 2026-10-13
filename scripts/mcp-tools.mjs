@@ -88,7 +88,11 @@ const countsOf = rp => ({ pages: rp.counts.pages, widgets: rp.counts.widgets, in
 function commandArgs(command, input) {
   const binding = config.commandSchemas[command.command];
   if (!binding || Object.hasOwn(input, 'args')) return [...input.args];
-  const args = binding.positionals.map(key => input[key]);
+  if (command.command === 'fill-panel-state' && Boolean(input.targetPage) === Boolean(input.targetMaster))
+    throw new Error('Choose exactly one targetPage or targetMaster');
+  const args = binding.positionals.map(key => key === 'targetPage' && command.command === 'fill-panel-state'
+    ? input.targetPage ?? input.targetMaster : input[key]);
+  if (command.command === 'fill-panel-state' && input.targetMaster) args.push('--master');
   args.push(...binding.constants ?? []);
   for (const [key, flag] of Object.entries(binding.flags ?? {})) if (input[key]) args.push(flag);
   for (const [key, flag] of Object.entries(binding.values ?? {})) if (input[key] !== undefined) args.push(flag, input[key]);
@@ -471,18 +475,56 @@ function richRunsDetail(state, cand) {
       return { paragraphs: [{ runs: texts.map(t => ({ text: t })) }], note: '纯文本块，无段落/run 结构' };
     }
     const aligns = ['left', 'center', 'right']; // HorizontalAlignment 0/1/2，与 set-widget-richtext 同一映射
+    const linkTarget = widgetId => {
+      const widget = graph.objects.get(widgetId);
+      const map = graph.objects.get(field(widget?.body ?? {}, 'InteractionMap')?.value);
+      const table = field(map?.body ?? {}, 'node-table');
+      const tree = graph.objects.get(field(map?.body ?? {}, 'tree')?.value);
+      const children = object => (field(object?.body ?? {}, 'children')?.items ?? []).map(node => graph.objects.get(node.value)).filter(Boolean);
+      const targetOf = node => graph.objects.get(table?.entries?.find(([key]) => key.value === node.id)?.[1]?.value);
+      for (const eventNode of children(tree)) for (const caseNode of children(eventNode)) for (const actionNode of children(caseNode)) {
+        const action = targetOf(actionNode);
+        if (action?.className !== 'Axure:InteractionLinkWindowAction') continue;
+        const target = graph.objects.get(field(action.body, 'target')?.value);
+        const targetType = field(target?.body ?? {}, 'target-type')?.value;
+        const literalRef = field(target?.body ?? {}, 'target-literal');
+        const literalObject = literalRef?.tag === 3 ? graph.objects.get(literalRef.value) : null;
+        const literalValue = field(literalObject?.body ?? {}, 'value')?.text;
+        const window = field(action.body, 'link-type')?.value === 2 ? 'new' : 'current';
+        if (targetType === 1) {
+          const page = state.rp.pages.find(item => `${item.name}.html` === literalValue)?.name
+            ?? literalValue?.replace(/\.html$/i, '') ?? '';
+          return { page, window };
+        }
+        if (targetType === 0) return { url: literalValue ?? '', window };
+        if (targetType === 2) return { action: 'refresh', window };
+        if (targetType === 3) return { action: 'back', window };
+      }
+      return null;
+    };
+    const readRun = r => {
+      const run = { text: field(r, 'Text')?.text ?? '' };
+      for (const [key, [name, kind]] of Object.entries(RUN_STYLE_FIELDS)) {
+        const node = field(r, name);
+        if (node === undefined) continue;
+        run[key] = kind === 'text' ? node.text : node.value;
+      }
+      if (typeof run.color === 'number') run.color = `#${(run.color >>> 0).toString(16).padStart(8, '0').slice(2)}`;
+      return run;
+    };
+    const readInline = inline => {
+      const type = field(inline, 'Type')?.text;
+      if (type === 'Axure:AttributedString:AxRun') return [readRun(inline)];
+      if (type === 'Axure:AttributedString:AxHyperlink') {
+        const target = linkTarget(field(inline, 'Link')?.value);
+        return (field(inline, 'Inlines')?.items ?? []).flatMap(readInline).map(run => ({ ...run, link: target }));
+      }
+      throw new Error(`不支持的富文本 inline ${type ?? '(missing type)'}`);
+    };
     return { paragraphs: paragraphs.map(p => ({
       align: aligns[field(p, 'HorizontalAlignment')?.value] ?? null,
-      runs: (field(p, 'Inlines')?.items ?? []).map(r => {
-        const run = { text: field(r, 'Text')?.text ?? '' };
-        for (const [key, [name, kind]] of Object.entries(RUN_STYLE_FIELDS)) {
-          const node = field(r, name);
-          if (node === undefined) continue;
-          run[key] = kind === 'text' ? node.text : node.value;
-        }
-        if (typeof run.color === 'number') run.color = `#${(run.color >>> 0).toString(16).padStart(8, '0').slice(2)}`;
-        return run;
-      }),
+      lineSpacing: field(p, 'LineSpacing')?.value ?? null,
+      runs: (field(p, 'Inlines')?.items ?? []).flatMap(readInline),
     })) };
   } catch (error) { return { paragraphs: null, note: `富文本明细解析失败：${error.message}` }; }
 }
@@ -646,15 +688,26 @@ const paragraphSchema = {
   type: 'object',
   properties: {
     align: { type: 'string', enum: ['left', 'center', 'right'] },
-    runs: { type: 'array', items: { type: 'object', properties: { text: { type: 'string' }, style: { type: 'object', description: '允许 fontFamily、size、bold、italic、underline、strikethrough、color；由现有 writer 验证值。' } } } },
+    wrapping: { type: 'integer', enum: [0, 1, 2, 3, 4] },
+    trimming: { type: 'integer', enum: [0, 2, 3] },
+    list: { oneOf: [{ type: 'boolean' }, { type: 'integer', minimum: 0, maximum: 3 }] },
+    lineSpacing: { type: 'number', minimum: 0, description: '原生段落 LineSpacing；留空沿用模板值，0 为自动行距。已验 72 显示为 96px 行高' },
+    runs: { type: 'array', minItems: 1, items: { type: 'object', properties: {
+      text: { type: 'string' },
+      style: { type: 'object', description: '允许 fontFamily、size、bold、italic、underline、strikethrough、color；由现有 writer 验证值。' },
+      link: { oneOf: [
+        { type: 'object', properties: { page: { type: 'string', minLength: 1 }, window: { type: 'string', enum: ['current', 'new'] } }, required: ['page'], additionalProperties: false },
+        { type: 'object', properties: { url: { type: 'string', pattern: '^https?://' }, window: { type: 'string', enum: ['current', 'new'] } }, required: ['url'], additionalProperties: false },
+      ] },
+    }, required: ['text'], additionalProperties: false } },
   },
-  required: ['runs'],
+  required: ['runs'], additionalProperties: false,
 };
 const richRunsSchema = {
-  description: '段落数组（同 set-widget-richtext 的 paragraphs），或 {paragraphs, defaults}；style 键集合由该库校验',
+  description: '段落数组（同 set-widget-richtext 的 paragraphs），或 {paragraphs, defaults}；支持 paragraph.lineSpacing/wrapping/trimming/list（布尔或 0-3 级原生列表）、run.link（page 或 HTTP(S) url，可选 window=current/new）及 style 全量键（含 weight/style/stretch/characterSpacing/baseline，键集合由该库校验）',
   oneOf: [
     { type: 'array', items: paragraphSchema },
-    { type: 'object', properties: { paragraphs: { type: 'array', items: paragraphSchema }, defaults: { type: 'object' } }, required: ['paragraphs'] },
+    { type: 'object', properties: { paragraphs: { type: 'array', items: paragraphSchema }, defaults: { type: 'object' } }, required: ['paragraphs'], additionalProperties: false },
   ],
 };
 const targetSchema = {
@@ -695,7 +748,7 @@ export const sessionTools = [
   },
   {
     name: 'inspect',
-    description: '单元件深看：富文本段落/runs 明细（字体/字号/样式/颜色）、几何、交互树人类可读展开。target 接受 locate 返回的定位字段。',
+    description: '单元件深看：富文本段落/runs 明细（字体/字号/样式/颜色/链接目标）、几何、交互树人类可读展开。target 接受 locate 返回的定位字段。',
     inputSchema: { type: 'object', properties: { target: targetSchema }, required: ['target'], additionalProperties: false },
     handler: sessionHandlers.inspect,
   },
@@ -707,7 +760,7 @@ export const sessionTools = [
   },
   {
     name: 'edit_text',
-    description: '改一个元件的文字：定位（唯一匹配或 locate 定位字段；多匹配报错列候选）→ 经 set-widget-text / set-widget-richtext 库导出写新链节点 → 新节点过 rp-read 三零（失败则坏节点保留 .rejected、链回退并报差异）。text=简单文本；richRuns=富文本段落。edits 数组一次批量改多个元件，全部成功才提交，任一失败整批回退。返回逐条 before/after 与新链尾；GUI/预览需另验。',
+    description: '改一个元件的文字：定位（唯一匹配或 locate 定位字段；多匹配报错列候选）→ 经 set-widget-text / set-widget-richtext 库导出写新链节点 → 新节点过 rp-read 三零（失败则坏节点保留 .rejected、链回退并报差异）。text=简单文本；richRuns=富文本段落/runs，可含段落行距、原生列表级别（list）、wrapping/trimming 及链接目标。edits 数组一次批量改多个元件，全部成功才提交，任一失败整批回退。返回逐条 before/after 与新链尾；GUI/预览需另验。',
     inputSchema: { type: 'object', properties: { target: targetSchema, text: { type: 'string' }, richRuns: richRunsSchema, edits: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object', properties: { target: targetSchema, text: { type: 'string' }, richRuns: richRunsSchema }, required: ['target'], additionalProperties: false } } }, additionalProperties: false },
     handler: sessionHandlers.edit_text,
   },
