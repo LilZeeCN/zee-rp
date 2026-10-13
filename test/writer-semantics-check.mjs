@@ -582,4 +582,3 @@ if (process.argv[1] && process.argv[1].endsWith('writer-semantics-check.mjs')) {
     process.exit(1);
   }
 }
-
