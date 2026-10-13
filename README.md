@@ -10,9 +10,9 @@ Use it to understand an existing prototype, apply repeatable changes, build from
 
 The source, schemas, test runners, test contracts and fingerprints, documentation generator, release packer, and reproducible example recipes are included. Native templates and libraries come from your own Axure installation. Supported operations and their evidence are documented explicitly: zee-rp does not guarantee arbitrary documents, widgets, or interactions.
 
-[![Watch the zee-rp 3D Particle Trailer (1080p Lossless)](https://raw.githubusercontent.com/LilZeeCN/zee-rp/main/assets/zee-rp-cover.png)](https://github.com/LilZeeCN/zee-rp/releases/download/v0.1.1/zee-rp-intro.mp4)
+https://github.com/user-attachments/assets/48d47444-b863-4e01-ad01-49ac0d8d312c
 
-> **▶ Overview Video (1080p Lossless, 32s):** [Download / Watch Lossless Master MP4 (`CRF=18`, 60 MB)](https://github.com/LilZeeCN/zee-rp/releases/download/v0.1.1/zee-rp-intro.mp4) · [View in Repository (`assets/zee-rp-intro.mp4`)](https://github.com/LilZeeCN/zee-rp/blob/main/assets/zee-rp-intro.mp4)
+> **▶ Overview Video (32s):** Watch directly in the inline player above, or download the [1080p Lossless Master MP4 (`CRF=18`, 60 MB)](https://github.com/LilZeeCN/zee-rp/releases/download/v0.1.1/zee-rp-intro.mp4) · [Repository copy (`assets/zee-rp-intro.mp4`)](https://github.com/LilZeeCN/zee-rp/blob/main/assets/zee-rp-intro.mp4)
 
 ![Reference layout rendered from the public specification](assets/demo-layout.svg)
 
