@@ -10,6 +10,10 @@ zee-rp 是独立的原生 `.rp` 文档工具集，采用 MIT 许可证。它包�
 
 仓库公开了源码、schema、测试运行器、测试合同与指纹、文档生成器、发布打包器，以及可复现的示例生成方法。原生模板和元件库由使用者从自己的 Axure 安装环境提供。各项操作的支持范围和证据分别记录，工具不保证任意文档、元件或交互都能处理。
 
+[![观看 zee-rp 3D 粒子宣传片（1080p 无损母片）](https://raw.githubusercontent.com/LilZeeCN/zee-rp/main/assets/zee-rp-cover.png)](https://github.com/LilZeeCN/zee-rp/releases/download/v0.1.1/zee-rp-intro.mp4)
+
+> **▶ 项目宣传片（1080p 无损母片，32 秒）：** [直链播放 / 下载无损 MP4（`CRF=18`，60 MB）](https://github.com/LilZeeCN/zee-rp/releases/download/v0.1.1/zee-rp-intro.mp4) · [仓库内文件 (`assets/zee-rp-intro.mp4`)](https://github.com/LilZeeCN/zee-rp/blob/main/assets/zee-rp-intro.mp4)
+
 ![由公开规格生成的参考布局](assets/demo-layout.svg)
 
 这是一张确定性生成的**参考图**，不是 Axure 截图，也不代表原生验收结果。它来自公开的[布局规格](assets/dashboard-example.spec.json)，图中的数量只是示意内容。下文的原生示例是另一套生成流程，产物包含五个具名元件和一个单独的表格文档。
