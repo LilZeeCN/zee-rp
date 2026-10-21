@@ -1626,6 +1626,7 @@ class Frontend:
         self.variables = {}
         self.computed_vars = {}
         self.symbols = {}
+        self.identity_labels = {}
         self.pages = {}
         self.pending = []
         self.repeaters = {}
@@ -2985,7 +2986,12 @@ class Frontend:
                   "icon": "img", "sparkline": "img",
                   "dynamic-panel": "panel", "repeater": "rep", "divider": "line"}[kind]
         name = prefix + "-" + re.sub(r"[^A-Za-z0-9_-]", "-", logical.rsplit("/", 1)[-1]) + "-" + hashlib.sha256(logical.encode()).hexdigest()[:12]
+        if "name" in source:
+            self.typecheck(source["name"], "text", ptr(path, "name"))
+        display = re.sub(r"[\r\n]+", " ", source.get("name", "")).strip() or name
+        self.identity_labels[logical] = source.get("id")
         self.symbols[logical] = {"id": logical, "kind": kind, "name": name,
+                                 "display": display,
                                  "label": source.get("name", source.get("id")), "pointer": path,
                                  "pageId": logical.split("/")[0]}
         macro_path = max((p for p in self.macro_calls if path == p or path.startswith(p + "/")), key=len, default=None)
@@ -4453,7 +4459,12 @@ class Frontend:
                 "aggregates": getattr(self, "compiled_aggregates", []),
                 "formulas": [{"name": f["name"], "ast": f["ast"], "pointer": f["pointer"]} for f in getattr(self, "compiled_formulas", [])],
             }
-        ir["semanticHash"] = hashlib.sha256(__import__("json").dumps(ir, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        # Display metadata must not change identity or the semantic patch guard.
+        hash_ir = {**ir, "symbols": [{k: v for k, v in symbol.items() if k != "display"}
+                                      for symbol in symbols]}
+        for symbol in hash_ir["symbols"]:
+            symbol["label"] = self.identity_labels[symbol["id"]]
+        ir["semanticHash"] = hashlib.sha256(__import__("json").dumps(hash_ir, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
         return lowered, ir
 
 

@@ -59,6 +59,14 @@ node scripts/proto.mjs generate --spec examples/rp-language/counter.json --out-d
 
 数据业务示例见 `examples/rp-language/runtime-inventory.json`。输出必须使用新文件名。原生模板、元件库和官方运行时均从用户本机读取，不随项目分发。
 
+节点的 `name` 直接作为 Axure OUTLINE 显示名，支持中文和重名；引用继续用 `id`。已有工程只改名字可直接执行：
+
+```sh
+node bin/axure.mjs name-widget 原工程.rp 改名后.rp --name "旧名称" --to "搜索输入框"
+```
+
+MCP 打开工程后调用 `rename_widget({target: {name: "旧名称"}, name: "搜索输入框"})` 即可；`edits` 支持一次批量修改。遇到重名时用返回候选的 `record` + `id` 精确指定。名称重复会在读取摘要中提示，不作为文件损坏；按名称编辑仍要求唯一目标。
+
 ## CLI、MCP 和测试
 
 ```sh

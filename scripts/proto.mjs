@@ -31,6 +31,7 @@ import { resolvePageRecord } from './ix-actions.mjs';
 import { readRp } from './rp-read.mjs';
 import { createGlobalVariable } from './create-global-variable.mjs';
 import { setWidgetText } from './set-widget-text.mjs';
+import { setWidgetNames } from './name-widget.mjs';
 import { readRecords, encodeRecord, replaceRecord, appendPackage } from './rp-records.mjs';
 import { parsePayload, encodePayload, field } from './parse-payload.mjs';
 import { guidKey } from './duplicate-page.mjs';
@@ -631,20 +632,43 @@ export function buildInteractiveRp(
   // Step 4: 落盘并执行 rp-read 三零与结构验证
   const auditT0 = Date.now();
   mkdirSync(dirname(absOut), { recursive: true });
-  const finalSummary = readRp(currentBuf, { path: absOut, includeMasterWidgets: true });
-  const allPageWidgets = finalSummary.pages.flatMap(p => (p.widgets ?? []).map(w => ({ ...w, record: p.record })));
+  const assembledSummary = readRp(currentBuf, { path: absOut, includeMasterWidgets: true });
+  const allPageWidgets = assembledSummary.pages.flatMap(p => (p.widgets ?? []).map(w => ({ ...w, record: p.record })));
   // The reader also exposes row-template objects in the page record. Prefer
   // their precise container path instead of reporting one native object twice.
-  const mappedWidgets = new Map([...allPageWidgets, ...(finalSummary.containedWidgets ?? [])]
+  const mappedWidgets = new Map([...allPageWidgets, ...(assembledSummary.containedWidgets ?? [])]
     .map(w => [`${w.record}:${w.id}`, w]));
   const nativeWidgets = [...mappedWidgets.values()];
+  // Resolve stable backend names after all events are bound, then rename by
+  // object identity. Duplicate display labels cannot redirect interactions.
+  const sourceMap = (plan.sourceMap ?? []).map(symbol => ({ ...symbol,
+    native: nativeWidgets.filter(w => w.name === (symbol.nativeName ?? symbol.name))
+      .map(w => ({ record: w.record, id: w.id, container: w.container ?? [] })),
+  }));
+  const renames = new Map();
+  for (const symbol of sourceMap) if (symbol.display && symbol.display !== symbol.name) {
+    const backendName = symbol.nativeName ?? symbol.name;
+    // Frames and generated backgrounds also appear in OUTLINE.
+    for (const w of nativeWidgets) if (w.name?.includes(backendName))
+      renames.set(`${w.record}:${w.id}`, { record: w.record, id: w.id, name: w.name.replace(backendName, symbol.display) });
+  }
+  if (renames.size) currentBuf = setWidgetNames(currentBuf, [...renames.values()]).file;
+  const finalSummary = renames.size ? readRp(currentBuf, { path: absOut, includeMasterWidgets: true }) : assembledSummary;
+  const finalWidgets = new Map([
+    ...finalSummary.pages.flatMap(p => p.widgets.map(w => [`${p.record}:${w.id}`, w])),
+    ...(finalSummary.containedWidgets ?? []).map(w => [`${w.record}:${w.id}`, w]),
+  ]);
+  for (const symbol of sourceMap) for (const loc of symbol.native) {
+    const w = finalWidgets.get(`${loc.record}:${loc.id}`);
+    loc.container = w?.container ?? [];
+  }
   const layerCount = nativeWidgets.filter(w => w.type === 'Layer').length;
   const dynamicPanelCount = nativeWidgets.filter(w => w.type === 'DynamicPanel').length;
 
-  const threeZerosOk = (finalSummary.counts.danglingRefs ?? 0) === 0
+  const threeZerosOk = finalSummary.records.unparseable === 0
+    && (finalSummary.counts.danglingRefs ?? 0) === 0
     && (finalSummary.counts.sentinelSlotsNonZero ?? 0) === 0
-    && finalSummary.problems.length === 0
-    && (finalSummary.duplicates ?? []).length === 0;
+    && finalSummary.problems.length === 0;
 
   if (!threeZerosOk) {
     throw new Error(`[ERR_FINAL_THREE_ZEROS] Final .rp failed three-zeros or duplicate check: ${JSON.stringify({
@@ -680,10 +704,7 @@ export function buildInteractiveRp(
       sentinelSlotsNonZero: finalSummary.counts.sentinelSlotsNonZero ?? 0,
       problems: finalSummary.problems.length,
     },
-    sourceMap: (plan.sourceMap ?? []).map(symbol => {
-      const widgets = nativeWidgets.filter(w => w.name === (symbol.nativeName ?? symbol.name));
-      return { ...symbol, native: widgets.map(w => ({ record: w.record, id: w.id, container: w.container ?? [] })) };
-    }),
+    sourceMap,
     eventCoverage: { declared: deferredInteractions.reduce((n, x) => n + (x.ix.events ?? []).length, 0),
       materialized: interactionReports.reduce((n, x) => n + x.events.length, 0) },
     stages: stageReport,

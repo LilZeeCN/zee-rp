@@ -100,6 +100,9 @@ node scripts/set-connector-anchors.mjs source.rp nested.rp "Page 1" \
 ```bash
 # PAGE_ORDINAL 只计 Axure:Page 记录，从 0 起；WIDGET_ID 是该记录内的对象 ID：
 node scripts/name-widget.mjs source.rp named.rp PAGE_ORDINAL WIDGET_ID "提交按钮"
+
+# 快捷路径：唯一旧名称即可；重名时加 --page 或使用 --record/--widget
+node scripts/name-widget.mjs source.rp named.rp --name "旧名称" --to "提交按钮"
 ```
 
 一次可传多组 `WIDGET_ID "新名称"`。该工具不修改显示文本或交互；已有样本链通过它命名表单和触发器。优先用数字页面序号：页名模式只查字符串表并取首个匹配，重名或页面文本撞名时可能选错。可用 `readRecords(file).filter(r => r.className === 'Axure:Page')` 核对序号与记录索引，不能直接把 `rp-read` 的记录索引填入这里。命名后重读摘要，确保后续交互引用的名称唯一。

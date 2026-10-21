@@ -1,51 +1,86 @@
-// 研究用：给指定 Page 记录里的具名/无名元件设置名称（补 skill 缺失的 rename 能力）。
-// 原理：元件名 = name-block 的 text 字段（tag8 字符串引用）。
-// 用法: node name-widget.mjs <source.rp> <new.rp> <pageName> <widgetId> <newName> [<widgetId2> <newName2> ...]
+// Change only name-block text; object identities, content and events stay intact.
 import { readFileSync, writeFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
 import { parsePayload, encodePayload, field } from './parse-payload.mjs';
-
 import { readRp } from './rp-read.mjs';
+import { assertNotProtected, assertWritable } from './engine.mjs';
 
-const [source, destination, pageIndexArg, ...pairs] = process.argv.slice(2);
-if (!source || !destination || !pageIndexArg || pairs.length < 2 || pairs.length % 2) {
-  throw new Error('用法: node name-widget.mjs <source.rp> <new.rp> <pageRecordsIndex|页名> <widgetId> <newName> [...]');
+export function setWidgetNames(file, edits) {
+  const grouped = new Map(), applied = [];
+  for (const edit of edits) {
+    if (!Number.isInteger(edit.record) || !Number.isInteger(edit.id) || typeof edit.name !== 'string')
+      throw new Error('Rename requires integer record/id and a string name');
+    if (!grouped.has(edit.record)) grouped.set(edit.record, []);
+    grouped.get(edit.record).push(edit);
+  }
+  let output = file;
+  for (const [index, changes] of grouped) {
+    // Re-encoding the manifest can move even earlier record offsets.
+    const record = readRecords(output).find(r => r.index === index);
+    if (!record || !['Axure:Page', 'Axure:PanelState', 'Axure:Master'].includes(record.className))
+      throw new Error(`Editable record #${index} not found`);
+    const graph = parsePayload(record), strings = [...record.strings];
+    for (const { id, name } of changes) {
+      const widget = graph.objects.get(id);
+      if (!widget?.className.startsWith('Axure:DiagramObject:')) throw new Error(`Widget #${id} not found in record #${index}`);
+      const text = field(field(widget.body, 'name-block') ?? {}, 'text');
+      if (text?.tag !== 8) throw new Error(`Widget #${id} has no name-block text`);
+      const before = text.text;
+      let pos = strings.indexOf(name);
+      if (pos < 0) { pos = strings.length; strings.push(name); }
+      text.value = pos + 1; text.text = name;
+      applied.push({ record: index, id, before, name });
+    }
+    output = replaceRecord(output, record, encodeRecord(record, strings, encodePayload(graph.roots)));
+  }
+  return { file: output, applied };
 }
-const file = readFileSync(source);
-const recs = readRecords(file);
-const pageRecords = recs.filter(r => r.className === 'Axure:Page');
-// pageIndexArg 可以是页名（由 readRp 权威定位）或 Page 记录序号（0 起，纯数字）
-const summary = readRp(file);
-const pageMeta = summary.pages.find(p => p.name === pageIndexArg);
-const page = pageMeta
-  ? recs.find(r => r.index === pageMeta.record && r.className === 'Axure:Page')
-  : (/^\d+$/.test(pageIndexArg) ? pageRecords[Number(pageIndexArg)] : undefined);
-if (!page) throw new Error(`Page not found: ${pageIndexArg}`);
 
-const g = parsePayload(page);
-const strings = [...page.strings];
-const ensure = name => {
-  const i = strings.indexOf(name);
-  if (i >= 0) return i + 1;
-  strings.push(name);
-  return strings.length;
-};
-const applied = [];
-for (let i = 0; i < pairs.length; i += 2) {
-  const id = Number(pairs[i]), name = pairs[i + 1];
-  const o = g.objects.get(id);
-  if (!o) throw new Error(`Widget #${id} not found in page record #${page.index}`);
-  const nb = field(o.body, 'name-block');
-  if (!nb) throw new Error(`Widget #${id} has no name-block`);
-  const textField = nb.entries.find(([k]) => k.text === 'text');
-  if (!textField) throw new Error(`Widget #${id} name-block has no text field`);
-  const idx = ensure(name);
-  textField[1].value = idx;
-  textField[1].text = name;
-  applied.push({ id, name, stringIndex: idx });
+const usage = 'node name-widget.mjs <source.rp> <new.rp> --name <oldName> --to <newName> [--page <pageName>]\n'
+  + '  or: <source.rp> <new.rp> --record <record> --widget <id> --to <newName>\n'
+  + '  or: <source.rp> <new.rp> <pageRecordsIndex|页名> <widgetId> <newName> [...]';
+
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  try {
+    const [source, destination, ...args] = process.argv.slice(2);
+    if (!source || !destination || !args.length) throw new Error(usage);
+    assertNotProtected(source); assertWritable(destination);
+    const file = readFileSync(source), summary = readRp(file, { includeMasterWidgets: true });
+    let edits;
+    if (args[0].startsWith('--')) {
+      const options = {};
+      for (let i = 0; i < args.length; i += 2) {
+        if (!['--name', '--to', '--page', '--record', '--widget'].includes(args[i]) || args[i + 1] === undefined || Object.hasOwn(options, args[i])) throw new Error(usage);
+        options[args[i]] = args[i + 1];
+      }
+      if (options['--to'] === undefined) throw new Error(usage);
+      if (options['--record'] !== undefined || options['--widget'] !== undefined) {
+        if (options['--name'] !== undefined || options['--page'] !== undefined || options['--record'] === undefined || options['--widget'] === undefined) throw new Error(usage);
+        edits = [{ record: Number(options['--record']), id: Number(options['--widget']), name: options['--to'] }];
+      } else {
+        if (options['--name'] === undefined) throw new Error(usage);
+        const candidates = new Map(summary.pages.flatMap(p => p.widgets.map(w => [`${p.record}:${w.id}`, { ...w, record: p.record, page: p.name }])));
+        for (const w of summary.containedWidgets) candidates.set(`${w.record}:${w.id}`, { ...candidates.get(`${w.record}:${w.id}`), ...w });
+        const page = options['--page'] === undefined ? null : summary.pages.filter(p => p.name === options['--page']);
+        if (page && page.length !== 1) throw new Error(`Page must be unique: ${options['--page']}`);
+        const pageKey = page ? summary.packages.find(p => p.record === page[0].record)?.key : null;
+        const matches = [...candidates.values()].filter(w => w.name === options['--name'] && (!page || w.record === page[0].record || summary.packages.find(p => p.record === w.record)?.path.startsWith(pageKey + '/')));
+        if (matches.length !== 1) throw new Error(`Name must be unique; found ${matches.length}: ${JSON.stringify(matches.map(({ record, id, name, container }) => ({ record, id, name, container })))}`);
+        edits = [{ record: matches[0].record, id: matches[0].id, name: options['--to'] }];
+      }
+    } else {
+      const [pageArg, ...pairs] = args;
+      if (pairs.length < 2 || pairs.length % 2) throw new Error(usage);
+      const pages = summary.pages.filter(p => p.name === pageArg);
+      const pageRecord = /^\d+$/.test(pageArg) ? readRecords(file).filter(r => r.className === 'Axure:Page')[Number(pageArg)] : null;
+      const page = pages.length === 1 ? pages[0] : !pages.length && pageRecord ? { record: pageRecord.index } : null;
+      if (!page) throw new Error(`Page not found or ambiguous: ${pageArg}`);
+      edits = [];
+      for (let i = 0; i < pairs.length; i += 2) edits.push({ record: page.record, id: Number(pairs[i]), name: pairs[i + 1] });
+    }
+    const result = setWidgetNames(file, edits);
+    writeFileSync(destination, result.file, { flag: 'wx' });
+    console.log(JSON.stringify({ destination, applied: result.applied, oldSize: file.length, newSize: result.file.length }, null, 2));
+  } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
-const payload = encodePayload(g.roots);
-const raw = encodeRecord(page, strings, payload);
-const output = replaceRecord(file, page, raw);
-writeFileSync(destination, output, { flag: 'wx' });
-console.log(JSON.stringify({ destination, pageRecord: page.index, applied, oldSize: file.length, newSize: output.length }, null, 2));

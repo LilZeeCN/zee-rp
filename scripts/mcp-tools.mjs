@@ -10,6 +10,7 @@ import { readRecords } from './rp-records.mjs';
 import { parsePayload, field, walkNodes } from './parse-payload.mjs';
 import { setRecordWidgetText } from './set-widget-text.mjs';
 import { setWidgetRichText } from './set-widget-richtext.mjs';
+import { setWidgetNames } from './name-widget.mjs';
 import { EVENTS } from './ix-actions.mjs';
 
 const dump = spawnSync(process.execPath, [fileURLToPath(new URL('./registry.mjs', import.meta.url)), 'dump'], { encoding: 'utf8' });
@@ -601,7 +602,31 @@ function editTexts(input) {
   return { status: 'completed', edits, previousTail, chainTail: state.chain.at(-1), before, after: countsOf(state.rp), structure: zerosOf(state.rp) };
 }
 
-// ---- 8 个意图级工具的实现 ----
+function renameWidgets(input) {
+  const state = refreshState(requireSession());
+  if (Object.values(zerosOf(state.rp)).some(Boolean)) throw new Error('链尾结构不健康，请先 verify。');
+  if (input.edits && (input.target !== undefined || input.name !== undefined)) throw new Error('edits 不能混用 target/name。');
+  const edits = input.edits ?? [input];
+  const resolved = edits.map(edit => {
+    if (edit.target === undefined || typeof edit.name !== 'string') throw new Error('改名需要 target 和 name。');
+    const cand = resolveTarget(state, edit.target);
+    return { record: cand.record, id: cand.id, name: edit.name };
+  });
+  const tail = state.chain.at(-1), node = nextWorkNode(state);
+  let created = false;
+  try {
+    assertNotProtected(tail); assertWritable(node);
+    const result = setWidgetNames(readFileSync(tail), resolved);
+    writeFileSync(node, result.file, { flag: 'wx' }); created = true;
+    commitChainNode(state, node, { op: 'rename_widget', at: now(), edits: result.applied, node });
+    return { edits: result.applied, chainTail: node, previousTail: tail, structure: zerosOf(state.rp) };
+  } catch (error) {
+    if (created && pathExists(node)) error.message += `；失败节点保留 ${rejectNode(node)}`;
+    throw error;
+  } finally { releaseWorkNode(node); }
+}
+
+// ---- 意图级工具的实现 ----
 const sessionHandlers = {
   axure_open({ path }) { return overviewOf(openSession(path)); },
   axure_state() {
@@ -667,6 +692,7 @@ const sessionHandlers = {
     };
   },
   edit_text: editTexts,
+  rename_widget: renameWidgets,
   verify({ deep } = {}) {
     const state = refreshState(requireSession());
     const base = { file: state.chain.at(-1), status: Object.values(zerosOf(state.rp)).some(Boolean) ? 'failed' : 'verified', structure: zerosOf(state.rp) };
@@ -763,6 +789,12 @@ export const sessionTools = [
     description: '改一个元件的文字：定位（唯一匹配或 locate 定位字段；多匹配报错列候选）→ 经 set-widget-text / set-widget-richtext 库导出写新链节点 → 新节点过 rp-read 三零（失败则坏节点保留 .rejected、链回退并报差异）。text=简单文本；richRuns=富文本段落/runs，可含段落行距、原生列表级别（list）、wrapping/trimming 及链接目标。edits 数组一次批量改多个元件，全部成功才提交，任一失败整批回退。返回逐条 before/after 与新链尾；GUI/预览需另验。',
     inputSchema: { type: 'object', properties: { target: targetSchema, text: { type: 'string' }, richRuns: richRunsSchema, edits: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object', properties: { target: targetSchema, text: { type: 'string' }, richRuns: richRunsSchema }, required: ['target'], additionalProperties: false } } }, additionalProperties: false },
     handler: sessionHandlers.edit_text,
+  },
+  {
+    name: 'rename_widget',
+    description: '快捷改名：target 为名称/文本或 locate 的 record+id，name 为新名称；edits 可批量修改。覆盖页面、面板状态、中继器模板和母版定义。只改元件名，保留文字、身份与交互；允许重名，目标歧义时返回候选。全部成功后提交一个新链节点。',
+    inputSchema: { type: 'object', properties: { target: targetSchema, name: { type: 'string' }, edits: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object', properties: { target: targetSchema, name: { type: 'string' } }, required: ['target', 'name'], additionalProperties: false } } }, additionalProperties: false },
+    handler: sessionHandlers.rename_widget,
   },
   {
     name: 'verify',

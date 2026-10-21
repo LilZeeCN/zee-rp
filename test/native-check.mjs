@@ -40,6 +40,22 @@ try {
     assert.deepEqual(healthy(bytes).pages[0].widgets.map(w => w.name), demo.widgets);
     assert.ok(healthy(readFileSync(join(demo.output, demo.table))).pages[0].widgets.some(w => w.type === 'Table'));
   });
+  check('quick rename CLI preserves GUIDs, text and event targets; legacy syntax remains usable', () => {
+    const output = join(work, 'renamed.rp');
+    cli(['name-widget', source, output, '--name', 'SubmitButton', '--to', '提交 按钮 ★', '--page', page]);
+    const result = healthy(readFileSync(output)), before = pageGraph(bytes), after = pageGraph(readFileSync(output));
+    assert.equal(result.pages[0].widgets.find(w => w.name === '提交 按钮 ★').text,
+      healthy(bytes).pages[0].widgets.find(w => w.name === 'SubmitButton').text);
+    assert.deepEqual(before.roots.find(n => n.tag === 30), after.roots.find(n => n.tag === 30));
+    for (const [id, obj] of before.objects) {
+      if (!obj.className.startsWith('Axure:DiagramObject:')) assert.deepEqual(after.objects.get(id), obj);
+      else assert.deepEqual(field(after.objects.get(id).body, 'InteractionMap'), field(obj.body, 'InteractionMap'));
+    }
+    const target = result.pages[0].widgets.find(w => w.name === '提交 按钮 ★');
+    const legacy = join(work, 'legacy-renamed.rp');
+    cli(['name-widget', output, legacy, page, String(target.id), '再次改名']);
+    assert(healthy(readFileSync(legacy)).pages[0].widgets.some(w => w.name === '再次改名'));
+  });
   check('nested BinaryExpr and multi-argument FCall preserve semantic structure', () => {
     const result = addInteractions(bytes, 'SubmitButton', [{ event: 'OnClick', cases: [{
       when: { op: '&&', left: {fn:'ValueContains',args:[{value:'alphabet'},{value:'pha'}]},

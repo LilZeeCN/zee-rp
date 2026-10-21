@@ -44,6 +44,8 @@ export async function runNativeAcceptance(page, oraclePath, outputDir, previewUr
   await save('oracle.json', oracle);
   await writeFile(join(outputDir, 'source' + extname(oracle.source)), oracle.sourceText ?? await readFile(oracle.source), { flag: 'wx' });
   const symbols = Object.fromEntries(oracle.symbols.map(s => [s.id, s]));
+  for (const symbol of Object.values(symbols))
+    if (symbol.display && symbol.display !== symbol.name) symbol.nativeName = symbol.display;
   const hook = await page.cdp('Page.addScriptToEvaluateOnNewDocument', { source: `
     window.__rpAcceptanceErrors=[];
     addEventListener('error',e=>window.__rpAcceptanceErrors.push(e.message));

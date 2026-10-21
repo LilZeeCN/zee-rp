@@ -73,6 +73,24 @@ class LanguageContract(unittest.TestCase):
         after = {s["id"]: s["name"] for s in compile_language(spec)[1]["symbols"]}
         self.assertEqual(before, after)
 
+    def test_display_names_do_not_change_identity_hash_or_interactions(self):
+        spec = sugar_fixture()
+        spec['pages'][0]['root']['children'][2]['onClick'] = {'type': 'set-variable', 'variable': 'answer', 'value': 'ok'}
+        before, before_ir = compile_language(spec)
+        for i, name in enumerate((' 搜索\r\n输入框 ', '重复名', '重复名', '★ !')):
+            spec['pages'][0]['root']['children'][i]['name'] = name
+        after, after_ir = compile_language(spec)
+        self.assertEqual(before, after)
+        self.assertEqual(before_ir['semanticHash'], after_ir['semanticHash'])
+        self.assertEqual([s['name'] for s in before_ir['symbols']], [s['name'] for s in after_ir['symbols']])
+        displays = {s['id']: s['display'] for s in after_ir['symbols']}
+        self.assertEqual(displays['main/title'], '搜索 输入框')
+        self.assertEqual(displays['main/receipt'], '★ !')
+        spec['pages'][0]['root']['name'] = ' \r\n '
+        _, blank_ir = compile_language(spec)
+        root = next(s for s in blank_ir['symbols'] if s['id'] == 'main/root')
+        self.assertEqual(root['display'], root['name'])
+
     def test_component_instances_do_not_share_targets(self):
         spec = fixture("course")
         component = spec["components"]["Course"]["root"]

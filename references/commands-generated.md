@@ -28,7 +28,7 @@ Generated from the shipped registry. Evidence tags refer to bounded samples, not
 | set-widget-text | set-widget-text.mjs | 按页内名称、记录索引+对象 ID 或容器路径精确定位改写一个既有文本片段 | gui-roundtrip |
 | set-widget-richtext | set-widget-richtext.mjs | 整段重写原生 RichTextBlock 的段落与 runs（字体/字号/行距/对齐/原生列表级别/wrapping/trimming 及 run 全量键） | gui-roundtrip |
 | set-master-overrides | set-master-overrides.mjs | 按实例 ID 创建/更新/清除母版实例的文字覆盖或写入内嵌 PNG，不改共享定义 | gui-roundtrip |
-| name-widget | name-widget.mjs | 按 Page 记录序号/页名与对象 ID 设置元件名称（name-block） | preview |
+| name-widget | name-widget.mjs | 按旧名称快捷改名（可加页名），或按记录/对象 ID 精确改名；保留身份与交互 | preview |
 | patch-link-window | patch-link-window.mjs | 字节级改写唯一 Page 记录里链接打开方式 current/new（capabilities.md 未列，仅结构级研究工具） | structure |
 | patch-string | patch-string.mjs | 替换唯一 Page 记录中的一个已有字符串（研究用，capabilities.md 未列） | structure |
 | rp-read | rp-read.mjs | 只读解析 .rp 输出页面/元件/交互摘要或 JSON（含 dangling refs 检查） | structure |

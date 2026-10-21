@@ -620,7 +620,7 @@ export function readRp(file, { full = false, path = null, includeMasterWidgets =
     });
   }
 
-  // 重名检测：顶层页面间重名 + 容器内重名（阶段1：无法消除歧义时必须让调用者看见）
+  // Page-name collisions are errors; widget-label collisions are lookup hints.
   const duplicates = [];
   {
     const byName = new Map();
@@ -629,12 +629,20 @@ export function readRp(file, { full = false, path = null, includeMasterWidgets =
       if (!byName.has(name)) byName.set(name, []);
       byName.get(name).push(where);
     };
-    for (const p of pages) note(p.name, `页面(${p.name})`);
-    for (const w of containedWidgets) if (!w.container[0]?.startsWith('母版:')) note(w.name, `${w.container.join('/')}#${w.id}(记录${w.record})`);
+    const pageNames = new Map();
+    for (const p of pages) pageNames.set(p.name, (pageNames.get(p.name) ?? 0) + 1);
+    for (const [name, count] of pageNames) if (count > 1)
+      problem('duplicate-name', `页面名字「${name}」有 ${count} 处（修改前必须消歧）`, { name });
+    const widgets = new Map([
+      ...pageSummaries.flatMap(p => p.widgets.map(w => [`${p.record}:${w.id}`, { ...w, record: p.record, container: [p.name] }])),
+      ...containedWidgets.map(w => [`${w.record}:${w.id}`, w]),
+    ]);
+    for (const w of widgets.values()) if (!w.container[0]?.startsWith('母版:')) note(w.name, `${w.container.join('/')}#${w.id}(记录${w.record})`);
     for (const [name, wheres] of byName) {
       if (wheres.length > 1) duplicates.push({ name, locations: wheres });
     }
-    for (const d of duplicates) problem('duplicate-name', `名字「${d.name}」有 ${d.locations.length} 处：${d.locations.join(' | ')}（修改前必须消歧）`, { name: d.name, locations: d.locations });
+    // Repeated widget labels are legal; name-based writers still require a
+    // unique target. Keep candidates visible without marking the file corrupt.
   }
 
   return {

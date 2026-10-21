@@ -86,6 +86,39 @@ try {
     assert.deepEqual(report.threeZeros, { danglingRefs: 0, sentinelSlotsNonZero: 0, problems: 0 });
     assert.equal(report.eventCoverage.declared, report.eventCoverage.materialized);
   });
+  for (const fixture of ['nested-panels', 'runtime-inventory']) {
+    check(`${fixture}: display names cover containers, inputs and row templates without losing events`, () => {
+      const spec = JSON.parse(readFileSync(join(root, 'examples/rp-language', `${fixture}.json`)));
+      const label = node => {
+        if (!node || typeof node !== 'object') return;
+        if (node.type && node.id && !['use', 'repeat'].includes(node.type)) node.name = node.type === 'label' ? '重复 名 ★' : `中文 ${node.id}`;
+        for (const value of Object.values(node)) if (value && typeof value === 'object') {
+          if (Array.isArray(value)) value.forEach(label); else label(value);
+        }
+      };
+      spec.pages.forEach(p => label(p.root));
+      Object.values(spec.components ?? {}).forEach(c => label(c.root));
+      const source = join(work, `${fixture}-named.json`), bundle = join(work, `${fixture}-named`);
+      writeFileSync(source, JSON.stringify(spec));
+      const compiled = spawn('python3', [join(root, 'scripts/proto.py'), 'compile', '--spec', source, '--out-dir', bundle], { encoding: 'utf8' });
+      assert.equal(compiled.status, 0, compiled.stderr);
+      const report = buildInteractiveRp(join(bundle, 'compile-plan.json'), join(work, `${fixture}-named.rp`));
+      const bytes = readFileSync(report.outputRp), records = readRecords(bytes);
+      assert.equal(report.eventCoverage.declared, report.eventCoverage.materialized);
+      assert(report.eventCoverage.declared > 0);
+      for (const symbol of report.sourceMap) {
+        assert.equal(symbol.native.length, 1, symbol.id);
+        const loc = symbol.native[0], graph = parsePayload(records.find(r => r.index === loc.record));
+        assert.equal(field(field(graph.objects.get(loc.id).body, 'name-block'), 'text').text,
+          symbol.display !== symbol.name ? symbol.display : symbol.nativeName ?? symbol.name);
+      }
+      const readback = readRp(bytes);
+      assert.equal(readback.records.unparseable, 0);
+      assert.equal(readback.counts.danglingRefs, 0);
+      assert.deepEqual(readback.problems, []);
+      assert(readback.duplicates.length > 0);
+    });
+  }
   check('startup aggregate fixture materializes all events with valid scopes', () => {
     const bundle = join(work, 'startup-aggregates');
     const result = spawn('python3', [join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'test/fixtures/rp-aggregate-startup.json'), '--out-dir', bundle], { encoding: 'utf8' });

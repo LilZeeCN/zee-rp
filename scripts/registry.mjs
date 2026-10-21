@@ -223,8 +223,8 @@ const COMMANDS = [
   {
     "command": "name-widget",
     "script": "name-widget.mjs",
-    "summary": "按 Page 记录序号/页名与对象 ID 设置元件名称（name-block）",
-    "usage": "node name-widget.mjs <source.rp> <new.rp> <pageRecordsIndex|页名> <widgetId> <newName> [...]",
+    "summary": "按旧名称快捷改名（可加页名），或按记录/对象 ID 精确改名；保留身份与交互",
+    "usage": "node name-widget.mjs <source.rp> <new.rp> --name <oldName> --to <newName> [--page <pageName>]；或 --record <record> --widget <id> --to <newName>；兼容 <pageRecordsIndex|页名> <widgetId> <newName> [...]",
     "output": "index:3",
     "evidence": "preview"
   },

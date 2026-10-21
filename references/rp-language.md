@@ -71,7 +71,7 @@ node scripts/proto.mjs build-rp --plan ./bundle/compile-plan.json --out ./anothe
 
 运行期行模板路径为 `页面/中继器/item/元件`。行元件只能从自己的模板内引用；页面外部操作 Repeater 或用变量表示选择项，不能把动态行当作一个全局控件。
 
-显式 ID、组件实例 ID 和重复键不变时，改显示 `name`、插入无关兄弟或重排初始数据不改变逻辑身份与后端名称。`name` 是显示标签，引用始终用 ID。原生 GUID 每次分配，不保证 `.rp` 字节相同。
+显式 ID、组件实例 ID 和重复键不变时，改显示 `name`、插入无关兄弟或重排初始数据不改变逻辑身份与内部后端名称。`name` 写入原生 `.rp` 的 OUTLINE 元件名；交互先按稳定身份装配，再写入显示名，引用始终用 ID。显示名允许中文、空格、符号和重名；换行转空格并去除首尾空白，空名称回退内部名称。`symbols[].display` 保存显示名，`symbols[].name` 及 compile-plan 内部 trigger 保持稳定，单独改元件显示名不改变 `semanticHash`。内部 scene JSON 继续使用稳定名，build 结果的 `sourceMap[].native` 给出实际记录与对象 ID。原生 GUID 每次分配，不保证 `.rp` 字节相同。
 
 ## 编译期表达式与组件
 

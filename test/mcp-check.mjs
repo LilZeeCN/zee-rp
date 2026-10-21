@@ -26,9 +26,9 @@ async function call(name, args) {
 try {
   const demo = buildNativeDemo(join(work,'demo')), source = join(demo.output,demo.source);
   await client.connect(transport);
-  await check('real stdio initializes and discovers all 43 unique tools', async () => {
+  await check('real stdio initializes and discovers all 44 unique tools', async () => {
     const result = await client.listTools();
-    assert.equal(result.tools.length,43); assert.equal(new Set(result.tools.map(t=>t.name)).size,43);
+    assert.equal(result.tools.length,44); assert.equal(new Set(result.tools.map(t=>t.name)).size,44);
   });
   await check('real transport reads generated native widgets', async () => {
     const result = await call('rp_read',{args:[source,'--json']});
@@ -54,6 +54,34 @@ try {
     const result=await call('create_global_variable',{session:true,args:['SessionCounter','--default-value','17']});
     assert.equal(result.exitCode,0);
     assert.ok(readRp(readFileSync(result.chainTail)).globalVariables.some(v=>v.name==='SessionCounter'&&v.value==='17'));
+  });
+  await check('quick rename preserves content/events and rejects ambiguous batches atomically', async () => {
+    const beforeState = await call('axure_state', {});
+    const before = readRp(readFileSync(beforeState.chain.at(-1)));
+    const result = await call('rename_widget', { target: { name: 'StatusBanner' }, name: '中文 状态 ★' });
+    const after = readRp(readFileSync(result.chainTail));
+    assert.equal(after.pages[0].widgets.find(w => w.name === '中文 状态 ★').text, 'Notice: Documentation');
+    assert.deepEqual(after.counts, before.counts);
+    const other = after.pages[0].widgets.find(w => w.name && w.name !== '中文 状态 ★');
+    await call('rename_widget', { target: { name: other.name }, name: '中文 状态 ★' });
+    const stable = await call('axure_state', {});
+    const failed = await client.callTool({ name: 'rename_widget', arguments: { edits: [
+      { target: { name: '中文 状态 ★' }, name: 'must not commit' },
+      { target: { name: 'missing' }, name: 'missing' },
+    ] } });
+    assert(failed.isError);
+    assert.deepEqual((await call('axure_state', {})).chain, stable.chain);
+    const target = (await call('locate', { query: '中文 状态 ★' })).candidates[0];
+    const exact = await call('rename_widget', { target: { record: target.record, id: target.id }, name: '精确改名' });
+    assert.equal(readRp(readFileSync(exact.chainTail)).counts.problems, 0);
+    const both = (await call('locate', { query: '中文 状态 ★' })).candidates[0];
+    const start = (await call('axure_state', {})).chain.length;
+    const bulk = await call('rename_widget', { edits: [
+      { target: { name: '精确改名' }, name: '批量一' },
+      { target: { record: both.record, id: both.id }, name: '批量二' },
+    ] });
+    assert.equal(bulk.edits.length, 2);
+    assert.equal((await call('axure_state', {})).chain.length, start + 1);
   });
   await check('stdio rejects unknown rich-text fields and protected paths', async () => {
     const invalid=await client.callTool({name:'edit_text',arguments:{target:{name:'StatusBanner'},richRuns:[{runs:[{text:'x'}],unknown:true}]}});
