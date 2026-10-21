@@ -1,4 +1,3 @@
-import { fixturePath, resolveLibrary } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, existsSync, rmSync } from 'node:fs';
@@ -16,7 +15,6 @@ import { validateSemantics } from './check-semantics.mjs';
 const skill = dirname(dirname(fileURLToPath(import.meta.url)));
 const work = mkdtempSync(join(tmpdir(), 'axure-template-check-'));
 const template = resolveBlankTemplate();
-process.env.AXURE_PROTECTED_PATHS = '/zee-rp-test-protected/final.rp';
 const results = [];
 const check = (name, action) => {
   try { action(); results.push({ name, passed: true }); console.log(`PASS  ${name}`); }
@@ -39,7 +37,7 @@ try {
     const out = join(work, 'missing.rp'); assert.notEqual(run('create-blank-project', [out], join(work, 'no-template.rp')).status, 0); assert.ok(!existsSync(out));
   });
   check('非空模板拒绝且没有输出', () => {
-    const out = join(work, 'nonblank.rp'); assert.notEqual(run('create-blank-project', [out], fixturePath('var-set-counter-roundtrip.rp')).status, 0); assert.ok(!existsSync(out));
+    const out = join(work, 'nonblank.rp'); assert.notEqual(run('create-blank-project', [out], join(skill, 'test/fixtures/var-set-counter-roundtrip.rp')).status, 0); assert.ok(!existsSync(out));
   });
   check('模板变量不能指向受保护成品', () => {
     const out = join(work, 'protected.rp');
@@ -57,7 +55,7 @@ try {
 
     // 3. 克隆组件 Box 1 到 Page 2，命名为 WIDGET_BOX
     const p3 = join(work, 'step3-cloned.rp');
-    const libPath = resolveLibrary('Default.rplib');
+    const libPath = '/Applications/Axure RP 11.app/Contents/Resources/DefaultSettings/Libraries/Default.rplib';
     const cloned = cloneLibraryWidget(libPath, p2, p3, {
       sourcePageName: 'Box 1',
       targetPageName: 'Page 2',

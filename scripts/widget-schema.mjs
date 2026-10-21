@@ -4,7 +4,9 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { readRecords } from './rp-records.mjs';
 import { parsePayload } from './parse-payload.mjs';
 
-const DIR = process.argv[2] ?? '/Applications/Axure RP 11.app/Contents/Resources/DefaultSettings/Libraries';
+import { installRoot, resolveTargetVersion } from './version.mjs';
+import { join } from 'node:path';
+const DIR = process.argv[2] ?? join(installRoot(resolveTargetVersion()), 'Libraries');
 const byType = new Map();   // className -> { count, fieldSets: Map<signature, count>, fields: Map<name, Set<tag>> }
 
 const tagName = t => ({ 1: 'dict', 2: 'list', 3: 'ref', 4: 'blob', 5: 'int', 6: 'f64', 8: 'str',

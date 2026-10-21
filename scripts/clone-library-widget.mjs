@@ -4,6 +4,7 @@ import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
 import { readRp } from './rp-read.mjs';
 import { parsePayload, encodePayload, field } from './parse-payload.mjs';
 import { closureOf, cloneInto } from './clone-closure.mjs';
+import { detectFileVersion } from './version.mjs';
 
 const uniquePage = (summary, name, role) => {
   const pages = summary.pages.filter(page => page.name === name);
@@ -12,7 +13,7 @@ const uniquePage = (summary, name, role) => {
 };
 
 export function cloneLibraryWidget(sourceFile, targetFile, outputFile, {
-  sourcePageName, targetPageName, name, x, y, width, height
+  sourcePageName, targetPageName, name, x, y, width, height, inputStyle, placeholder
 }) {
   if (!sourcePageName || !targetPageName || !name) throw new Error('sourcePageName, targetPageName, and name are required');
   let output = readFileSync(targetFile);
@@ -40,6 +41,7 @@ export function cloneLibraryWidget(sourceFile, targetFile, outputFile, {
   const targetPageObject = [...targetGraph.objects.values()].find(object => object.className === 'Axure:Page');
   const diagram = targetGraph.objects.get(field(targetPageObject.body, 'diagram').value);
   const clone = cloneInto({
+    version: detectFileVersion(output),
     srcGraph: sourceGraph,
     srcStrings: sourcePage.strings,
     dstGraph: targetGraph,
@@ -74,6 +76,35 @@ export function cloneLibraryWidget(sourceFile, targetFile, outputFile, {
     }
   }
   if (!positioned || !sized) throw new Error(`${widget.className} has no editable position/size properties`);
+
+  if (inputStyle) {
+    if (widget.className !== 'Axure:DiagramObject:TextBox') throw new Error('inputStyle requires a TextBox');
+    const str = text => {
+      let index = targetStrings.indexOf(text);
+      if (index < 0) { index = targetStrings.length; targetStrings.push(text); }
+      return { tag: 8, value: index + 1, text };
+    };
+    const map = obj => ({ tag: 1, entries: Object.entries(obj).map(([k, v]) => [str(k), v]) });
+    const num = value => ({ tag: 6, value });
+    const int = value => ({ tag: 5, value });
+    const props = field(style.body, 'PropList').items;
+    const put = (key, value) => {
+      const item = map({ DOAName: int(0xc0000000 + key), Value: value });
+      const index = props.findIndex(p => (field(p, 'DOAName').value & 0x3fffffff) === key);
+      if (index < 0) props.push(item); else props[index] = item;
+    };
+    const paint = argb => map({ 'fill-type': str('solid'), 'fill-color': int(argb) });
+    // The editable vector behind the TextBox owns fill, stroke and radius.
+    put(7, paint(0)); put(8, paint(0)); put(15, num(0)); put(80, int(0));
+    put(1, str('Inter')); put(2, num(inputStyle.fontSize * .75));
+    put(1001, int(inputStyle.fontWeight));
+    const hex = inputStyle.color === 'transparent' ? '00000000' : inputStyle.color.replace('#', '');
+    put(6, paint(parseInt((hex.length === 8 ? hex.slice(6) : 'ff') + hex.slice(0, 6), 16)));
+    put(9, int({ left: 0, center: 1, right: 2 }[inputStyle.align]));
+    put(11, num(inputStyle.textPaddingX)); put(13, num(inputStyle.textPaddingX));
+    put(12, num(0)); put(14, num(0));
+    Object.assign(field(widget.body, 'PlaceholderText'), str(placeholder ?? ''));
+  }
 
   field(diagram.body, 'diagram-objects').items.push({ tag: 3, value: widget.id });
   targetGraph.roots.splice(targetGraph.roots.length - 1, 0, ...clone.created);

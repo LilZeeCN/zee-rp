@@ -7,6 +7,7 @@ import { parsePayload, encodePayload, field, walkNodes } from './parse-payload.m
 import { guidKey } from './duplicate-page.mjs';
 
 import { resolveBlankTemplate } from './blank-template.mjs';
+import { detectFileVersion } from './version.mjs';
 
 function stringNode(strings, text) {
   let index = strings.indexOf(text);
@@ -43,7 +44,8 @@ export function createBlankPage(file, newName) {
     throw new Error(`Page already exists: ${newName}`);
   }
 
-  const template = readFileSync(resolveBlankTemplate());
+  // 模板必须和输入文件同版本：把 RP 11 的空白 Page 加进 RP 9 工程会是跨版本混装。
+  const template = readFileSync(resolveBlankTemplate(detectFileVersion(file)));
   const blankPage = readRecords(template).find(record => record.className === 'Axure:Page');
   if (!blankPage) throw new Error('Native blank Page record not found in template');
   const page = parsePayload(blankPage);

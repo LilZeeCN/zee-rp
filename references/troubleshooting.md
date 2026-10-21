@@ -71,7 +71,7 @@
 
 ## 自适应后添加交互报 Missing null GUID
 
-旧自适应工具把 Page 的公共空 GUID 槽改成了视图集身份。当前工具改为追加集合身份槽并保留旧 GUID 表；本轮当前实现生成件已在 Axure 保存关闭重开，并在生成视图后追加和运行交互。对于旧工具生成、已出现 `Missing null GUID` 的文件，不要随意补一个空 GUID 就认为所有引用都已修复；从未损坏的原始基座重建，并按 复验结果（历史研究资料未随仓库分发） 检查。
+旧自适应工具把 Page 的公共空 GUID 槽改成了视图集身份。当前工具改为追加集合身份槽并保留旧 GUID 表；本轮当前实现生成件已在 Axure 保存关闭重开，并在生成视图后追加和运行交互。对于旧工具生成、已出现 `Missing null GUID` 的文件，不要随意补一个空 GUID 就认为所有引用都已修复；从未损坏的原始基座重建，并按 复验结果 (internal research reference) 检查。
 
 ## 中继器预览整页白屏
 
@@ -86,6 +86,25 @@
 - 剪贴板写入报错：`xcode-select --install`（Swift 解释器）。
 - 自动粘贴/菜单操作无效：宿主进程（Terminal/iTerm/宿主 App）加入「辅助功能」权限。
 - 剪贴板写入成功但 Axure 不识别：确认粘贴的是纯文本且以 `// axvg` 开头（脚本自动加）。自定义类型 "Axvg"/com.axure.axvg 在 mac 上粘贴均无效——这是与 Windows 的关键差异。
+- `osascript` 报 `-10004 权限违例`（连 `tell application "System Events" to get name of first process` 都失败）时，
+  脚本里的菜单/窗口自动化分支全部不可用，但 **Swift 的 AX API 仍可用**（`AXIsProcessTrusted()` 为 true、
+  `AXUIElementCopyAttributeValue` 正常）。此时用 `AXUIElement` 按名点击菜单项、按 `AXWindowNumber` 提窗，
+  并用 `CGEvent` 发鼠标/键盘事件替代 `System Events`。2026-10-16 在 RP 9 上按此路线跑通完整粘贴+保存。
+  注意 RP 9 文档窗口的 AX 树几乎是空的（只暴露窗口与标题），面板输入框读写不可行。
+
+## 线段（零高 + rotation 矩形）在宿主预览里渲染错误（2026-10-16，RP 9 实测）
+
+**症状**：`kind:"line"` 生成的线段在本地薄页校验里完全正常（薄页是按 `x1,y1→x2,y2` 直接画的，
+看不出编码问题），但在 Axure **原生 Preview** 里全部渲染成同方向的过长斜线，折线图整体毁坏。
+
+**范围**：本机 Axure RP 9.0.0.3754 / macOS 的 HTML 预览。未分解到角度符号、长度或 stroke 哪一项，
+未在其他 build/平台复现。
+
+**规避**：折线等线段改用 `kind:"shape"`（闭合细四边形，`type:2` 原生矢量路径）。
+饼图楔形本来就走 `type:2` 路径，一直是正常的，说明问题出在「零高 + rotation」这一编码本身。
+
+**纪律**：`trace.mjs verify` / 本地薄页是**布局收敛工具，不是宿主验收**。任何依赖 rotation、渐变、
+阴影、嵌套或字体回退的元素，都必须以宿主原生 Preview 或 GUI 打开后的观察为准。
 
 ## Windows 分支（未实测）
 

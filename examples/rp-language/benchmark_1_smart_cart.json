@@ -1,0 +1,201 @@
+{
+  "language": "rp/1",
+  "name": "智能购物车与满减算价台",
+  "domain": "web",
+  "theme": "enterprise-light",
+  "models": {
+    "CartItem": {
+      "id": "id",
+      "title": "text",
+      "category": "enum(硬件,软件,配件)",
+      "price": "money",
+      "qty": "number"
+    }
+  },
+  "datasets": {
+    "cart": {
+      "model": "CartItem",
+      "rows": [
+        {"id": "SKU-01", "title": "人体工学机械键盘", "category": "硬件", "price": 120, "qty": 1},
+        {"id": "SKU-02", "title": "桌面Type-C扩展坞", "category": "配件", "price": 90, "qty": 1},
+        {"id": "SKU-03", "title": "专业版原型授权包", "category": "软件", "price": 60, "qty": 1}
+      ]
+    }
+  },
+  "variables": {
+    "discount": {"type": "number", "value": 0},
+    "coupon_applied": {"type": "text", "value": "未用券"}
+  },
+  "computed": {
+    "item_count": {"type": "number", "compute": {"op": "sum", "dataset": "cart", "field": "qty"}},
+    "subtotal": {"type": "number", "compute": {"op": "sum", "dataset": "cart", "field": "=item.price * item.qty"}},
+    "payable": {"type": "number", "compute": "=var.subtotal - var.discount"}
+  },
+  "invariants": [
+    {"id": "non_negative_payable", "expr": "=var.payable >= 0", "message": "实付金额不可为负数"},
+    {"id": "consistent_payable_formula", "expr": "=var.payable == var.subtotal - var.discount", "message": "实付金额必须等于商品小计减优惠"}
+  ],
+  "pages": [
+    {
+      "id": "cart_console",
+      "name": "智能购物车与满减算价台",
+      "canvas": [960, 560],
+      "root": {
+        "column": "root_col",
+        "w": 960,
+        "h": 560,
+        "padding": 24,
+        "gap": 16,
+        "fill": "$bg",
+        "children": [
+          {
+            "row": "header_bar",
+            "w": 912,
+            "h": 44,
+            "gap": 12,
+            "align": "center",
+            "children": [
+              {"label": "page_title", "w": 360, "h": 28, "fontSize": 18, "fontWeight": 700, "text": "智能购物车与满减算价台"},
+              {"badge": "cnt_badge", "w": 160, "h": 28, "text": "='总件数：' + text(var.item_count)"},
+              {"badge": "coupon_badge", "w": 180, "h": 28, "text": "='优惠状态：' + var.coupon_applied"}
+            ]
+          },
+          {
+            "row": "main_split",
+            "w": 912,
+            "h": 420,
+            "gap": 20,
+            "children": [
+              {
+                "card": "cart_list_card",
+                "layout": "column",
+                "w": 560,
+                "h": 420,
+                "padding": 16,
+                "gap": 12,
+                "children": [
+                  {"label": "list_heading", "w": 300, "h": 24, "fontSize": 15, "fontWeight": 600, "text": "购物清单明细"},
+                  {
+                    "repeater": "cart_rep",
+                    "dataset": "cart",
+                    "w": 528,
+                    "h": 220,
+                    "rowHeight": 56,
+                    "rowGap": 8,
+                    "template": {
+                      "row": "cart_row",
+                      "w": 528,
+                      "h": 56,
+                      "padding": [8, 12],
+                      "gap": 8,
+                      "align": "center",
+                      "fill": "$surface",
+                      "stroke": "$line",
+                      "radius": 8,
+                      "children": [
+                        {"label": "r_title", "w": 164, "h": 24, "fontSize": 13, "fontWeight": 600, "text": "=item.title"},
+                        {"badge": "r_cat", "w": 64, "h": 24, "fontSize": 12, "text": "=item.category"},
+                        {"label": "r_line_total", "w": 124, "h": 24, "fontSize": 12, "text": "='¥' + text(item.price * item.qty) + ' (' + text(item.qty) + '件)'"},
+                        {
+                          "button": "r_plus_btn",
+                          "w": 64,
+                          "h": 28,
+                          "fontSize": 12,
+                          "variant": "secondary",
+                          "text": "+1件",
+                          "onClick": [
+                            {"type": "data-update", "target": "cart_rep", "where": "=item.id == caller.id", "set": {"qty": "=item.qty + 1"}}
+                          ]
+                        },
+                        {
+                          "button": "r_minus_btn",
+                          "w": 64,
+                          "h": 28,
+                          "fontSize": 12,
+                          "variant": "outline",
+                          "text": "-1件",
+                          "onClick": {
+                            "cases": [
+                              {
+                                "when": "=item.qty > 1",
+                                "do": [
+                                  {"type": "data-update", "target": "cart_rep", "where": "=item.id == caller.id", "set": {"qty": "=item.qty - 1"}}
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "card": "summary_card",
+                "layout": "column",
+                "w": 332,
+                "h": 420,
+                "padding": 16,
+                "gap": 12,
+                "children": [
+                  {"label": "sum_heading", "w": 240, "h": 24, "fontSize": 15, "fontWeight": 600, "text": "实时算价与优惠核销"},
+                  {
+                    "detail-card": "bill_detail",
+                    "w": 300,
+                    "items": [
+                      {"id": "d_sub", "label": "商品总额", "value": "='¥' + text(var.subtotal)"},
+                      {"id": "d_disc", "label": "满减立减", "value": "='-¥' + text(var.discount)"},
+                      {"id": "d_pay", "label": "应付总额", "value": "='¥' + text(var.payable)"}
+                    ]
+                  },
+                  {"label": "coupon_msg", "w": 300, "h": 24, "fontSize": 12, "color": "$ink-2", "text": "满 200 元可享立减 30 元"},
+                  {
+                    "row": "coupon_btn_row",
+                    "w": 300,
+                    "h": 38,
+                    "gap": 10,
+                    "children": [
+                      {
+                        "button": "apply_coupon_btn",
+                        "w": 140,
+                        "h": 36,
+                        "variant": "primary",
+                        "text": "用满200减30券",
+                        "onClick": {
+                          "cases": [
+                            {
+                              "when": "=var.subtotal >= 200",
+                              "do": [
+                                {"set": {"$discount": 30, "$coupon_applied": "满200减30", "@coupon_msg": "已成功核销满200减30优惠券"}}
+                              ]
+                            },
+                            {
+                              "else": true,
+                              "do": [
+                                {"set": {"@coupon_msg": "未达 200 元门槛，无法使用该券"}}
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      {
+                        "button": "clear_coupon_btn",
+                        "w": 140,
+                        "h": 36,
+                        "variant": "secondary",
+                        "text": "取消优惠券",
+                        "onClick": [
+                          {"set": {"$discount": 0, "$coupon_applied": "未用券", "@coupon_msg": "已取消优惠券"}}
+                        ]
+                      }
+                    ]
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

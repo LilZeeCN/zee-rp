@@ -1,11 +1,10 @@
-import { fixturePath } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { readRecords } from '../scripts/rp-records.mjs';
-import { parsePayload, field } from '../scripts/parse-payload.mjs';
-import { readRp } from '../scripts/rp-read.mjs';
-import { fillPanelState } from '../scripts/fill-panel-state.mjs';
-import { removePanelStateContent, resolvePanelState } from '../scripts/remove-panel-state-content.mjs';
+import {readFileSync} from 'node:fs';
+import {readRecords} from '../scripts/rp-records.mjs';
+import {parsePayload,field} from '../scripts/parse-payload.mjs';
+import {readRp} from '../scripts/rp-read.mjs';
+import {fillPanelState} from '../scripts/fill-panel-state.mjs';
+import {removePanelStateContent,resolvePanelState} from '../scripts/remove-panel-state-content.mjs';
 
 const owner={master:'NESTED_MASTER',panel:'CONTENT_PANEL',state:'Form'};
 const table=g=>g.roots.find(n=>n.tag===30).values;
@@ -26,8 +25,8 @@ function othersUnchanged(before,after,removed=[]){
  assert.equal(guid(state(before).graph),guid(state(after).graph));
 }
 export function runMasterRepeaterChecks(){
- const direct=readFileSync(fixturePath('master-repeater-import.rp')),nested=readFileSync(fixturePath('master-repeater-nested-import.rp'));
- const form=readFileSync(fixturePath('master-state-form-source.rp')),results=[];
+ const direct=readFileSync(new URL('./fixtures/master-repeater-import.rp',import.meta.url)),nested=readFileSync(new URL('./fixtures/master-repeater-nested-import.rp',import.meta.url));
+ const form=readFileSync(new URL('./fixtures/master-state-form-source.rp',import.meta.url)),results=[];
  const check=(name,fn)=>{try{fn();results.push({name,passed:true});}catch(error){results.push({name,passed:false,detail:error.message});}};
  check('Master 直接/嵌套中继器往返 fixture 含三列七行数据',()=>{for(const b of[direct,nested]){healthy(b);assert.equal(repeaterData(b).length,1);assert.equal(field(repeaterData(b)[0].body,'columns').items.length,3);assert.equal(field(repeaterData(b)[0].body,'rows').items.length,7);}assert.equal(readRp(direct).counts.panelStates,4);assert.equal(readRp(nested).counts.panelStates,6);});
  check('仅删除 Master R7 时剩余增删改按钮引用使操作拒绝',()=>assert.throws(()=>removePanelStateContent(direct,{...owner,widgets:['R7']}),/Remaining state content references|Remaining content references/));

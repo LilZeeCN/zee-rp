@@ -1,16 +1,16 @@
 import { fixturePath } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-
-import { pathToFileURL } from 'node:url';
-import { readRecords, readManifest, replaceRecord, encodeRecord } from '../scripts/rp-records.mjs';
-import { parsePayload, field, encodePayload } from '../scripts/parse-payload.mjs';
-import { readRp } from '../scripts/rp-read.mjs';
-import { removePanelStateContent, resolvePanelState } from '../scripts/remove-panel-state-content.mjs';
-import { fillPanelState } from '../scripts/fill-panel-state.mjs';
-import { addInteractions } from '../scripts/ix-actions.mjs';
-import { guidKey } from '../scripts/duplicate-page.mjs';
-const read=n=>readFileSync(fixturePath(n));
+import {readFileSync} from 'node:fs';
+import {dirname,join} from 'node:path';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+import {readRecords,readManifest,replaceRecord,encodeRecord} from '../scripts/rp-records.mjs';
+import {parsePayload,field,encodePayload} from '../scripts/parse-payload.mjs';
+import {readRp} from '../scripts/rp-read.mjs';
+import {removePanelStateContent,resolvePanelState} from '../scripts/remove-panel-state-content.mjs';
+import {fillPanelState} from '../scripts/fill-panel-state.mjs';
+import {addInteractions} from '../scripts/ix-actions.mjs';
+import {guidKey} from '../scripts/duplicate-page.mjs';
+const root=dirname(fileURLToPath(import.meta.url)),read=n=>readFileSync(join(root,'fixtures',n));
 const guid=g=>g.roots.find(n=>n.tag===30).values[g.roots.find(n=>n.tag===18).value-1];
 const name=o=>field(field(o.body,'name-block')??{},'text')?.text;
 export function runPanelMasterChecks({log=()=>{}}={}){
@@ -37,7 +37,7 @@ export function runPanelMasterChecks({log=()=>{}}={}){
  });
  check('清掉 Master 状态中的母版实例仍保留共享定义和依赖',()=>{const result=removePanelStateContent(withMaster.file,{...owner,all:true});healthy(result.file);for(const r of readRecords(withMaster.file).filter(r=>r.className==='Axure:Master')){const after=readRecords(result.file).find(a=>a.className==='Axure:Master'&&guid(parsePayload(a))===guid(parsePayload(r)));assert.ok(r.raw.equals(after.raw));}const beforeDoc=readRecords(withMaster.file).find(r=>r.className==='Axure:DesignDocument'),afterDoc=readRecords(result.file).find(r=>r.className==='Axure:DesignDocument');assert.ok(beforeDoc.raw.equals(afterDoc.raw));});
  check('Page 导入带自定义锚点连接线至面板状态并保留点与三零',()=>{
-  const connSrc=readFileSync(fixturePath('connector-custom-anchor-writer-roundtrip-20261012.rp'));
+  const connSrc = readFileSync(fixturePath('connector-custom-anchor-writer-roundtrip-20261012.rp'));
   const targetRp=read('panel-replace-roundtrip.rp');
   const imported=fillPanelState(connSrc,targetRp,{sourcePage:'Page 1',targetPage:'Page 1',panel:owner.panel,state:owner.state,replace:true});
   healthy(imported.file);
@@ -49,7 +49,7 @@ export function runPanelMasterChecks({log=()=>{}}={}){
   assert.equal(field(conns[0].body,'end-point-direction').value,2);
  });
  check('连接线端点超出布局范围时导入拒绝',()=>{
-  const connSrc=readFileSync(fixturePath('connector-custom-anchor-writer-roundtrip-20261012.rp'));
+  const connSrc = readFileSync(fixturePath('connector-custom-anchor-writer-roundtrip-20261012.rp'));
   const pageRec=readRecords(connSrc).find(r=>r.className==='Axure:Page');
   const g=parsePayload(pageRec);
   field(g.objects.get(14).body,'end-diagram-object').value=999;

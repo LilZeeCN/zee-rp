@@ -1,8 +1,7 @@
-import { fixturePath } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-
-
+import { join } from 'node:path';
+import { TEST_DIR } from './fixture-summary.mjs';
 import { validateSemantics, validateRecord } from './check-semantics.mjs';
 import { readRecords, replaceRecord, encodeRecord } from '../scripts/rp-records.mjs';
 import { parsePayload, encodePayload, field, walkNodes } from '../scripts/parse-payload.mjs';
@@ -16,7 +15,8 @@ export function runSemanticsChecks() {
     catch (err) { results.push({ name, passed: false, detail: err.message }); }
   };
 
-  const validBytes = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+  const fixturePath = join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp');
+  const validBytes = readFileSync(fixturePath);
 
   check('正常原生 fixture 结构与语义闭环体检全部通过 (0 violations)', () => {
     const res = validateSemantics(validBytes);
@@ -112,7 +112,7 @@ export function runSemanticsChecks() {
   });
 
   check('拦截负例: ReferenceDiagramObject 指向未在 DesignDocument 登记的 Master GUID', () => {
-    const masterFixture = fixturePath('master-override-writer-image-roundtrip.rp');
+    const masterFixture = join(TEST_DIR, 'fixtures', 'master-override-writer-image-roundtrip.rp');
     const mBytes = readFileSync(masterFixture);
     const records = readRecords(mBytes);
     let targetRec = null, graph = null, rdo = null;
@@ -156,7 +156,7 @@ export function runSemanticsChecks() {
   });
 
   check('clonePageByIndex 复制含交互页面保留 tag 0x16 整数槽位与三零语义', () => {
-    const srcBytes = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const srcBytes = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     const cloned = clonePageByIndex(srcBytes, 4, 'CLONED_INTERACTIVE_PAGE');
     const health = readRp(cloned.file, { full: true });
     assert.equal(health.records.unparseable, 0);

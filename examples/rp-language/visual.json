@@ -1,0 +1,94 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "原生视觉探针",
+  "theme": "enterprise-light",
+  "pages": [
+    {
+      "id": "visual",
+      "name": "原生视觉探针",
+      "canvas": {
+        "w": 600,
+        "h": 720
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "column",
+        "padding": 16,
+        "gap": 12,
+        "fill": "#F3F6FA",
+        "children": [
+          {
+            "type": "label",
+            "id": "heading",
+            "text": "原生视觉写入",
+            "fontSize": 20,
+            "fontWeight": 700,
+            "w": "fill",
+            "h": 28
+          },
+          {
+            "type": "button",
+            "id": "action",
+            "text": "居中蓝色按钮",
+            "fill": "#0055CC",
+            "stroke": "#001F66",
+            "radius": 12,
+            "w": 240,
+            "h": 44
+          },
+          {
+            "type": "label",
+            "id": "right",
+            "text": "右对齐文字",
+            "align": "right",
+            "color": "#FF4000",
+            "fontSize": 16,
+            "w": 240,
+            "h": 28
+          },
+          {
+            "type": "divider",
+            "id": "line",
+            "color": "#0055CC",
+            "w": 240,
+            "h": 2
+          },
+          {
+            "type": "image",
+            "id": "image",
+            "src": "assets/native-probe.png",
+            "w": 320,
+            "h": 160
+          },
+          {
+            "type": "paragraph",
+            "id": "para",
+            "text": "第一段中文\nSecond line",
+            "w": 400,
+            "h": 64
+          },
+          {
+            "type": "dynamic-panel",
+            "id": "picturePanel",
+            "w": 200,
+            "h": 120,
+            "states": [
+              {
+                "id": "picture",
+                "root": {
+                  "type": "image",
+                  "id": "stateImage",
+                  "src": "assets/native-probe.png",
+                  "w": 160,
+                  "h": 80
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

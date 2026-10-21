@@ -1,0 +1,39 @@
+rp/1 name="智能购物车与满减算价台" domain=web theme=enterprise-light computed={"item_count":{"type":"number","compute":{"op":"sum","dataset":"cart","field":"qty"}},"subtotal":{"type":"number","compute":{"op":"sum","dataset":"cart","field":"=item.price * item.qty"}},"payable":{"type":"number","compute":"=var.subtotal - var.discount"}} invariants=[{"id":"non_negative_payable","expr":"=var.payable >= 0","message":"实付金额不可为负数"},{"id":"consistent_payable_formula","expr":"=var.payable == var.subtotal - var.discount","message":"实付金额必须等于商品小计减优惠"}]
+model CartItem id=id title=text category="enum(硬件,软件,配件)" price=money qty=number
+dataset cart model=CartItem
+  - id=SKU-01 title="人体工学机械键盘" category="硬件" price=120 qty=1
+  - id=SKU-02 title="桌面Type-C扩展坞" category="配件" price=90 qty=1
+  - id=SKU-03 title="专业版原型授权包" category="软件" price=60 qty=1
+var $discount type=number value=0
+var $coupon_applied type=text value="未用券"
+page #cart_console [960x560a] name="智能购物车与满减算价台"
+  @column #root_col [960x560] padding=24 gap=16 fill=$bg
+    @row #header_bar [912x44] gap=12 align=center
+      @label #page_title [360x28] "智能购物车与满减算价台" fontSize=18 fontWeight=700
+      @badge #cnt_badge [160x28] "='总件数：' + text(var.item_count)"
+      @badge #coupon_badge [180x28] "='优惠状态：' + var.coupon_applied"
+    @row #main_split [912x420] gap=20
+      @card #cart_list_card [560x420] layout=column padding=16 gap=12
+        @label #list_heading [300x24] "购物清单明细" fontSize=15 fontWeight=600
+        @repeater #cart_rep [528x220] dataset=cart rowHeight=56 rowGap=8
+          :template
+            @row #cart_row [528x56] padding=[8,12] gap=8 align=center fill=$surface stroke=$line radius=8
+              @label #r_title [164x24] "=item.title" fontSize=13 fontWeight=600
+              @badge #r_cat [64x24] "=item.category" fontSize=12
+              @label #r_line_total [124x24] "='¥' + text(item.price * item.qty) + ' (' + text(item.qty) + '件)'" fontSize=12
+              @button #r_plus_btn [64x28] "+1件" fontSize=12 variant=secondary
+                +onClick [{"type":"data-update","target":"cart_rep","where":"=item.id == caller.id","set":{"qty":"=item.qty + 1"}}]
+              @button #r_minus_btn [64x28] "-1件" fontSize=12 variant=outline
+                +onClick {"cases":[{"when":"=item.qty > 1","do":[{"type":"data-update","target":"cart_rep","where":"=item.id == caller.id","set":{"qty":"=item.qty - 1"}}]}]}
+      @card #summary_card [332x420] layout=column padding=16 gap=12
+        @label #sum_heading [240x24] "实时算价与优惠核销" fontSize=15 fontWeight=600
+        @detail-card #bill_detail w=300
+          :item id=d_sub label="商品总额" value="='¥' + text(var.subtotal)"
+          :item id=d_disc label="满减立减" value="='-¥' + text(var.discount)"
+          :item id=d_pay label="应付总额" value="='¥' + text(var.payable)"
+        @label #coupon_msg [300x24] "满 200 元可享立减 30 元" fontSize=12 color=$ink-2
+        @row #coupon_btn_row [300x38] gap=10
+          @button #apply_coupon_btn [140x36] "用满200减30券" variant=primary
+            +onClick {"cases":[{"when":"=var.subtotal >= 200","do":[{"set":{"$discount":30,"$coupon_applied":"满200减30","@coupon_msg":"已成功核销满200减30优惠券"}}]},{"else":true,"do":[{"set":{"@coupon_msg":"未达 200 元门槛，无法使用该券"}}]}]}
+          @button #clear_coupon_btn [140x36] "取消优惠券" variant=secondary
+            +onClick [{"set":{"$discount":0,"$coupon_applied":"未用券","@coupon_msg":"已取消优惠券"}}]

@@ -1,0 +1,166 @@
+{
+  "version": "0.2.0",
+  "date": "2026-10-21",
+  "status": "verified_local_source_delivery",
+  "platform": "macOS; Node 24.15.0; Python 3.13; Axure RP 9.0.0.3754 for GUI roundtrips",
+  "baselinePublicCommit": "473761e6a08f051e1666944db690332ef27a6038",
+  "checks": [
+    {
+      "name": "public Node suite",
+      "passed": 16,
+      "failed": 0,
+      "requiresAxure": false
+    },
+    {
+      "name": "RP/1 language",
+      "passed": 43,
+      "failed": 0
+    },
+    {
+      "name": "runtime reference",
+      "passed": 57,
+      "failed": 0
+    },
+    {
+      "name": "aggregate semantics",
+      "passed": 354,
+      "failed": 0
+    },
+    {
+      "name": "native runtime record contracts",
+      "passed": 11,
+      "failed": 0
+    },
+    {
+      "name": "native backend",
+      "passed": 30,
+      "failed": 0
+    },
+    {
+      "name": "native visual record contracts",
+      "passed": 4,
+      "failed": 0
+    },
+    {
+      "name": "acceptance comparison and minimization",
+      "pythonPassed": 8,
+      "nodePassed": 8,
+      "failed": 0
+    },
+    {
+      "name": "architecture",
+      "originalCasesPassed": 6,
+      "auditGapCasesPassed": 8,
+      "masterReferences": 3,
+      "adaptiveWidths": [
+        342,
+        1000
+      ],
+      "failed": 0
+    },
+    {
+      "name": "real MCP stdio with generated native fixtures",
+      "passed": 6,
+      "failed": 0,
+      "requiresLocalAxureAssets": true
+    },
+    {
+      "name": "public native file recipes",
+      "passed": 10,
+      "failed": 0,
+      "requiresLocalAxureAssets": true
+    },
+    {
+      "name": "mock job lifecycle",
+      "passed": 11,
+      "failed": 0,
+      "guiEvidence": false
+    },
+    {
+      "name": "screenshot synthetic selftest",
+      "pass": true,
+      "usesMacOSVision": true
+    },
+    {
+      "name": "all bundled RP/1 examples",
+      "passed": 23,
+      "failed": 0
+    },
+    {
+      "name": "mobile example with original assets",
+      "pass": true,
+      "method": "compile; no GUI claim"
+    },
+    {
+      "name": "benchmark manifest",
+      "pass": true,
+      "tasks": 30,
+      "development": 20,
+      "heldout": 10
+    },
+    {
+      "name": "source selection",
+      "pass": true,
+      "nodeCommands": 31,
+      "mcpTools": 43,
+      "nativeBinariesDistributed": false
+    },
+    {
+      "name": "source hygiene",
+      "pass": true,
+      "filesScanned": 226,
+      "personalAbsolutePaths": 0,
+      "highConfidenceSecretSignatures": 0,
+      "brokenLocalJSImportMatches": 0
+    }
+  ],
+  "screenshotDemo": {
+    "logical_size": {
+      "w": 960,
+      "h": 620
+    },
+    "widget_count": 63,
+    "vector_and_text_widgets": 63,
+    "embedded_images_count": 0,
+    "overall_mae_per_255": 3.5,
+    "pixel_similarity_pct": 98.63,
+    "encoding_hazards_count": 0
+  },
+  "screenshotMetricScope": "original source vs local software render; not a native-preview comparison or OCR accuracy",
+  "nativeSamples": [
+    {
+      "name": "counter",
+      "generatedBy": "scripts/proto.mjs generate",
+      "savedClosedReopenedInRP9": true,
+      "widgets": 6,
+      "interactions": 2,
+      "structureProblems": 0,
+      "previewVerifiedThisRelease": false,
+      "guiEditedThisRelease": false
+    },
+    {
+      "name": "screenshot",
+      "generatedBy": "trace draft + tools/rp9_place.py",
+      "coordinateReferencesChecked": 61,
+      "savedClosedReopenedInRP9": true,
+      "widgets": 67,
+      "structureProblems": 0,
+      "previewVerifiedThisRelease": false,
+      "guiEditedThisRelease": false
+    }
+  ],
+  "originalAssets": {
+    "generator": "examples/generate-assets.py",
+    "license": "MIT",
+    "description": "Fictional dashboard, simple mobile frame geometry, icons and image probe. Existing demo-layout.svg is rendered from the authored layout specification."
+  },
+  "publication": {
+    "pushed": false,
+    "npmPublished": false
+  },
+  "limitations": [
+    "Recent native behavior evidence is sample-bounded; not universal version/platform support.",
+    "No native preview or GUI edit claim is inferred from a save/close/reopen test.",
+    "Historical 90-trial GUI evidence is incomplete; historical first-pass claim 83/90, external human trials zero."
+  ]
+}

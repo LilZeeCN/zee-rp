@@ -1,0 +1,208 @@
+{
+  "language": "rp/1",
+  "name": "双栏选课穿梭框与学分上限守卫",
+  "domain": "web",
+  "theme": "enterprise-light",
+  "models": {
+    "CourseItem": {
+      "id": "id",
+      "title": "text",
+      "credits": "number"
+    }
+  },
+  "datasets": {
+    "pool_courses": {
+      "model": "CourseItem",
+      "rows": [
+        {"id": "CS-301", "title": "分布式系统设计", "credits": 4},
+        {"id": "CS-302", "title": "现代编译器构造", "credits": 4},
+        {"id": "CS-303", "title": "形式化验证导论", "credits": 3}
+      ]
+    },
+    "selected_courses": {
+      "model": "CourseItem",
+      "rows": [
+        {"id": "CS-201", "title": "操作系统内核实验", "credits": 6},
+        {"id": "CS-202", "title": "计算机网络协议栈", "credits": 6}
+      ]
+    }
+  },
+  "computed": {
+    "total_credits": {"type": "number", "compute": {"op": "sum", "dataset": "selected_courses", "field": "credits"}},
+    "selected_count": {"type": "number", "compute": {"op": "count", "dataset": "selected_courses"}}
+  },
+  "invariants": [
+    {"id": "credit_cap_18", "expr": "=var.total_credits <= 18", "message": "已选课程总学分不可超过 18 学分上限"}
+  ],
+  "pages": [
+    {
+      "id": "shuttle_page",
+      "name": "双栏选课穿梭框与学分上限守卫",
+      "canvas": [960, 520],
+      "root": {
+        "column": "root_col",
+        "w": 960,
+        "h": 520,
+        "padding": 24,
+        "gap": 16,
+        "fill": "$bg",
+        "children": [
+          {
+            "row": "header_row",
+            "w": 912,
+            "h": 44,
+            "gap": 12,
+            "align": "center",
+            "children": [
+              {"label": "page_title", "w": 360, "h": 28, "fontSize": 18, "fontWeight": 700, "text": "双栏选课穿梭框与学分上限守卫"},
+              {"badge": "credit_badge", "w": 180, "h": 28, "text": "='已选学分：' + text(var.total_credits) + ' / 18'"},
+              {"badge": "count_badge", "w": 150, "h": 28, "text": "='已选门数：' + text(var.selected_count)"},
+              {"label": "guard_banner", "w": 180, "h": 24, "fontSize": 12, "color": "$ink-2", "text": "学分上限：18 学分"}
+            ]
+          },
+          {
+            "row": "shuttle_row",
+            "w": 912,
+            "h": 400,
+            "gap": 24,
+            "children": [
+              {
+                "card": "pool_card",
+                "layout": "column",
+                "w": 444,
+                "h": 400,
+                "padding": 16,
+                "gap": 12,
+                "children": [
+                  {"label": "pool_title", "w": 240, "h": 24, "fontSize": 15, "fontWeight": 600, "text": "候选课程池"},
+                  {
+                    "repeater": "pool_rep",
+                    "dataset": "pool_courses",
+                    "w": 412,
+                    "h": 220,
+                    "rowHeight": 52,
+                    "rowGap": 8,
+                    "template": {
+                      "row": "pool_row",
+                      "w": 412,
+                      "h": 52,
+                      "padding": [8, 12],
+                      "gap": 8,
+                      "align": "center",
+                      "fill": "$surface",
+                      "stroke": "$line",
+                      "radius": 8,
+                      "children": [
+                        {"label": "p_id", "w": 72, "h": 24, "fontSize": 12, "color": "$ink-2", "text": "=item.id"},
+                        {"label": "p_title", "w": 164, "h": 24, "fontSize": 13, "fontWeight": 600, "text": "=item.title"},
+                        {"badge": "p_cred", "w": 68, "h": 24, "fontSize": 12, "text": "=text(item.credits) + '学分'"},
+                        {
+                          "button": "btn_enroll",
+                          "w": 68,
+                          "h": 28,
+                          "fontSize": 12,
+                          "variant": "primary",
+                          "text": "选修",
+                          "onClick": {
+                            "cases": [
+                              {
+                                "when": "=var.total_credits + item.credits <= 18",
+                                "do": [
+                                  {
+                                    "type": "data-add",
+                                    "target": "selected_rep",
+                                    "row": {
+                                      "id": "=caller.id",
+                                      "title": "=caller.title",
+                                      "credits": "=caller.credits"
+                                    }
+                                  },
+                                  {
+                                    "type": "data-delete",
+                                    "target": "pool_rep",
+                                    "where": "=item.id == caller.id"
+                                  },
+                                  {"set": {"@guard_banner": "选修成功"}}
+                                ]
+                              },
+                              {
+                                "else": true,
+                                "do": [
+                                  {"set": {"@guard_banner": "超过18学分上限，禁止选修"}}
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "card": "sel_card",
+                "layout": "column",
+                "w": 444,
+                "h": 400,
+                "padding": 16,
+                "gap": 12,
+                "children": [
+                  {"label": "sel_title", "w": 240, "h": 24, "fontSize": 15, "fontWeight": 600, "text": "已选课程清单"},
+                  {
+                    "repeater": "selected_rep",
+                    "dataset": "selected_courses",
+                    "w": 412,
+                    "h": 220,
+                    "rowHeight": 52,
+                    "rowGap": 8,
+                    "template": {
+                      "row": "sel_row",
+                      "w": 412,
+                      "h": 52,
+                      "padding": [8, 12],
+                      "gap": 8,
+                      "align": "center",
+                      "fill": "$surface",
+                      "stroke": "$line",
+                      "radius": 8,
+                      "children": [
+                        {"label": "s_id", "w": 72, "h": 24, "fontSize": 12, "color": "$ink-2", "text": "=item.id"},
+                        {"label": "s_title", "w": 164, "h": 24, "fontSize": 13, "fontWeight": 600, "text": "=item.title"},
+                        {"badge": "s_cred", "w": 68, "h": 24, "fontSize": 12, "text": "=text(item.credits) + '学分'"},
+                        {
+                          "button": "btn_drop",
+                          "w": 68,
+                          "h": 28,
+                          "fontSize": 12,
+                          "variant": "secondary",
+                          "text": "退选",
+                          "onClick": [
+                            {
+                              "type": "data-add",
+                              "target": "pool_rep",
+                              "row": {
+                                "id": "=caller.id",
+                                "title": "=caller.title",
+                                "credits": "=caller.credits"
+                              }
+                            },
+                            {
+                              "type": "data-delete",
+                              "target": "selected_rep",
+                              "where": "=item.id == caller.id"
+                            },
+                            {"set": {"@guard_banner": "已退选课程"}}
+                          ]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

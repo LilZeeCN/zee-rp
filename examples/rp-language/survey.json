@@ -1,0 +1,149 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "问卷状态语言样本",
+  "theme": "mobile-lowfi",
+  "domain": "test",
+  "pages": [
+    {
+      "id": "survey",
+      "name": "满意度问卷",
+      "canvas": {
+        "w": 600,
+        "h": 640
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "column",
+        "gap": 12,
+        "padding": 16,
+        "fill": "$surface",
+        "children": [
+          {
+            "type": "label",
+            "id": "heading",
+            "text": "这次体验如何？",
+            "w": "fill",
+            "h": 24,
+            "fontSize": 20,
+            "fontWeight": 700
+          },
+          {
+            "type": "button",
+            "id": "yes",
+            "text": "满意",
+            "w": "fill",
+            "h": 36,
+            "on": {
+              "click": [
+                {
+                  "type": "set-variable",
+                  "variable": "answer",
+                  "value": "yes"
+                },
+                {
+                  "type": "set-text",
+                  "target": {
+                    "ref": "status"
+                  },
+                  "text": "已选择满意"
+                }
+              ]
+            }
+          },
+          {
+            "type": "button",
+            "id": "no",
+            "text": "不满意",
+            "w": "fill",
+            "h": 36,
+            "on": {
+              "click": [
+                {
+                  "type": "set-variable",
+                  "variable": "answer",
+                  "value": "no"
+                },
+                {
+                  "type": "set-text",
+                  "target": {
+                    "ref": "status"
+                  },
+                  "text": "已选择不满意"
+                }
+              ]
+            }
+          },
+          {
+            "type": "label",
+            "id": "status",
+            "text": "尚未选择",
+            "w": "fill",
+            "h": 24
+          },
+          {
+            "type": "button",
+            "id": "send",
+            "text": "提交问卷",
+            "w": "fill",
+            "h": 36,
+            "on": {
+              "click": {
+                "cases": [
+                  {
+                    "when": {
+                      "left": {
+                        "variable": "answer"
+                      },
+                      "op": "==",
+                      "right": "none"
+                    },
+                    "actions": [
+                      {
+                        "type": "set-text",
+                        "target": {
+                          "ref": "status"
+                        },
+                        "text": "请先选择答案"
+                      }
+                    ]
+                  },
+                  {
+                    "else": true,
+                    "actions": [
+                      {
+                        "type": "set-text",
+                        "target": {
+                          "ref": "status"
+                        },
+                        "text": "问卷已提交"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      "on": {
+        "load": [
+          {
+            "type": "set-text",
+            "target": {
+              "ref": "status"
+            },
+            "text": "请选择一项"
+          }
+        ]
+      }
+    }
+  ],
+  "variables": {
+    "answer": {
+      "type": "text",
+      "value": "none"
+    }
+  }
+}

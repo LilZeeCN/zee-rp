@@ -1,0 +1,201 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "审批表单语言样本",
+  "theme": "mobile-lowfi",
+  "domain": "test",
+  "pages": [
+    {
+      "id": "form",
+      "name": "请假审批",
+      "canvas": {
+        "w": 600,
+        "h": 640
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "column",
+        "gap": 12,
+        "padding": 16,
+        "fill": "$surface",
+        "children": [
+          {
+            "type": "label",
+            "id": "heading",
+            "text": "请假审批",
+            "w": "fill",
+            "h": 24,
+            "fontSize": 20,
+            "fontWeight": 700
+          },
+          {
+            "type": "label",
+            "id": "status",
+            "text": "等待填写",
+            "w": "fill",
+            "h": 24
+          },
+          {
+            "type": "dynamic-panel",
+            "id": "editor",
+            "w": "fill",
+            "h": 240,
+            "states": [
+              {
+                "id": "editing",
+                "root": {
+                  "type": "box",
+                  "id": "content",
+                  "layout": "column",
+                  "gap": 12,
+                  "padding": 16,
+                  "fill": "$surface",
+                  "children": [
+                    {
+                      "type": "label",
+                      "id": "hint",
+                      "text": "预约说明",
+                      "w": "fill",
+                      "h": 24
+                    },
+                    {
+                      "type": "input",
+                      "id": "field",
+                      "value": "",
+                      "w": "fill",
+                      "h": 36
+                    },
+                    {
+                      "type": "button",
+                      "id": "submit",
+                      "text": "提交预约",
+                      "w": "fill",
+                      "h": 36,
+                      "on": {
+                        "click": {
+                          "cases": [
+                            {
+                              "when": {
+                                "left": {
+                                  "widget": {
+                                    "ref": "field"
+                                  }
+                                },
+                                "op": "==",
+                                "right": ""
+                              },
+                              "actions": [
+                                {
+                                  "type": "set-text",
+                                  "target": {
+                                    "ref": "form/status"
+                                  },
+                                  "text": "请输入预约说明"
+                                }
+                              ]
+                            },
+                            {
+                              "else": true,
+                              "actions": [
+                                {
+                                  "type": "set-text",
+                                  "target": {
+                                    "ref": "form/status"
+                                  },
+                                  "text": "预约已提交"
+                                },
+                                {
+                                  "type": "set-panel-state",
+                                  "target": {
+                                    "ref": "form/editor"
+                                  },
+                                  "state": "complete"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "variant": "primary"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "complete",
+                "root": {
+                  "type": "box",
+                  "id": "content",
+                  "layout": "column",
+                  "gap": 12,
+                  "padding": 16,
+                  "fill": "$surface",
+                  "children": [
+                    {
+                      "type": "label",
+                      "id": "success",
+                      "text": "提交成功",
+                      "w": "fill",
+                      "h": 24
+                    },
+                    {
+                      "type": "button",
+                      "id": "reset",
+                      "text": "再预约一次",
+                      "w": "fill",
+                      "h": 36,
+                      "on": {
+                        "click": [
+                          {
+                            "type": "set-text",
+                            "target": {
+                              "ref": "form/editor/editing/field"
+                            },
+                            "text": ""
+                          },
+                          {
+                            "type": "set-panel-state",
+                            "target": {
+                              "ref": "form/editor"
+                            },
+                            "state": "editing"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "type": "button",
+            "id": "clear",
+            "text": "清空表单",
+            "w": "fill",
+            "h": 36,
+            "on": {
+              "click": [
+                {
+                  "type": "set-text",
+                  "target": {
+                    "ref": "editor/editing/field"
+                  },
+                  "text": ""
+                },
+                {
+                  "type": "set-panel-state",
+                  "target": {
+                    "ref": "editor"
+                  },
+                  "state": "editing"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

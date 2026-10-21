@@ -3,13 +3,32 @@ import { fileURLToPath } from 'node:url';
 import { randomBytes } from 'node:crypto';
 import { readRecords, readManifest, encodeManifest, encodeRecord, replaceRecord, insertRecord } from './rp-records.mjs';
 import { readRp } from './rp-read.mjs';
+import { fixPanelRegistry } from './fix-panel-registry.mjs';
 import { parsePayload, encodePayload, field } from './parse-payload.mjs';
 import { closureOf, cloneInto } from './clone-closure.mjs';
+import { detectFileVersion } from './version.mjs';
 import { guidKey } from './duplicate-page.mjs';
 
-const uniquePage = (summary, name, role) => {
+// 页定位：默认按名字，**要求唯一**。
+// 自带库里存在重名页（Sample UI Patterns.rplib 有 4 个 "Instructions"），
+// 按名字无法区分，于是这些页从来克隆不了 —— 而 Tree 页里的 TextArea、
+// Instructions 页里的 Hyperlink 等类就永远不出现在产物里，
+// 被类覆盖审计误读成「工具缺失」。
+// 出路：`sourcePageName` 支持 `#<记录号>` 形式，或显式传 sourcePageIndex。
+const uniquePage = (summary, name, role, index) => {
+  if (index !== undefined) {
+    const page = summary.pages.find(p => p.record === index);
+    if (!page) throw new Error(`${role} page record index ${index} not found`);
+    return page;
+  }
+  const direct = /^#(\d+)$/.exec(String(name ?? ''));
+  if (direct) {
+    const page = summary.pages.find(p => p.record === Number(direct[1]));
+    if (!page) throw new Error(`${role} page record index ${direct[1]} not found`);
+    return page;
+  }
   const pages = summary.pages.filter(page => page.name === name);
-  if (pages.length !== 1) throw new Error(`${role} page "${name}" must be unique; found ${pages.length}`);
+  if (pages.length !== 1) throw new Error(`${role} page "${name}" must be unique; found ${pages.length}（重名页请用 #<记录号> 指定）`);
   return pages[0];
 };
 
@@ -38,7 +57,7 @@ const moveTo = (graph, widget, dx, dy) => {
 const packageGuid = graph => graph.roots.find(n => n.tag === 0x1e).values[graph.roots.find(n => n.tag === 0x12).value - 1];
 
 export function cloneLibraryPageContent(sourceFile, targetFile, outputFile, {
-  sourcePageName, targetPageName, x, y
+  sourcePageName, targetPageName, x, y, sourcePageIndex
 }) {
   if (!sourcePageName || !targetPageName) throw new Error('sourcePageName and targetPageName are required');
   if (x !== undefined && !Number.isFinite(x)) throw new Error('x must be a finite number');
@@ -47,7 +66,7 @@ export function cloneLibraryPageContent(sourceFile, targetFile, outputFile, {
   const sourceBytes = readFileSync(sourceFile);
   const sourceSummary = readRp(sourceBytes, { path: sourceFile });
   const targetSummary = readRp(output, { path: targetFile });
-  const sourceMeta = uniquePage(sourceSummary, sourcePageName, 'Source');
+  const sourceMeta = uniquePage(sourceSummary, sourcePageName, 'Source', sourcePageIndex);
   const targetMeta = uniquePage(targetSummary, targetPageName, 'Target');
   const sourceRecords = readRecords(sourceBytes);
   const targetRecords = readRecords(output);
@@ -137,6 +156,7 @@ export function cloneLibraryPageContent(sourceFile, targetFile, outputFile, {
 
   // 克隆 Page 图内对象
   const cloned = cloneInto({
+    version: detectFileVersion(output ?? targetBytes),
     srcGraph: sourceGraph,
     srcStrings: sourceStrings,
     dstGraph: targetGraph,
@@ -210,9 +230,14 @@ export function cloneLibraryPageContent(sourceFile, targetFile, outputFile, {
     output = Buffer.concat([encodeManifest(output, manifest.value), output.subarray(manifest.dataStart)]);
   }
 
+  // RP 9 靠 DesignDocument 里的面板注册链解析状态包；缺失时面板状态内容什么都不画。
+  // RP 11 没有这个模型，fixPanelRegistry 对非 RP 9 原样跳过。
+  const panelRegistry = fixPanelRegistry(output);
+  output = panelRegistry.file;
   writeFileSync(outputFile, output, { flag: 'wx' });
   return {
     outputFile,
+    panelRegistry: panelRegistry.report,
     sourcePage: sourcePageName,
     targetPage: targetPageName,
     clonedRoots: sourceRoots.length,
@@ -236,6 +261,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   console.log(JSON.stringify(cloneLibraryPageContent(sourceFile, targetFile, outputFile, {
-    sourcePageName, targetPageName, x: flags.x, y: flags.y
+    sourcePageName, targetPageName, x: flags.x, y: flags.y, sourcePageIndex: flags.index
   }), null, 2));
 }

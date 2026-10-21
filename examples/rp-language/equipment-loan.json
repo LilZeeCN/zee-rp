@@ -1,0 +1,177 @@
+{
+  "$schema": "../../references/rp-language.schema.json",
+  "language": "rp/1",
+  "target": 9,
+  "name": "实验室设备借用台",
+  "domain": "web",
+  "theme": "enterprise-light",
+  "strictAudit": true,
+  "product": {
+    "entities": {
+      "EquipmentLoan": {
+        "key": "id",
+        "statusField": "status",
+        "selectionVariable": "selected_eq_id",
+        "nextIdVariable": "next_eq_id",
+        "nextIdDefault": "EQ-205",
+        "fields": {
+          "id": {"type": "text", "label": "设备编号"},
+          "title": {"type": "text", "label": "设备名称", "required": true},
+          "category": {"type": "text", "label": "设备分类", "default": "仪器", "enum": ["仪器", "套件", "光学"]},
+          "location": {"type": "text", "label": "存放实验室", "required": true},
+          "status": {"type": "text", "label": "借用状态", "default": "在库可借"},
+          "claimant": {"type": "text", "label": "借用人", "default": "未借出"},
+          "contact": {"type": "text", "label": "联系方式", "default": "-"},
+          "note": {"type": "text", "label": "配置说明", "default": "附件齐全"}
+        },
+        "rows": [
+          {
+            "id": "EQ-201",
+            "title": "数字示波器 DSOX1204G",
+            "category": "仪器",
+            "location": "电子楼 B204",
+            "status": "在库可借",
+            "claimant": "未借出",
+            "contact": "-",
+            "note": "含双通道探头与电源线"
+          },
+          {
+            "id": "EQ-202",
+            "title": "逻辑分析仪 Saleae Pro",
+            "category": "仪器",
+            "location": "嵌入式实验室 A108",
+            "status": "在库可借",
+            "claimant": "未借出",
+            "contact": "-",
+            "note": "16 通道高速采样线束齐全"
+          },
+          {
+            "id": "EQ-203",
+            "title": "无人机飞控开发套件",
+            "category": "套件",
+            "location": "创客空间 C301",
+            "status": "在库可借",
+            "claimant": "未借出",
+            "contact": "-",
+            "note": "含激光雷达模块与备用电池"
+          },
+          {
+            "id": "EQ-204",
+            "title": "红外热成像分析仪",
+            "category": "光学",
+            "location": "光电实验室 D402",
+            "status": "在库可借",
+            "claimant": "未借出",
+            "contact": "-",
+            "note": "含校准证书与便携保护箱"
+          }
+        ]
+      }
+    },
+    "rules": {
+      "register_policy": {
+        "entity": "EquipmentLoan",
+        "operation": "register_equipment",
+        "description": "设备入库必填规则：必须填写设备名称与存放实验室。",
+        "requiredFields": [
+          {"field": "title", "required": true, "message": "请填写设备名称"},
+          {"field": "location", "required": true, "message": "请填写存放实验室"}
+        ]
+      },
+      "borrow_policy": {
+        "entity": "EquipmentLoan",
+        "operation": "borrow_equipment",
+        "description": "借用规则（基线）：借用人姓名必填，联系方式选填；借用后记录保留在列表中。",
+        "requiredFields": [
+          {"field": "claimant", "required": true, "message": "请填写借用人姓名"}
+        ],
+        "requireContact": false,
+        "contactField": "contact",
+        "contactRequiredMessage": "请填写借用人联系方式",
+        "statusTransition": {"field": "status", "from": "在库可借", "to": "借用待审"},
+        "excludeClaimedFromList": false,
+        "detailClaimedText": "借用待审"
+      }
+    },
+    "queries": {
+      "available_equipment": {
+        "entity": "EquipmentLoan",
+        "searchField": "title",
+        "filterField": "category",
+        "filters": [
+          {"label": "全部", "value": "全部", "all": true},
+          "仪器",
+          "套件",
+          "光学"
+        ],
+        "respectRule": "borrow_policy",
+        "emptyText": "暂无匹配的实验设备"
+      }
+    },
+    "operations": {
+      "register_equipment": {
+        "kind": "create",
+        "entity": "EquipmentLoan",
+        "rule": "register_policy",
+        "fields": ["title", "category", "location", "note"],
+        "defaults": {
+          "status": "在库可借",
+          "claimant": "未借出",
+          "contact": "-"
+        },
+        "successText": "入库成功，已加入设备台账",
+        "navigateTo": "equipment_detail"
+      },
+      "borrow_equipment": {
+        "kind": "update",
+        "entity": "EquipmentLoan",
+        "rule": "borrow_policy",
+        "fields": ["claimant", "contact", "note"],
+        "successText": "借用提交成功",
+        "navigateTo": "equipment_detail"
+      }
+    },
+    "views": [
+      {
+        "id": "equipment_list",
+        "title": "实验设备列表",
+        "kind": "list",
+        "entity": "EquipmentLoan",
+        "query": "available_equipment",
+        "cardFields": {
+          "title": "title",
+          "subtitle": "location",
+          "badge": "status"
+        }
+      },
+      {
+        "id": "equipment_detail",
+        "title": "设备详情",
+        "kind": "detail",
+        "entity": "EquipmentLoan",
+        "rule": "borrow_policy",
+        "displayFields": ["id", "title", "category", "location", "status", "claimant", "contact", "note"],
+        "primaryAction": {"label": "申请借用", "navigateTo": "borrow_form"},
+        "secondaryAction": {"label": "设备入库", "navigateTo": "register_form"}
+      },
+      {
+        "id": "register_form",
+        "title": "设备入库",
+        "kind": "form",
+        "entity": "EquipmentLoan",
+        "operation": "register_equipment",
+        "submitText": "确认入库",
+        "backTo": "equipment_detail"
+      },
+      {
+        "id": "borrow_form",
+        "title": "借用登记",
+        "kind": "form",
+        "entity": "EquipmentLoan",
+        "operation": "borrow_equipment",
+        "submitText": "确认借用",
+        "backTo": "equipment_detail"
+      }
+    ]
+  }
+}

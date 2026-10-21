@@ -1,0 +1,622 @@
+{
+ "name": "校园失物招领 App 低保真原型 (课程实验规范版)",
+ "domain": "mobile",
+ "theme": "mobile-lowfi",
+ "static": true,
+ "pages": [
+  {
+   "name": "1-失物信息浏览页",
+   "slug": "page1-browse",
+   "device": "iphone-x",
+   "canvas": {
+    "w": 375,
+    "h": 812
+   },
+   "root": {
+    "type": "box",
+    "name": "grp-p1-screen",
+    "layout": "column",
+    "w": 375,
+    "h": 812,
+    "padding": [
+     44,
+     0,
+     0,
+     0
+    ],
+    "gap": 0,
+    "fill": "$bg",
+    "isGroup": true,
+    "bgName": "bg-p1-screen",
+    "children": [
+     {
+      "type": "mobile-navbar",
+      "prefix": "p1",
+      "title": "拾物 · 校园失物招领",
+      "titleAlign": "left",
+      "rightText": "消息"
+     },
+     {
+      "type": "mobile-searchbar",
+      "prefix": "p1",
+      "placeholder": "搜索物品名称、拾获地点、编号关键词...",
+      "buttonText": "搜索"
+     },
+     {
+      "type": "mobile-segmented",
+      "prefix": "p1",
+      "title": "物品分类筛选 (6 类)",
+      "rightText": "共 128 条 · 全部",
+      "columns": 3,
+      "activeIndex": 0,
+      "items": [
+       "全部",
+       "证件卡类",
+       "数码电子",
+       "生活用品",
+       "图书文具",
+       "其他物品"
+      ]
+     },
+     {
+      "type": "mobile-card-list",
+      "prefix": "p1",
+      "h": 486,
+      "cardHeight": 98,
+      "headerTitle": "最新失物招领动态",
+      "headerRight": "按发布时间排序",
+      "bindDetail": {
+       "page": "2-物品详情-发布页",
+       "panel": "panel-item-state"
+      },
+      "cards": [
+       {
+        "id": "c1",
+        "badge": "招领·待认领",
+        "badgeVariant": "primary",
+        "title": "索尼 WH-1000XM5 降噪耳机",
+        "loc": "一校区图书馆 402 自习室",
+        "time": "10分钟前 · 拾主：林同学",
+        "thumb": "数码实物图",
+        "detail": {
+         "badge": "招领·待认领",
+         "itemTitle": "索尼 WH-1000XM5 降噪耳机",
+         "statusText": "状态：待认领 · 编号 LF-20261017-019",
+         "pubTime": "发布时间：2026-10-17 14:20 · 浏览 86 次",
+         "category": "数码电子 / 音频外设",
+         "location": "一校区图书馆 402 自习室窗边座位",
+         "holder": "图书馆一楼总服务台失物招领处",
+         "contact": "拾主林同学 (138****5621 / 微信 hit_lin)",
+         "description": "黑色便携耳机盒完好，拉链处挂有蓝色宇航员硅胶挂件，认领时请说明盒内转接头颜色。"
+        }
+       },
+       {
+        "id": "c2",
+        "badge": "寻物·寻找中",
+        "badgeVariant": "secondary",
+        "title": "校园一卡通及深蓝硅胶卡套",
+        "loc": "正心楼 204 阶梯教室",
+        "time": "28分钟前 · 失主：张同学",
+        "thumb": "证件卡类图"
+       },
+       {
+        "id": "c3",
+        "badge": "招领·核验中",
+        "badgeVariant": "outline",
+        "title": "象印 500ml 银色保温杯",
+        "loc": "学苑楼二层风味窗口旁",
+        "time": "1小时前 · 拾主：王阿姨",
+        "thumb": "生活用品图"
+       },
+       {
+        "id": "c4",
+        "badge": "招领·已认领",
+        "badgeVariant": "soft",
+        "title": "《计算机网络》教材及课堂笔记",
+        "loc": "致知楼 308 教室第三排",
+        "time": "3小时前 · 拾主：陈同学",
+        "thumb": "图书文具图"
+       }
+      ]
+     },
+     {
+      "type": "mobile-tabbar",
+      "prefix": "p1",
+      "h": 80,
+      "items": [
+       {
+        "name": "p1-tab-home",
+        "label": "首页",
+        "active": true
+       },
+       {
+        "name": "p1-tab-cat",
+        "label": "分类"
+       },
+       {
+        "name": "p1-btn-publish-plus",
+        "label": "+发布",
+        "prominent": true
+       },
+       {
+        "name": "p1-tab-msg",
+        "label": "消息"
+       },
+       {
+        "name": "p1-tab-mine",
+        "label": "我的"
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "2-物品详情-发布页",
+   "slug": "page2-detail-panel",
+   "device": null,
+   "canvas": {
+    "w": 420,
+    "h": 860
+   },
+   "root": {
+    "type": "box",
+    "name": "grp-p2-host",
+    "layout": "stack",
+    "w": 420,
+    "h": 860,
+    "fill": "$surface",
+    "isGroup": true,
+    "bgName": "bg-p2-host",
+    "children": [
+     {
+      "type": "dynamic-panel",
+      "name": "panel-item-state",
+      "x": 0,
+      "y": 0,
+      "w": 420,
+      "h": 860,
+      "states": [
+       {
+        "name": "状态一：查看物品详情",
+        "prefix": "view",
+        "device": "iphone-x",
+        "canvas": {
+         "w": 375,
+         "h": 812
+        },
+        "root": {
+         "type": "mobile-detail-view",
+         "prefix": "view",
+         "title": "物品信息详情",
+         "leftText": "返回列表",
+         "rightText": "切换发布态",
+         "shareText": "收藏 / 分享",
+         "claimText": "立即联系拾主认领"
+        }
+       },
+       {
+        "name": "状态二：发布失物招领",
+        "prefix": "pub",
+        "device": "iphone-x",
+        "canvas": {
+         "w": 375,
+         "h": 812
+        },
+        "root": {
+         "type": "mobile-form-view",
+         "prefix": "pub",
+         "title": "发布寻物 / 招领信息",
+         "leftText": "取消",
+         "rightText": "切换查看态",
+         "uploadCaption": "+ 点击上传物品实拍图片 (最多 3 张，选填)",
+         "fields": [
+          {
+           "id": "name",
+           "label": "物品名称 (必填)",
+           "required": true,
+           "placeholder": "请输入物品名称，如：索尼黑色头戴耳机"
+          },
+          {
+           "id": "cat",
+           "label": "所属分类 (必填·6类)",
+           "required": true,
+           "type": "pills",
+           "options": [
+            "证件卡类",
+            "数码电子",
+            "生活用品",
+            "图书文具",
+            "服饰配件",
+            "其他物品"
+           ]
+          },
+          {
+           "id": "loc",
+           "label": "拾获/遗失地点与时间 (必填)",
+           "required": true,
+           "placeholder": "一校区图书馆 402 自习室 · 今日 14:20"
+          },
+          {
+           "id": "desc",
+           "label": "详细特征描述",
+           "type": "textarea",
+           "placeholder": "请描述品牌型号、颜色、挂件等核验特征"
+          },
+          {
+           "id": "contact",
+           "label": "联系方式与保管地点 (必填)",
+           "required": true,
+           "placeholder": "手机号 / 微信号 / 招领处位置"
+          }
+         ],
+         "draftText": "重置表单",
+         "submitText": "确认发布信息"
+        }
+       }
+      ]
+     }
+    ]
+   }
+  },
+  {
+   "name": "3-页面关系与设计说明",
+   "slug": "page3-spec-doc",
+   "domain": "doc",
+   "device": null,
+   "canvas": {
+    "w": 1120,
+    "h": 680
+   },
+   "root": {
+    "type": "box",
+    "name": "grp-doc-canvas",
+    "layout": "column",
+    "w": 1120,
+    "h": 680,
+    "padding": [
+     28,
+     32
+    ],
+    "gap": 20,
+    "fill": "$bg",
+    "isGroup": true,
+    "bgName": "bg-doc-canvas",
+    "children": [
+     {
+      "type": "box",
+      "name": "grp-doc-header",
+      "layout": "row",
+      "w": 1056,
+      "h": 72,
+      "padding": [
+       16,
+       20
+      ],
+      "gap": 16,
+      "align": "center",
+      "fill": "$surface",
+      "stroke": "$line",
+      "radius": 10,
+      "isGroup": true,
+      "bgName": "bg-doc-header",
+      "children": [
+       {
+        "type": "box",
+        "name": "grp-doc-title-col",
+        "layout": "column",
+        "flex": 1,
+        "gap": 4,
+        "isGroup": true,
+        "children": [
+         {
+          "type": "label",
+          "name": "doc-main-title",
+          "text": "拾物 · 校园失物招领 App — 页面关系与低保真设计规范说明",
+          "fontSize": 18,
+          "fontWeight": 700,
+          "color": "$ink"
+         },
+         {
+          "type": "label",
+          "name": "doc-main-sub",
+          "text": "遵循 iPhone X (375×812 pt / 420×860 整机画板) 纯灰阶低保真规范 · 课程实验静态交付（0 交互）",
+          "fontSize": 12,
+          "fontWeight": 400,
+          "color": "$ink-2"
+         }
+        ]
+       },
+       {
+        "type": "button",
+        "name": "doc-badge-mode",
+        "text": "静态原型交付 (0 交互)",
+        "variant": "secondary",
+        "w": 168,
+        "h": 36,
+        "fontSize": 12,
+        "radius": 8
+       }
+      ]
+     },
+     {
+      "type": "box",
+      "name": "grp-doc-cards",
+      "layout": "row",
+      "w": 1056,
+      "h": 520,
+      "gap": 20,
+      "isGroup": true,
+      "children": [
+       {
+        "type": "box",
+        "name": "grp-doc-col-1",
+        "layout": "column",
+        "flex": 1,
+        "padding": [
+         20,
+         20
+        ],
+        "gap": 12,
+        "fill": "$surface",
+        "stroke": "$line",
+        "radius": 10,
+        "isGroup": true,
+        "bgName": "bg-doc-col-1",
+        "children": [
+         {
+          "type": "button",
+          "name": "doc-tag-1",
+          "text": "01 · 页面架构与双态面板说明",
+          "variant": "secondary",
+          "w": 200,
+          "h": 26,
+          "fontSize": 11,
+          "radius": 6
+         },
+         {
+          "type": "paragraph",
+          "name": "doc-para-flow",
+          "w": 292,
+          "fontSize": 12,
+          "text": "本工程包含 3 个顶层页面：页面一为失物信息浏览页（含 6 分类筛选、4 种状态卡片流与 5 项底部导航栏）；页面二使用动态面板承载两个核心状态；页面三为本设计规范说明。"
+         },
+         {
+          "type": "label",
+          "name": "doc-flow-1",
+          "text": "1. 浏览页卡片 → 对应页面二「状态一：查看详情」",
+          "fontSize": 12,
+          "fontWeight": 600,
+          "color": "$ink"
+         },
+         {
+          "type": "label",
+          "name": "doc-flow-2",
+          "text": "2. 底部「+发布」 → 对应页面二「状态二：发布招领」",
+          "fontSize": 12,
+          "fontWeight": 600,
+          "color": "$ink"
+         },
+         {
+          "type": "label",
+          "name": "doc-flow-3",
+          "text": "3. 首张卡片与详情查看态共享同一条物品记录",
+          "fontSize": 12,
+          "fontWeight": 600,
+          "color": "$ink"
+         },
+         {
+          "type": "label",
+          "name": "doc-flow-4",
+          "text": "4. 搜索框聚焦 → 同页：键盘弹起 + 列表实时过滤",
+          "fontSize": 11,
+          "fontWeight": 500,
+          "color": "$ink-2"
+         },
+         {
+          "type": "label",
+          "name": "doc-flow-5",
+          "text": "5. 分类 chip → 同页：选中高亮 + 列表过滤",
+          "fontSize": 11,
+          "fontWeight": 500,
+          "color": "$ink-2"
+         },
+         {
+          "type": "label",
+          "name": "doc-flow-6",
+          "text": "6. 联系发布者 → 认领联系弹层（确认后展示联系方式）",
+          "fontSize": 11,
+          "fontWeight": 500,
+          "color": "$ink-2"
+         },
+         {
+          "type": "label",
+          "name": "doc-flow-7",
+          "text": "7. 查看态返回 → 浏览页（保留原筛选条件）",
+          "fontSize": 11,
+          "fontWeight": 500,
+          "color": "$ink-2"
+         },
+         {
+          "type": "paragraph",
+          "name": "doc-para-design",
+          "w": 292,
+          "fontSize": 12,
+          "color": "$ink-2",
+          "text": "布局取舍：搜索与分类紧贴导航栏下方，形成「先搜后筛」的稳定路径；分类用 3×2 网格保证 375 宽度下 6 个类别全部可见；卡片采用左图右文，名称、状态、地点、时间按识别优先级排列；发布入口放在底部标签栏中央并凸起，位于拇指热区、全局常驻，符合「浏览为主、发布为辅」的任务权重。"
+         }
+        ]
+       },
+       {
+        "type": "box",
+        "name": "grp-doc-col-2",
+        "layout": "column",
+        "flex": 1,
+        "padding": [
+         20,
+         20
+        ],
+        "gap": 12,
+        "fill": "$surface",
+        "stroke": "$line",
+        "radius": 10,
+        "isGroup": true,
+        "bgName": "bg-doc-col-2",
+        "children": [
+         {
+          "type": "button",
+          "name": "doc-tag-2",
+          "text": "02 · 视觉规范与思考点回应",
+          "variant": "secondary",
+          "w": 188,
+          "h": 26,
+          "fontSize": 11,
+          "radius": 6
+         },
+         {
+          "type": "paragraph",
+          "name": "doc-para-spec",
+          "w": 292,
+          "fontSize": 12,
+          "text": "采用 iPhone X 标准样机（整机画板 420×860 px，内屏视口 375×812 px，内屏偏移 X=25, Y=21）。顶部 44pt 状态栏 + 44pt 导航栏，底部 34pt Home Indicator 安全区。"
+         },
+         {
+          "type": "label",
+          "name": "doc-spec-1",
+          "text": "• 栅格间距：左右边距 16pt，卡片间距 8/12pt",
+          "fontSize": 12,
+          "fontWeight": 500,
+          "color": "$ink-2"
+         },
+         {
+          "type": "label",
+          "name": "doc-spec-2",
+          "text": "• 色彩规范：纯灰阶低保真（#262626 ~ #F5F5F5）",
+          "fontSize": 12,
+          "fontWeight": 500,
+          "color": "$ink-2"
+         },
+         {
+          "type": "label",
+          "name": "doc-spec-3",
+          "text": "• 字阶规范：标题 16/18pt，正文 12/13pt，辅助 11pt",
+          "fontSize": 12,
+          "fontWeight": 500,
+          "color": "$ink-2"
+         },
+         {
+          "type": "paragraph",
+          "name": "doc-think-1",
+          "w": 292,
+          "fontSize": 12,
+          "color": "$ink-2",
+          "text": "思考点 1：卡片必须一眼可见名称、状态、地点、时间；发布人与详细描述弱化到详情页。依据是浏览页只需判断「是否值得点开」。"
+         },
+         {
+          "type": "paragraph",
+          "name": "doc-think-2",
+          "w": 292,
+          "fontSize": 12,
+          "color": "$ink-2",
+          "text": "思考点 2：搜索独立成条、分类在搜索下方；搜索聚焦时实时过滤，分类只改变筛选条件，两者是叠加关系，不抢同一焦点。"
+         },
+         {
+          "type": "paragraph",
+          "name": "doc-think-3",
+          "w": 292,
+          "fontSize": 12,
+          "color": "$ink-2",
+          "text": "思考点 3：联系方式默认脱敏为 138****5621，点击「立即联系拾主认领」并完成认领确认后再公开，兼顾联系效率与隐私。"
+         }
+        ]
+       },
+       {
+        "type": "box",
+        "name": "grp-doc-col-3",
+        "layout": "column",
+        "flex": 1,
+        "padding": [
+         20,
+         20
+        ],
+        "gap": 12,
+        "fill": "$surface",
+        "stroke": "$line",
+        "radius": 10,
+        "isGroup": true,
+        "bgName": "bg-doc-col-3",
+        "children": [
+         {
+          "type": "button",
+          "name": "doc-tag-3",
+          "text": "03 · 工程结构与静态交付",
+          "variant": "secondary",
+          "w": 188,
+          "h": 26,
+          "fontSize": 11,
+          "radius": 6
+         },
+         {
+          "type": "paragraph",
+          "name": "doc-para-qa",
+          "w": 292,
+          "fontSize": 12,
+          "text": "全画板通过 Auto-Layout 排版、真实字宽防裁切检测、原生 Axure:Layer 编组发射与两级质量审计门禁："
+         },
+         {
+          "type": "label",
+          "name": "doc-qa-1",
+          "text": "● 语义化命名率 100%（零 Unnamed / 零同页重名）",
+          "fontSize": 12,
+          "fontWeight": 600,
+          "color": "$ink"
+         },
+         {
+          "type": "label",
+          "name": "doc-qa-2",
+          "text": "● 原生 Layer 编组覆盖率 100%，层级清晰可编辑",
+          "fontSize": 12,
+          "fontWeight": 600,
+          "color": "$ink"
+         },
+         {
+          "type": "label",
+          "name": "doc-qa-3",
+          "text": "● 文本重叠 0 处、文本裁切 0 处、三零结构校验通过",
+          "fontSize": 12,
+          "fontWeight": 600,
+          "color": "$ink"
+         },
+         {
+          "type": "label",
+          "name": "doc-static-1",
+          "text": "• 静态交付：interactions=0 / actions=0",
+          "fontSize": 11,
+          "fontWeight": 600,
+          "color": "$ink"
+         },
+         {
+          "type": "label",
+          "name": "doc-static-2",
+          "text": "• 页面二双状态：在 Axure 切换 panel-item-state",
+          "fontSize": 11,
+          "fontWeight": 500,
+          "color": "$ink-2"
+         },
+         {
+          "type": "label",
+          "name": "doc-static-3",
+          "text": "• 首卡数据与详情查看态保持一致",
+          "fontSize": 11,
+          "fontWeight": 500,
+          "color": "$ink-2"
+         }
+        ]
+       }
+      ]
+     }
+    ]
+   }
+  }
+ ]
+}

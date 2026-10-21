@@ -84,10 +84,10 @@ Axure 把 `height:0` + `strokes` 的 widget 渲染成 SVG 线段，颜色粗细�
     "patternFillType": 4 }] }                  // 4 = 适应填充
 ```
 
-- 图片数据 = **base64 JPEG**（`/9j/` 开头）；PNG 需转 JPEG。
-- key 40 位十六进制，实测 = 图片 JPEG 字节的 SHA1（自造任意唯一 key 也可，但保持 SHA1 与官方一致）。
-- `axvg.mjs` 已支持：spec 里 `"images": {key: base64}` + `{"kind":"image", imageKey, x,y,w,h}`。
-- 验证：Axure 预览将图片渲染为 `<img src="images/page_1/uN.jpg">` 资产。
+- 图片数据 = **base64 PNG（支持 Alpha 透明通道，`iVBORw0KGgo` 开头）或 base64 JPEG（`/9j/` 开头）**。实测 Axure RP 9 与 RP 11 均原生支持带透明通道的 PNG 直接写入 `imageMap`（无需转 JPEG），可用于手机外框、状态栏、Home Indicator、图标等透明图层叠加。
+- key 40 位十六进制，实测 = 图片原始字节（PNG 或 JPEG）的 SHA1（自造任意唯一 key 也可，但保持 SHA1 与官方一致）。
+- `axvg.mjs` 与 `proto.py` 均已支持：spec 里 `"images": {key: base64}` + `{"kind":"image", imageKey, x,y,w,h}`（或在 `proto.py` 声明式 spec 中直接使用 `{"type":"image", "src":"shells/iphone-x-black/shell-top.png", "w":420, "h":56}` 自动计算 SHA1 并注入 `imageMap`）。
+- 验证：Axure 保存后将图片持久化在 `Axure:DiagramObject:VectorShape` 的 `MyStyle -> PropList -> Stream`（可由 `scripts/extract-assets.mjs` 逆向提取），预览渲染为 `<img src="images/page_1/uN.png">` 或 `.jpg` 资产。
 
 ## 矢量形状（type:2 + paths）—— 锚点循环模型
 
@@ -123,7 +123,7 @@ Axure 把 `height:0` + `strokes` 的 widget 渲染成 SVG 线段，颜色粗细�
 
 ## spec 与原始格式的区别
 
-`axvg.mjs` 当前展开 rect/card、circle/ellipse、hline、text、line、image、shape、pie。原始 Axvg 格式中已有渐变与阴影字段（见 官方序列化资料（历史研究资料未随仓库分发）），当前 spec 展开器已提供 linear/radial 渐变和内外阴影参数，范围与示例见下文。angular 会被拒绝，其他未登记字段不表示生效。
+`axvg.mjs` 当前展开 rect/card、circle/ellipse、hline、text、line、image、shape、pie。原始 Axvg 格式中已有渐变与阴影字段（见 [官方序列化资料](official-serialization.md)），但 spec 展开器尚未提供这些参数。需要这些效果时明确手工编码及待验证范围，不能把传入未知 spec 字段视为已经生效。
 
 文本元件当前以内容自动命名，`text` 的自定义 `name` 不会覆盖它；通道 B 定位前以 `rp-read` 实际输出为准。多行排版优先分行建 text。
 

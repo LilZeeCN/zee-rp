@@ -1,76 +1,39 @@
-# 截图复刻工作流
+# 图片转 Axure 原型
 
-目标：给定一张界面截图，在 Axure 产出布局、颜色、字号、组成元素对应的可编辑原型。验证标准是预览截图与原图逐区块对照。
+`trace.mjs` 封装 Python 图像处理和 macOS Vision OCR，识别文字、卡片、胶囊、分隔线、部分图表几何和媒体区域，再生成分层规格。文字和支持的几何可继续编辑，复杂画面和部分图标保留为独立图片。
 
-## 第 1 步：分层读图
+## 自制示例
 
-先把截图读成结构清单，生成时按需要回看确认：
+安装 README 依赖、激活 Python 环境，然后执行：
 
-1. **画布与底色**：整页尺寸（桌面常见 1440×900/1440×860；移动 375×812）与页面底色（多数为 #FFFFFF）。
-2. **固定框架**：左侧导航（宽度 ~200–260）、顶部栏（高度 ~50–60）、右侧面板等。先画框架，再画内容。
-3. **内容栅格**：把主区域按行列分块（卡片行、图表区、表格区），记录每块的 x/y/w/h 和间隙（通常 12–16）。同排卡片等宽等高，按列均分。
-4. **每块内部**：从上到下列元素——标题文字、数字、按钮、图标占位、分隔线、图表。
-5. **颜色与字阶**：底色、边框色、文字三阶（深 #333 / 中 #666 / 浅 #999）、主题色。按参考保留配色和字阶；只在用户要求线框图时使用灰阶简化。
-
-估算坐标时先定区间边界再算元素位置；用截图像素尺寸对页面尺寸的比例换算。宁可轻微偏差，不要漏块。
-
-## 第 2 步：组件映射
-
-| 原图元素 | spec 写法 |
-|---|---|
-| 卡片 | rect（白底 + #E6E6E6 边框 + corners 6）+ 内部元素 |
-| 导航项 | rect 选中态 + 小 rect 图标占位 + text + 右侧角标 rect |
-| 搜索框 | 圆角 rect（corners=高/2）+ circle 放大镜 + 浅色 text |
-| 头像/图标占位 | circle 或圆角 rect（灰底） |
-| 按钮 | rect（主题色，corners=高/2）+ 白色 text |
-| KPI 卡 | rect + 小 text 标签 + 大号加粗 text 数字 + 小 text 增幅 + rect 占位 |
-| 折线图 | text 轴标签 + hline 网格线 + circle 数据点 + line 逐点连线 |
-| 柱状图 | text 轴标签 + hline 网格线 + rect 柱体（y=底线−高度）+ text 类别 |
-| 饼图 | kind:"pie"（脚本展开为楔形；颜色按参考）+ 图例（小 circle + text） |
-| 图片/插画/照片 | kind:"image"（真实图片：imageMap + base64 JPEG，见下） |
-| 表格 | text 表头 + hline + 每行 text 三列 + 行间 hline |
-| 选项卡/chips | text（激活项 = 深色 pill + 白字） |
-| 通知/列表项 | circle 圆点 + text（多段落拆成多个 text，每行一个） |
-
-图标按要求保真：可用 shape 重建或以内嵌图片保留。只有允许简化时才用方块/圆占位，并在交付时说明；避免依赖未验证的 emoji 字体渲染。
-
-### 图片元素的处理（imageMap）
-
-截图里的照片/插画/logo/头像不是纯色块，用 **kind:"image"** 内嵌真实图片：
-
-1. 从截图裁出图片区域，转成 JPEG（`sips -s format jpeg 原图 --out 小图.jpg`；大图先缩到显示尺寸，控制体积）。
-2. base64 编码，算 SHA1 作为 key。
-3. spec 顶层加 `"images": { "<key>": "<base64>" }`，元素写 `{"kind":"image", "x","y","w","h", "imageKey":"<key>"}`。
-
-```bash
-IMG_B64=$(base64 -i 图片.jpg | tr -d '\n')
-KEY=$(shasum -a 1 图片.jpg | cut -d' ' -f1)
-# 用 jq 或脚本把 images[key] 和 kind:"image" 元素写进 spec
+```sh
+node scripts/trace.mjs draft examples/screenshot/source.png -o outputs/screenshot --scale 1 --axvg outputs/screenshot/page.axvg.json
 ```
 
-图片按显示尺寸控制体积；占位是否合适由用户要求的保真程度决定。
+`--scale` 是物理像素与逻辑像素的比例，Retina 2x 截图通常用 `2`。输出 `draft.spec.json`、剪贴板 JSON、薄页渲染和差分图。识别是启发式过程，应检查结果。
 
-## 第 3 步：写 spec 并粘贴
-
-- frame 的 `x/y` 只决定同一次粘贴中各块的相对布局。页面落点由 Axure 粘贴锚点决定；测试使用副本或空白文档，不能靠远处坐标保证避开旧内容。
-- 非文本元素给可识别的 `name`；文本当前按内容自动命名。离线加交互前用 `rp-read` 确认真实名称及唯一性。
-- 一个 frame 装整页；超大数据（>400 widget）按区块拆多 frame 并在同一次 Axvg 中提交，靠内部相对坐标拼装。
-
-```bash
-node scripts/axvg.mjs build spec.json -o page.axvg.json
-node scripts/axvg.mjs paste page.axvg.json
+```sh
+node scripts/trace.mjs patch outputs/screenshot/draft.spec.json --replace "识别错字=正确文字" --axvg outputs/screenshot/page.axvg.json --safe-lines
 ```
 
-## 第 4 步：预览对比与迭代
+## 保存为 `.rp`
 
-1. 点 Axure 预览入口生成新预览，确认当前文件和页面。
-2. 整页截图，与原图并排对比，按区块列差异清单：缺元素 / 位置偏移 / 颜色字号不符 / 层级错误。
-3. 修 spec 里对应元素重新粘贴。粘贴是**追加**：小改须明确替换本次生成的旧块并核对粘贴锚点；大改在新文档或副本重建，避免误删用户既有内容。
-4. 保存 `.rp`，交付时报告实际对照结论；未能观察预览或用户推迟验证时列为待验，不报告复刻已验证。
+`draft/build` 生成剪贴板 JSON，不是原生文件。RP9 中打开新工作工程后执行：
 
-## 常见失败
+```sh
+python3 tools/rp9_place.py /absolute/path/to/new-working-project.rp --axvg outputs/screenshot/page.axvg.json
+```
 
-- 粘贴无效果/菜单灰：见 [故障排查](troubleshooting.md) 的剪贴板刷新步骤。
-- 饼图楔形错位：检查所有楔形是否共用同一 rect（同心同半径是硬约束）。
-- 文本溢出：text 宽度给足，多行文案拆成每行一个 text。
-- 元素被盖：调整生成顺序，后生成的在上层。
+该工具清空指定工作工程当前页、粘贴、对齐并保存，请使用新工程。RP11 使用 `node scripts/axvg.mjs paste outputs/screenshot/page.axvg.json --version 11` 后在 Axure 保存。
+
+## 核对实际预览
+
+```sh
+node scripts/trace.mjs verify outputs/screenshot/draft.spec.json --source examples/screenshot/source.png --scale 1 --preview /absolute/path/to/axure-preview.png -o outputs/host-comparison
+```
+
+没有 `--preview` 时只比较本地薄页；另有 `axure_preview_mae_per_255` 才表示 Axure 实际预览比较。`pixel_similarity_pct = 100 × (1 − MAE/255)`，不是 OCR 准确率或逐像素相等率。
+
+图片元件能单独移动不代表内部图案已矢量化，静态截图也无法恢复业务逻辑。RP9 斜线使用 `--safe-lines`。耗时应交代缓存、尺寸、OCR 及是否包含 GUI 落盘。
+
+源图和移动示例由 [generate-assets.py](../examples/generate-assets.py) 自行绘制，不含第三方网页、聊天、头像、官方手机模型或字体文件。

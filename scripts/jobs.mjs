@@ -5,6 +5,7 @@ import { dirname, basename, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertNotProtected, assertWritable } from './engine.mjs';
 import { readRp } from './rp-read.mjs';
+import { resolvePasteTarget } from './version.mjs';
 
 const HELPER = fileURLToPath(new URL('./gui-roundtrip.swift', import.meta.url));
 
@@ -23,8 +24,8 @@ export class JobManager {
     return structuredClone(data);
   }
 
-  async startRoundtrip({ source, output, wait = false }) {
-    if (process.platform !== 'darwin') throw new Error('GUI roundtrip 当前仅支持 macOS / Axure RP 11');
+  async startRoundtrip({ source, output, wait = false, version }) {
+    if (process.platform !== 'darwin') throw new Error('GUI roundtrip 当前仅支持 macOS');
     assertNotProtected(source); assertWritable(output);
     // 不先做词法归一化；link/.. 必须按操作系统的真实路径顺序解析。
     source = realpathSync.native(source); output = join(realpathSync.native(dirname(output)), basename(output));
@@ -32,9 +33,12 @@ export class JobManager {
     if (extname(source).toLowerCase() !== '.rp' || extname(output).toLowerCase() !== '.rp') throw new Error('source/output 必须是 .rp');
     const before = readRp(readFileSync(source));
     if (before.records.unparseable || before.counts.danglingRefs || before.counts.problems) throw new Error('源文件结构检查失败，拒绝 GUI job');
+    // 宿主版本：显式参数 > 源文件版本。双版本并行时不能靠「第一个 Axure 进程」。
+    const host = resolvePasteTarget({ version: version ?? before.version });
     copyFileSync(source, output, constants.COPYFILE_EXCL);
     const id = randomUUID();
-    const job = { id, type: 'gui-roundtrip', source, output, status: 'queued', stdout: '', stderr: '', phase: 'queued', validation: null };
+    const job = { id, type: 'gui-roundtrip', source, output, host: { version: host.version, label: host.label, bundleId: host.bundleId },
+      status: 'queued', stdout: '', stderr: '', phase: 'queued', validation: null };
     job.done = new Promise(resolveDone => { job.finish = resolveDone; });
     this.jobs.set(id, job);
     setImmediate(() => this.pump());
@@ -52,7 +56,7 @@ export class JobManager {
     try {
       assertNotProtected(job.output); assertWritable(job.output);
       originalMtime = statSync(job.output).mtimeMs;
-      job.child = this.runner([job.output]);
+      job.child = this.runner([job.output, String(job.host.version)]);
       job.child.stdout.on('data', chunk => { job.stdout += chunk.toString(); });
       job.child.stderr.on('data', chunk => {
         job.stderr += chunk.toString();

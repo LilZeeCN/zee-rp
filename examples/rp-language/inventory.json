@@ -1,0 +1,211 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "库存主从语言样本",
+  "theme": "mobile-lowfi",
+  "domain": "test",
+  "pages": [
+    {
+      "id": "browse",
+      "name": "库存列表",
+      "canvas": {
+        "w": 600,
+        "h": 640
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "grid",
+        "gap": 12,
+        "padding": 16,
+        "fill": "$surface",
+        "children": [
+          {
+            "type": "use",
+            "id": "first",
+            "component": "RoomCard",
+            "args": {
+              "item": {
+                "id": "room-a",
+                "title": "图书馆研讨室 A",
+                "category": "四人间",
+                "description": "一层东区，配备白板。"
+              }
+            }
+          },
+          {
+            "type": "use",
+            "id": "second",
+            "component": "RoomCard",
+            "args": {
+              "item": {
+                "id": "room-b",
+                "title": "创新楼会议室 B",
+                "category": "八人间",
+                "description": "三层南区，配备投影。"
+              }
+            }
+          }
+        ],
+        "columns": 2
+      }
+    },
+    {
+      "id": "detail",
+      "name": "库存详情",
+      "canvas": {
+        "w": 600,
+        "h": 640
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "column",
+        "gap": 12,
+        "padding": 16,
+        "fill": "$surface",
+        "children": [
+          {
+            "type": "label",
+            "id": "heading",
+            "text": "场地信息",
+            "w": "fill",
+            "h": 24,
+            "fontSize": 20,
+            "fontWeight": 700
+          },
+          {
+            "type": "label",
+            "id": "title",
+            "text": "加载场地",
+            "w": "fill",
+            "h": 24
+          },
+          {
+            "type": "label",
+            "id": "category",
+            "text": "加载类型",
+            "w": "fill",
+            "h": 24
+          },
+          {
+            "type": "label",
+            "id": "description",
+            "text": "加载说明",
+            "w": "fill",
+            "h": 24
+          },
+          {
+            "type": "button",
+            "id": "back",
+            "text": "返回库存",
+            "w": "fill",
+            "h": 36,
+            "on": {
+              "click": [
+                {
+                  "type": "link",
+                  "page": "browse"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "bindings": [
+        {
+          "dataset": "rooms",
+          "key": "id",
+          "variable": "selectedItem",
+          "targets": {
+            "title": "title",
+            "category": "category",
+            "description": "description"
+          }
+        }
+      ]
+    }
+  ],
+  "models": {
+    "Item": {
+      "id": "text",
+      "title": "text",
+      "category": "text",
+      "description": "text"
+    }
+  },
+  "datasets": {
+    "rooms": {
+      "model": "Item",
+      "rows": [
+        {
+          "id": "room-a",
+          "title": "图书馆研讨室 A",
+          "category": "四人间",
+          "description": "一层东区，配备白板。"
+        },
+        {
+          "id": "room-b",
+          "title": "创新楼会议室 B",
+          "category": "八人间",
+          "description": "三层南区，配备投影。"
+        }
+      ]
+    }
+  },
+  "variables": {
+    "selectedItem": {
+      "type": "text",
+      "value": "room-a"
+    }
+  },
+  "components": {
+    "RoomCard": {
+      "params": {
+        "item": "Item"
+      },
+      "root": {
+        "type": "box",
+        "id": "card",
+        "layout": "column",
+        "gap": 12,
+        "padding": 16,
+        "fill": "$surface",
+        "children": [
+          {
+            "type": "label",
+            "id": "title",
+            "text": {
+              "$": "item.title"
+            },
+            "w": "fill",
+            "h": 24
+          },
+          {
+            "type": "button",
+            "id": "open",
+            "text": "查看详情",
+            "w": "fill",
+            "h": 36,
+            "on": {
+              "click": [
+                {
+                  "type": "set-variable",
+                  "variable": "selectedItem",
+                  "value": {
+                    "$": "item.id"
+                  }
+                },
+                {
+                  "type": "link",
+                  "page": "detail"
+                }
+              ]
+            }
+          }
+        ],
+        "h": 120
+      }
+    }
+  }
+}

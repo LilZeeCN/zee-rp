@@ -8,13 +8,17 @@ import { readRp } from './rp-read.mjs';
 import { closureOf, cloneInto } from './clone-closure.mjs';
 import { guidKey } from './duplicate-page.mjs';
 import { removePanelStateContent, resolvePanelState } from './remove-panel-state-content.mjs';
+import { fixPanelRegistry } from './fix-panel-registry.mjs';
+import { detectFileVersion } from './version.mjs';
 
 const unique = (items, label) => {
   if (items.length !== 1) throw new Error(`${label} must be unique; found ${items.length}`);
   return items[0];
 };
 
-export function fillPanelState(source, target, { sourcePage, targetPage, targetMaster, panel, state, append = false, replace = false }) {
+export function fillPanelState(source, target, { sourcePage, targetPage, targetMaster, panel, state, append = false, replace = false, version }) {
+  // 目标版本决定克隆体落地前的裁剪；不传时按目标文件头判。
+  const targetVersion = version ?? detectFileVersion(target);
   if (append && replace) throw new Error('append and replace cannot be combined');
   let removal;
   if (replace) {
@@ -205,6 +209,11 @@ export function fillPanelState(source, target, { sourcePage, targetPage, targetM
           let targetScopeId = nonNullScope(field(object.body, 'TargetRepeaterScope')?.value)
             ?? nonNullScope(field(object.body, 'repeater-scope')?.value);
           let targetDataSetId = repeaterToDataSet.has(targetScopeId) ? repeaterToDataSet.get(targetScopeId) : targetScopeId;
+          // scope 指向的既不是本闭包的 repeater、也不是已知数据集时，**必须置空**让下面几条兜底生效。
+          // 原生库的中继器就是这种形状：Repeater.Data 指向一个 DataSet，而单元格字面量的
+          // repeater-scope 指向**另一个** DataSet；此时 targetDataSetId 会是个陌生 id，
+          // 不置空就会直接抛错，把「按列 id 匹配」「expressionOwners」「唯一 repeater」全跳过。
+          if (targetDataSetId && !dataSetToColumns.has(targetDataSetId)) targetDataSetId = undefined;
           if (!targetDataSetId) {
             // Native Item-load literals can carry null scopes; their column identities
             // identify the owning dataset even when multiple repeaters share a name.
@@ -321,7 +330,7 @@ export function fillPanelState(source, target, { sourcePage, targetPage, targetM
   const guids = tg.roots.find(n => n.tag === 0x1e).values;
   if (!guids.includes('0'.repeat(32))) guids.push('0'.repeat(32));
   const strings = [...targetRecord.strings];
-  const clone = cloneInto({ srcGraph: sg, srcStrings: sourceRecord.strings, dstGraph: tg, dstStrings: strings, closure, rootOldId: roots[0] });
+  const clone = cloneInto({ srcGraph: sg, srcStrings: sourceRecord.strings, dstGraph: tg, dstStrings: strings, closure, rootOldId: roots[0], version: targetVersion });
   for (const oldId of closure) {
     const old = sg.objects.get(oldId), current = tg.objects.get(clone.idMap.get(oldId));
     if (!old?.className.startsWith('Axure:DiagramObject:')) continue;
@@ -421,7 +430,7 @@ export function fillPanelState(source, target, { sourcePage, targetPage, targetM
         const name = field(pkg.info.body, 'package-name').text;
         if (names.has(name)) throw new Error(`Imported master name already exists: ${name}`);
         names.add(name);
-        const infoClone = cloneInto({ srcGraph: sourceDoc, srcStrings: sourceDocRecord.strings, dstGraph: doc, dstStrings: docStrings, closure: closureOf(sourceDoc, pkg.info.id) });
+        const infoClone = cloneInto({ srcGraph: sourceDoc, srcStrings: sourceDocRecord.strings, dstGraph: doc, dstStrings: docStrings, closure: closureOf(sourceDoc, pkg.info.id), version: targetVersion });
         for (const [oldIndex, mapped] of infoClone.guidMap)
           docGuids[mapped.index - 1] = mapIdentity(sourceDocGuids[oldIndex - 1]);
         const info = doc.objects.get(infoClone.rootNewId);
@@ -483,7 +492,8 @@ export function fillPanelState(source, target, { sourcePage, targetPage, targetM
     }
     output = Buffer.concat([encodeManifest(output, manifest.value), output.subarray(manifest.dataStart)]);
   }
-  return { file: output, report: { sourcePage, ...(targetMaster ? { targetMaster } : { targetPage }), panel, state, append, replace, ...(removal ? { removal } : {}), record: targetRecord.index, roots: roots.length, objects: clone.created.length, statePackages: packages.size, masterPackages: masters.size } };
+  const panelRegistry = fixPanelRegistry(output);
+  return { file: panelRegistry.file, report: { sourcePage, ...(targetMaster ? { targetMaster } : { targetPage }), panel, state, append, replace, ...(removal ? { removal } : {}), record: targetRecord.index, roots: roots.length, objects: clone.created.length, statePackages: packages.size, masterPackages: masters.size, panelRegistry: panelRegistry.report } };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

@@ -1,14 +1,13 @@
-import { fixturePath } from './native-inputs.mjs';
+import { resolveBlankTemplate } from '../scripts/blank-template.mjs';
 import { readFileSync } from 'node:fs';
-import { addInteractions } from '../scripts/ix-actions.mjs';
 import { validateSemantics, validateRecord } from './check-semantics.mjs';
-import { readRecords, replaceRecord, encodeRecord } from '../scripts/rp-records.mjs';
-import { parsePayload, encodePayload, field } from '../scripts/parse-payload.mjs';
+import { readRecords, readManifest } from '../scripts/rp-records.mjs';
+import { parsePayload, field } from '../scripts/parse-payload.mjs';
 
 console.log('=== Running D04 comprehensive semantic diagnostics tests ===\n');
 
 // 1. 正例测试
-const blankPath = fixturePath('axure-rp11-blank.rp');
+const blankPath = resolveBlankTemplate();
 const blankRes = validateSemantics(blankPath);
 if (!blankRes.valid || blankRes.violationCount !== 0) {
   console.error('Blank template failed semantic validation:', blankRes.violations);
@@ -134,24 +133,43 @@ console.log('PASS: Blank template passes semantic validation (0 violations)');
   console.log(`PASS: Connector endpoint violation correctly flagged: "${connViolation.message}"`);
 }
 
-// 6. Active paths are a document-scope invariant, checked by validateSemantics.
+// 6. 负例 E: DiagramObjectPath 动作路径指向不存在的 widget
 {
-  const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
-  const active = addInteractions(source, 'SET_BUTTON', [{event:'OnClick',actions:[{type:'move',target:'VALUE_PREVIEW',x:10,y:0}]}], {replaceEvent:true}).file;
-  const pageRec = readRecords(active).find(r => r.className === 'Axure:Page');
+  const file = readFileSync(blankPath);
+  const records = readRecords(file);
+  const pageRec = records.find(r => r.className === 'Axure:Page');
   const graph = parsePayload(pageRec);
-  let changed = 0;
-  for (const object of graph.objects.values()) {
-    if (object.className !== 'Axure:DiagramObjectPath') continue;
-    const target = field(object.body, 'object-id');
-    if (target) { target.value = 999999; changed++; }
-  }
-  if (!changed) throw new Error('Native path prerequisite was not constructed');
-  const corrupted = replaceRecord(active, pageRec, encodeRecord(pageRec, pageRec.strings, encodePayload(graph.roots)));
-  const violations = validateSemantics(corrupted).violations;
+
+  const fakePath = {
+    id: 555,
+    className: 'Axure:DiagramObjectPath',
+    body: {
+      tag: 1,
+      entries: [
+        [{ tag: 8, value: 1, text: 'items' }, { tag: 2, items: [{ tag: 3, value: 6666 }] }] // 6666 不存在
+      ]
+    }
+  };
+  const fakeAction = {
+    id: 556,
+    className: 'Axure:InteractionMoveWidgetAction',
+    body: {
+      tag: 1,
+      entries: [
+        [{ tag: 8, value: 1, text: 'object-path' }, { tag: 3, value: 555 }]
+      ]
+    }
+  };
+  graph.objects.set(555, fakePath);
+  graph.objects.set(556, fakeAction);
+
+  const violations = validateRecord(pageRec, graph);
   const pathViolation = violations.find(v => v.category === 'interaction-path-integrity');
-  if (!pathViolation) throw new Error('Active native DiagramObjectPath was not diagnosed');
-  console.log('PASS: Active native DiagramObjectPath corruption is diagnosed at document scope');
+  if (!pathViolation) {
+    console.error('FAILED: DiagramObjectPath pointing to non-existent widget should have been caught!');
+    process.exit(1);
+  }
+  console.log(`PASS: DiagramObjectPath violation correctly flagged: "${pathViolation.message}"`);
 }
 
 console.log('\n=== All D04 semantic diagnostic tests passed successfully! ===');

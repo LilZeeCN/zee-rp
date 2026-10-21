@@ -1,0 +1,61 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "Counter",
+  "variables": {
+    "count": {
+      "type": "number",
+      "value": 0
+    }
+  },
+  "pages": [
+    {
+      "id": "home",
+      "name": "Counter",
+      "canvas": {
+        "w": 420,
+        "h": 260
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "column",
+        "padding": 24,
+        "gap": 16,
+        "w": 420,
+        "h": 260,
+        "children": [
+          {
+            "type": "label",
+            "id": "title",
+            "text": "Editable counter",
+            "fontSize": 22,
+            "w": 350,
+            "h": 36
+          },
+          {
+            "type": "label",
+            "id": "value",
+            "text": "='Count: ' + text(var.count)",
+            "w": 350,
+            "h": 32
+          },
+          {
+            "type": "button",
+            "id": "increment",
+            "text": "Add one",
+            "w": 200,
+            "h": 44,
+            "onClick": [
+              {
+                "set": {
+                  "$count": "=var.count + 1"
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

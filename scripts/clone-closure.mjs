@@ -16,6 +16,7 @@
 // 参考实现见 research-rp/round4/add-repeater.mjs。
 import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
+import { adaptNodesForVersion } from './version-adapt.mjs';
 import { readRecords } from './rp-records.mjs';
 import { parsePayload, field } from './parse-payload.mjs';
 
@@ -44,7 +45,7 @@ export function closureOf(graph, rootId) {
 }
 
 // 把闭包从源图克隆进目标图，返回新对象 id 列表与新 GUID 映射
-export function cloneInto({ srcGraph, srcStrings, dstGraph, dstStrings, closure, rootOldId }) {
+export function cloneInto({ srcGraph, srcStrings, dstGraph, dstStrings, closure, rootOldId, version }) {
   // 1) 列出待克隆的对象；新 id 随后与目标 GUID 表索引一起分配。
   //    闭包是 Set，迭代顺序不保证，所以先固定成一个数组，后续一律按它走。
   const ids = [...closure].filter(id => srcGraph.objects.has(id));
@@ -115,6 +116,11 @@ export function cloneInto({ srcGraph, srcStrings, dstGraph, dstStrings, closure,
     if (!src) continue;
     created.push(clone({ tag: 9, ...src }));
   }
+  // 跨版本克隆时（如 RP 11 源 → RP 9 目标），克隆体会原样带着 RP 11 专属键。
+  // 三零查不出这类问题，必须在落地前按目标版本裁剪。version 不传时按原样保留（旧行为）。
+  const versionAdaptations = version
+    ? adaptNodesForVersion(created, { version })
+    : [];
   for (const c of created) dstGraph.objects.set(c.id, c);
-  return { created, idMap, guidMap, rootNewId: idMap.get(rootOldId) };
+  return { created, idMap, guidMap, rootNewId: idMap.get(rootOldId), versionAdaptations };
 }

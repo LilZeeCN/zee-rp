@@ -1,22 +1,19 @@
-# Capability boundaries
+# 能力与验证边界
 
-Updated 2026-10-13 for zee-rp 0.1.1. **31 CLI commands / 43 MCP tools.** The source reflects the 2026-10-12 implementation, plus the public CLI/MCP and packaging fixes in the changelog. All capabilities are scoped to supported inputs; no arbitrary-document guarantee is implied.
+公开版 0.2.0，2026-10-21。用法见 [README](../README.zh-CN.md)，实际发布检查见 [verification](../docs/verification.md)。
 
-| Area | Public implementation | Evidence and limits |
-| --- | --- | --- |
-| Records, payloads and reading | `rp-records`, `parse-payload`, `rp-read` | Compressed native RP 11 inputs; uncompressed manifest writing is unsupported. Parse/three-zero health is not native acceptance. |
-| Blank projects and pages | `blank-template`, `create-blank-project`, `create-blank-page`, `duplicate-page` | User-provided real blank template; new page/widget/container identities are remapped. Specific historical GUI samples exist. |
-| Native widgets and containers | `clone-closure`, `clone-library-widget`, `clone-library-page-content`, panel/state writers | Clone genuine local templates. Closure/scope checks deliberately reject unsupported external references and actions. |
-| Masters | `create-master`, `place-master`, `set-master-overrides` | Existing native template-based definitions/instances; recent closure fixes are offline-validated. Overrides cover supported Text/Image values, not arbitrary styles/defaults. |
-| Expressions and interactions | `ix-actions`, `add-interaction`, `remove-interaction`, `expr-schema` | Recursive binary expressions and a registered FCall contract. Unknown functions, Concat FCall, independent refresh-repeater, and unsupported candidate-set literals are rejected. Different functions/targets need native behavior checks. |
-| Variables | `create-global-variable`, `set-global-variable` action | Named variable/default writes and GUID lookup. New writer is offline-validated; it is exposed in CLI/MCP. |
-| Rich text and tables | `set-widget-richtext`, `set-native-table`, `encodeStyleEntry` | Multi-run styles, supported links, line spacing, native list levels, wrapping/trimming; table multi-run cells. Numbered lists and true native merged cells are not provided. Visual merges use overlays. Latest parameters have offline evidence only. |
-| Form controls and images | text writers, `set-listbox-options`, library closure cloning | Supported native widgets/assets from the user's documents; no guarantee for every image format/state/container. |
-| Connectors | `clone-native-connector`, `set-connector-anchors` | Supported same-diagram/native custom-point/nested-source closure. Cross-state/scope constraints apply. Recent custom-anchor support is offline-validated. |
-| Adaptive views and repeaters | `add-adaptive-view`, repeater actions and clone closure | Specific historical sample acceptance; scoped datasets and single-column expression forms. No universal multi-column rule builder. |
-| Static canvas | `axvg` | Public specification compiler; native paste requires a running Axure canvas. Reference SVG is a separate authored preview. |
-| MCP sessions and jobs | `mcp-tools`, `jobs`, `gui-roundtrip.swift` | CLI tools + sessions + jobs. Mock job tests verify orchestration, not actual GUI behavior. Native GUI jobs require macOS and Accessibility permission. |
+| 能力 | 当前范围 |
+| --- | --- |
+| 图片转布局 | OCR、几何与媒体分层、图表、成稿、改字与视觉核验；需 macOS Vision、Swift 与 Python 包。复杂图像并非全部矢量。 |
+| 原生读写 | RP9/RP11 版本感知读取与编辑；页、文字、富文本、交互、面板、母版、表格、连接线、中继器工具。只承诺已支持字段和操作。 |
+| RP/1 | JSON/文本语法、类型/引用检查、布局、主题、组件、输入、面板、中继器、数据、表达式及规则。近期原生行为证据限 macOS RP9 指定样本。 |
+| 详情选择 | 指定样本的连续新增、修改、删除已验；selection-scan 仍是运行时 O(n) 扫描。选中行快照不代表全数据集跨页持久化。 |
+| RP/1 母版 | 基础文字、按钮、输入与导航；含动态面板/中继器的母版明确拒绝。 |
+| RP/1 自适应 | 页元件有限数值 x/y/w/h 覆盖；模板内覆盖暂时拒绝，不承诺任意响应式重排。 |
+| 导回与合并 | 当前已支持字段的提取和三方合并，不承诺任意工程无损往返。 |
+| HTML 辅助 | 浏览器提取 DOM 几何样式后映射规格；不是完整网站业务迁移器。 |
+| 验证 | 结构、模拟、表达式 Oracle、实际预览、GUI 修改及保存重开分别记录。 |
 
-[Generated commands](commands-generated.md) lists actual CLI arguments and all production libraries. [Validation](../docs/validation.md) documents reproducible public checks, native inputs, historical fingerprints, and the independent evidence levels. [Historical detailed capability notes](../docs/historical-capabilities.md) preserve the earlier sample-specific findings; raw internal evidence is not part of this distribution.
+历史 90 轮 GUI 证据未全部达到新门禁，历史首次成功申报 83/90 保留，外部真人试用为 0。不发布“100 分”或“任意场景全部可靠”的结论。
 
-Neither the historical 225/67 assertions nor the default test count is a feature coverage percentage. New offline checks do not close outstanding native loading, preview, or GUI edit/save/reopen work.
+模板、官方元件库与运行时由使用者本机提供；系统字体只在本机调用。移动示例使用原创简化几何，设备名称仅作规格兼容别名。

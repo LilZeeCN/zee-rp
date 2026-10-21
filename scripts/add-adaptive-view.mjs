@@ -21,6 +21,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
 import { parsePayload, encodePayload, field } from './parse-payload.mjs';
+import { detectFileVersion } from './version.mjs';
 
 const args = process.argv.slice(2);
 const overrides = [];
@@ -30,6 +31,9 @@ for (let i = 0; i < args.length; i++) {
   else positional.push(args[i]);
 }
 const [src, dst, ...breaks] = positional;
+const srcVersion = (() => { try { return detectFileVersion(readFileSync(src)); } catch { return 11; } })();
+// RP 11 原生 AdaptiveView 有 Cursor 键；RP 9 原生没有，写进去就是版本专属键。
+const adaptiveViewExtra = srcVersion === 9 ? [] : [['Cursor', int(1)]];
 const WIDTHS = (breaks.length ? breaks : ['768', '1024']).map(Number);
 // 解析 --override: "V768:TESTRECT:w=450,h=200" → {view:'V768', widget:'TESTRECT', props:{w:450,h:200}}
 const overrideSpec = s => {
@@ -98,13 +102,13 @@ const baseView = obj(baseViewObjId, 'Axure:AdaptiveView', [
   ['Id', id11(baseViewId)],
   ['Size', dictOf([[str('Width'), f64(0)], [str('Height'), f64(0)]])],
   ['Name', str('')], ['BaseViewId', id11(baseViewId)], ['BaseViewName', str('')],
-  ['Cursor', int(1)], ['ParentAdaptiveViewSet', ref(setObjId)]
+  ...adaptiveViewExtra, ['ParentAdaptiveViewSet', ref(setObjId)]
 ]);
 const childViews = specs.map((sp, i) => obj(childObjIds[i], 'Axure:AdaptiveView', [
   ['Id', id11(sp.id)],
   ['Size', dictOf([[str('Width'), f64(sp.width)], [str('Height'), f64(0)]])],
   ['Name', str(sp.name)], ['BaseViewId', id11(baseViewId)], ['BaseViewName', str('')],
-  ['Cursor', int(1)], ['ParentAdaptiveViewSet', ref(setObjId)]
+  ...adaptiveViewExtra, ['ParentAdaptiveViewSet', ref(setObjId)]
 ]));
 const set = obj(setObjId, 'Axure:AdaptiveViewSet', [
   ['Id', id11(setId)], ['Name', str('')],
@@ -244,7 +248,10 @@ const pagePatch = records => {
     const wname = o => { const t = field(field(o.body, 'name-block') ?? {}, 'text'); return t?.tag === 8 ? t.text : ''; };
     for (const ov of overrideList) {
       const targetWidget = [...widgets].find(w => wname(w) === ov.widget);
-      const perView = widgetPlaceholders.get(targetWidget?.id ?? -1);
+      // override 是逐页尝试的：元件本来就不在这一页时静默跳过，
+      // 只有「这一页有这个元件、却没拿到该视图的占位样式」才值得报警。
+      if (!targetWidget) continue;
+      const perView = widgetPlaceholders.get(targetWidget.id);
       const styleObj = perView?.[ov.view];
       if (!styleObj) { console.error(`⚠️ override 目标未找到: ${ov.view}/${ov.widget}（页#${r.index}）`); continue; }
       const pl = field(styleObj.body, 'PropList');

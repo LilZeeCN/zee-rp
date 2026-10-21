@@ -1,0 +1,409 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "预约流程语言样本",
+  "theme": "mobile-lowfi",
+  "domain": "test",
+  "pages": [
+    {
+      "id": "browse",
+      "name": "场地预约",
+      "canvas": {
+        "w": 600,
+        "h": 640
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "column",
+        "gap": 12,
+        "padding": 16,
+        "fill": "$surface",
+        "children": [
+          {
+            "type": "label",
+            "id": "heading",
+            "text": "选择预约场地",
+            "w": "fill",
+            "h": 24,
+            "fontSize": 20,
+            "fontWeight": 700
+          },
+          {
+            "type": "repeat",
+            "id": "rooms",
+            "dataset": "rooms",
+            "as": "room",
+            "key": "id",
+            "w": "fill",
+            "h": 240,
+            "template": {
+              "type": "use",
+              "id": "instance",
+              "component": "RoomCard",
+              "args": {
+                "item": {
+                  "$": "room"
+                }
+              }
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail",
+      "name": "场地详情",
+      "canvas": {
+        "w": 600,
+        "h": 640
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "column",
+        "gap": 12,
+        "padding": 16,
+        "fill": "$surface",
+        "children": [
+          {
+            "type": "label",
+            "id": "heading",
+            "text": "场地信息",
+            "w": "fill",
+            "h": 24,
+            "fontSize": 20,
+            "fontWeight": 700
+          },
+          {
+            "type": "label",
+            "id": "title",
+            "text": "加载场地",
+            "w": "fill",
+            "h": 24
+          },
+          {
+            "type": "label",
+            "id": "category",
+            "text": "加载类型",
+            "w": "fill",
+            "h": 24
+          },
+          {
+            "type": "label",
+            "id": "description",
+            "text": "加载说明",
+            "w": "fill",
+            "h": 24
+          },
+          {
+            "type": "button",
+            "id": "reserve",
+            "text": "填写预约",
+            "w": "fill",
+            "h": 36,
+            "on": {
+              "click": [
+                {
+                  "type": "link",
+                  "page": "form"
+                }
+              ]
+            }
+          },
+          {
+            "type": "button",
+            "id": "back",
+            "text": "返回列表",
+            "w": "fill",
+            "h": 36,
+            "on": {
+              "click": [
+                {
+                  "type": "link",
+                  "page": "browse"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "bindings": [
+        {
+          "dataset": "rooms",
+          "key": "id",
+          "variable": "selectedItem",
+          "targets": {
+            "title": "title",
+            "category": "category",
+            "description": "description"
+          }
+        }
+      ]
+    },
+    {
+      "id": "form",
+      "name": "提交预约",
+      "canvas": {
+        "w": 600,
+        "h": 640
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "column",
+        "gap": 12,
+        "padding": 16,
+        "fill": "$surface",
+        "children": [
+          {
+            "type": "label",
+            "id": "heading",
+            "text": "确认预约",
+            "w": "fill",
+            "h": 24,
+            "fontSize": 20,
+            "fontWeight": 700
+          },
+          {
+            "type": "label",
+            "id": "status",
+            "text": "等待填写",
+            "w": "fill",
+            "h": 24
+          },
+          {
+            "type": "dynamic-panel",
+            "id": "editor",
+            "w": "fill",
+            "h": 240,
+            "states": [
+              {
+                "id": "editing",
+                "root": {
+                  "type": "box",
+                  "id": "content",
+                  "layout": "column",
+                  "gap": 12,
+                  "padding": 16,
+                  "fill": "$surface",
+                  "children": [
+                    {
+                      "type": "label",
+                      "id": "hint",
+                      "text": "预约说明",
+                      "w": "fill",
+                      "h": 24
+                    },
+                    {
+                      "type": "input",
+                      "id": "field",
+                      "value": "",
+                      "w": "fill",
+                      "h": 36
+                    },
+                    {
+                      "type": "button",
+                      "id": "submit",
+                      "text": "提交预约",
+                      "w": "fill",
+                      "h": 36,
+                      "on": {
+                        "click": {
+                          "cases": [
+                            {
+                              "when": {
+                                "left": {
+                                  "widget": {
+                                    "ref": "field"
+                                  }
+                                },
+                                "op": "==",
+                                "right": ""
+                              },
+                              "actions": [
+                                {
+                                  "type": "set-text",
+                                  "target": {
+                                    "ref": "form/status"
+                                  },
+                                  "text": "请输入预约说明"
+                                }
+                              ]
+                            },
+                            {
+                              "else": true,
+                              "actions": [
+                                {
+                                  "type": "set-text",
+                                  "target": {
+                                    "ref": "form/status"
+                                  },
+                                  "text": "预约已提交"
+                                },
+                                {
+                                  "type": "set-panel-state",
+                                  "target": {
+                                    "ref": "form/editor"
+                                  },
+                                  "state": "complete"
+                                }
+                              ]
+                            }
+                          ]
+                        }
+                      },
+                      "variant": "primary"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "complete",
+                "root": {
+                  "type": "box",
+                  "id": "content",
+                  "layout": "column",
+                  "gap": 12,
+                  "padding": 16,
+                  "fill": "$surface",
+                  "children": [
+                    {
+                      "type": "label",
+                      "id": "success",
+                      "text": "提交成功",
+                      "w": "fill",
+                      "h": 24
+                    },
+                    {
+                      "type": "button",
+                      "id": "reset",
+                      "text": "再预约一次",
+                      "w": "fill",
+                      "h": 36,
+                      "on": {
+                        "click": [
+                          {
+                            "type": "set-text",
+                            "target": {
+                              "ref": "form/editor/editing/field"
+                            },
+                            "text": ""
+                          },
+                          {
+                            "type": "set-panel-state",
+                            "target": {
+                              "ref": "form/editor"
+                            },
+                            "state": "editing"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "type": "button",
+            "id": "back",
+            "text": "返回详情",
+            "w": "fill",
+            "h": 36,
+            "on": {
+              "click": [
+                {
+                  "type": "link",
+                  "page": "detail"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ],
+  "models": {
+    "Item": {
+      "id": "text",
+      "title": "text",
+      "category": "text",
+      "description": "text"
+    }
+  },
+  "datasets": {
+    "rooms": {
+      "model": "Item",
+      "rows": [
+        {
+          "id": "room-a",
+          "title": "图书馆研讨室 A",
+          "category": "四人间",
+          "description": "一层东区，配备白板。"
+        },
+        {
+          "id": "room-b",
+          "title": "创新楼会议室 B",
+          "category": "八人间",
+          "description": "三层南区，配备投影。"
+        }
+      ]
+    }
+  },
+  "variables": {
+    "selectedItem": {
+      "type": "text",
+      "value": "room-a"
+    }
+  },
+  "components": {
+    "RoomCard": {
+      "params": {
+        "item": "Item"
+      },
+      "root": {
+        "type": "box",
+        "id": "card",
+        "layout": "column",
+        "gap": 12,
+        "padding": 16,
+        "fill": "$surface",
+        "children": [
+          {
+            "type": "label",
+            "id": "title",
+            "text": {
+              "$": "item.title"
+            },
+            "w": "fill",
+            "h": 24
+          },
+          {
+            "type": "button",
+            "id": "open",
+            "text": "查看详情",
+            "w": "fill",
+            "h": 36,
+            "on": {
+              "click": [
+                {
+                  "type": "set-variable",
+                  "variable": "selectedItem",
+                  "value": {
+                    "$": "item.id"
+                  }
+                },
+                {
+                  "type": "link",
+                  "page": "detail"
+                }
+              ]
+            }
+          }
+        ],
+        "h": 120
+      }
+    }
+  }
+}

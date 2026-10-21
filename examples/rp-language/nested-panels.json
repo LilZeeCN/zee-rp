@@ -1,0 +1,163 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "嵌套面板",
+  "theme": "mobile-lowfi",
+  "pages": [
+    {
+      "id": "nested",
+      "name": "嵌套状态",
+      "canvas": {
+        "w": 600,
+        "h": 600
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "column",
+        "padding": 16,
+        "gap": 12,
+        "children": [
+          {
+            "type": "label",
+            "id": "status",
+            "text": "等待编辑",
+            "w": "fill",
+            "h": 28
+          },
+          {
+            "type": "dynamic-panel",
+            "id": "outer",
+            "w": 560,
+            "h": 300,
+            "states": [
+              {
+                "id": "editing",
+                "root": {
+                  "type": "box",
+                  "id": "content",
+                  "layout": "column",
+                  "padding": 12,
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "label",
+                      "id": "label",
+                      "text": "外层编辑状态",
+                      "h": 28
+                    },
+                    {
+                      "type": "dynamic-panel",
+                      "id": "inner",
+                      "w": 500,
+                      "h": 180,
+                      "states": [
+                        {
+                          "id": "form",
+                          "root": {
+                            "type": "box",
+                            "id": "body",
+                            "layout": "column",
+                            "gap": 12,
+                            "children": [
+                              {
+                                "type": "input",
+                                "id": "field",
+                                "value": "来自内层输入",
+                                "w": 400,
+                                "h": 36
+                              },
+                              {
+                                "type": "button",
+                                "id": "commit",
+                                "text": "完成外层",
+                                "w": 140,
+                                "h": 36,
+                                "on": {
+                                  "click": [
+                                    {
+                                      "type": "set-text",
+                                      "target": {
+                                        "ref": "nested/status"
+                                      },
+                                      "text": {
+                                        "widget": {
+                                          "ref": "field"
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": "set-panel-state",
+                                      "target": {
+                                        "ref": "nested/outer"
+                                      },
+                                      "state": "done"
+                                    }
+                                  ]
+                                }
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "id": "alternate",
+                          "root": {
+                            "type": "label",
+                            "id": "alternateLabel",
+                            "text": "备用状态"
+                          }
+                        }
+                      ]
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "done",
+                "root": {
+                  "type": "box",
+                  "id": "body",
+                  "layout": "column",
+                  "gap": 12,
+                  "children": [
+                    {
+                      "type": "label",
+                      "id": "success",
+                      "text": "外层已完成",
+                      "h": 28
+                    },
+                    {
+                      "type": "button",
+                      "id": "reset",
+                      "text": "返回内层",
+                      "w": 140,
+                      "h": 36,
+                      "on": {
+                        "click": [
+                          {
+                            "type": "set-text",
+                            "target": {
+                              "ref": "nested/outer/editing/inner/form/field"
+                            },
+                            "text": ""
+                          },
+                          {
+                            "type": "set-panel-state",
+                            "target": {
+                              "ref": "nested/outer"
+                            },
+                            "state": "editing"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

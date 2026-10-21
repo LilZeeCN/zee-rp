@@ -1,0 +1,240 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "Native visual consistency acceptance",
+  "theme": "enterprise-light",
+  "domain": "test",
+  "models": {
+    "Row": {
+      "id": "text",
+      "title": "text",
+      "qty": "number"
+    }
+  },
+  "datasets": {
+    "rows": {
+      "model": "Row",
+      "rows": [
+        {
+          "id": "A",
+          "title": "原生行 A",
+          "qty": 1
+        },
+        {
+          "id": "B",
+          "title": "原生行 B",
+          "qty": 2
+        }
+      ]
+    }
+  },
+  "pages": [
+    {
+      "id": "visual01",
+      "name": "Visual01",
+      "canvas": {
+        "w": 390,
+        "h": 780
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "column",
+        "padding": 24,
+        "gap": 16,
+        "fill": "#F1F5F9",
+        "children": [
+          {
+            "type": "label",
+            "id": "heading",
+            "text": "VISUAL 01 / 390px",
+            "fontSize": 24,
+            "fontWeight": 700,
+            "color": "#173A63",
+            "w": "fill",
+            "h": 40
+          },
+          {
+            "type": "input",
+            "id": "field",
+            "value": "初值",
+            "placeholder": "独立提示",
+            "w": "fill",
+            "h": 48,
+            "fontSize": 16,
+            "fontWeight": 700,
+            "color": "#173A63",
+            "align": "left",
+            "textPaddingX": 12,
+            "fill": "#EDF4FF",
+            "stroke": "#819ABB",
+            "radius": 12
+          },
+          {
+            "type": "button",
+            "id": "echo",
+            "text": "读取输入",
+            "w": 160,
+            "h": 40,
+            "onClick": {
+              "type": "set-text",
+              "target": {
+                "ref": "output"
+              },
+              "text": "=widget.field"
+            }
+          },
+          {
+            "type": "label",
+            "id": "output",
+            "text": "等待输入",
+            "w": "fill",
+            "h": 28,
+            "color": "#173A63"
+          },
+          {
+            "type": "repeater",
+            "id": "rows",
+            "dataset": "rows",
+            "w": "fill",
+            "h": 160,
+            "rowHeight": 72,
+            "rowGap": 12,
+            "template": {
+              "type": "card",
+              "id": "row",
+              "layout": "row",
+              "padding": 12,
+              "gap": 12,
+              "fill": "#FFFFFF",
+              "radius": 16,
+              "children": [
+                {
+                  "type": "label",
+                  "id": "title",
+                  "text": "=item.title",
+                  "w": "fill",
+                  "h": 32,
+                  "color": "#173A63"
+                },
+                {
+                  "type": "label",
+                  "id": "quantity",
+                  "text": "=text(item.qty)",
+                  "w": 32,
+                  "h": 32,
+                  "color": "#173A63"
+                },
+                {
+                  "type": "button",
+                  "id": "plus",
+                  "text": "+1",
+                  "w": 64,
+                  "h": 36,
+                  "onClick": {
+                    "type": "data-update",
+                    "target": {
+                      "ref": "visual01/rows"
+                    },
+                    "where": "=item.id == caller.id",
+                    "set": {
+                      "qty": "=item.qty + 1"
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "dynamic-panel",
+            "id": "panel",
+            "w": "fill",
+            "h": 140,
+            "states": [
+              {
+                "id": "editing",
+                "root": {
+                  "type": "card",
+                  "id": "content",
+                  "layout": "column",
+                  "padding": 12,
+                  "gap": 8,
+                  "fill": "#FFFFFF",
+                  "radius": 16,
+                  "children": [
+                    {
+                      "type": "input",
+                      "id": "inside",
+                      "value": "",
+                      "placeholder": "面板内输入",
+                      "w": "fill",
+                      "h": 40,
+                      "fontSize": 12,
+                      "fontWeight": 400,
+                      "color": "#173A63",
+                      "align": "left",
+                      "textPaddingX": 12,
+                      "fill": "#EDF4FF",
+                      "stroke": "#819ABB",
+                      "radius": 12
+                    },
+                    {
+                      "type": "button",
+                      "id": "done",
+                      "text": "切换面板",
+                      "w": 160,
+                      "h": 40,
+                      "onClick": {
+                        "type": "set-panel-state",
+                        "target": {
+                          "ref": "visual01/panel"
+                        },
+                        "state": "complete"
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "complete",
+                "root": {
+                  "type": "card",
+                  "id": "content",
+                  "layout": "column",
+                  "padding": 12,
+                  "gap": 8,
+                  "fill": "#FFFFFF",
+                  "radius": 16,
+                  "children": [
+                    {
+                      "type": "label",
+                      "id": "message",
+                      "text": "状态已切换",
+                      "w": "fill",
+                      "h": 24,
+                      "color": "#173A63"
+                    },
+                    {
+                      "type": "button",
+                      "id": "back",
+                      "text": "返回输入",
+                      "w": 160,
+                      "h": 40,
+                      "onClick": {
+                        "type": "set-panel-state",
+                        "target": {
+                          "ref": "visual01/panel"
+                        },
+                        "state": "editing"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

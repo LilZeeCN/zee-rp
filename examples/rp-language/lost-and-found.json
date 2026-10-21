@@ -1,0 +1,177 @@
+{
+  "$schema": "../../references/rp-language.schema.json",
+  "language": "rp/1",
+  "target": 9,
+  "name": "校园失物招领工作台",
+  "domain": "web",
+  "theme": "enterprise-light",
+  "strictAudit": true,
+  "product": {
+    "entities": {
+      "LostItem": {
+        "key": "id",
+        "statusField": "status",
+        "selectionVariable": "selected_lost_id",
+        "nextIdVariable": "next_lost_id",
+        "nextIdDefault": "LF-105",
+        "fields": {
+          "id": {"type": "text", "label": "物品编号"},
+          "title": {"type": "text", "label": "物品名称", "required": true},
+          "category": {"type": "text", "label": "物品分类", "default": "证件", "enum": ["证件", "电子", "生活"]},
+          "location": {"type": "text", "label": "拾获地点", "required": true},
+          "status": {"type": "text", "label": "认领状态", "default": "待认领"},
+          "claimant": {"type": "text", "label": "认领人", "default": "未认领"},
+          "contact": {"type": "text", "label": "联系方式", "default": "-"},
+          "note": {"type": "text", "label": "备注说明", "default": "请凭有效凭证核对"}
+        },
+        "rows": [
+          {
+            "id": "LF-101",
+            "title": "校园一卡通",
+            "category": "证件",
+            "location": "图书馆二楼自习区",
+            "status": "待认领",
+            "claimant": "未认领",
+            "contact": "-",
+            "note": "卡套内附借书小票"
+          },
+          {
+            "id": "LF-102",
+            "title": "AirPods Pro 耳机盒",
+            "category": "电子",
+            "location": "第三教学楼 302",
+            "status": "待认领",
+            "claimant": "未认领",
+            "contact": "-",
+            "note": "白色保护套"
+          },
+          {
+            "id": "LF-103",
+            "title": "黑色保温杯",
+            "category": "生活",
+            "location": "体育馆北门看台",
+            "status": "待认领",
+            "claimant": "未认领",
+            "contact": "-",
+            "note": "杯底贴有姓名缩写"
+          },
+          {
+            "id": "LF-104",
+            "title": "银色机械键盘",
+            "category": "电子",
+            "location": "创新实验室 A106",
+            "status": "待认领",
+            "claimant": "未认领",
+            "contact": "-",
+            "note": "87 键有线版"
+          }
+        ]
+      }
+    },
+    "rules": {
+      "register_policy": {
+        "entity": "LostItem",
+        "operation": "register_item",
+        "description": "失物登记必填规则：必须填写物品名称与拾获地点。",
+        "requiredFields": [
+          {"field": "title", "required": true, "message": "请填写物品名称"},
+          {"field": "location", "required": true, "message": "请填写拾获地点"}
+        ]
+      },
+      "claim_policy": {
+        "entity": "LostItem",
+        "operation": "claim_item",
+        "description": "认领规则（基线）：认领人姓名必填，联系方式选填；认领后记录保留在列表中。",
+        "requiredFields": [
+          {"field": "claimant", "required": true, "message": "请填写认领人姓名"}
+        ],
+        "requireContact": false,
+        "contactField": "contact",
+        "contactRequiredMessage": "请填写认领人联系方式",
+        "statusTransition": {"field": "status", "from": "待认领", "to": "认领待核验"},
+        "excludeClaimedFromList": false,
+        "detailClaimedText": "认领待核验"
+      }
+    },
+    "queries": {
+      "pending_items": {
+        "entity": "LostItem",
+        "searchField": "title",
+        "filterField": "category",
+        "filters": [
+          {"label": "全部", "value": "全部", "all": true},
+          "证件",
+          "电子",
+          "生活"
+        ],
+        "respectRule": "claim_policy",
+        "emptyText": "暂无匹配的待认领物品"
+      }
+    },
+    "operations": {
+      "register_item": {
+        "kind": "create",
+        "entity": "LostItem",
+        "rule": "register_policy",
+        "fields": ["title", "category", "location", "note"],
+        "defaults": {
+          "status": "待认领",
+          "claimant": "未认领",
+          "contact": "-"
+        },
+        "successText": "登记成功，已加入待认领列表",
+        "navigateTo": "lost_detail"
+      },
+      "claim_item": {
+        "kind": "update",
+        "entity": "LostItem",
+        "rule": "claim_policy",
+        "fields": ["claimant", "contact", "note"],
+        "successText": "认领提交成功",
+        "navigateTo": "lost_detail"
+      }
+    },
+    "views": [
+      {
+        "id": "lost_list",
+        "title": "待认领物品列表",
+        "kind": "list",
+        "entity": "LostItem",
+        "query": "pending_items",
+        "cardFields": {
+          "title": "title",
+          "subtitle": "location",
+          "badge": "status"
+        }
+      },
+      {
+        "id": "lost_detail",
+        "title": "物品详情",
+        "kind": "detail",
+        "entity": "LostItem",
+        "rule": "claim_policy",
+        "displayFields": ["id", "title", "category", "location", "status", "claimant", "contact", "note"],
+        "primaryAction": {"label": "发起认领", "navigateTo": "claim_form"},
+        "secondaryAction": {"label": "登记失物", "navigateTo": "register_form"}
+      },
+      {
+        "id": "register_form",
+        "title": "登记失物",
+        "kind": "form",
+        "entity": "LostItem",
+        "operation": "register_item",
+        "submitText": "确认登记",
+        "backTo": "lost_detail"
+      },
+      {
+        "id": "claim_form",
+        "title": "认领登记",
+        "kind": "form",
+        "entity": "LostItem",
+        "operation": "claim_item",
+        "submitText": "确认认领",
+        "backTo": "lost_detail"
+      }
+    ]
+  }
+}

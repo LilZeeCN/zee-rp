@@ -1,8 +1,7 @@
-import { fixturePath } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-
-
+import { join } from 'node:path';
+import { TEST_DIR } from './fixture-summary.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { field, parsePayload } from '../scripts/parse-payload.mjs';
 import { addInteractions } from '../scripts/ix-actions.mjs';
@@ -15,7 +14,7 @@ export function runStyleParameterChecks() {
   };
 
   check('apply-style fontSize uses native property ID 2 and preserves full style', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     const { file } = addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ actions: [{ type: 'apply-style', fill: '#FF3366', textColor: '#D72638', borderColor: '#0000FF', borderWidth: 9, opacity: 50, fontSize: 28, fontFamily: 'Courier New' }] }],
@@ -47,7 +46,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style opacity rejects values outside 0..100', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     for (const opacity of [-1, 100.1, Infinity, NaN]) {
       assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
         event: 'OnClick',
@@ -57,7 +56,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style fontSize rejects non-positive and non-finite values', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     for (const fontSize of [-1, 0, Infinity, NaN]) {
       assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
         event: 'OnClick',
@@ -67,7 +66,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style fontFamily rejects empty and non-string values', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     for (const fontFamily of ['', '   ', 12, null]) {
       assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
         event: 'OnClick',
@@ -77,7 +76,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style bold writes native property ID 3', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     const { file } = addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ actions: [{ type: 'apply-style', bold: true }] }],
@@ -95,7 +94,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style bold=false writes the native unchecked property value', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     const { file } = addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ actions: [{ type: 'apply-style', bold: false }] }],
@@ -112,7 +111,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style bold rejects non-boolean values', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     for (const bold of [null, 0, 1, 'false']) {
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
@@ -122,7 +121,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style italic=true is rejected because preview leaves fontStyle normal', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ actions: [{ type: 'apply-style', italic: true }] }],
@@ -130,7 +129,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style italic=false is rejected because runtime support is unverified', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ actions: [{ type: 'apply-style', italic: false }] }],
@@ -138,7 +137,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style italic rejects non-boolean values', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     for (const italic of [null, 0, 1, 'false']) {
       assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
         event: 'OnClick',
@@ -148,7 +147,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style underline writes native property ID 5', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     const { file } = addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ actions: [{ type: 'apply-style', underline: true }] }],
@@ -165,7 +164,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style underline rejects unverified false value', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ actions: [{ type: 'apply-style', underline: false }] }],
@@ -173,7 +172,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style strikethrough writes Boolean property ID 95', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     const { file } = addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ actions: [{ type: 'apply-style', strikethrough: true }] }],
@@ -190,7 +189,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style strikethrough rejects unverified false value', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ actions: [{ type: 'apply-style', strikethrough: false }] }],
@@ -198,7 +197,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style borderColor rejects non-hex colors', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ actions: [{ type: 'apply-style', borderColor: 'blue' }] }],
@@ -206,7 +205,7 @@ export function runStyleParameterChecks() {
   });
 
   check('apply-style textColor rejects non-hex colors', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     for (const textColor of ['red', '#FFF', '#12345678', '123456']) {
       assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
         event: 'OnClick',

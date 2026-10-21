@@ -7,9 +7,9 @@ import { listCommands } from './registry.mjs';
 import { listMcpTools, jobTools } from './mcp-tools.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const TOP = ['README.md', 'README.zh-CN.md', 'CONTRIBUTING.md', 'CHANGELOG.md', 'LICENSE', 'SKILL.md', '.gitignore', '.npmignore', 'package.json', 'package-lock.json'];
-const DIRS = ['bin', 'scripts', 'test', 'references', 'examples', 'docs', 'assets', '.github'];
-const EXTENSIONS = /\.(mjs|swift|md|json|svg|ya?ml)$/;
+const TOP = ['README.md', 'README.zh-CN.md', 'CONTRIBUTING.md', 'CHANGELOG.md', 'LICENSE', 'SKILL.md', '.gitignore', '.npmignore', 'package.json', 'package-lock.json', 'requirements.txt'];
+const DIRS = ['bin', 'scripts', 'test', 'references', 'examples', 'docs', 'assets', 'tools', 'benchmarks', '.github'];
+const EXTENSIONS = /\.(mjs|py|swift|md|json|rp1|svg|png|ya?ml)$/;
 
 // Copy the public source without pruning implementations, tests, or rewriting their contents.
 export function releasePaths(root = ROOT) {
@@ -17,8 +17,9 @@ export function releasePaths(root = ROOT) {
   const walk = dir => {
     if (!existsSync(join(root, dir))) return;
     for (const item of readdirSync(join(root, dir), { withFileTypes: true })) {
-      if (['fixtures', 'node_modules', '.git', 'outputs'].includes(item.name)) continue;
+      if (['node_modules', '__pycache__', '.venv', '.git', 'outputs', '.proto-axvg-cache'].includes(item.name)) continue;
       const path = `${dir}/${item.name}`;
+      if (dir === 'test/fixtures' && !['rp-aggregate-cases.json', 'rp-aggregate-matrix.json', 'rp-aggregate-panel.json', 'rp-aggregate-startup.json', 'rp-native-visual.json', 'rp1-master-adaptive.json'].includes(item.name)) continue;
       if (item.isDirectory()) walk(path);
       else if (item.isFile() && EXTENSIONS.test(item.name)) paths.push(path);
     }

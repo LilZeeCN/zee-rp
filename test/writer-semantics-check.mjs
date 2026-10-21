@@ -1,4 +1,4 @@
-import { fixturePath, resolveLibrary } from './native-inputs.mjs';
+import { fixturePath } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -32,7 +32,7 @@ export function runWriterSemanticsChecks() {
   };
 
   check('ix-actions 基础动作 (show/hide/toggle/wait) 字段语义及动画属性断言', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     const { file } = addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       actions: [
@@ -84,7 +84,7 @@ export function runWriterSemanticsChecks() {
   });
 
   check('ix-actions 变换动作 (move/set-size/rotate) 坐标、尺寸、角度与 easing 断言', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     const { file } = addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       actions: [
@@ -157,7 +157,7 @@ export function runWriterSemanticsChecks() {
   });
 
   check('ix-actions set-opacity 动画参数、百分比转换与非法值拒绝断言', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     const { file } = addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       actions: [
@@ -185,7 +185,7 @@ export function runWriterSemanticsChecks() {
   });
 
   check('ix-actions 状态与层级动作 (set-panel-state/set-panel-order/enable/disable/focus) 断言', () => {
-    const source = readFileSync(fixturePath('panel-repeater-direct-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'panel-repeater-direct-roundtrip.rp'));
     const { file } = addInteractions(source, 'Show Data', [{
       event: 'OnClick',
       actions: [
@@ -269,7 +269,7 @@ export function runWriterSemanticsChecks() {
   });
 
   check('ix-actions 中继器增删改排筛与分页动作断言', () => {
-    const source = readFileSync(fixturePath('blank-page-in-existing-project-v2-gui.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'blank-page-in-existing-project-v2-gui.rp'));
     const { file } = addInteractions(source, { widget: 'R7', page: 'Quick win' }, [{
       event: 'OnClick',
       actions: [
@@ -321,7 +321,7 @@ export function runWriterSemanticsChecks() {
   check('set-combobox-options 选项数组、默认选定与越界保护断言', () => {
     const tmpDir = mkdtempSync(join(tmpdir(), 'combobox-check-'));
     try {
-      const src = fixturePath('master-state-form-source.rp');
+      const src = join(TEST_DIR, 'fixtures', 'master-state-form-source.rp');
       const out = join(tmpDir, 'out.rp');
 
       const res = setComboBoxOptions(src, out, 'Page 1', 'REPLACEMENT_DROPLIST', ['Option A', 'Option B', 'Option C'], { selectedIndex: 1 });
@@ -355,7 +355,7 @@ export function runWriterSemanticsChecks() {
   });
 
   check('create-master 与 place-master 引用、GUID 与包依赖断言', () => {
-    const src = readFileSync(fixturePath('master-direct-image-base.rp'));
+    const src = readFileSync(join(TEST_DIR, 'fixtures', 'master-direct-image-base.rp'));
 
     // 1. duplicateMaster
     const duplicated = duplicateMaster(src, 'OUTER_VISUAL_MASTER', 'CLONED_MASTER');
@@ -399,7 +399,7 @@ export function runWriterSemanticsChecks() {
     try {
       const srcPath = join(tmpDir, 'source.rp');
       const outPath = join(tmpDir, 'renamed.rp');
-      const fixtureBytes = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+      const fixtureBytes = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
       writeFileSync(srcPath, fixtureBytes);
 
       const recsBefore = readRecords(fixtureBytes);
@@ -446,8 +446,8 @@ export function runWriterSemanticsChecks() {
   });
 
   check('clone-library-widget 闭包复制与几何坐标断言', () => {
-    const libPath = resolveLibrary('Default.rplib');
-    const targetPath = fixturePath('blank-ui-native.rp');
+    const libPath = '/Applications/Axure RP 11.app/Contents/Resources/DefaultSettings/Libraries/Default.rplib';
+    const targetPath = join(TEST_DIR, 'fixtures', 'blank-ui-native.rp');
     const tmpDir = mkdtempSync(join(tmpdir(), 'lib-clone-check-'));
     try {
       const outPath = join(tmpDir, 'out.rp');
@@ -497,8 +497,8 @@ export function runWriterSemanticsChecks() {
   });
 
   check('clone-library-page-content 导入计划、动态面板包闭包与独立状态 GUID 断言', () => {
-    const libPath = resolveLibrary('Sample UI patterns.rplib');
-    const targetPath = fixturePath('blank-ui-native.rp');
+    const libPath = '/Applications/Axure RP 11.app/Contents/Resources/DefaultSettings/Libraries/Sample UI patterns.rplib';
+    const targetPath = join(TEST_DIR, 'fixtures', 'blank-ui-native.rp');
     const tmpDir = mkdtempSync(join(tmpdir(), 'lib-page-clone-check-'));
     try {
       const outPath1 = join(tmpDir, 'out1.rp');

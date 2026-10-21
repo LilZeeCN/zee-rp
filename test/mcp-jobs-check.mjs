@@ -1,4 +1,3 @@
-import { fixturePath } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -27,14 +26,14 @@ const check = async (name, action) => {
 let handle;
 try {
   await client.connect(transport);
-  await check('MCP 暴露 31 个命令、8 个意图与 4 个 job 工具', async () => assert.equal((await client.listTools()).tools.length, 43));
+  await check('MCP 暴露 30 个命令、8 个意图与 4 个 job 工具', async () => assert.equal((await client.listTools()).tools.length, 42));
   await check('gui_roundtrip 默认返回排队句柄', async () => {
-    handle = await call('gui_roundtrip', { source: fixturePath('var-set-counter-roundtrip.rp'), output: join(outputDir, 'mcp-gui-counter.rp') });
+    handle = await call('gui_roundtrip', { source: join(skill, 'test/fixtures/var-set-counter-roundtrip.rp'), output: join(outputDir, 'mcp-gui-counter.rp') });
     assert.equal(handle.status, 'queued'); assert.ok(handle.id);
   });
   await check('jobs_list/get 与排队取消', async () => {
     assert.ok((await call('jobs_list', {})).some(j => j.id === handle.id));
-    const queued = await call('gui_roundtrip', { source: fixturePath('blank-ui-native.rp'), output: join(outputDir, 'cancelled-queued.rp') });
+    const queued = await call('gui_roundtrip', { source: join(skill, 'test/fixtures/blank-ui-native.rp'), output: join(outputDir, 'cancelled-queued.rp') });
     assert.equal((await call('jobs_cancel', { id: queued.id })).status, 'cancelled');
     assert.equal((await call('jobs_get', { id: queued.id })).status, 'cancelled');
   });

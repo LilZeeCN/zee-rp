@@ -146,7 +146,7 @@ node scripts/remove-interaction.mjs source.rp no-click.rp "提交按钮" \
 | `move` | `target`、`x/y` 位移，默认 0；不是 `dx/dy` |
 | `set-position` | `target`、`x/y` 绝对位置 |
 | `wait` | `ms` 毫秒 |
-| `set-opacity` | `target`、`opacity` 百分数、`duration` 毫秒、`easing`；例如 Page 本地 VectorShape 已验证 15%/linear/3000 ms 与 100%/swing/2000 ms。其它组合见 样本边界（历史本地证据未随仓库分发） |
+| `set-opacity` | `target`、`opacity` 百分数、`duration` 毫秒、`easing`；例如 Page 本地 VectorShape 已验证 15%/linear/3000 ms 与 100%/swing/2000 ms。其它组合见 样本边界 (internal research reference) |
 | `set-panel-state` | `target`、`state` 真实状态名或 `next/previous`；`loop=true/false` |
 | `set-size` | `target`、`width/height`、`duration` |
 | `set-text` | `target`、`text`；按目标类路由：TextBox 使用 `SetWidgetFormText`，VectorShape 使用 `SetWidgetRichText`（`plain=true`）。其它目标类型当前拒绝 |
@@ -226,7 +226,7 @@ node scripts/create-panel-clone.mjs source.rp panel.rp "页面名" "新面板名
 # 名称解析不适用时，在上述命令末尾加入 --page-index 数字；页面名位置参数仍需保留。
 ```
 
-模板默认来自 macOS 安装目录下的 `Quick Win.rp` / `Hours Panel`。其他位置可用现有 `AXURE_PANEL_TEMPLATE` 和 `AXURE_PANEL_TEMPLATE_NAME` 环境变量指定。状态包为空；GUI 双击编辑态已于 2026-09-22 在修复件复验通过（三处对齐 UI ground truth：清洗模板残留孤儿 DiagramObject/Style 与 StyleCache 条目、状态包挂目标 Page 的 children、PanelState 记录插在其所属 Page 记录之前）。已知拒读的手写路线源码归档在 研究记录（历史研究资料未随仓库分发），不作为交付工具。
+模板默认来自 macOS 安装目录下的 `Quick Win.rp` / `Hours Panel`。其他位置可用现有 `AXURE_PANEL_TEMPLATE` 和 `AXURE_PANEL_TEMPLATE_NAME` 环境变量指定。状态包为空；GUI 双击编辑态已于 2026-09-22 在修复件复验通过（三处对齐 UI ground truth：清洗模板残留孤儿 DiagramObject/Style 与 StyleCache 条目、状态包挂目标 Page 的 children、PanelState 记录插在其所属 Page 记录之前）。已知拒读的手写路线源码归档在 研究记录 (research reference not distributed)，不作为交付工具。
 
 加 `--copy-template-states` 可把模板 `Hours Panel` 中两种状态的元件内容一并克隆进新状态包。指定 State B 的 TextBox/Button 已经 GUI 保存关闭重开及预览切换验收；它复制的是该模板已有内容。
 
@@ -260,13 +260,13 @@ node scripts/fill-panel-state.mjs layout.rp source.rp master-replaced.rp "Page 1
 
 `--replace` 与 `--append` 互斥；替换先清旧内容，再按已有导入边界复制 Page 布局，允许复用旧名称，默认导入仍保护非空状态。源验证失败只影响内存中的候选，不写源文件。原生删除图片的状态 body 与生成件一致；指定 PNG 删除、五控件 Form 清空、新四控件替换及 GUI 默认文本改稿均通过保存关闭重开与预览。复杂清理阶段的三层面板替换、母版单实例删除/整组清空/表单替换、中继器清空/同名替换均通过 GUI 往返与指定交互；GUI 改新表单默认文本为 COMPLEX_REPLACED_GUI 后也通过。22 文件/147 审计、26 拒绝/回归/CLI 检查，证据 panel-complex-remove-20261007。追加 Base 标签覆盖双实例的单个删除/全清/替换、含内嵌 PNG 覆盖依赖实例的清空/替换也通过保存重开和预览；剩余覆盖与动作、替换后新表单及状态返回通过。原生删除对照一致；13 文件/114 检查证据见 panel-overrides-remove-20261007/evidence/override-remove-final-audit.json。删除实例保留共享母版定义，新控件与保留定义重名时，须在导入副本中先命名消歧。2026-10-08 Master 根状态的 PNG 删除、表单清空/替换、三层面板私有状态清理、Base 覆盖双实例导入/清空/替换及 GUI 改稿通过；26 文件/115 检查，见 panel-master-remove-20261008/REPORT.md。其它覆盖/资源/依赖/作用域及任意组合仍未验。
 
-2026-10-08 追加 Page 根 MASTER_PANEL/Card 的直接 Base 图片覆盖清理：红 A/蓝 B 两个实例，删 A 后红 Stream 物理消失而蓝 B 保留；全清/四控件替换后两私有 PNG 都消失；A 更新为蓝后有两份蓝 Stream，清除 A 图片后恢复共享母版原图；同红图双实例删 A 后另一份红 Stream 保留。七件实际画布、保存关闭重开和预览通过，内外状态切回保留表单值；GUI 改剩余 B 的 y640 后重开，蓝图和动作保留。全 payload/tag4 与 raw record 检查，共享 Master/状态和 Doc 在离线操作中原字节保留。28 文件/136 审计、核心 116/116、MCP 56/56，见 direct-image-cleanup-20261008/REPORT.md。随后 Master NESTED_MASTER/CONTENT_PANEL/Form 中同七组直接 Base PNG 操作、原生删除与剩余 B y640 GUI 改稿重开/预览亦通过，27 文件/142 审计，见 Master 报告（历史本地证据未随仓库分发）。仅这两个 Page/Master 状态与内嵌 PNG；其它 Master 作用域/资源、外部资源及其它格式未验。清除覆盖后旧路径定义、未用 GUID/字符串可保留，不把 PNG bytes 消失称为全部标识垃圾回收。
+2026-10-08 追加 Page 根 MASTER_PANEL/Card 的直接 Base 图片覆盖清理：红 A/蓝 B 两个实例，删 A 后红 Stream 物理消失而蓝 B 保留；全清/四控件替换后两私有 PNG 都消失；A 更新为蓝后有两份蓝 Stream，清除 A 图片后恢复共享母版原图；同红图双实例删 A 后另一份红 Stream 保留。七件实际画布、保存关闭重开和预览通过，内外状态切回保留表单值；GUI 改剩余 B 的 y640 后重开，蓝图和动作保留。全 payload/tag4 与 raw record 检查，共享 Master/状态和 Doc 在离线操作中原字节保留。28 文件/136 审计、核心 116/116、MCP 56/56，见 direct-image-cleanup-20261008/REPORT.md。随后 Master NESTED_MASTER/CONTENT_PANEL/Form 中同七组直接 Base PNG 操作、原生删除与剩余 B y640 GUI 改稿重开/预览亦通过，27 文件/142 审计，见 Master 报告 (internal research reference)。仅这两个 Page/Master 状态与内嵌 PNG；其它 Master 作用域/资源、外部资源及其它格式未验。清除覆盖后旧路径定义、未用 GUID/字符串可保留，不把 PNG bytes 消失称为全部标识垃圾回收。
 
 MCP `fill_panel_state` 使用 `targetMaster` 代替 `targetPage`，两者必须且只能传一个；宿主/输出可按已有会话规则省略。remove 工具传 `args:["NESTED_MASTER","CONTENT_PANEL","Form","--master","--all"],session:true`。API remove 使用 `master` 字符串，fill 使用 `targetMaster`。新增母版依赖登记到所属 MasterPackageInfo；删除实例保留共享定义和依赖。范围及未验组合以能力表为准。
 
-2026-10-08 同一 Master 根 CONTENT_PANEL/Form 的三列七行 R7：直接/嵌套空导入、清空、四控件替换、同名重建与原表单 append 八件全部保存关闭重开及实际预览通过；增删改行与三层状态返回保留数据。独立 GUI 键盘改首行 MASTER_GUI_CUSTOMER 后重开，只更新另一条 Alice，改名行仍为 120。嵌套清理移除两个自有状态包；append 保留旧四控件 GUID/动作。DataSet 按 column-id 读值，R7.Data 与 Add/Update 动作私有数据集区分。27 文件/151 审计、核心 35/131，见 本轮报告（历史本地证据未随仓库分发）。早期 AX setValue 显示已改而当次重开副本未改，保留对照，不推广为永不能保存。其它列类型/动作/作用域仍按能力表开放。
+2026-10-08 同一 Master 根 CONTENT_PANEL/Form 的三列七行 R7：直接/嵌套空导入、清空、四控件替换、同名重建与原表单 append 八件全部保存关闭重开及实际预览通过；增删改行与三层状态返回保留数据。独立 GUI 键盘改首行 MASTER_GUI_CUSTOMER 后重开，只更新另一条 Alice，改名行仍为 120。嵌套清理移除两个自有状态包；append 保留旧四控件 GUID/动作。DataSet 按 column-id 读值，R7.Data 与 Add/Update 动作私有数据集区分。27 文件/151 审计、核心 35/131，见 本轮报告 (internal research reference)。早期 AX setValue 显示已改而当次重开副本未改，保留对照，不推广为永不能保存。其它列类型/动作/作用域仍按能力表开放。
 
-2026-10-08 原生单层 Layer 内目标面板追加通过：Page MASTER_PANEL/Card 的清空/四控件替换，以及 Master CONTENT_PANEL/Form 的空导入/PNG 追加/清空/R7 替换六件保存关闭重开与实际预览通过。Layer.DiagramObjects 记录成员，组合和面板仍在所属图 diagram-objects 中，现有定位器无需新参数或修改。GUI 默认文本 LAYER_GUI 改稿重开及原交互通过，组成员/控件身份保留；20 文件/106 审计，见 报告（历史本地证据未随仓库分发）。多层组合、组动作/移动、连接线坐标系与其它组合不外推。
+2026-10-08 原生单层 Layer 内目标面板追加通过：Page MASTER_PANEL/Card 的清空/四控件替换，以及 Master CONTENT_PANEL/Form 的空导入/PNG 追加/清空/R7 替换六件保存关闭重开与实际预览通过。Layer.DiagramObjects 记录成员，组合和面板仍在所属图 diagram-objects 中，现有定位器无需新参数或修改。GUI 默认文本 LAYER_GUI 改稿重开及原交互通过，组成员/控件身份保留；20 文件/106 审计，见 报告 (internal research reference)。多层组合、组动作/移动、连接线坐标系与其它组合不外推。
 
 ### 面板按内容调整尺寸
 
@@ -385,4 +385,4 @@ set-adaptive-view view=base
 
 ## 2026-10-12 验收修复合同
 
-条件Case用`when`与`description`，按实际活动树核对Condition和Case顺序。普通`link`动作必须且只能提供`page`或`url`，窗口仅current/new；Page名解析自身包GUID。跨文档connector状态21迁移未支持，未登记来源样式明确拒绝。有限GC与最小VectorShape仅研究目录候选，不在canonical命令注册表提供通用接口；清理不压缩GUID/字符串。四件验证与重建入口见历史本地路径）。
+条件Case用`when`与`description`，按实际活动树核对Condition和Case顺序。普通`link`动作必须且只能提供`page`或`url`，窗口仅current/new；Page名解析自身包GUID。跨文档connector状态21迁移未支持，未登记来源样式明确拒绝。有限GC与最小VectorShape仅研究目录候选，不在canonical命令注册表提供通用接口；清理不压缩GUID/字符串。四件验证与重建入口见<local-path> (internal research reference)。

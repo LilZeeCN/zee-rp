@@ -4,9 +4,13 @@ import {randomBytes} from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 import {readRecords,encodeRecord,replaceRecord} from './rp-records.mjs';
 import {parsePayload,encodePayload,field} from './parse-payload.mjs';
+import {detectFileVersion} from './version.mjs';
+import {adaptNodesForVersion} from './version-adapt.mjs';
 
-export function addClickLink(file, widgetName, url, mode='current') {
+export function addClickLink(file, widgetName, url, mode='current', { version } = {}) {
   if(!['current','new'].includes(mode))throw new Error('Mode must be current or new');
+  // 这个 writer 不走 ix-actions，版本适配必须自己做，否则会写出 RP 11 形状的 Event/Case。
+  const targetVersion = version ?? detectFileVersion(file);
   const matches=[];
   for(const r of readRecords(file).filter(r=>r.className==='Axure:Page')){
     const graph=parsePayload(r);
@@ -34,6 +38,7 @@ export function addClickLink(file, widgetName, url, mode='current') {
   obj('action','Axure:InteractionLinkWindowAction',{Disabled:bool(false),target:ref(ids.target),'link-type':int(mode==='current'?1:2)});
   obj('target','Axure:InteractionTarget',{'target-type':int(0),'target-page-id':{tag:0x13,values:[1,nullId]},'target-literal':ref(ids.literal)});
   obj('literal','Axure:Expr:StringLiteral',{value:str(url),'variable-identifiers':list([]),'repeater-scope':ref(nullId),TargetRepeaterScope:ref(nullId)});
+  adaptNodesForVersion(defs, { version: targetVersion, str });
   const pos=widget.body.entries.findIndex(([k])=>k.text==='MyStyle');
   widget.body.entries.splice(pos<0?widget.body.entries.length:pos,0,[str('InteractionMap'),ref(ids.map)]);
   graph.roots.splice(graph.roots.length-1,0,...defs);

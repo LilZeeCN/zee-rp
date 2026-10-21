@@ -1,0 +1,200 @@
+{
+  "language": "rp/1",
+  "name": "主从联动与多页签服务工作台",
+  "domain": "web",
+  "theme": "enterprise-light",
+  "models": {
+    "ServiceTicket": {
+      "id": "id",
+      "title": "text",
+      "level": "enum(紧急,高优,常规)",
+      "owner": "text",
+      "sla": "text",
+      "notes": "text"
+    }
+  },
+  "datasets": {
+    "tickets": {
+      "model": "ServiceTicket",
+      "rows": [
+        {"id": "TK-201", "title": "核心网关证书续期", "level": "紧急", "owner": "陈工", "sla": "2小时内响应", "notes": "需同步更新负载均衡节点证书"},
+        {"id": "TK-202", "title": "日志集群扩容评审", "level": "高优", "owner": "王工", "sla": "8小时内响应", "notes": "评估冷热数据分层存储策略"},
+        {"id": "TK-203", "title": "测试环境权限清理", "level": "常规", "owner": "赵工", "sla": "24小时内响应", "notes": "季度例行账号与密钥巡检"}
+      ]
+    }
+  },
+  "variables": {
+    "sel_id": {"type": "text", "value": "TK-201"},
+    "sel_title": {"type": "text", "value": "核心网关证书续期"},
+    "sel_level": {"type": "text", "value": "紧急"},
+    "sel_owner": {"type": "text", "value": "陈工"},
+    "sel_sla": {"type": "text", "value": "2小时内响应"},
+    "sel_notes": {"type": "text", "value": "需同步更新负载均衡节点证书"}
+  },
+  "computed": {
+    "urgent_count": {"type": "number", "compute": {"op": "count", "dataset": "tickets", "where": "=item.level == '紧急'"}}
+  },
+  "pages": [
+    {
+      "id": "workspace",
+      "name": "主从联动与多页签服务工作台",
+      "canvas": [980, 540],
+      "root": {
+        "column": "root_col",
+        "w": 980,
+        "h": 540,
+        "padding": 20,
+        "gap": 12,
+        "fill": "$bg",
+        "children": [
+          {
+            "row": "top_bar",
+            "w": 940,
+            "h": 40,
+            "gap": 12,
+            "align": "center",
+            "children": [
+              {"label": "ws_title", "w": 360, "h": 28, "fontSize": 18, "fontWeight": 700, "text": "主从联动与多页签服务工作台"},
+              {"badge": "urgent_badge", "w": 160, "h": 26, "text": "='紧急单数：' + text(var.urgent_count)"}
+            ]
+          },
+          {
+            "master-detail": "ticket_md",
+            "w": 940,
+            "h": 440,
+            "gap": 20,
+            "masterWidth": 420,
+            "dataset": "tickets",
+            "key": "id",
+            "searchField": "title",
+            "filterField": "level",
+            "filters": "auto",
+            "rowHeight": 52,
+            "repeaterHeight": 208,
+            "template": {
+              "row": "tk_row",
+              "w": 420,
+              "h": 52,
+              "padding": [8, 12],
+              "gap": 8,
+              "align": "center",
+              "fill": "$surface",
+              "stroke": "$line",
+              "radius": 8,
+              "children": [
+                {"label": "tk_title", "w": 180, "h": 24, "fontSize": 13, "fontWeight": 600, "text": "=item.title"},
+                {"badge": "tk_lvl", "w": 64, "h": 24, "fontSize": 12, "text": "=item.level"},
+                {"label": "tk_own", "w": 64, "h": 24, "fontSize": 12, "color": "$ink-2", "text": "=item.owner"},
+                {
+                  "button": "tk_pick",
+                  "w": 64,
+                  "h": 28,
+                  "fontSize": 12,
+                  "variant": "secondary",
+                  "text": "查看",
+                  "onClick": [
+                    {
+                      "set": {
+                        "$sel_id": "=item.id",
+                        "$sel_title": "=item.title",
+                        "$sel_level": "=item.level",
+                        "$sel_owner": "=item.owner",
+                        "$sel_sla": "=item.sla",
+                        "$sel_notes": "=item.notes"
+                      }
+                    }
+                  ]
+                }
+              ]
+            },
+            "detail": {
+              "card": "detail_pane",
+              "layout": "column",
+              "w": 500,
+              "h": 420,
+              "padding": 16,
+              "gap": 12,
+              "children": [
+                {
+                  "row": "tab_bar",
+                  "w": 468,
+                  "h": 36,
+                  "gap": 10,
+                  "align": "center",
+                  "children": [
+                    {
+                      "button": "tab_btn_overview",
+                      "w": 120,
+                      "h": 32,
+                      "variant": "primary",
+                      "text": "基本信息页签",
+                      "onClick": [{"state": "detail_tabs.overview"}]
+                    },
+                    {
+                      "button": "tab_btn_sla",
+                      "w": 120,
+                      "h": 32,
+                      "variant": "secondary",
+                      "text": "SLA与备注页签",
+                      "onClick": [{"state": "detail_tabs.sla"}]
+                    }
+                  ]
+                },
+                {
+                  "dynamic-panel": "detail_tabs",
+                  "w": 468,
+                  "h": 320,
+                  "states": [
+                    {
+                      "id": "overview",
+                      "root": {
+                        "column": "ov_box",
+                        "w": 468,
+                        "h": 300,
+                        "gap": 12,
+                        "children": [
+                          {
+                            "detail-card": "ov_card",
+                            "w": 440,
+                            "title": "工单核心概览",
+                            "items": [
+                              {"id": "ov_id", "label": "工单编号", "value": "=var.sel_id"},
+                              {"id": "ov_title", "label": "工单标题", "value": "=var.sel_title"},
+                              {"id": "ov_lvl", "label": "优先等级", "value": "=var.sel_level"},
+                              {"id": "ov_own", "label": "当前负责人", "value": "=var.sel_owner"}
+                            ]
+                          }
+                        ]
+                      }
+                    },
+                    {
+                      "id": "sla",
+                      "root": {
+                        "column": "sla_box",
+                        "w": 468,
+                        "h": 300,
+                        "gap": 12,
+                        "children": [
+                          {
+                            "detail-card": "sla_card",
+                            "w": 440,
+                            "title": "SLA 承诺与执行说明",
+                            "items": [
+                              {"id": "sl_id", "label": "关联工单", "value": "=var.sel_id"},
+                              {"id": "sl_target", "label": "SLA 时效", "value": "=var.sel_sla"},
+                              {"id": "sl_notes", "label": "执行备注", "value": "=var.sel_notes"}
+                            ]
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

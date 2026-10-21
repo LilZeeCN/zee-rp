@@ -19,7 +19,7 @@ const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 // 受保护路径（硬规则），与 registry.mjs 保持同一来源：AXURE_PROTECTED_PATHS 环境变量提供
 // 冒号分隔的绝对路径列表，命中任一即拒绝作为任何路径参数（输入或输出）；未设置时为空列表。
 function protectedPaths() {
-  return (process.env.AXURE_PROTECTED_PATHS || '').split(':').filter(Boolean).map(p => resolve(p));
+  return [process.env.AXURE_PROTECTED_PATH, ...(process.env.AXURE_PROTECTED_PATHS || '').split(':')].filter(Boolean).map(p => resolve(p));
 }
 
 // darwin（APFS/HFS+ 默认卷）与 win32 大小写不敏感；其余平台按大小写敏感精确比较。

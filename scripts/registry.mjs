@@ -11,7 +11,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 
 // 受保护成品（硬规则）：任何参数解析为该绝对路径时拒绝执行；本 CLI 本无路径参数，纯防御。
-function protectedPaths() { return (process.env.AXURE_PROTECTED_PATHS || '').split(':').filter(Boolean).map(p => resolve(p)); }
+function protectedPaths() { return [process.env.AXURE_PROTECTED_PATH, ...(process.env.AXURE_PROTECTED_PATHS || '').split(':')].filter(Boolean).map(p => resolve(p)); }
 
 // evidence 枚举 = 盘点实际使用的六级；internal 仅用于无 CLI 入口的库脚本。
 const EVIDENCE_LEVELS = ['structure', 'loaded', 'preview', 'gui-roundtrip', 'channel-a', 'internal'];
@@ -20,10 +20,10 @@ const EVIDENCE_LEVELS = ['structure', 'loaded', 'preview', 'gui-roundtrip', 'cha
 const OUTPUT_PATTERN = /^(?:index:\d+|flag:-[A-Za-z0-9][A-Za-z0-9-]*|none)$/;
 
 const META = {
-  generatedAt: '2026-10-13',
-  source: 'scripts',
-  evidenceSource: 'references/capabilities.md',
-  cliEntryRules: 'output 的 index:N 指 process.argv 索引（argv[2] 即第 1 个用户位置参数）；判定依据为各脚本 main guard 的解构顺序',
+  "generatedAt": "2026-10-21",
+  "source": "scripts",
+  "evidenceSource": "references/capabilities.md",
+  "cliEntryRules": "output 的 index:N 指 process.argv 索引（argv[2] 即第 1 个用户位置参数）；判定依据为各脚本 main guard 的解构顺序"
 };
 
 // CliEntry 全集：command（调度名，axvg 三个子命令各占一条）/ script / summary / usage / output / evidence。
@@ -31,8 +31,8 @@ const COMMANDS = [
   {
     "command": "create-blank-project",
     "script": "create-blank-project.mjs",
-    "summary": "复制用户本机的 RP 11 原生空白模板生成单页空白 .rp 工程",
-    "usage": "node create-blank-project.mjs <output.rp>",
+    "summary": "复制用户本机的 RP 9 / RP 11 原生空白模板生成单页空白 .rp 工程（模板按目标版本绑定）",
+    "usage": "node create-blank-project.mjs <output.rp> [--version 9|11]",
     "output": "index:2",
     "evidence": "loaded"
   },
@@ -47,7 +47,7 @@ const COMMANDS = [
   {
     "command": "create-blank-page",
     "script": "create-blank-page.mjs",
-    "summary": "把用户本机空白模板的 Page 记录追加到已有 .rp 生成新空白页",
+    "summary": "把与输入文件同版本的空白模板 Page 记录追加到已有 .rp 生成新空白页（跨版本模板会拒绝）",
     "usage": "node create-blank-page.mjs <input.rp> <output.rp> <newPageName>",
     "output": "index:3",
     "evidence": "gui-roundtrip"
@@ -263,8 +263,8 @@ const COMMANDS = [
   {
     "command": "axvg paste",
     "script": "axvg.mjs",
-    "summary": "把 Axvg JSON 写入剪贴板并触发 Axure 粘贴上画布",
-    "usage": "node axvg.mjs paste <file.axvg.json> [--no-menu]",
+    "summary": "把 Axvg JSON 写入剪贴板并触发 Axure 粘贴上画布（宿主按 --version / --bundle-id 显式绑定）",
+    "usage": "node axvg.mjs paste <file.axvg.json> [--no-menu] [--version 9|11] [--bundle-id <id>]",
     "output": "none",
     "evidence": "channel-a"
   },
@@ -281,6 +281,31 @@ const COMMANDS = [
 // 无 CLI 入口（或仅自测 main guard）的库/研究脚本，只参与存在性与 evidence 校验。
 const LIB_SCRIPTS = [
   {
+    "script": "version.mjs",
+    "summary": "Axure 版本边界：文件头识别（RP9 acef0900 / RP11 acef0b00）、目标版本解析、宿主与模板按版本绑定",
+    "evidence": "structure"
+  },
+  {
+    "script": "version-adapt.mjs",
+    "summary": "按目标版本裁剪/改写新建对象的共享适配器（所有 writer 复用，避免独立实现漏适配）",
+    "evidence": "structure"
+  },
+  {
+    "script": "fix-panel-registry.mjs",
+    "summary": "补齐 RP 9 的面板注册链（DynamicPanelInfo/PanelDiagramInfo）；缺失时 RP 9 不渲染面板状态内容",
+    "evidence": "gui-roundtrip"
+  },
+  {
+    "script": "version-lint.mjs",
+    "summary": "按目标版本扫描文件里的版本专属键违规（三零查不出这类问题）",
+    "evidence": "structure"
+  },
+  {
+    "script": "version-fields.mjs",
+    "summary": "RP 9 / RP 11 动作与信息对象的字段差异表（由两版自带原生样本实测键集派生）",
+    "evidence": "structure"
+  },
+  {
     "script": "pack-release.mjs",
     "summary": "按代码与使用文档白名单生成新发布目录和 SHA 清单，排除研究、Axure 资源和 fixture",
     "evidence": "internal"
@@ -292,7 +317,7 @@ const LIB_SCRIPTS = [
     "tools": [
       {
         "name": "gui_roundtrip",
-        "description": "复制到新文件后在 Axure RP 11 保存、关闭、重开；默认立即返回 job 句柄。仅此流程，不含 GUI 改稿和预览行为。",
+        "description": "复制到新文件后在 Axure RP 9 或 RP 11 保存、关闭、重开（宿主按 version 或源文件版本绑定）；默认立即返回 job 句柄。仅此流程，不含 GUI 改稿和预览行为。",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -306,6 +331,14 @@ const LIB_SCRIPTS = [
             },
             "wait": {
               "type": "boolean"
+            },
+            "version": {
+              "type": "integer",
+              "enum": [
+                9,
+                11
+              ],
+              "description": "目标 Axure 版本；省略时用源文件头版本"
             }
           },
           "required": [
@@ -679,6 +712,46 @@ const LIB_SCRIPTS = [
     "script": "engine.mjs",
     "summary": "编排引擎库（AxureSession 按注册表分发、受保护成品红线与 AXURE_WRITE_ROOT 白名单），spawn 透传存量脚本，无 CLI 入口",
     "evidence": "internal"
+  },
+  {
+    "script": "trace.mjs",
+    "summary": "截图临摹工具链入口（scan 字帖扫描 / crop 形态学膨胀擦字与 1x 安全裁切 / verify 透底与残差热力图 / build 一键编译 / selftest），封装 trace.py 与 trace-ocr.swift",
+    "evidence": "channel-a"
+  },
+  {
+    "script": "native-scene.mjs",
+    "summary": "RP/1 矩形场景直接写入 RP 9 原生编组、形状、文字和内嵌图片，无 GUI 或缓存依赖",
+    "evidence": "internal"
+  },
+  {
+    "script": "native-acceptance.mjs",
+    "summary": "Ego Page 上逐步比对 RP/1 模型与原生预览，保存首错与删除最小反例",
+    "evidence": "internal"
+  },
+  {
+    "script": "native-repeater.mjs",
+    "summary": "RP/1 原生 Repeater 模型、初始数据与行模板装配库",
+    "evidence": "internal"
+  },
+  {
+    "script": "runtime-expr.mjs",
+    "summary": "RP/1 有类型运行期 AST 到 Axure 原生变量、控件、行与目标行作用域表达式",
+    "evidence": "internal"
+  },
+  {
+    "script": "proto.mjs",
+    "summary": "声明式直接原型生成与双通道混合编译入口（支持 --spec <spec.json> 与 --preset、Web/Mobile 多主题、设备外框自动合成、多页装配与动态面板/原生控件/跨页交互离线装填），封装 proto.py",
+    "evidence": "channel-a"
+  },
+  {
+    "script": "merge-pages.mjs",
+    "summary": "多页 .rp 工程装配工具与库（将多个单页或多页 .rp 合并为一个多页 .rp，重映射页面 GUID 并注册 Sitemap 树节点与 PackageDocument 映射）",
+    "evidence": "loaded"
+  },
+  {
+    "script": "extract-assets.mjs",
+    "summary": "从 .rp 工程提取内嵌 PNG 位图资源及宿主的精确几何尺寸（x/y/w/h）并输出 manifest.json",
+    "evidence": "structure"
   }
 ];
 
@@ -744,7 +817,7 @@ function registryData() {
 const IS_MAIN = import.meta.url === pathToFileURL(process.argv[1] || import.meta.url).href;
 if (IS_MAIN) {
   if (process.argv.some(a => protectedPaths().includes(resolve(a)))) {
-    console.error(`拒绝执行：AXURE_PROTECTED_PATHS 是受保护路径，禁止作为任何路径参数`);
+    console.error(`拒绝执行：AXURE_PROTECTED_PATHS 中的路径是受保护成品，禁止作为任何路径参数`);
     process.exit(1);
   }
   const sub = process.argv[2];

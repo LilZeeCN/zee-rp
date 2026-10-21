@@ -1,0 +1,37 @@
+rp/1 name="双栏选课穿梭框与学分上限守卫" domain=web theme=enterprise-light computed={"total_credits":{"type":"number","compute":{"op":"sum","dataset":"selected_courses","field":"credits"}},"selected_count":{"type":"number","compute":{"op":"count","dataset":"selected_courses"}}} invariants=[{"id":"credit_cap_18","expr":"=var.total_credits <= 18","message":"已选课程总学分不可超过 18 学分上限"}]
+model CourseItem id=id title=text credits=number
+dataset pool_courses model=CourseItem
+  - id=CS-301 title="分布式系统设计" credits=4
+  - id=CS-302 title="现代编译器构造" credits=4
+  - id=CS-303 title="形式化验证导论" credits=3
+dataset selected_courses model=CourseItem
+  - id=CS-201 title="操作系统内核实验" credits=6
+  - id=CS-202 title="计算机网络协议栈" credits=6
+page #shuttle_page [960x520a] name="双栏选课穿梭框与学分上限守卫"
+  @column #root_col [960x520] padding=24 gap=16 fill=$bg
+    @row #header_row [912x44] gap=12 align=center
+      @label #page_title [360x28] "双栏选课穿梭框与学分上限守卫" fontSize=18 fontWeight=700
+      @badge #credit_badge [180x28] "='已选学分：' + text(var.total_credits) + ' / 18'"
+      @badge #count_badge [150x28] "='已选门数：' + text(var.selected_count)"
+      @label #guard_banner [180x24] "学分上限：18 学分" fontSize=12 color=$ink-2
+    @row #shuttle_row [912x400] gap=24
+      @card #pool_card [444x400] layout=column padding=16 gap=12
+        @label #pool_title [240x24] "候选课程池" fontSize=15 fontWeight=600
+        @repeater #pool_rep [412x220] dataset=pool_courses rowHeight=52 rowGap=8
+          :template
+            @row #pool_row [412x52] padding=[8,12] gap=8 align=center fill=$surface stroke=$line radius=8
+              @label #p_id [72x24] "=item.id" fontSize=12 color=$ink-2
+              @label #p_title [164x24] "=item.title" fontSize=13 fontWeight=600
+              @badge #p_cred [68x24] "=text(item.credits) + '学分'" fontSize=12
+              @button #btn_enroll [68x28] "选修" fontSize=12 variant=primary
+                +onClick {"cases":[{"when":"=var.total_credits + item.credits <= 18","do":[{"type":"data-add","target":"selected_rep","row":{"id":"=caller.id","title":"=caller.title","credits":"=caller.credits"}},{"type":"data-delete","target":"pool_rep","where":"=item.id == caller.id"},{"set":{"@guard_banner":"选修成功"}}]},{"else":true,"do":[{"set":{"@guard_banner":"超过18学分上限，禁止选修"}}]}]}
+      @card #sel_card [444x400] layout=column padding=16 gap=12
+        @label #sel_title [240x24] "已选课程清单" fontSize=15 fontWeight=600
+        @repeater #selected_rep [412x220] dataset=selected_courses rowHeight=52 rowGap=8
+          :template
+            @row #sel_row [412x52] padding=[8,12] gap=8 align=center fill=$surface stroke=$line radius=8
+              @label #s_id [72x24] "=item.id" fontSize=12 color=$ink-2
+              @label #s_title [164x24] "=item.title" fontSize=13 fontWeight=600
+              @badge #s_cred [68x24] "=text(item.credits) + '学分'" fontSize=12
+              @button #btn_drop [68x28] "退选" fontSize=12 variant=secondary
+                +onClick [{"type":"data-add","target":"pool_rep","row":{"id":"=caller.id","title":"=caller.title","credits":"=caller.credits"}},{"type":"data-delete","target":"selected_rep","where":"=item.id == caller.id"},{"set":{"@guard_banner":"已退选课程"}}]

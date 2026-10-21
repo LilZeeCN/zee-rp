@@ -1,0 +1,46 @@
+{
+  "version": "1.0.0",
+  "frozenAt": "2026-10-20",
+  "tasks": 30,
+  "development": 20,
+  "heldout": 10,
+  "files": {
+    "development.json": "67f899f74700689d6b460057b3ab028832fbbfcdb0b6efd9e84589f4768b1b96",
+    "heldout.json": "01e84c99212dd2f0107732c20d7ba2a04c6c9856dba9843b941e22728fbe30a5"
+  },
+  "policy": "Do not revise v1 after a result. Create v2 and retain v1 results. Author has seen all tasks; heldout status is for later fresh sessions, not independent blindness of this author.",
+  "trialPolicy": {
+    "coldStartsPerTask": 3,
+    "attempts": 90,
+    "record": [
+      "model",
+      "sourceHash",
+      "firstGenerationPass",
+      "repairRounds",
+      "manualEdits",
+      "elapsedSeconds",
+      "rpHash",
+      "nativeBehavior",
+      "guiSaveReopen",
+      "guiEdit",
+      "visualReview",
+      "evidence"
+    ]
+  },
+  "rubric": {
+    "expression": 20,
+    "efficiency": 20,
+    "visual": 20,
+    "reliability": 20,
+    "verification": 20
+  },
+  "fullScoreGates": {
+    "firstGenerationPassRate": 0.95,
+    "finalFunctionalPassRate": 1.0,
+    "nativeDifferentialSteps": 10000,
+    "p0p1Open": 0,
+    "independentUsersMin": 3,
+    "independentUsersMax": 5,
+    "manualBinaryRepairCount": 0
+  }
+}

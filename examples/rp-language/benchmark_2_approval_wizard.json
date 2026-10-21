@@ -1,0 +1,157 @@
+{
+  "language": "rp/1",
+  "name": "多步立项申请与状态机向导",
+  "domain": "web",
+  "theme": "enterprise-light",
+  "variables": {
+    "applicant": {"type": "text", "value": "林工"},
+    "project_name": {"type": "text", "value": "AI 原生原型引擎升级"},
+    "budget": {"type": "number", "value": 80},
+    "flow_state": {"type": "text", "value": "草稿"}
+  },
+  "statecharts": {
+    "ApprovalFlow": {
+      "variable": "flow_state",
+      "initial": "草稿",
+      "states": ["草稿", "待审批", "已通过"],
+      "transitions": [
+        {"from": "草稿", "to": "待审批", "on": "submit"},
+        {"from": "待审批", "to": "已通过", "on": "approve"}
+      ]
+    }
+  },
+  "invariants": [
+    {"id": "budget_within_limit", "expr": "=var.budget >= 0 && var.budget <= 500", "message": "立项预算必须在 0 到 500 万之间"}
+  ],
+  "pages": [
+    {
+      "id": "wizard_page",
+      "name": "多步立项申请与状态机向导",
+      "canvas": [880, 560],
+      "root": {
+        "column": "root_col",
+        "w": 880,
+        "h": 560,
+        "padding": 24,
+        "gap": 14,
+        "fill": "$bg",
+        "children": [
+          {
+            "wizard-card": "proj_wizard",
+            "title": "研发立项三步向导",
+            "w": 832,
+            "bodyHeight": 280,
+            "slots": {
+              "header": {
+                "row": "wiz_custom_header",
+                "w": 780,
+                "h": 32,
+                "gap": 12,
+                "align": "center",
+                "children": [
+                  {"badge": "flow_badge", "w": 160, "h": 26, "text": "='审批状态：' + var.flow_state"},
+                  {"label": "wiz_tip", "w": 420, "h": 24, "fontSize": 12, "color": "$ink-2", "text": "每步通过守卫校验后才可进入下一步"}
+                ]
+              },
+              "footer": {
+                "row": "wiz_custom_footer",
+                "w": 780,
+                "h": 34,
+                "gap": 12,
+                "align": "center",
+                "children": [
+                  {
+                    "button": "approve_btn",
+                    "w": 140,
+                    "h": 30,
+                    "variant": "secondary",
+                    "text": "主管一键终审",
+                    "onClick": {
+                      "cases": [
+                        {
+                          "when": "=var.flow_state == '待审批'",
+                          "do": [{"set": {"$flow_state": "已通过", "@wiz_tip": "立项申请已通过主管终审"}}]
+                        },
+                        {
+                          "else": true,
+                          "do": [{"set": {"@wiz_tip": "请先完成三步向导并提交审批"}}]
+                        }
+                      ]
+                    }
+                  }
+                ]
+              }
+            },
+            "steps": [
+              {
+                "id": "step_basic",
+                "title": "基本信息",
+                "nextWhen": "=@inp_applicant != '' && @inp_proj != ''",
+                "errorMessage": "请填写申请人与项目名称",
+                "onNext": [
+                  {"set": {"$applicant": "=@inp_applicant", "$project_name": "=@inp_proj"}}
+                ],
+                "root": {
+                  "column": "s1_box",
+                  "w": 760,
+                  "h": 210,
+                  "gap": 12,
+                  "children": [
+                    {"label": "s1_l1", "w": 240, "h": 22, "fontSize": 13, "fontWeight": 600, "text": "申请人姓名"},
+                    {"input": "inp_applicant", "w": 360, "h": 36, "value": "林工"},
+                    {"label": "s1_l2", "w": 240, "h": 22, "fontSize": 13, "fontWeight": 600, "text": "立项名称"},
+                    {"input": "inp_proj", "w": 360, "h": 36, "value": "AI 原生原型引擎升级"}
+                  ]
+                }
+              },
+              {
+                "id": "step_budget",
+                "title": "预算核定",
+                "nextWhen": "=number(@inp_budget) > 0 && number(@inp_budget) <= 500",
+                "errorMessage": "预算金额必须大于 0 且不超过 500 万元",
+                "onNext": [
+                  {"set": {"$budget": "=number(@inp_budget)"}}
+                ],
+                "root": {
+                  "column": "s2_box",
+                  "w": 760,
+                  "h": 210,
+                  "gap": 12,
+                  "children": [
+                    {"label": "s2_l1", "w": 320, "h": 22, "fontSize": 13, "fontWeight": 600, "text": "申请预算（万元，上限 500 万）"},
+                    {"input": "inp_budget", "w": 240, "h": 36, "value": "80"},
+                    {"label": "s2_preview", "w": 420, "h": 24, "fontSize": 12, "color": "$ink-2", "text": "='当前核定预算：' + text(var.budget) + ' 万元'"}
+                  ]
+                }
+              },
+              {
+                "id": "step_confirm",
+                "title": "确认提交",
+                "root": {
+                  "column": "s3_box",
+                  "w": 760,
+                  "h": 210,
+                  "gap": 10,
+                  "children": [
+                    {
+                      "detail-card": "review_card",
+                      "w": 520,
+                      "items": [
+                        {"id": "rv_app", "label": "申请人", "value": "=var.applicant"},
+                        {"id": "rv_proj", "label": "项目名称", "value": "=var.project_name"},
+                        {"id": "rv_bud", "label": "申报预算", "value": "=text(var.budget) + ' 万元'"}
+                      ]
+                    }
+                  ]
+                }
+              }
+            ],
+            "onComplete": [
+              {"set": {"$flow_state": "待审批", "@wiz_tip": "已提交立项申请，等待主管终审"}}
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

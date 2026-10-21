@@ -1,12 +1,12 @@
-# Published command registry
+# Public command registry
 
-> Generated from registry.mjs. Evidence labels describe historical samples, not full command coverage. See [capabilities.md](capabilities.md) and [public validation](../docs/validation.md).
+Generated from the shipped registry. Evidence tags refer to bounded samples, not universal compatibility.
 
-| Command | Script | Purpose | Evidence |
+| 命令 | 脚本 | 用途 | 证据层级 |
 | --- | --- | --- | --- |
-| create-blank-project | create-blank-project.mjs | 复制用户本机的 RP 11 原生空白模板生成单页空白 .rp 工程 | loaded |
+| create-blank-project | create-blank-project.mjs | 复制用户本机的 RP 9 / RP 11 原生空白模板生成单页空白 .rp 工程（模板按目标版本绑定） | loaded |
 | create-global-variable | create-global-variable.mjs | 创建具名全局变量及字符串默认值（离线结构级） | structure |
-| create-blank-page | create-blank-page.mjs | 把用户本机空白模板的 Page 记录追加到已有 .rp 生成新空白页 | gui-roundtrip |
+| create-blank-page | create-blank-page.mjs | 把与输入文件同版本的空白模板 Page 记录追加到已有 .rp 生成新空白页（跨版本模板会拒绝） | gui-roundtrip |
 | duplicate-page | duplicate-page.mjs | 按页名（或 --index 记录号）复制已有页面生成新页 | gui-roundtrip |
 | create-master | create-master.mjs | 复制已有 Axure:Master 记录并注册为新命名的母版 | preview |
 | place-master | place-master.mjs | 在指定页面上放置母版实例（ReferenceDiagramObject） | gui-roundtrip |
@@ -33,47 +33,18 @@
 | patch-string | patch-string.mjs | 替换唯一 Page 记录中的一个已有字符串（研究用，capabilities.md 未列） | structure |
 | rp-read | rp-read.mjs | 只读解析 .rp 输出页面/元件/交互摘要或 JSON（含 dangling refs 检查） | structure |
 | axvg build | axvg.mjs | 把布局规格 JSON 展开为完整 Axvg JSON（几何/样式编码） | channel-a |
-| axvg paste | axvg.mjs | 把 Axvg JSON 写入剪贴板并触发 Axure 粘贴上画布 | channel-a |
+| axvg paste | axvg.mjs | 把 Axvg JSON 写入剪贴板并触发 Axure 粘贴上画布（宿主按 --version / --bundle-id 显式绑定） | channel-a |
 | axvg selftest | axvg.mjs | 内置几何/编码断言自检，不产出文件 | channel-a |
 
-## CLI arguments
+库脚本（无 CLI 入口）：
 
-- **create-blank-project**: `node create-blank-project.mjs <output.rp>`
-- **create-global-variable**: `node create-global-variable.mjs <source.rp> <output.rp> <VariableName> [--default-value "Value"]`
-- **create-blank-page**: `node create-blank-page.mjs <input.rp> <output.rp> <newPageName>`
-- **duplicate-page**: `node duplicate-page.mjs source.rp output.rp sourceName newName`
-- **create-master**: `node create-master.mjs <source.rp> <output.rp> <SourceMasterName> <NewMasterName>`
-- **place-master**: `node place-master.mjs <src.rp> <out.rp> <masterName> <pageIndex> [--x N --y N]`
-- **create-panel-clone**: `node create-panel-clone.mjs <src.rp> <out.rp> <pageName> <panelName> [state...] [--x N --y N --w N --h N] [--page-index N]`
-- **fill-panel-state**: `node fill-panel-state.mjs <source.rp> <target.rp> <new.rp> <sourcePage> <pageOrMaster> <panel> <state> [--master] [--append | --replace]`
-- **remove-panel-state-content**: `node remove-panel-state-content.mjs source.rp new.rp <pageOrMaster> <panel> <state> [--master] (--all | --ids <id>... | <widgetName>...)`
-- **set-panel-fit-to-content**: `node set-panel-fit-to-content.mjs source.rp new.rp spec.json`
-- **add-adaptive-view**: `node add-adaptive-view.mjs <src.rp> <out.rp> [断点宽度...] [--override "<视图名>:<元件名>:w=<宽>[,h=<高>][,x=<x>,y=<y>]"]`
-- **add-interaction**: `node add-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] [--replace-event] --event <EventName> --action <type> [key=value ...]`
-- **remove-interaction**: `node remove-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] --event <EventName> (--remove-event | --remove-action --case-index <n> --action-index <n>)`
-- **add-click-link**: `node add-click-link.mjs source.rp output.rp widgetName url [current|new]`
-- **clone-library-widget**: `node clone-library-widget.mjs <source.rplib> <target.rp> <output.rp> <sourcePage> <targetPage> <newName> [--x N --y N --w N --h N]`
-- **clone-library-page-content**: `node clone-library-page-content.mjs <source.rplib> <target.rp> <output.rp> <sourcePage> <targetPage> [--x N --y N]`
-- **set-combobox-options**: `node set-combobox-options.mjs <source.rp> <output.rp> <pageName> <widgetName> <options-json> [--selected <zeroBasedIndex>]`
-- **set-listbox-options**: `node set-listbox-options.mjs <source.rp> <output.rp> <pageName> <widgetName> <options-json> [--selected <indices-json>] [--single]`
-- **set-native-table**: `node set-native-table.mjs input.rp output.rp table.json`
-- **clone-native-connector**: `node clone-native-connector.mjs <source.rp> <target.rp> <output.rp> <sourceRecord> <connectorId> <targetPage> [options-json]`
-- **set-connector-anchors**: `node set-connector-anchors.mjs <source.rp> <output.rp> <pageName> <connector-name-or-selector-json> <endpoints-json>`
-- **set-widget-text**: `node set-widget-text.mjs <source.rp> <output.rp> <pageName> <widgetName> <text>`
-- **set-widget-richtext**: `node set-widget-richtext.mjs source.rp new.rp richtext.json`
-- **set-master-overrides**: `node set-master-overrides.mjs source.rp new.rp overrides.json`
-- **name-widget**: `node name-widget.mjs <source.rp> <new.rp> <pageRecordsIndex|页名> <widgetId> <newName> [...]`
-- **patch-link-window**: `node patch-link-window.mjs <source.rp> <new.rp> <current|new>`
-- **patch-string**: `node patch-string.mjs <source.rp> <new.rp> <old string> <new string>`
-- **rp-read**: `node rp-read.mjs <file.rp> [--json] [--full]`
-- **axvg build**: `node axvg.mjs build <spec.json> -o <out.axvg.json>`
-- **axvg paste**: `node axvg.mjs paste <file.axvg.json> [--no-menu]`
-- **axvg selftest**: `node axvg.mjs selftest`
-
-## Support and research tools
-
-| Script | Purpose | Evidence |
+| 脚本 | 用途 | 证据层级 |
 | --- | --- | --- |
+| version.mjs | Axure 版本边界：文件头识别（RP9 acef0900 / RP11 acef0b00）、目标版本解析、宿主与模板按版本绑定 | structure |
+| version-adapt.mjs | 按目标版本裁剪/改写新建对象的共享适配器（所有 writer 复用，避免独立实现漏适配） | structure |
+| fix-panel-registry.mjs | 补齐 RP 9 的面板注册链（DynamicPanelInfo/PanelDiagramInfo）；缺失时 RP 9 不渲染面板状态内容 | gui-roundtrip |
+| version-lint.mjs | 按目标版本扫描文件里的版本专属键违规（三零查不出这类问题） | structure |
+| version-fields.mjs | RP 9 / RP 11 动作与信息对象的字段差异表（由两版自带原生样本实测键集派生） | structure |
 | pack-release.mjs | 按代码与使用文档白名单生成新发布目录和 SHA 清单，排除研究、Axure 资源和 fixture | internal |
 | jobs.mjs | macOS GUI 保存关闭重开队列：wait:false 句柄、list/get/cancel，单服务内串行 | internal |
 | blank-template.mjs | 解析用户本机空白模板 AXURE_BLANK_TEMPLATE 或本机缓存；不分发 Axure 模板 | internal |
@@ -86,5 +57,11 @@
 | expr-schema.mjs | 一次性研究工具：扫描本机 .rplib 提取条件表达式语法统计（顶层直接执行，按任务指定归入库清单） | internal |
 | widget-schema.mjs | 一次性研究工具：扫描本机 .rplib 提取各元件类型字段清单统计（顶层直接执行，按任务指定归入库清单） | internal |
 | engine.mjs | 编排引擎库（AxureSession 按注册表分发、受保护成品红线与 AXURE_WRITE_ROOT 白名单），spawn 透传存量脚本，无 CLI 入口 | internal |
-
-Core checks: `npm test`. Local native integration: `npm run test:native`. Optional MCP integration: `npm run test:mcp`. Historical fixture replay: `npm run test:historical` with your external, hash-matching fixture pack. Native assets are never bundled.
+| trace.mjs | 截图临摹工具链入口（scan 字帖扫描 / crop 形态学膨胀擦字与 1x 安全裁切 / verify 透底与残差热力图 / build 一键编译 / selftest），封装 trace.py 与 trace-ocr.swift | channel-a |
+| native-scene.mjs | RP/1 矩形场景直接写入 RP 9 原生编组、形状、文字和内嵌图片，无 GUI 或缓存依赖 | internal |
+| native-acceptance.mjs | Ego Page 上逐步比对 RP/1 模型与原生预览，保存首错与删除最小反例 | internal |
+| native-repeater.mjs | RP/1 原生 Repeater 模型、初始数据与行模板装配库 | internal |
+| runtime-expr.mjs | RP/1 有类型运行期 AST 到 Axure 原生变量、控件、行与目标行作用域表达式 | internal |
+| proto.mjs | 声明式直接原型生成与双通道混合编译入口（支持 --spec <spec.json> 与 --preset、Web/Mobile 多主题、设备外框自动合成、多页装配与动态面板/原生控件/跨页交互离线装填），封装 proto.py | channel-a |
+| merge-pages.mjs | 多页 .rp 工程装配工具与库（将多个单页或多页 .rp 合并为一个多页 .rp，重映射页面 GUID 并注册 Sitemap 树节点与 PackageDocument 映射） | loaded |
+| extract-assets.mjs | 从 .rp 工程提取内嵌 PNG 位图资源及宿主的精确几何尺寸（x/y/w/h）并输出 manifest.json | structure |

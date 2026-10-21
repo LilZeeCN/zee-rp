@@ -1,0 +1,123 @@
+{
+  "language": "rp/1",
+  "name": "行内条件动作流转看板",
+  "domain": "web",
+  "theme": "enterprise-light",
+  "models": {
+    "KanbanTask": {
+      "id": "id",
+      "title": "text",
+      "assignee": "text",
+      "status": "enum(待处理,处理中,已完成)"
+    }
+  },
+  "datasets": {
+    "tasks": {
+      "model": "KanbanTask",
+      "rows": [
+        {"id": "TSK-01", "title": "机房巡检告警排查", "assignee": "周工", "status": "待处理"},
+        {"id": "TSK-02", "title": "专线带宽峰值调优", "assignee": "吴工", "status": "处理中"},
+        {"id": "TSK-03", "title": "数据库备库切换演练", "assignee": "郑工", "status": "已完成"}
+      ]
+    }
+  },
+  "computed": {
+    "todo_count": {"type": "number", "compute": {"op": "count", "dataset": "tasks", "where": "=item.status == '待处理'"}},
+    "doing_count": {"type": "number", "compute": {"op": "count", "dataset": "tasks", "where": "=item.status == '处理中'"}},
+    "done_count": {"type": "number", "compute": {"op": "count", "dataset": "tasks", "where": "=item.status == '已完成'"}},
+    "total_visible": {"type": "number", "compute": {"op": "count", "dataset": "tasks"}}
+  },
+  "invariants": [
+    {"id": "conservation_of_tasks", "expr": "=var.todo_count + var.doing_count + var.done_count == var.total_visible && var.total_visible <= 3", "message": "三种状态任务数之和恒等于当前可见任务总数且不超过 3"}
+  ],
+  "pages": [
+    {
+      "id": "kanban_board",
+      "name": "行内条件动作流转看板",
+      "canvas": [920, 520],
+      "root": {
+        "column": "root_col",
+        "w": 920,
+        "h": 520,
+        "padding": 24,
+        "gap": 16,
+        "fill": "$bg",
+        "children": [
+          {
+            "row": "kpi_bar",
+            "w": 872,
+            "h": 44,
+            "gap": 12,
+            "align": "center",
+            "children": [
+              {"label": "board_title", "w": 320, "h": 28, "fontSize": 18, "fontWeight": 700, "text": "行内条件动作流转看板"},
+              {"badge": "kpi_todo", "w": 150, "h": 28, "text": "='待处理：' + text(var.todo_count)"},
+              {"badge": "kpi_doing", "w": 150, "h": 28, "text": "='处理中：' + text(var.doing_count)"},
+              {"badge": "kpi_done", "w": 150, "h": 28, "text": "='已完成：' + text(var.done_count)"}
+            ]
+          },
+          {
+            "searchable-list": "task_list",
+            "dataset": "tasks",
+            "key": "id",
+            "searchField": "title",
+            "filterField": "status",
+            "filters": "auto",
+            "w": 872,
+            "rowHeight": 56,
+            "repeaterHeight": 240,
+            "template": {
+              "row": "task_row",
+              "w": 872,
+              "h": 56,
+              "padding": [8, 16],
+              "gap": 12,
+              "align": "center",
+              "fill": "$surface",
+              "stroke": "$line",
+              "radius": 8,
+              "children": [
+                {"label": "t_id", "w": 90, "h": 24, "fontSize": 12, "color": "$ink-2", "text": "=item.id"},
+                {"label": "t_title", "w": 240, "h": 24, "fontSize": 13, "fontWeight": 600, "text": "=item.title"},
+                {"label": "t_user", "w": 90, "h": 24, "fontSize": 12, "text": "=item.assignee"},
+                {"badge": "t_status", "w": 84, "h": 24, "fontSize": 12, "text": "=item.status"},
+                {
+                  "button": "btn_dispatch",
+                  "w": 88,
+                  "h": 28,
+                  "fontSize": 12,
+                  "variant": "primary",
+                  "text": "立即派单",
+                  "when": "=item.status == '待处理'",
+                  "onClick": [
+                    {"type": "data-update", "target": "task_list", "where": "=item.id == caller.id", "set": {"status": "处理中"}}
+                  ]
+                },
+                {
+                  "button": "btn_finish",
+                  "w": 88,
+                  "h": 28,
+                  "fontSize": 12,
+                  "variant": "secondary",
+                  "text": "确认完结",
+                  "when": "=item.status == '处理中'",
+                  "onClick": [
+                    {"type": "data-update", "target": "task_list", "where": "=item.id == caller.id", "set": {"status": "已完成"}}
+                  ]
+                },
+                {
+                  "badge": "tag_archived",
+                  "w": 88,
+                  "h": 24,
+                  "fontSize": 12,
+                  "text": "已归档",
+                  "when": "=item.status == '已完成'"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

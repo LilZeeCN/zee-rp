@@ -1,0 +1,15 @@
+import assert from 'node:assert/strict';
+import { difference, reduceSteps } from '../scripts/native-acceptance.mjs';
+assert.equal(difference({ rows: [{ qty: 2 }] }, { rows: [{ qty: 2 }] }), null);
+assert.equal(difference({ rows: [{ qty: 2 }] }, { rows: [{ qty: 3 }] }).path, '/rows/0/qty');
+assert(difference({ n: 2 }, { n: '2' }));
+assert(difference([], {}));
+assert(difference({ n: 1 }, {}));
+const predicate = steps => steps.includes('filter') && steps.includes('update');
+const reduced = await reduceSteps(['noise', 'filter', 'noise', 'update', 'noise'], predicate);
+assert.deepEqual(reduced.steps, ['filter', 'update']);
+assert(reduced.oneMinimal);
+for (let i = 0; i < reduced.steps.length; i++) assert(!predicate(reduced.steps.filter((_, n) => i !== n)));
+const capped = await reduceSteps(['a', 'b'], () => false, 1);
+assert.equal(capped.oneMinimal, false);
+console.log('8/8 native acceptance comparison and minimization contracts passed');

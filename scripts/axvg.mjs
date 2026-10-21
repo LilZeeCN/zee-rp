@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-// zee-rp 核心脚本：设计规格(spec) → Axvg JSON → 系统剪贴板 → Axure RP 11 粘贴。
+// zee-axure 核心脚本：设计规格(spec) → Axvg JSON → 系统剪贴板 → Axure RP 11 粘贴。
 // 零依赖，Node ≥ 18，macOS / Windows 双路径。所有编码规则经 2026-09 落画实测。
 //
 // 用法：
 //   node axvg.mjs build <spec.json> -o <out.axvg.json>   规格展开为完整 Axvg
-//   node axvg.mjs paste <file.axvg.json> [--no-menu]      写剪贴板并触发 Axure 粘贴
+//   node axvg.mjs paste <file.axvg.json> [--no-menu] [--version 9|11 | --bundle-id <id>]
+//                                                        写剪贴板并触发 Axure 粘贴（宿主按版本显式绑定）
 //   node axvg.mjs selftest                                内置几何/编码自检
 //
 // spec 结构（坐标系：frame 内相对像素，y 向下）：
@@ -33,6 +34,7 @@ import { writeFileSync, readFileSync, existsSync, mkdtempSync, rmSync } from "no
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
+import { resolvePasteTarget } from "./version.mjs";
 import { pathToFileURL } from "node:url";
 
 const IS_MAIN = import.meta.url === pathToFileURL(process.argv[1] || import.meta.url).href;
@@ -102,6 +104,17 @@ function shadows(items = []) {
 
 // ---------- 组件展开 ----------
 export function expandChild(c) {
+  if (c.kind === "group") {
+    const items = (c.children || []).flatMap((ch) => { const r = expandChild(ch); return Array.isArray(r) ? r : [r]; });
+    return {
+      itemType: 0, id: wid("grp"), name: c.name || "Group",
+      visible: true, isLocked: false, isNameDynamic: false,
+      flippedHorizontal: false, flippedVertical: false, rotation: 0,
+      rect: rect_(c.x ?? 0, c.y ?? 0, c.w ?? 0, c.h ?? 0),
+      resizingConstraints: { hasFixedLeft: true, hasFixedRight: false, hasFixedTop: true, hasFixedBottom: false, hasFixedWidth: true, hasFixedHeight: true },
+      effects: shadows(c.shadows), scene: { items },
+    };
+  }
   if (c.kind === "rect" || c.kind === "card") {
     const t = c.border?.thickness ?? 0;
     const corners = typeof c.corners === "number" ? [c.corners, c.corners, c.corners, c.corners] : (c.corners ?? [0, 0, 0, 0]);
@@ -132,7 +145,8 @@ export function expandChild(c) {
       textColor: color, size, underline: false, strikethrough: false, superscript: 0,
       baselineOffset: 0, highlight: { a: 1, r: 0, g: 0, b: 0 }, characterSpacing: 0, transform: 0, stretch: 5,
     }));
-    return { ...widgetDefaults(String(c.content ?? "")), isNameDynamic: true,
+    const explicitName = typeof c.name === "string" && c.name.trim() !== "";
+    return { ...widgetDefaults(explicitName ? c.name.trim() : String(c.content ?? "")), isNameDynamic: !explicitName,
       rect: rect_(c.x, c.y, c.w, c.h), strokes: [], strokeThickness: 0,
       backgroundFills: [], corners: [0, 0, 0, 0], border: [0, 0, 0, 0], textAlignment: 0,
       text: { paragraphs: [{ horizontalAlignment: align, lineSpacing: 0, inlines }] } };
@@ -238,10 +252,10 @@ export function expandSpec(spec) {
 }
 
 // ---------- 剪贴板 + 粘贴 ----------
-export function pasteAxvg(axvgJson, { menu = true } = {}) {
+export function pasteAxvg(axvgJson, { menu = true, version, bundleId } = {}) {
   let text = typeof axvgJson === "string" ? axvgJson : JSON.stringify(axvgJson);
   if (!text.startsWith("// axvg")) text = "// axvg\n" + text;
-  const dir = mkdtempSync(join(tmpdir(), "zee-rp-"));
+  const dir = mkdtempSync(join(tmpdir(), "zee-axure-"));
   try {
     const payload = join(dir, "payload.axvg.json");
     writeFileSync(payload, text, "utf8");
@@ -278,16 +292,25 @@ Write-Output "CLIP_OK"
     if (!menu || !IS_MAC) return { ok: true, chars: text.length, pasteCommandSent: false, pasted: false, hint: "剪贴板已就绪。请在 Axure 中 Ctrl/Cmd+V。自动菜单粘贴仅支持 macOS 中文界面。" };
 
     // Axure 缓存剪贴板评估 → 粘贴菜单会变灰；焦点切走再切回强制刷新，然后走菜单粘贴（菜单比模拟按键可靠）。
+    // 双版本并行时「第一个名字含 Axure 的进程」会选错程序，所以宿主显式绑定：
+    // --bundle-id / AXURE_PASTE_BUNDLE_ID > --version / AXURE_TARGET_VERSION > 唯一在跑的那一版。
+    let host;
+    try {
+      host = resolvePasteTarget({ version, bundleId: bundleId ?? process.env.AXURE_PASTE_BUNDLE_ID });
+    } catch (e) {
+      throw new Error(`${e.message}\n（Axvg 粘贴需要明确的目标 Axure；双版本并行时不自动选择。）`);
+    }
+    const PROC = host.processName;
     const focusToggle = () => {
       if (!IS_MAC) return;
       spawnSync("osascript", ["-e", 'tell application "System Events" to set frontmost of (first process whose name contains "Finder") to true'], { encoding: "utf8" });
       spawnSync("sleep", ["0.6"]);
-      spawnSync("osascript", ["-e", 'tell application "System Events" to set frontmost of (first process whose name contains "Axure") to true'], { encoding: "utf8" });
+      spawnSync("osascript", ["-e", `tell application "System Events" to set frontmost of (first process whose name is "${PROC}") to true`], { encoding: "utf8" });
     };
     const menuPaste = () => spawnSync("osascript", ["-e",
-      'tell application "System Events" to click menu item "粘贴" of menu "编辑" of menu bar 1 of (first process whose name contains "Axure")'], { encoding: "utf8" });
+      `tell application "System Events" to click menu item "粘贴" of menu "编辑" of menu bar 1 of (first process whose name is "${PROC}")`], { encoding: "utf8" });
     const pasteEnabled = () => spawnSync("osascript", ["-e",
-      'tell application "System Events" to tell (first process whose name contains "Axure") to get enabled of menu item "粘贴" of menu "编辑" of menu bar 1'], { encoding: "utf8" }).stdout?.trim() ?? "false";
+      `tell application "System Events" to tell (first process whose name is "${PROC}") to get enabled of menu item "粘贴" of menu "编辑" of menu bar 1`], { encoding: "utf8" }).stdout?.trim() ?? "false";
 
     let attempts = 0;
     while (attempts < 2) {
@@ -299,7 +322,8 @@ Write-Output "CLIP_OK"
     spawnSync("osascript", ["-e", 'tell application "System Events" to key code 53']); // Escape 取消选中，避免嵌进选中容器
     const result = menuPaste();
     if (result.status !== 0) throw new Error(`粘贴菜单命令失败: ${result.error?.message ?? result.stderr}`);
-    return { ok: true, chars: text.length, pasteCommandSent: true, pasted: null,
+    return { ok: true, chars: text.length, host: { version: host.version, label: host.label, bundleId: host.bundleId },
+      pasteCommandSent: true, pasted: null,
       hint: "粘贴菜单命令已发送；是否落画尚未验证。先检查画布、大纲和错误对话框，避免重复粘贴叠层，再生成预览对照。" };
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -370,11 +394,12 @@ if (cmd === "build") {
   const f = args[1];
   if (!f || !existsSync(f)) { console.error(`文件不存在: ${f}`); process.exit(1); }
   const menu = !args.includes("--no-menu");
-  const r = pasteAxvg(readFileSync(f, "utf8"), { menu });
+  const flag = (name) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
+  const r = pasteAxvg(readFileSync(f, "utf8"), { menu, version: flag("--version"), bundleId: flag("--bundle-id") });
   console.log(JSON.stringify(r, null, 2));
 } else if (cmd === "selftest") {
   selftest();
 } else if (cmd !== null) {
-  console.log("用法: node axvg.mjs build <spec.json> -o <out.axvg.json> | paste <axvg.json> [--no-menu] | selftest");
+  console.log("用法: node axvg.mjs build <spec.json> -o <out.axvg.json> | paste <axvg.json> [--no-menu] [--version 9|11] [--bundle-id <id>] | selftest");
   process.exit(1);
 }

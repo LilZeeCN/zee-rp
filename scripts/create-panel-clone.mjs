@@ -29,12 +29,28 @@ import { parsePayload, encodePayload, field }
 import { cloneInto, closureOf } from './clone-closure.mjs';
 import { resolvePageRecord } from './ix-actions.mjs';
 import { guidKey } from './duplicate-page.mjs';
+import { detectFileVersion, installRoot, versionLabel } from './version.mjs';
+import { fixPanelRegistry } from './fix-panel-registry.mjs';
+import { join } from 'node:path';
 
-const TEMPLATE = process.env.AXURE_PANEL_TEMPLATE
-  ?? '/Applications/Axure RP 11.app/Contents/Resources/DefaultSettings/Training/Quick Win.rp';
-const TEMPLATE_PANEL_NAME = process.env.AXURE_PANEL_TEMPLATE_NAME ?? 'Hours Panel';
+// 面板模板取自「与目标文件同版本」的 Axure 安装资源；跨版本模板会带来版本专属字段。
+export function panelTemplate(file) {
+  if (process.env.AXURE_PANEL_TEMPLATE) return process.env.AXURE_PANEL_TEMPLATE;
+  const version = detectFileVersion(file);
+  const name = version === 9 ? 'RP9 Tour.rp' : 'Quick Win.rp';
+  return join(installRoot(version), 'Training', name);
+}
+
+// 两版教学工程里的多状态面板不同名：RP 9 = RP9 Tour.rp/Discount Panel，RP 11 = Quick Win.rp/Hours Panel。
+function panelTemplateName(file) {
+  if (process.env.AXURE_PANEL_TEMPLATE_NAME) return process.env.AXURE_PANEL_TEMPLATE_NAME;
+  return detectFileVersion(file) === 9 ? 'Discount Panel' : 'Hours Panel';
+}
+// TEMPLATE_PANEL_NAME 现在按目标文件版本解析，见 panelTemplateName()。
 
 export function createPanel(file, { pageName, pageIndex, name, states = ['State 1'], x = 100, y = 100, width = 300, height = 200, copyTemplateStates = false }) {
+  const TEMPLATE = panelTemplate(file);
+  const TEMPLATE_PANEL_NAME = panelTemplateName(file);
   const records = readRecords(file);
   const pageRec = pageIndex === undefined ? resolvePageRecord(file, pageName)
     : records.find(r => r.index === Number(pageIndex) && r.className === 'Axure:Page');
@@ -80,7 +96,8 @@ export function createPanel(file, { pageName, pageIndex, name, states = ['State 
     }
   }
   const closure = closureOf(templateGraph, templateWidget.id);
-  const cloned = cloneInto({ srcGraph: templateGraph, srcStrings: templateRecord.strings,
+  const cloned = cloneInto({ version: detectFileVersion(file),
+    srcGraph: templateGraph, srcStrings: templateRecord.strings,
     dstGraph: graph, dstStrings: strings, closure, rootOldId: templateWidget.id });
   const widget = graph.objects.get(cloned.rootNewId);
   const style = graph.objects.get(field(widget.body, 'MyStyle').value);
@@ -89,6 +106,15 @@ export function createPanel(file, { pageName, pageIndex, name, states = ['State 
   field(pd, 'diagram-object-id').value = widget.id;
   field(pd, 'parent-diagram-id').value = diagram.id;
   const pl = field(style.body, 'PropList');
+  // 【RP 9 渲染缺口根因，2026-10-16】模板面板可能是**隐藏**的：RP 9 的模板 Discount Panel 是
+  // 10×10 残桩，样式里带 VISIBLE(0xC000006E)=false；RP 11 教学工程里同样带这一项的面板
+  // Axure 自己就叫 "Hidden Hours"。这个 false 被克隆进新面板后，RP 9 **不渲染它的状态内容**
+  // （面板在、注册链在、结构签名与能渲染样本逐键一致，就是不画）——三零与 version-lint 都查不出。
+  // 原生**可见**面板（RP 9 Tour 的大面板、RP 11 的 Hours Panel）都根本没有这一项，
+  // 所以这里直接删掉该条目，而不是写 true。
+  const VISIBLE_PROP = 0xC000006E;
+  pl.items = pl.items.filter(n =>
+    !(field(n, 'DOAName')?.value === VISIBLE_PROP && field(n, 'Value')?.value === false));
   const setProp = (code, values) => {
     let item = pl.items.find(n => field(n, 'DOAName')?.value === code);
     const value = { tag: 1, entries: Object.entries(values).map(([k, v]) => [intern(k), { tag: 6, value: v }]) };
@@ -142,11 +168,32 @@ export function createPanel(file, { pageName, pageIndex, name, states = ['State 
       if (styles) styles.items = styles.items
         .filter(it => field(field(it, 'Info') ?? {}, 'Name')?.text !== 'Image');
     }
-    // 重排 GUID 表：所有槽位（含被删对象留下的死槽）都换新 GUID，不残留模板 GUID。
+    // 重排 GUID 表：槽位换新 GUID，不残留模板 GUID。但**空哨兵槽必须保持全零**。
     // 对象 id 与 tag-3 引用保持不变——Axure 自己的状态记录同样有洞（PanelState 的
-    // AdaptiveViewSet 悬空指向不存在的 id=3），致密重编号会让悬空引用撞上真实对象。
+    // AdaptiveViewSet 指向不存在的 id=3），致密重编号会让引用撞上真实对象。
+    //
+    // 原生对照（Default.rplib + RP9 Tour，2026-10-16 实测）：
+    //   无对象 + 被 tag-3 引用（空哨兵）: 全零 46 / 非零 0   ← 必须全零
+    //   无对象 + 无引用（死槽）        : 全零  4 / 非零 961 ← 保留新 GUID 是对的
+    // 早前无条件给**所有**槽写随机 GUID，把空哨兵槽也写脏了 → 产物出现孤儿 GUID
+    // （Axure 自己的文件一个都没有）。看着能加载，但那是我们独有的偏差，不该留。
     const gl = sg.roots.find(n => n.tag === 0x1e).values;
-    for (let i = 0; i < gl.length; i++) gl[i] = randomBytes(16).toString('hex');
+    const sentinelIds = new Set();          // 被 tag-3 引用、但本 record 无此对象的 id
+    {
+      const referenced = new Set();
+      const collect = n => {
+        if (!n) return;
+        if (n.tag === 3) referenced.add(n.value);
+        if (n.tag === 1) for (const [, v] of n.entries) collect(v);
+        if (n.tag === 2) for (const it of n.items) collect(it);
+        if (n.tag === 9) collect(n.body);
+      };
+      for (const root of sg.roots) collect(root);
+      for (const id of referenced) if (!sg.objects.has(id)) sentinelIds.add(id);
+    }
+    for (let i = 0; i < gl.length; i++) {
+      gl[i] = sentinelIds.has(i + 1) ? '0'.repeat(32) : randomBytes(16).toString('hex');
+    }
     let nameIndex = ss.indexOf(stateName); if (nameIndex < 0) { nameIndex = ss.length; ss.push(stateName); }
     Object.assign(field(sd.body, 'Name'), { tag: 8, value: nameIndex + 1, text: stateName });
     const stateGuid = gl[sd.id - 1];
@@ -185,7 +232,8 @@ export function createPanel(file, { pageName, pageIndex, name, states = ['State 
   for (const k of Object.keys(pageNode)) delete pageNode[k];
   Object.assign(pageNode, ordered);
   out = Buffer.concat([encodeManifest(out, manifest.value), out.subarray(manifest.dataStart)]);
-  return { file: out, report: { page: pageName ?? pageIndex, panel: name, widgetId: widget.id, states: stateNames, copiedTemplateStateContent: copyTemplateStates, x, y, width, height } };
+  const panelRegistry = fixPanelRegistry(out);
+  return { file: panelRegistry.file, report: { page: pageName ?? pageIndex, panel: name, widgetId: widget.id, states: stateNames, copiedTemplateStateContent: copyTemplateStates, x, y, width, height, panelRegistry: panelRegistry.report } };
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

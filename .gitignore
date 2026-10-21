@@ -1,7 +1,11 @@
 node_modules/
+.venv/
+__pycache__/
+*.pyc
 .DS_Store
+.proto-axvg-cache/
 *.rp
 *.rplib
-test/fixtures/
-gui-jobs-check/
+outputs/
 release/
+gui-jobs-check/

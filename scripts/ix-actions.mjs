@@ -1,3 +1,4 @@
+import { nativeRuntimeValue } from './runtime-expr.mjs';
 // Offline interaction builder: append events + actions to a widget (or a page) inside a .rp file.
 // Schemas were reverse engineered from Axure's own sample documents
 // (DefaultSettings/Training/*.rp and DefaultSettings/Libraries/*.rplib).
@@ -7,20 +8,38 @@ import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';
 import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
 import { parsePayload, encodePayload, field, walkNodes } from './parse-payload.mjs';
+import { detectFileVersion, resolveTargetVersion } from './version.mjs';
+import { RP9_ENABLE_VALUES, RP11_ONLY_FCALLS, RP11_ONLY_EVENTS } from './version-fields.mjs';
+import { adaptNodesForVersion } from './version-adapt.mjs';
 
 // Complete FCall function registry recovered statically from
 // Axure.DocumentModel.Expressions.ExprFunctions on RP 11.0.0.4137 (2026-10-12).
 // Serializing a name outside this set produces an undefined-function FCall that
 // fails at preview runtime (the historical Concat failure).
+// 与 RP 9 程序集里**可写函数注册表**（G4wP.y4wj 的 Get/Set/Is/位置/值 五组）逐名对账过：
+//   注册表全集 34 个（去重）；其中 Set 组 6 个我们以动作形式覆盖（set-text/set-check/set-selected）。
+//   本集合是**表达式取值**这一侧我们能写的名字。对账脚本：patch/fcall-audit.mjs
+// 事件派生类（GetKeyPressed / GetAdaptiveView / IsEntering / IsOver / IsLeaving / IsNotOver）：
+// **可写实参数 = 序列化实参数**，事件上下文由求值器自动补。
+// 依据两版预览运行时 expr.js 的求值器（2026-10-16 实测）：
+//     } else fcallArgs[fcallArgs.length] = eventInfo;      // ← **总是**把 eventInfo 追加为最后一个实参
+//     return _exprFunctions[expr.functionName].apply(this, fcallArgs);
+// 所以运行时签名里的 eventInfo 形参**不需要**用户写：
+//   GetKeyPressed(eventInfo) / GetAdaptiveView(eventInfo)                     → 0 参
+//   IsOver/IsEntering/IsLeaving/IsNotOver(movingRects, targetRects)           → 2 参（矩形表达式）
+// 矩形表达式由 GetWidgetRectangles(widget) / GetCursorRectangles() 提供（两者都已在注册表里）。
 export const REGISTERED_FCALLS = new Set([
-  'GetGlobalVariableLength', 'GetGlobalVariableValue', 'GetWidgetRectangles', 'GetWidgetText',
-  'GetWidgetValueLength', 'GetWidgetVisibility', 'IsValueAlpha', 'IsValueAlphaNumeric',
-  'IsValueNotAlpha', 'IsValueNotAlphaNumeric', 'IsValueNotNumeric', 'IsValueNotOneOf',
-  'IsValueNumeric', 'IsValueOneOf', 'SetGlobalVariableValue', 'ToLowerCase', 'ValueContains',
-  'ValueNotContains'
+  'GetKeyPressed', 'GetAdaptiveView', 'IsEntering', 'IsOver', 'IsLeaving', 'IsNotOver',
+  'GetCheckState', 'GetCursorRectangles', 'GetDisabledState', 'GetErrorState', 'GetFocusedWidgetText',
+  'GetGlobalVariableLength', 'GetGlobalVariableValue', 'GetPanelState', 'GetSelectedOption',
+  'GetWidgetRectangles', 'GetWidgetText', 'GetWidgetValueLength', 'GetWidgetVisibility',
+  'IsValueAlpha', 'IsValueAlphaNumeric', 'IsValueNotAlpha', 'IsValueNotAlphaNumeric',
+  'IsValueNotNumeric', 'IsValueNotOneOf', 'IsValueNumeric', 'IsValueOneOf',
+  'SetErrorState', 'SetGlobalVariableValue', 'ToLowerCase', 'ValueContains', 'ValueNotContains'
 ]);
 export const WIDGET_PATH_FCALLS = new Set([
-  'GetWidgetText', 'GetWidgetValueLength', 'GetWidgetVisibility', 'GetWidgetRectangles'
+  'GetWidgetText', 'GetWidgetValueLength', 'GetWidgetVisibility', 'GetWidgetRectangles',
+  'GetCheckState', 'GetDisabledState', 'GetSelectedOption', 'GetPanelState', 'GetErrorState'
 ]);
 export const FCALL_SPECS = {
   GetWidgetText: { arity: 1, paramTypes: ['widgetPath'] },
@@ -37,10 +56,29 @@ export const FCALL_SPECS = {
   IsValueNotNumeric: { arity: 1, paramTypes: ['scalar'] },
   IsValueNotAlphaNumeric: { arity: 1, paramTypes: ['scalar'] },
   ToLowerCase: { arity: 1, paramTypes: ['scalar'] },
+  // 事件派生：0 参（事件由求值器自动追加）
+  GetKeyPressed: { arity: 0, paramTypes: [] },
+  GetAdaptiveView: { arity: 0, paramTypes: [] },
+  // 事件派生：2 个矩形表达式
+  IsOver: { arity: 2, paramTypes: ['scalar', 'scalar'] },
+  IsEntering: { arity: 2, paramTypes: ['scalar', 'scalar'] },
+  IsLeaving: { arity: 2, paramTypes: ['scalar', 'scalar'] },
+  IsNotOver: { arity: 2, paramTypes: ['scalar', 'scalar'] },
+  // RP 11 专属：两版运行时函数表不同（RP11 的 expr.js 有，RP9 没有）。
+  //   GetErrorState(ids)            → $ax('#'+ids[0]).error()   形状同 GetCheckState（已验）
+  //   SetErrorState(elementIds, value) → value 取 'toggle' / 真值 / 'false'
+  GetErrorState: { arity: 1, paramTypes: ['widgetPath'] },
+  SetErrorState: { arity: 2, paramTypes: ['widgetPath', 'scalar'] },
+  GetCheckState: { arity: 1, paramTypes: ['widgetPath'] },
+  GetDisabledState: { arity: 1, paramTypes: ['widgetPath'] },
+  GetSelectedOption: { arity: 1, paramTypes: ['widgetPath'] },
+  GetPanelState: { arity: 1, paramTypes: ['widgetPath'] },
+  GetFocusedWidgetText: { arity: 0, paramTypes: [] },
+  GetCursorRectangles: { arity: 0, paramTypes: [] },
   ValueContains: { arity: 2, paramTypes: ['scalar', 'scalar'] },
   ValueNotContains: { arity: 2, paramTypes: ['scalar', 'scalar'] },
-  IsValueOneOf: { arity: 2, paramTypes: ['scalar', 'unsupportedSet'] },
-  IsValueNotOneOf: { arity: 2, paramTypes: ['scalar', 'unsupportedSet'] }
+  IsValueOneOf: { arity: 2, paramTypes: ['scalar', 'optionSet'] },
+  IsValueNotOneOf: { arity: 2, paramTypes: ['scalar', 'optionSet'] }
 };
 export const FCALL_ARITIES = Object.fromEntries(
   Object.entries(FCALL_SPECS).map(([k, v]) => [k, v.arity])
@@ -119,24 +157,78 @@ export function resolvePageRecord(file, pageName) {
   return rec;
 }
 
-export function addInteractions(file, target, interactions, { replaceEvent = false } = {}) {
+// The same page owns its root diagram and every reachable panel-state diagram.
+// Keep the owning record/graph with each widget so event owners and action paths
+// can live in different records without confusing local object IDs with GUIDs.
+export function pageWidgetContexts(file, pageName) {
+  const records = readRecords(file);
+  const root = resolvePageRecord(file, pageName);
+  const parsed = records.filter(r => r.className === 'Axure:PanelState').map(r => {
+    const graph = parsePayload(r);
+    const table = graph.roots.find(n => n.tag === 0x1e)?.values ?? [];
+    const diagram = [...graph.objects.values()].find(o => o.className === 'Axure:PanelDiagram');
+    return { r, graph, guid: diagram ? table[diagram.id - 1] : null };
+  });
+  const result = [], visited = new Set();
+  const visit = (r, graph, container) => {
+    if (visited.has(r.index)) return;
+    visited.add(r.index);
+    const widgets = [...graph.objects.values()].filter(o => o.className.startsWith('Axure:DiagramObject:'));
+    result.push({ r, graph, widgets, container, pageName });
+    const guids = graph.roots.find(n => n.tag === 0x1e)?.values ?? [];
+    for (const panel of widgets.filter(o => o.className === 'Axure:DiagramObject:DynamicPanel')) {
+      const name = field(field(panel.body, 'name-block') ?? {}, 'text')?.text;
+      for (const pair of field(panel.body, 'panel-diagrams')?.items ?? []) {
+        const guid = guids[(pair.values?.[1] ?? pair.value) - 1];
+        const state = parsed.find(context => context.guid === guid);
+        if (!state) throw new Error(`Panel state record missing for ${pageName}/${name}`);
+        const diagram = [...state.graph.objects.values()].find(o => o.className === 'Axure:PanelDiagram');
+        visit(state.r, state.graph, [...container, `${name}(${field(diagram.body, 'Name')?.text})`]);
+      }
+    }
+  };
+  visit(root, parsePayload(root), []);
+  return result;
+}
+
+export function addInteractions(file, target, interactions, { replaceEvent = false, version } = {}) {
   if (!Array.isArray(interactions) || !interactions.length) throw new Error('No interactions given');
+  // 写侧编码必须跟随「这个文件自己的版本」，不是本机装的哪个 Axure。
+  const targetVersion = version !== undefined ? resolveTargetVersion(version) : resolveTargetVersion(detectFileVersion(file));
   // target 三种形态：
   //   'WidgetName'                      全局按名找 widget（重名报错并列候选）
   //   { page: 'PageName' }              页面级交互
   //   { widget: 'Name', page: 'PageName' }  限定页面内找 widget（两页同名只改指定页）
-  const pageOnly = typeof target === 'object' && target !== null && target.page !== undefined && target.widget === undefined;
+  const masterName = typeof target === 'object' && target !== null ? target.master : null;
+  const pageOnly = typeof target === 'object' && target !== null && (target.page !== undefined || masterName) && target.widget === undefined;
   const widgetName = pageOnly ? null : (typeof target === 'string' ? target : target.widget);
   const pageName = pageOnly ? target.page : (target && target.page ? target.page : null);
 
   const matches = [];
-  const pageRecords = pageName ? [resolvePageRecord(file, pageName)] : readRecords(file).filter(r => r.className === 'Axure:Page');
-  for (const r of pageRecords) {
-    const graph = parsePayload(r);
-    const pageObj = [...graph.objects.values()].find(o => o.className === 'Axure:Page');
+  let masterRecord;
+  if (masterName) {
+    const records = readRecords(file), doc = records.find(r => r.className === 'Axure:DesignDocument');
+    const g = parsePayload(doc), guids = g.roots.find(n => n.tag === 0x1e).values;
+    const info = [...g.objects.values()].find(o => o.className === 'Axure:MasterPackageInfo' && field(o.body, 'package-name')?.text === masterName);
+    if (!info) throw new Error(`Master not found: ${masterName}`);
+    const guid = guids[field(info.body, 'package-id').values[1] - 1];
+    masterRecord = records.find(r => r.className === 'Axure:Master' && (() => {
+      const pg = parsePayload(r); return pg.roots.find(n => n.tag === 0x1e).values[pg.roots.find(n => n.tag === 0x12).value - 1] === guid;
+    })());
+    if (!masterRecord) throw new Error(`Master package not found: ${masterName}`);
+  }
+  const pageRecords = masterRecord ? [masterRecord] : pageName ? [resolvePageRecord(file, pageName)] : readRecords(file).filter(r => r.className === 'Axure:Page');
+  // Legacy global-name lookup retains its root-only semantics. Page-scoped calls
+  // explicitly opt into reachable panel-state lookup.
+  const contexts = !masterRecord && pageName && !pageOnly ? pageWidgetContexts(file, pageName)
+    : pageRecords.map(r => ({ r, graph: parsePayload(r), container: [] }));
+  for (const { r, graph, container } of contexts) {
+    const pageObj = [...graph.objects.values()].find(o => o.className === (masterName ? 'Axure:Master' : 'Axure:Page'));
     if (pageOnly) { matches.push({ kind: 'page', r, graph, pageObj }); continue; }
     for (const widget of graph.objects.values()) {
       if (!widget.className.startsWith('Axure:DiagramObject:') && !widget.className.startsWith('Axure:Repeater')) continue;
+      if (typeof target === 'object' && target.record !== undefined && target.record !== r.index) continue;
+      if (typeof target === 'object' && target.container && JSON.stringify(target.container) !== JSON.stringify(container)) continue;
       if (field(field(widget.body, 'name-block') ?? {}, 'text')?.text === widgetName) matches.push({ kind: 'widget', r, graph, widget });
     }
   }
@@ -166,6 +258,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
   const newGuid = () => { guids.push(randomBytes(16).toString('hex')); return guids.length; };
 
   const defs = [];
+  const versionAdaptations = [];   // 本次为适配目标版本所做的编码改动（进 report，避免被当成宿主通过）
   const obj = (id, className, props) => {
     const node = { tag: 9, id, classIndex: str(className).value, className, body: map(props) };
     defs.push(node);
@@ -177,9 +270,23 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
   });
 
   const nameOf = o => field(field(o.body, 'name-block') ?? {}, 'text')?.text;
+  const importGuid = guid => {
+    if (!guid) throw new Error('Missing GUID for cross-container reference');
+    let id = guids.indexOf(guid) + 1;
+    if (!id) { guids.push(guid); id = guids.length; }
+    return id;
+  };
   const findWidget = name => {
     const candidates = [...graph.objects.values()].filter(o =>
       (o.className.startsWith('Axure:DiagramObject:') || o.className.startsWith('Axure:Repeater')) && nameOf(o) === name);
+    if (!candidates.length && pageName) {
+      const external = pageWidgetContexts(file, pageName).flatMap(context => context.widgets
+        .filter(o => nameOf(o) === name).map(node => ({ node, context })));
+      if (external.length !== 1) throw new Error(`Expected exactly one widget named "${name}" in page "${pageName}", found ${external.length}`);
+      const { node, context } = external[0];
+      const sourceGuids = context.graph.roots.find(n => n.tag === 0x1e)?.values ?? [];
+      return { ...node, id: importGuid(sourceGuids[node.id - 1]), sourceGraph: context.graph, sourceGuids };
+    }
     if (candidates.length !== 1) throw new Error(`Expected exactly one widget named "${name}" on record #${r.index}, found ${candidates.length}: ${candidates.map(o => `obj#${o.id}`).join(', ')}`);
     return candidates[0];
   };
@@ -218,7 +325,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
     const states = new Map();
     for (const pair of field(panelWidget.body, 'panel-diagrams')?.items ?? []) {
       const guidIndex = pair.tag === 0x13 ? pair.values[1] : pair.value;
-      const guid = guids[guidIndex - 1];
+      const guid = (panelWidget.sourceGuids ?? guids)[guidIndex - 1];
       if (!guid) continue;
       let named = false;
       for (const rec of readRecords(file)) {
@@ -228,15 +335,35 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         const diagram = [...g2.objects.values()].find(o => o.className === 'Axure:PanelDiagram');
         if (!diagram || own[diagram.id - 1] !== guid) continue;
         const nm = field(diagram.body, 'Name');
-        if (nm && nm.tag === 8) { states.set(nm.text, guidIndex); named = true; }
+        if (nm && nm.tag === 8) { states.set(nm.text, importGuid(guid)); named = true; }
       }
       if (!named) states.set(`(state ${guidIndex})`, guidIndex);
     }
     return states;
   };
-  const pathTo = targetNodeId => obj(newGuid(), 'Axure:DiagramObjectPath', {
-    'rdo-path': list([]), 'repeater-path': list([]), 'object-id': guidRef(targetNodeId), 'is-dummy': bool(false)
-  });
+  const repeaterByWidgetId = new Map();
+  for (const o of graph.objects.values()) {
+    if (o.className === 'Axure:DiagramObject:Repeater') {
+      const bd = graph.objects.get(field(o.body, 'BaseDiagram')?.value);
+      const collect = items => {
+        for (const item of items ?? []) {
+          repeaterByWidgetId.set(item.value, o.id);
+          const child = graph.objects.get(item.value);
+          if (child) collect(field(child.body, 'DiagramObjects')?.items);
+        }
+      };
+      if (bd) collect(field(bd.body, 'diagram-objects')?.items);
+    }
+  }
+  const pathTo = targetNodeId => {
+    const ownerRepId = repeaterByWidgetId.get(targetNodeId);
+    return obj(newGuid(), 'Axure:DiagramObjectPath', {
+      'rdo-path': list([]),
+      'repeater-path': list(ownerRepId ? [guidRef(ownerRepId)] : []),
+      'object-id': guidRef(targetNodeId),
+      'is-dummy': bool(false)
+    });
+  };
   const treeNodePath = (treeName, nodeText) => {
     const tree = findWidget(treeName);
     if (tree.className !== 'Axure:DiagramObject:TreeNodeObject')
@@ -271,6 +398,10 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
     return pathTo(matches[0].id);
   };
 
+  const runtimeValue = (ast, options) => nativeRuntimeValue(ast, {
+    obj, newGuid, str, list, ref, dict, bool, nullId, graph, findWidget, globalVariableInfo, pathTo,
+  }, options);
+
   // ---- 条件构造器：取自自带控件库的真实 BinaryExpr ----
   const OPS = { '&&': 1, '||': 2, '==': 3, '!=': 4, '>': 5, '<': 6, '>=': 7, '<=': 8 };
   const buildCondition = when => {
@@ -285,6 +416,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
       if (e === undefined || e === null) throw new Error('condition side 不能为空');
       if (typeof e === 'string' || typeof e === 'number' || typeof e === 'boolean') return ref(literal(e).id);
       if (typeof e !== 'object') throw new Error(`Unsupported condition side expression type: ${typeof e}`);
+      if (e.runtime) return ref(runtimeValue(e.runtime).id);
       const semanticCount = [
         e.value !== undefined,
         e.op !== undefined,
@@ -322,11 +454,31 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
           throw new Error('Concat is not an Axure RP 11.0.0.4137 FCall; use a StringLiteral value such as [["A".concat("B")]]');
         if (!REGISTERED_FCALLS.has(e.fn))
           throw new Error(`Unknown FCall function "${e.fn}". Registered functions (Axure.DocumentModel.Expressions.ExprFunctions on RP 11.0.0.4137): ${[...REGISTERED_FCALLS].join(', ')}`);
+        // 名字在注册表里不等于目标版本有它：这两版预览运行时的函数表并不相同。
+        if (targetVersion === 9 && RP11_ONLY_FCALLS.has(e.fn))
+          throw new Error(`FCall function "${e.fn}" is RP 11-only; Axure RP 9 does not provide it (RP 9 运行时只有 38 个表达式函数，此名不在其中)`);
         const spec = FCALL_SPECS[e.fn];
         if (spec && spec.arity !== undefined && e.args.length !== spec.arity)
           throw new Error(`FCall function "${e.fn}" expects ${spec.arity} argument${spec.arity === 1 ? '' : 's'}, received ${e.args.length}`);
-        if (e.fn === 'IsValueOneOf' || e.fn === 'IsValueNotOneOf')
-          throw new Error(`FCall function "${e.fn}" candidate set has no native .rp Literal ground truth in Axure RP 11 sample library; unsupported`);
+        // `IsValueOneOf(val, values)` / `IsValueNotOneOf` 的第二个参数在磁盘上是
+        //   Axure:Expr:ArrayExpr { items: [ <表达式>, <表达式>, ... ] }
+        // 依据（REA + 运行时实测，2026-10-16）：
+        //   ① 两版预览运行时 expr.js：IsValueOneOf = function(val, values){ for(...) if(val==values[i]) return true; return false; }
+        //      —— 第二个形参是**数组**；
+        //   ② 程序集 ArrayExpr.rv2F/Bv2O 只序列化一个键 `items`；类名 `Axure:Expr:ArrayExpr`
+        //      在 RP 9 类注册表字符串里（两版都有，非版本差异）；
+        //   ③ **items 里直接放表达式，不要再套 OptionLiteral** —— 套了会让 RP 9 预览整页空白
+        //      （实测：套 OptionLiteral 暗像素 7243=空白；不套 9024=正常，且 data.js 里出现
+        //        IsValueOneOf）。虽然程序集里确实存在 `Axure:Expr:OptionLiteral{Option}`，
+        //      但那不是这个参数要的形状。
+        //   ④ RP 9 原生预览行为实测：IsValueOneOf("b",["a","b","c"]) == true → 命中分支。
+        const buildOptionSet = arg => {
+          const arr = arg?.array ?? arg?.values;
+          if (!Array.isArray(arr) || arr.length === 0)
+            throw new Error(`FCall function "${e.fn}" argument must be { array: [...] } with at least one option, received ${JSON.stringify(arg)}`);
+          const items = arr.map(v => side(v));   // 变体 B：items 直接放表达式，不套 OptionLiteral
+          return ref(obj(newGuid(), 'Axure:Expr:ArrayExpr', { items: list(items) }).id);
+        };
 
         const args = e.args.map((arg, idx) => {
           const expectedType = spec?.paramTypes?.[idx];
@@ -355,6 +507,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
             if (arg?.widgetPath !== undefined || arg?.globalVariable !== undefined)
               throw new Error(`FCall function "${e.fn}" argument #${idx + 1} expects a scalar expression or literal, received target reference`);
           }
+          if (expectedType === 'optionSet') return buildOptionSet(arg);
           return side(arg);
         });
 
@@ -379,6 +532,8 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         const fnName = e.fn ?? 'GetWidgetText';
         if (!REGISTERED_FCALLS.has(fnName))
           throw new Error(`Unknown FCall function "${fnName}". Registered functions: ${[...REGISTERED_FCALLS].join(', ')}`);
+        if (targetVersion === 9 && RP11_ONLY_FCALLS.has(fnName))
+          throw new Error(`FCall function "${fnName}" is RP 11-only; Axure RP 9 does not provide it`);
         if (!WIDGET_PATH_FCALLS.has(fnName))
           throw new Error(`FCall function "${fnName}" does not accept a single widget target path. Supported widget path functions: ${[...WIDGET_PATH_FCALLS].join(', ')}`);
         const path = pathTo(findWidget(e.widget).id);
@@ -435,6 +590,12 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         }
         const duration = spec.duration !== undefined ? num(spec.duration) : 250;
         const easing = pick(FADE_EASE, spec.animation ?? 'fade', 'animation');
+        // RP 9 的 FadeWidgetInfo writer 只有 13 键，**没有** scale / scale-hide / scale-anchor /
+        // scale-hide-anchor（REA Axure.DocumentModel.Interaction.FadeWidgetInfo.rv2F = 0x06008fa7）。
+        // 这四个键由 spec.scale / spec.anchor 驱动；静默丢掉 = 缩放效果无声消失，所以按版本明确拒绝。
+        if (targetVersion === 9 && (spec.scale !== undefined || spec.anchor !== undefined)) {
+          throw new Error('show/toggle 的 scale / anchor 是 RP 11 专属能力（RP 9 的 FadeWidgetInfo 无对应键），已明确拒绝；RP 9 上请去掉 scale/anchor');
+        }
         const fold = info('Axure:FadeWidgetInfo', {
           duration: f64(duration), 'fade-action-type': int(fade), easing: int(easing),
           DurationHide: f64(duration), EasingHide: int(easing), BringToFront: bool(spec.bringToFront),
@@ -445,7 +606,9 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
           'animation-hide': int(pick(EASE, spec.hideEasing ?? 'none', 'easing')),
           'animation-show': int(pick(EASE, spec.showEasing ?? 'none', 'easing')),
           scale: f64(spec.scale ?? 0), 'scale-hide': f64(spec.scale ?? 0),
-          'scale-anchor': str(spec.anchor ?? 'center'), 'scale-hide-anchor': str(spec.anchor ?? 'center')
+          'scale-anchor': str(spec.anchor ?? 'center'), 'scale-hide-anchor': str(spec.anchor ?? 'center'),
+          // RP 9 原生 FadeWidgetInfo 有 vertical:bool，RP 11 已移除该键。按 showType 的压缩方向回填。
+          ...(targetVersion === 9 ? { vertical: bool((spec.showType ?? 'none') === 'compressVertical') } : {})
         });
         return obj(newGuid(), 'Axure:InteractionFadeWidgetAction', {
           Disabled: bool(false), panelobjectpaths: list([ref(path.id)]),
@@ -531,6 +694,19 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
       }
       case 'enable': case 'disable': case 'toggle-enabled': {
         const { path } = paths();
+        // RP 9 原生 EnableDisableWidgetsInfo.enable 是 bool（样本实测），只有启用/禁用两种状态；
+        // RP 11 是同键的 int 枚举 Enable=0 / Disable=1 / Toggle=2。同名不同型，不能机械换算。
+        if (targetVersion === 9) {
+          if (type === 'toggle-enabled') {
+            throw new Error('toggle-enabled has no Axure RP 9 representation: RP 9 EnableDisableWidgetsInfo.enable is a bool (enable/disable only). Use enable or disable.');
+          }
+          const en = info('Axure:EnableDisableWidgetsInfo', { enable: bool(RP9_ENABLE_VALUES[type]) });
+          versionAdaptations.push(`enable/disable 按 RP 9 原生 bool 写入（RP 11 为 int 枚举）`);
+          return obj(newGuid(), 'Axure:InteractionEnableDisableWidgetsAction', {
+            Disabled: bool(false), panelobjectpaths: list([ref(path.id)]),
+            WidgetPaths: list([ref(path.id)]), EnableDisableInfos: list([ref(en.id)])
+          });
+        }
         const value = type === 'enable' ? 0 : type === 'disable' ? 1 : 2;
         const en = info('Axure:EnableDisableWidgetsInfo', { enable: int(value) });
         return obj(newGuid(), 'Axure:InteractionEnableDisableWidgetsAction', {
@@ -570,7 +746,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         }
         const arg = type === 'set-text' ? (spec.text ?? '') : (spec.checked ?? spec.value ?? 'true');
         const pathLiteral = obj(newGuid(), 'Axure:Expr:DiagramObjectPathLiteral', { value: ref(path.id) });
-        const args = [ref(pathLiteral.id), ref(literal(arg).id)];
+        const args = [ref(pathLiteral.id), ref((spec.runtime ? runtimeValue(spec.runtime) : literal(arg)).id)];
         if (fn === 'SetWidgetRichText') args.push(ref(obj(newGuid(), 'Axure:Expr:BooleanLiteral', { value: str('True') }).id));
         const call = obj(newGuid(), 'Axure:Expr:FCall', { 'function-name': str(fn), args: list(args) });
         const block = obj(newGuid(), 'Axure:Expr:Block', { subexpressions: list([ref(call.id)]) });
@@ -585,7 +761,8 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
           'is-dummy': bool(false), 'variable-name': str(variableName)
         });
         let valueExpr;
-        if (spec.expression !== undefined) {
+        if (spec.runtime) valueExpr = runtimeValue(spec.runtime);
+        else if (spec.expression !== undefined) {
           if (spec.value !== undefined) throw new Error('set-variable accepts value or expression, not both');
           const expression = String(spec.expression);
           if (!/^\[\[[\s\S]+\]\]$/.test(expression))
@@ -787,11 +964,25 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
           ImageStatesInfos: list([ref(statesInfo.id)])
         });
       }
+      case 'data-sort': return build({ ...spec, type:'repeater-sort' }, ctx);
+      case 'data-clear-sort': return build({ ...spec, type:'remove-sort', removeAll:true }, ctx);
+      case 'data-clear-filter': return build({ ...spec, type:'remove-filter', removeAll:true }, ctx);
+      case 'data-page': return build({ ...spec, type:'set-repeater-page' }, ctx);
+      case 'data-add': return build({ ...spec, type:'repeater-add-items' }, ctx);
+      case 'data-delete': return build({ ...spec, type:'repeater-delete-items' }, ctx);
+      case 'data-update': return build({ ...spec, type:'repeater-update-items' }, ctx);
+      case 'data-filter': return build({ ...spec, type:'repeater-filter' }, ctx);
       case 'repeater-sort': case 'repeater-filter': case 'repeater-add-items': case 'repeater-delete-items':
       case 'repeater-update-items': {
         // 中继器数据操作；Info 结构逆向自 Axure 自带 Sample UI/form patterns.rplib
         const { widget: repeater, path } = paths();
         if (type === 'repeater-sort') {
+          // RP 9 的 AddSortToRepeaterInfo writer 只有 ascending / column-id / column-name /
+          // label / sort-type / toggle（REA 0x060089f4），没有 remove-all-sorts。
+          // 静默丢掉会让「清除其它排序」这个意图无声消失，所以按版本明确拒绝。
+          if (targetVersion === 9 && spec.removeAll) {
+            throw new Error('repeater-sort 的 removeAll（remove-all-sorts）是 RP 11 专属能力，RP 9 无对应键，已明确拒绝');
+          }
           const sortInfo = info('Axure:AddSortToRepeaterInfo', {
             label: str(spec.label ?? ''), 'column-id': guidRef(repeaterColumnId(repeater, spec.column)),
             'column-name': str(spec.column ?? ''), ascending: bool(!!spec.ascending),
@@ -804,7 +995,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
           });
         }
         if (type === 'repeater-filter') {
-          const columnId = repeaterColumnId(repeater, spec.column);
+          const columnId = spec.predicate ? null : repeaterColumnId(repeater, spec.column);
           let condition = literal('');
           if (spec.condition) {
             const data = graph.objects.get(field(repeater.body, 'Data').value);
@@ -820,10 +1011,39 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
               operation: int(3)
             });
           }
+          // RP 9 的 AddFilterToRepeaterInfo writer 只有 Filter / Label / RemoveOtherFilters
+          // （REA Axure.DocumentModel.Interaction.AddFilterToRepeaterInfo.rv2F = 0x06008981），
+          // 过滤条件必须放进 Filter 自身；RP 11 才另立 Condition 等键。
+          // ⚠ 这里必须「搬值」而不是「丢键」：若照旧写空字面量，版本适配会把条件整个丢掉，
+          //   产出键集与 RP 9 原生一模一样、却是个空操作 —— 三零与 version-lint 都查不出这种静默损坏。
+          if (targetVersion === 9 && spec.comboType !== undefined) {
+            throw new Error('repeater-filter 的 comboType 是 RP 11 专属键（RP 9 的 AddFilterToRepeaterInfo 无对应）');
+          }
+          // RP 9 的 Filter 是 **StringLiteral，装整个 [[...]] 表达式**，不是表达式树：
+          //   原生真值 Sample UI Patterns.rplib obj#359/628/46/833，value 形如
+          //   "[[Item.ProductName.toLowerCase().indexOf(filter) >= 0]]"，variable-identifiers 列出引用变量。
+          // ⚠ 指向 BinaryExpr 会让 RP 9 的 HTML 生成器**整页崩成空白**（2026-10-16 实测：
+          //   不带动作的对照页正常渲染，带该动作的页全白）。此处沿用已验证的 Rule 表达式写法。
+          let filterExprId = literal('').id;
+          if (spec.predicate) filterExprId = runtimeValue(spec.predicate, { targetRows:true }).id;
+          else if (targetVersion === 9) {
+            const repDataForFilter = graph.objects.get(field(repeater.body, 'Data').value);
+            const ruleLitId = newGuid(), identId = newGuid();
+            obj(ruleLitId, 'Axure:Expr:StringLiteral', {
+              value: str(`[[TargetItem.${spec.column} == '${spec.filter ?? ''}']]`),
+              'variable-identifiers': list([ref(identId)]),
+              scope: dict([]), 'repeater-scope': ref(nullId), TargetRepeaterScope: ref(repDataForFilter.id)
+            });
+            obj(identId, 'Axure:Expr:TextVariableIdentifier', {
+              Id: { tag: 0x11, value: columnId }, Name: str(`TargetTargetItem.${spec.column}`),
+              Expr: ref(ruleLitId), TargetOverride: bool(true)
+            });
+            filterExprId = ruleLitId;
+          }
           const filterInfo = info('Axure:AddFilterToRepeaterInfo', {
             RemoveOtherFilters: bool(spec.removeOthers !== false),
             Label: str(spec.label ?? ''),
-            Filter: ref(literal('').id),
+            Filter: ref(targetVersion === 9 ? filterExprId : literal('').id),
             UseCondition: bool(!!spec.condition),
             Condition: ref(condition.id),
             FilterComboType: int(num(spec.comboType ?? 2)),
@@ -864,16 +1084,22 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
             ? spec.columns.map(s => String(s).trim()).filter(Boolean)
             : String(spec.columns ?? '').split(',').map(s => s.trim()).filter(Boolean);
           if (!colNames.length) throw new Error('repeater-add-items requires columns=<c1,c2,...>');
-          if (spec.rows === undefined || (typeof spec.rows === 'string' && spec.rows.trim() === '')) throw new Error('repeater-add-items requires rows=<v1,v2,...;...>');
-          const rows = typeof spec.rows === 'string'
-            ? spec.rows.split(';').map(row => row.split(',').map(value => ({ value: value.trim() })))
-            : spec.rows;
+          // CLI 的 coerce() 会把 `rows=9` 这类纯数字值转成 Number；这里统一接受数字，
+          // 否则「只有数字的数据行」根本传不进来（RP 11 上也一样）。
+          const rawRows = spec.rows;
+          if (rawRows === undefined || ((typeof rawRows === 'string' || typeof rawRows === 'number') && String(rawRows).trim() === '')) {
+            throw new Error('repeater-add-items requires rows=<v1,v2,...;...>');
+          }
+          const rows = (typeof rawRows === 'string' || typeof rawRows === 'number')
+            ? String(rawRows).split(';').map(row => row.split(',').map(value => ({ value: value.trim() })))
+            : rawRows;
           if (!Array.isArray(rows) || !rows.length || rows.some(row => !Array.isArray(row)))
             throw new Error('repeater-add-items rows must be a non-empty array of row arrays or a delimited string');
           const cells = rows.map((row, rowIndex) => row.map((cell, columnIndex) => {
             if (cell === null || typeof cell === 'string' || typeof cell === 'number' || typeof cell === 'boolean')
               return { kind: 'value', value: String(cell ?? '') };
             if (typeof cell !== 'object') throw new Error(`repeater-add-items row ${rowIndex + 1} cell ${columnIndex + 1} must be a value or {widget: name}`);
+            if (cell.runtime) return {kind:'runtime', ast:cell.runtime};
             if (Object.hasOwn(cell, 'widget') && typeof cell.widget === 'string' && cell.widget.trim()) {
               if (cell.fn !== undefined && cell.fn !== 'GetWidgetText')
                 throw new Error(`repeater-add-items row ${rowIndex + 1} cell ${columnIndex + 1} supports only GetWidgetText`);
@@ -887,7 +1113,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
             if (row.length !== colNames.length) throw new Error(`repeater-add-items row ${i + 1} has ${row.length} cells; expected ${colNames.length} columns`);
           });
           const actionId = newGuid(), pathId = newGuid(), infoId = newGuid(), dsId = newGuid();
-          // ⚠️ 列的 variable-id 是独立 GUID 槽（真值：vid 156/157/158 ≠ prop 对象 id 159/160/161）
+          // ⚠️ 列的 variable-id 是独立 GUID 槽（真值：vid 156/157/158 ≠ prop 对象 id 159/161）
           const newVids = colNames.map(() => newGuid());
           const propIds = colNames.map(() => newGuid());
           const rowIds = cells.map(() => newGuid());
@@ -923,6 +1149,14 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
             });
           }));
           cells.forEach((row, r) => row.forEach((cell, c) => {
+            if (cell.kind === 'runtime') {
+              const value = runtimeValue(cell.ast);
+              const element = graph.objects.get(elemIds[r][c]) ?? defs.find(n=>n.id===elemIds[r][c]);
+              field(element.body,'value').value = value.id;
+              // Add cells are evaluated in their private AddItems DataSet.
+              if (field(value.body,'repeater-scope').value === nullId) field(value.body,'repeater-scope').value = dsId;
+              return;
+            }
             const ids = exprIds[r][c];
             const variableName = 'LVAR1';
             obj(litIds[r][c], 'Axure:Expr:StringLiteral', {
@@ -945,8 +1179,8 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         }
         if (type === 'repeater-delete-items') {
           // spec: target=R7 column=First_Name value=Bob（自动拼规则）或 rule="[[...]]" + column=
-          const ruleText = spec.rule ?? `[[Item.${spec.column} == '${spec.value}']]`;
-          const colVid = repeaterColumnId(repeater, spec.column);
+          const ruleText = spec.rule ?? `[[TargetItem.${spec.column} == '${spec.value}']]`;
+          const colVid = spec.predicate ? null : repeaterColumnId(repeater, spec.column);
           const actionId = newGuid(), pathId = newGuid(), infoId = newGuid(), litId = newGuid(), identId = newGuid();
           const delAction = obj(actionId, 'Axure:InteractionDeleteItemsFromDataSetAction', {
             Disabled: bool(false), panelobjectpaths: list([ref(pathId)]),
@@ -955,15 +1189,21 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
           obj(pathId, 'Axure:DiagramObjectPath', {
             'rdo-path': list([]), 'repeater-path': list([]), 'object-id': guidRef(repeater.id), 'is-dummy': bool(false)
           });
+          // RP 9 的 DeleteItemsFromDataSetInfo writer 只有 Rule / SelectionType（REA 0x06008a2b），
+          // 没有 RowIndicesText / RowIndicesRule。行序号只落在 RowIndicesText 里，静默丢掉会让
+          // 删除按 Rule 表达式选行 —— 选错行，所以按版本明确拒绝。
+          if (targetVersion === 9 && spec.rowIndices !== undefined) {
+            throw new Error('rowIndices 是 RP 11 专属键（RP 9 的 DataSetInfoWithRowSelection 只有 Rule/SelectionType），已明确拒绝；RP 9 上请改用 rule=<[[]]> 指定规则');
+          }
           obj(infoId, 'Axure:DeleteItemsFromDataSetInfo', {
-            SelectionType: int(num(spec.selectionType ?? 2)), Rule: ref(litId),
-            RowIndicesText: str(spec.rowIndices ?? ''), RowIndicesRule: ref(nullId)
+            SelectionType: int(num(spec.selectionType ?? 2)), Rule: ref(spec.predicate ? runtimeValue(spec.predicate, {targetRows:true}).id : litId),
+            RowIndicesText: str(String(spec.rowIndices ?? '')), RowIndicesRule: ref(nullId)
           });
-          obj(litId, 'Axure:Expr:StringLiteral', {
+          if (!spec.predicate) obj(litId, 'Axure:Expr:StringLiteral', {
             value: str(ruleText), 'variable-identifiers': list([ref(identId)]),
             scope: dict([]), 'repeater-scope': ref(nullId), TargetRepeaterScope: ref(repData.id)
           });
-          obj(identId, 'Axure:Expr:TextVariableIdentifier', {
+          if (!spec.predicate) obj(identId, 'Axure:Expr:TextVariableIdentifier', {
             Id: { tag: 0x11, value: colVid }, Name: str(`TargetTargetItem.${spec.column}`),
             Expr: ref(litId), TargetOverride: bool(true)
           });
@@ -975,19 +1215,19 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         // UI 真值当前只含一列；DataSetInfo 的列名、目标 ID 和更新值均为并行列表，
         // 迷你 DataSet 则按每个列/值对各存一行。多列形状仍需 Axure GUI/预览验收。
         if (!Array.isArray(requestedUpdates) || requestedUpdates.length === 0 ||
-          requestedUpdates.some(u => u?.column === undefined || u?.value === undefined)) {
+          requestedUpdates.some(u => u?.column === undefined || (u?.value === undefined && !u?.runtime))) {
           throw new Error('repeater-update-items requires a non-empty updates array of {column, value} pairs (or setColumn and setValue)');
         }
         const updates = requestedUpdates
-          .map(u => ({ column: String(u.column), value: String(u.value) }));
+          .map(u => ({ column: String(u.column), value: String(u.value ?? ''), runtime:u.runtime }));
         if (new Set(updates.map(u => u.column)).size !== updates.length)
           throw new Error('repeater-update-items updates must use each column only once');
         const updateColumnIds = updates.map(u => repeaterColumnId(repeater, u.column));
-        const ruleText = spec.rule ?? `[[Item.${spec.column} == '${spec.value}']]`;
-        const ruleVid = repeaterColumnId(repeater, spec.column);
+        const ruleText = spec.rule ?? `[[TargetItem.${spec.column} == '${spec.value}']]`;
+        const ruleVid = spec.predicate ? null : repeaterColumnId(repeater, spec.column);
         const actionId = newGuid(), pathId = newGuid(), infoId = newGuid();
         const ruleLitId = newGuid(), identId = newGuid();
-        const valueLiteralIds = updates.map(() => newGuid());
+        const valueLiteralIds = updates.map(u => u.runtime ? runtimeValue(u.runtime, {targetRows:true}).id : newGuid());
         const miniDsId = newGuid(), mc1 = newGuid(), mc2 = newGuid();
         const miniRows = updates.map(() => ({ row: newGuid(), cells: [newGuid(), newGuid()] }));
         const mv1 = newGuid(), mv2 = newGuid(); // 列 vid 独立槽（真值 204/205 ≠ prop 对象 201/202）
@@ -999,19 +1239,19 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
           'rdo-path': list([]), 'repeater-path': list([]), 'object-id': guidRef(repeater.id), 'is-dummy': bool(false)
         });
         obj(infoId, 'Axure:UpdateEditItemsInDataSetInfo', {
-          SelectionType: int(num(spec.selectionType ?? 2)), Rule: ref(ruleLitId),
-          RowIndicesText: str(spec.rowIndices ?? ''), RowIndicesRule: ref(nullId),
+          SelectionType: int(num(spec.selectionType ?? 2)), Rule: ref(spec.predicate ? runtimeValue(spec.predicate, {targetRows:true}).id : ruleLitId),
+          RowIndicesText: str(String(spec.rowIndices ?? '')), RowIndicesRule: ref(nullId),
           'column-names': list(updates.map(u => str(u.column))),
           'update-data': list(updates.map((u, i) => dict([
             [str('Type'), int(3)], [str('Text'), str(u.value)], [str('Literal'), ref(valueLiteralIds[i])]
           ]))),
           actual: list(updateColumnIds.map(guidRef))
         });
-        obj(ruleLitId, 'Axure:Expr:StringLiteral', {
+        if (!spec.predicate) obj(ruleLitId, 'Axure:Expr:StringLiteral', {
           value: str(ruleText), 'variable-identifiers': list([ref(identId)]),
           scope: dict([]), 'repeater-scope': ref(nullId), TargetRepeaterScope: ref(repData.id)
         });
-        obj(identId, 'Axure:Expr:TextVariableIdentifier', {
+        if (!spec.predicate) obj(identId, 'Axure:Expr:TextVariableIdentifier', {
           Id: { tag: 0x11, value: ruleVid }, Name: str(`TargetTargetItem.${spec.column}`),
           Expr: ref(ruleLitId), TargetOverride: bool(true)
         });
@@ -1029,7 +1269,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         updates.forEach((u, i) => {
           const { row, cells: [columnCell, valueCell] } = miniRows[i];
           const literalId = valueLiteralIds[i];
-          obj(literalId, 'Axure:Expr:StringLiteral', {
+          if (!u.runtime) obj(literalId, 'Axure:Expr:StringLiteral', {
             value: str(u.value), 'variable-identifiers': list([]),
             'repeater-scope': ref(miniDsId), TargetRepeaterScope: ref(nullId)
           });
@@ -1073,6 +1313,11 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         return obj(newGuid(), 'Axure:InteractionCloseCurrentAction', { Disabled: bool(false) });
       }
       case 'apply-style': {
+        // RP 9 的 get_TypeName 标签全集里没有 Axure:InteractionApplyStyle / InteractionApplyStyleInfo
+        // （静态证据：RP 9 181 个标签全部出现在 RP 11，RP 11 只多这两个）。目标 RP 9 时明确拒绝。
+        if (targetVersion === 9) {
+          throw new Error('apply-style does not exist in Axure RP 9: the InteractionApplyStyle / InteractionApplyStyleInfo type tags are RP 11 additions. No RP 9 equivalent action has been established yet.');
+        }
         // Native saved truth: InteractionApplyStyle + InteractionApplyStyleInfo.
         // Border width: native UI truth c000000f / Float64, saved 2026-10-09.
         // Opacity: native UI truth c0000046 / Float64, saved 2026-10-10.
@@ -1384,6 +1629,12 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
     const eventName = ix.event ?? ix.on ?? 'OnClick';
     let eventType = EVENTS[eventName] !== undefined ? EVENTS[eventName] : pick(EVENTS, eventName, 'event');
     if (eventType === undefined) throw new Error(`Unknown event "${eventName}"`);
+    // 事件也有版本差异：名字在 EVENTS 表里不等于目标版本认得它。
+    // 依据两版**预览运行时** JS 的事件名逐名对比（patch/event-version-audit.mjs）：
+    //   RP 11 运行时有 onErrorSet/onErrorRemoved/onBeforeItemLoad，RP 9 运行时全无；
+    //   旁证：RP 9 程序集字符串里 `OnErrorSet`/`OnErrorRemoved`/`error-state` 一个都没有。
+    if (targetVersion === 9 && RP11_ONLY_EVENTS[eventName] !== undefined)
+      throw new Error(`Event "${eventName}" (event-type ${RP11_ONLY_EVENTS[eventName]}) is RP 11-only; Axure RP 9 does not provide it`);
     // ⚠️ 页面级「载入时」必须用 OnLoad(288)，不能用 OnPageLoad(320)：
     // Axure 预览运行时的页面加载分发（events.js loadDynamicPanelsAndMasters →
     // fireEventThroughContainers('onLoad')）只产生 'onLoad' key；生成器把 320 写成
@@ -1468,13 +1719,19 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
     added.push({ event: eventName, eventType, replaced: !!replaceTarget, cases: cases.map(c => ({ description: c.description, actions: (c.actions ?? []).map(s => s.type) })) });
   }
 
+  // ---- 版本字段适配（共享实现，见 version-adapt.mjs）----
+  adaptNodesForVersion(defs, { version: targetVersion, str, log: m => versionAdaptations.push(m) });
+
   graph.roots.splice(graph.roots.length - 1, 0, ...defs);
   const raw = encodeRecord(r, strings, encodePayload(graph.roots));
   return {
     file: replaceRecord(file, r, raw),
     report: {
       target: kind === 'widget' ? `widget:${widgetName}` : `page:${pageName}`,
-      record: r.index, addedObjects: defs.length, addedStrings: strings.length - r.strings.length, interactions: added
+      record: r.index, version: targetVersion, addedObjects: defs.length,
+      addedStrings: strings.length - r.strings.length,
+      versionAdaptations: [...new Set(versionAdaptations)],
+      interactions: added
     }
   };
 }

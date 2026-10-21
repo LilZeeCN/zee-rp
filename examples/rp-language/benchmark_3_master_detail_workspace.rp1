@@ -1,0 +1,47 @@
+rp/1 name="主从联动与多页签服务工作台" domain=web theme=enterprise-light computed={"urgent_count":{"type":"number","compute":{"op":"count","dataset":"tickets","where":"=item.level == '紧急'"}}}
+model ServiceTicket id=id title=text level="enum(紧急,高优,常规)" owner=text sla=text notes=text
+dataset tickets model=ServiceTicket
+  - id=TK-201 title="核心网关证书续期" level="紧急" owner="陈工" sla="2小时内响应" notes="需同步更新负载均衡节点证书"
+  - id=TK-202 title="日志集群扩容评审" level="高优" owner="王工" sla="8小时内响应" notes="评估冷热数据分层存储策略"
+  - id=TK-203 title="测试环境权限清理" level="常规" owner="赵工" sla="24小时内响应" notes="季度例行账号与密钥巡检"
+var $sel_id type=text value=TK-201
+var $sel_title type=text value="核心网关证书续期"
+var $sel_level type=text value="紧急"
+var $sel_owner type=text value="陈工"
+var $sel_sla type=text value="2小时内响应"
+var $sel_notes type=text value="需同步更新负载均衡节点证书"
+page #workspace [980x540a] name="主从联动与多页签服务工作台"
+  @column #root_col [980x540] padding=20 gap=12 fill=$bg
+    @row #top_bar [940x40] gap=12 align=center
+      @label #ws_title [360x28] "主从联动与多页签服务工作台" fontSize=18 fontWeight=700
+      @badge #urgent_badge [160x26] "='紧急单数：' + text(var.urgent_count)"
+    @master-detail #ticket_md [940x440] gap=20 masterWidth=420 dataset=tickets key=id searchField=title filterField=level rowHeight=52 repeaterHeight=208
+      :filters auto
+      :template
+        @row #tk_row [420x52] padding=[8,12] gap=8 align=center fill=$surface stroke=$line radius=8
+          @label #tk_title [180x24] "=item.title" fontSize=13 fontWeight=600
+          @badge #tk_lvl [64x24] "=item.level" fontSize=12
+          @label #tk_own [64x24] "=item.owner" fontSize=12 color=$ink-2
+          @button #tk_pick [64x28] "查看" fontSize=12 variant=secondary
+            +onClick [{"set":{"$sel_id":"=item.id","$sel_title":"=item.title","$sel_level":"=item.level","$sel_owner":"=item.owner","$sel_sla":"=item.sla","$sel_notes":"=item.notes"}}]
+      :detail
+        @card #detail_pane [500x420] layout=column padding=16 gap=12
+          @row #tab_bar [468x36] gap=10 align=center
+            @button #tab_btn_overview [120x32] "基本信息页签" variant=primary
+              +onClick [{"state":"detail_tabs.overview"}]
+            @button #tab_btn_sla [120x32] "SLA与备注页签" variant=secondary
+              +onClick [{"state":"detail_tabs.sla"}]
+          @dynamic-panel #detail_tabs [468x320]
+            :state overview
+              @column #ov_box [468x300] gap=12
+                @detail-card #ov_card w=440 title="工单核心概览"
+                  :item id=ov_id label="工单编号" value="=var.sel_id"
+                  :item id=ov_title label="工单标题" value="=var.sel_title"
+                  :item id=ov_lvl label="优先等级" value="=var.sel_level"
+                  :item id=ov_own label="当前负责人" value="=var.sel_owner"
+            :state sla
+              @column #sla_box [468x300] gap=12
+                @detail-card #sla_card w=440 title="SLA 承诺与执行说明"
+                  :item id=sl_id label="关联工单" value="=var.sel_id"
+                  :item id=sl_target label="SLA 时效" value="=var.sel_sla"
+                  :item id=sl_notes label="执行备注" value="=var.sel_notes"

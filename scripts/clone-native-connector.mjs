@@ -67,7 +67,8 @@ export function cloneNativeConnector(sourceFile, targetFile, outputFile, sourceR
   });
   const closure = closureOf(sg, sc.id);
   for (const endpoint of endpoints) if (endpoint) for (const id of closureOf(sg, endpoint.shape.id)) closure.add(id);
-  const clone = cloneInto({ srcGraph: sg, srcStrings: sr.strings, dstGraph: tg, dstStrings: strings, closure, rootOldId: sc.id });
+  const clone = cloneInto({
+    srcGraph: sg, srcStrings: sr.strings, dstGraph: tg, dstStrings: strings, closure, rootOldId: sc.id });
   const guids = tg.roots.find(n => n.tag === 0x1e).values;
   const keepGuid = raw => { let index = guids.indexOf(raw) + 1; if (!index) { guids.push(raw); index = guids.length; } return index; };
   const connector = tg.objects.get(clone.rootNewId);

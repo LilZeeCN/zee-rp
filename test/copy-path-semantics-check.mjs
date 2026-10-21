@@ -1,4 +1,3 @@
-import { FIXTURE_DIR } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -10,7 +9,7 @@ import { closureOf } from '../scripts/clone-closure.mjs';
 import { addInteractions } from '../scripts/ix-actions.mjs';
 import { validateSemantics } from './check-semantics.mjs';
 
-const fixtures = FIXTURE_DIR + '/';
+const fixtures = fileURLToPath(new URL('./fixtures/', import.meta.url));
 const read = name => readFileSync(fixtures + name);
 const state = (bytes, page) => resolvePanelState(bytes, { page, panel: 'MASTER_PANEL', state: 'Card' }).stateRecord;
 const overrideTargets = record => {

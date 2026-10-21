@@ -1,22 +1,22 @@
-import { fixturePath, resolveRuntime } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-
+import { join } from 'node:path';
 import vm from 'node:vm';
-
+import { TEST_DIR } from './fixture-summary.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { field, parsePayload } from '../scripts/parse-payload.mjs';
-import { addInteractions, REGISTERED_FCALLS, FCALL_ARITIES } from '../scripts/ix-actions.mjs';
+import { addInteractions, WIDGET_PATH_FCALLS, FCALL_SPECS } from '../scripts/ix-actions.mjs';
 
-export function runConditionExpressionChecks() {
+export async function runConditionExpressionChecks() {
   const results = [];
-  const check = (name, run) => {
-    try { run(); results.push({ name, passed: true }); }
+  // async-aware：run() 可能是 async，必须 await 才能捕获 rejection。
+  const check = async (name, run) => {
+    try { await run(); results.push({ name, passed: true }); }
     catch (error) { results.push({ name, passed: false, detail: error.message }); }
   };
 
-  check('nested BinaryExpr and multi-argument FCall serialization', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+  await check('nested BinaryExpr and multi-argument FCall serialization', () => {
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     const { file } = addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{
@@ -51,8 +51,8 @@ export function runConditionExpressionChecks() {
     assert.equal(field(rightLeft.body, 'function-name').text, 'ToLowerCase');
   });
 
-  check('reject incomplete nested BinaryExpr before output', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+  await check('reject incomplete nested BinaryExpr before output', () => {
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{
@@ -62,13 +62,13 @@ export function runConditionExpressionChecks() {
     }]), /nested condition expressions require both left and right sides/);
   });
 
-  check('set-text selects the native TextBox or VectorShape function', () => {
+  await check('set-text selects the native TextBox or VectorShape function', () => {
     const cases = [
       { file: 'var-set-from-widget-roundtrip.rp', target: 'NATIVE_TEXT_FIELD', expected: 'SetWidgetFormText', value: 'TEXTBOX_WRITE_TEST' },
       { file: 'var-set-counter-roundtrip.rp', target: 'VALUE_PREVIEW', expected: 'SetWidgetRichText', value: 'VECTOR_WRITE_TEST' },
     ];
     for (const item of cases) {
-      const source = readFileSync(fixturePath(item.file));
+      const source = readFileSync(join(TEST_DIR, 'fixtures', item.file));
       const { file } = addInteractions(source, 'SET_BUTTON', [{
         event: 'OnClick',
         actions: [{ type: 'set-text', target: item.target, text: item.value }],
@@ -91,19 +91,21 @@ export function runConditionExpressionChecks() {
     }
   });
 
-  check('FCall function names outside the static registry are rejected', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+  await check('FCall function names outside the static registry are rejected', async () => {
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ when: { op: '==', left: { fn: 'MadeUpFunction', args: [{ value: 'x' }] }, right: { value: 'y' } }, actions: [{ type: 'wait', ms: 1 }] }],
     }], { replaceEvent: true }), /Unknown FCall function "MadeUpFunction"/);
-    assert.equal(REGISTERED_FCALLS.size, 18);
+    const { REGISTERED_FCALLS } = await import('../scripts/ix-actions.mjs');
+    // 不写死数量（注册表会随版本扩充）；只断言下界与关键成员存在。
+    assert.ok(REGISTERED_FCALLS.size >= 18, `REGISTERED_FCALLS.size=${REGISTERED_FCALLS.size} < 18`);
     for (const name of ['GetWidgetText', 'IsValueNumeric', 'IsValueOneOf', 'GetGlobalVariableValue', 'ToLowerCase', 'ValueNotContains'])
       assert.ok(REGISTERED_FCALLS.has(name), name + ' missing');
   });
 
-  check('FCall argument arity mismatch is rejected before serialization', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+  await check('FCall argument arity mismatch is rejected before serialization', async () => {
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ when: { op: '==', left: { fn: 'ValueContains', args: [{ value: 'abc' }] }, right: { value: 'y' } }, actions: [{ type: 'wait', ms: 1 }] }],
@@ -114,13 +116,14 @@ export function runConditionExpressionChecks() {
       cases: [{ when: { op: '==', left: { fn: 'ToLowerCase', args: [{ value: 'a' }, { value: 'b' }] }, right: { value: 'y' } }, actions: [{ type: 'wait', ms: 1 }] }],
     }], { replaceEvent: true }), /FCall function "ToLowerCase" expects 1 argument, received 2/);
 
-    assert.equal(Object.keys(FCALL_ARITIES).length, 18);
+    const { FCALL_ARITIES } = await import('../scripts/ix-actions.mjs');
+    assert.ok(Object.keys(FCALL_ARITIES).length >= 18, `FCALL_ARITIES=${Object.keys(FCALL_ARITIES).length} < 18`);
     assert.equal(FCALL_ARITIES.ValueContains, 2);
     assert.equal(FCALL_ARITIES.ToLowerCase, 1);
   });
 
-  check('{variable} condition side resolves to GetGlobalVariableValue FCall and GlobalVariableLiteral', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+  await check('{variable} condition side resolves to GetGlobalVariableValue FCall and GlobalVariableLiteral', () => {
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     const { file } = addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{
@@ -146,8 +149,8 @@ export function runConditionExpressionChecks() {
     }], { replaceEvent: true }), /Expected exactly one global variable named "NonExistentVar", found 0/);
   });
 
-  check('FCall {widget, fn} gate rejects non-widget functions and unknown functions', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+  await check('FCall {widget, fn} gate rejects non-widget functions and unknown functions', () => {
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     // 负例 1: 传两参函数 ValueContains 到单一元件路径入口
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
@@ -174,8 +177,8 @@ export function runConditionExpressionChecks() {
     assert.equal(graph.objects.get(args[0].value).className, 'Axure:Expr:DiagramObjectPathLiteral');
   });
 
-  check('FCall argument category and shape contract enforcement', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+  await check('FCall argument category and shape contract enforcement', () => {
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     // 负例 1: widgetPath 函数传纯 scalar
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
@@ -208,23 +211,35 @@ export function runConditionExpressionChecks() {
     assert.equal(graph.objects.get(args[0].value).className, 'Axure:Expr:GlobalVariableLiteral');
   });
 
-  check('FCall candidate set unsupported gate for IsValueOneOf and IsValueNotOneOf', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
-    // 无原生 Literal 真值，明确拒绝防止盲猜
+  await check('FCall candidate set now supported for IsValueOneOf and IsValueNotOneOf', () => {
+    // 曾因「无原生 Literal 真值」明确拒绝。2026-10-16 定出形状后改为支持：
+    //   第二参数 = Axure:Expr:ArrayExpr { items: [ <表达式>, ... ] }
+    //   依据 ArrayExpr.rv2F/Bv2O 只序列化 `items`（REA），且 RP 9 原生预览实测行为正确。
+    // **items 里不得套 OptionLiteral** —— 套了 RP 9 预览整页空白（7243 空白 vs 9024 正常）。
+    // 参数形状不对（不是 { array: [...] }）仍必须报错，不能静默产出坏文件。
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
+    for (const fn of ['IsValueOneOf', 'IsValueNotOneOf']) {
+      const out = addInteractions(source, 'SET_BUTTON', [{
+        event: 'OnClick',
+        cases: [{ when: { op: '==', left: { fn, args: [{ value: 'a' }, { array: [{ value: 'a' }, { value: 'b' }] }] }, right: { value: 'true' } }, actions: [{ type: 'wait', ms: 1 }] }],
+      }], { replaceEvent: true }).file;
+      const kinds = [];
+      for (const record of readRecords(out)) {
+        let graph; try { graph = parsePayload(record); } catch { continue; }
+        for (const o of graph.objects.values()) kinds.push(o.className);
+      }
+      assert.equal(kinds.filter(k => k === 'Axure:Expr:ArrayExpr').length, 1, `${fn} 应产出 1 个 ArrayExpr`);
+      assert.equal(kinds.filter(k => k === 'Axure:Expr:OptionLiteral').length, 0, `${fn} 不得套 OptionLiteral`);
+    }
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ when: { op: '==', left: { fn: 'IsValueOneOf', args: [{ value: 'a' }, { value: 'b' }] }, right: { value: 'true' } }, actions: [{ type: 'wait', ms: 1 }] }],
-    }], { replaceEvent: true }), /candidate set has no native \.rp Literal ground truth/);
-
-    assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
-      event: 'OnClick',
-      cases: [{ when: { op: '==', left: { fn: 'IsValueNotOneOf', args: [{ value: 'a' }, { value: 'b' }] }, right: { value: 'true' } }, actions: [{ type: 'wait', ms: 1 }] }],
-    }], { replaceEvent: true }), /candidate set has no native \.rp Literal ground truth/);
+    }], { replaceEvent: true }), /array/, '第二参数必须是 { array: [...] }');
   });
 
-  check('FCall runtime JS evaluation check for scalar validation and string functions', () => {
-    const runtimePath = resolveRuntime();
-    if (!existsSync(runtimePath)) throw new Error('Missing local native expr.js; configure AXURE_SETTINGS_ROOT before historical runtime checks');
+  await check('FCall runtime JS evaluation check for scalar validation and string functions', () => {
+    const runtimePath = '/Applications/Axure RP 11.app/Contents/Resources/DefaultSettings/Prototype_Files/resources/scripts/axure/expr.js';
+    if (!existsSync(runtimePath)) return;
     const code = readFileSync(runtimePath, 'utf8');
     const ax = { expr: {}, placeholderManager: { isActive: () => false }, visibility: {}, INPUT: () => '' };
     const sandbox = {
@@ -261,8 +276,8 @@ export function runConditionExpressionChecks() {
     assert.equal(evalExpr('ValueNotContains', 'axure-exp', 'xyz'), true);
   });
 
-  check('condition side null、未定义操作符与歧义语义严谨拒绝', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+  await check('condition side null、未定义操作符与歧义语义严谨拒绝', () => {
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
 
     // 负例 1: side 为 null
     assert.throws(() => {
@@ -295,6 +310,22 @@ export function runConditionExpressionChecks() {
         cases: [{ when: { op: '===', left: { value: 'a' }, right: { value: 'b' } }, actions: [{ type: 'wait', ms: 1 }] }]
       }]);
     }, /Unknown condition operator "==="/);
+  });
+
+  // P0-1 自毁式元测试：构造一个微任务后 reject('sentinel') 的异步伪检查，
+  // 验证上方 check() 必须真正 await 并将其记为 passed: false。
+  // 一旦有人把第 13 行 check 的 async/await 删掉，probe.passed 会变成 true，本元测试立即爆红。
+  await check('__sentinel_async_rejection_probe__', async () => {
+    await Promise.resolve();
+    throw new Error('sentinel');
+  });
+  const probe = results.pop();
+  results.push({
+    name: 'async check() captures rejected Promise as passed:false (anti-fake-green meta-test)',
+    passed: Boolean(probe && probe.passed === false && probe.detail === 'sentinel'),
+    ...(probe && probe.passed === false && probe.detail === 'sentinel'
+      ? {}
+      : { detail: `expected passed:false detail:"sentinel", got ${JSON.stringify(probe)}` }),
   });
 
   return results;

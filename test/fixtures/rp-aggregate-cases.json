@@ -1,0 +1,255 @@
+[
+  {
+    "name": "initial pagination",
+    "steps": [],
+    "expected": {
+      "ds_sum": 37,
+      "ds_count": 3,
+      "vs_sum": 16,
+      "vs_count": 2,
+      "high_sum": 31,
+      "weighted": 37,
+      "formula": 37
+    }
+  },
+  {
+    "name": "next page visible total",
+    "steps": [
+      "next"
+    ],
+    "expected": {
+      "ds_sum": 37,
+      "ds_count": 3,
+      "vs_sum": 21,
+      "vs_count": 1,
+      "high_sum": 31,
+      "weighted": 37,
+      "formula": 37
+    }
+  },
+  {
+    "name": "sort changes visible page",
+    "steps": [
+      "sort"
+    ],
+    "expected": {
+      "ds_sum": 37,
+      "ds_count": 3,
+      "vs_sum": 27,
+      "vs_count": 2,
+      "high_sum": 31,
+      "weighted": 37,
+      "formula": 37
+    }
+  },
+  {
+    "name": "filter then update all including hidden",
+    "steps": [
+      "only_b",
+      "inc_all"
+    ],
+    "expected": {
+      "ds_sum": 57,
+      "ds_count": 3,
+      "vs_sum": 9,
+      "vs_count": 1,
+      "high_sum": 48,
+      "weighted": 57,
+      "formula": 57
+    }
+  },
+  {
+    "name": "zero matches then update all",
+    "steps": [
+      "no_match",
+      "inc_all"
+    ],
+    "expected": {
+      "ds_sum": 57,
+      "ds_count": 3,
+      "vs_sum": 0,
+      "vs_count": 0,
+      "high_sum": 48,
+      "weighted": 57,
+      "formula": 57
+    }
+  },
+  {
+    "name": "filter then add hidden D",
+    "steps": [
+      "only_b",
+      "add"
+    ],
+    "expected": {
+      "ds_sum": 57,
+      "ds_count": 4,
+      "vs_sum": 6,
+      "vs_count": 1,
+      "high_sum": 31,
+      "weighted": 57,
+      "formula": 57
+    }
+  },
+  {
+    "name": "zero matches then delete all",
+    "steps": [
+      "no_match",
+      "delete_all"
+    ],
+    "expected": {
+      "ds_sum": 0,
+      "ds_count": 0,
+      "vs_sum": 0,
+      "vs_count": 0,
+      "high_sum": 0,
+      "weighted": 0,
+      "formula": 0
+    }
+  },
+  {
+    "name": "delete last page record",
+    "steps": [
+      "last",
+      "delete_b"
+    ],
+    "expected": {
+      "ds_sum": 31,
+      "ds_count": 2,
+      "vs_sum": 31,
+      "vs_count": 2,
+      "high_sum": 31,
+      "weighted": 31,
+      "formula": 31
+    }
+  },
+  {
+    "name": "aggregate value variable dependency",
+    "steps": [
+      "factor"
+    ],
+    "expected": {
+      "ds_sum": 37,
+      "ds_count": 3,
+      "vs_sum": 16,
+      "vs_count": 2,
+      "high_sum": 31,
+      "weighted": 74,
+      "formula": 74
+    }
+  },
+  {
+    "name": "aggregate predicate variable dependency",
+    "steps": [
+      "threshold"
+    ],
+    "expected": {
+      "ds_sum": 37,
+      "ds_count": 3,
+      "vs_sum": 16,
+      "vs_count": 2,
+      "high_sum": 0,
+      "weighted": 37,
+      "formula": 37
+    }
+  },
+  {
+    "name": "multi-field update follows declaration order",
+    "steps": [
+      "swap"
+    ],
+    "expected": {
+      "ds_sum": 127,
+      "ds_count": 3,
+      "vs_sum": 106,
+      "vs_count": 2,
+      "high_sum": 121,
+      "weighted": 127,
+      "formula": 127
+    }
+  },
+  {
+    "name": "two mutations in one event",
+    "steps": [
+      "combo"
+    ],
+    "expected": {
+      "ds_sum": 19,
+      "ds_count": 2,
+      "vs_sum": 19,
+      "vs_count": 2,
+      "high_sum": 10,
+      "weighted": 19,
+      "formula": 19
+    }
+  },
+  {
+    "name": "filter clear page sort chain",
+    "steps": [
+      "expensive",
+      "last",
+      "clear",
+      "sort",
+      "next"
+    ],
+    "expected": {
+      "ds_sum": 37,
+      "ds_count": 3,
+      "vs_sum": 10,
+      "vs_count": 1,
+      "high_sum": 31,
+      "weighted": 37,
+      "formula": 37
+    }
+  },
+  {
+    "name": "empty then add",
+    "steps": [
+      "delete_all",
+      "add"
+    ],
+    "expected": {
+      "ds_sum": 20,
+      "ds_count": 1,
+      "vs_sum": 20,
+      "vs_count": 1,
+      "high_sum": 0,
+      "weighted": 20,
+      "formula": 20
+    }
+  },
+  {
+    "name": "clear filters resets current page",
+    "steps": [
+      "last",
+      "add",
+      "clear"
+    ],
+    "expected": {
+      "ds_sum": 57,
+      "ds_count": 4,
+      "vs_sum": 16,
+      "vs_count": 2,
+      "high_sum": 31,
+      "weighted": 57,
+      "formula": 57
+    }
+  },
+  {
+    "name": "sort after clear uses first page",
+    "steps": [
+      "last",
+      "add",
+      "clear",
+      "sort"
+    ],
+    "expected": {
+      "ds_sum": 57,
+      "ds_count": 4,
+      "vs_sum": 26,
+      "vs_count": 2,
+      "high_sum": 31,
+      "weighted": 57,
+      "formula": 57
+    }
+  }
+]

@@ -1,0 +1,197 @@
+{
+  "version": "1.0.0",
+  "description": "Original geometric demo frames. Device names are compatibility aliases, not vendor artwork.",
+  "shells": {
+    "iphone-x-black": {
+      "outerSize": [
+        420,
+        860
+      ],
+      "screenRect": [
+        25,
+        21,
+        375,
+        812
+      ],
+      "pieces": [
+        {
+          "name": "frame-top",
+          "file": "shells/iphone-x-black/frame-top.png",
+          "x": 0,
+          "y": 0,
+          "w": 420,
+          "h": 21
+        },
+        {
+          "name": "frame-left",
+          "file": "shells/iphone-x-black/frame-left.png",
+          "x": 0,
+          "y": 21,
+          "w": 25,
+          "h": 812
+        },
+        {
+          "name": "frame-right",
+          "file": "shells/iphone-x-black/frame-right.png",
+          "x": 400,
+          "y": 21,
+          "w": 20,
+          "h": 812
+        },
+        {
+          "name": "frame-bottom",
+          "file": "shells/iphone-x-black/frame-bottom.png",
+          "x": 0,
+          "y": 833,
+          "w": 420,
+          "h": 27
+        }
+      ]
+    },
+    "iphone-x-white": {
+      "outerSize": [
+        420,
+        860
+      ],
+      "screenRect": [
+        25,
+        21,
+        375,
+        812
+      ],
+      "pieces": [
+        {
+          "name": "frame-top",
+          "file": "shells/iphone-x-white/frame-top.png",
+          "x": 0,
+          "y": 0,
+          "w": 420,
+          "h": 21
+        },
+        {
+          "name": "frame-left",
+          "file": "shells/iphone-x-white/frame-left.png",
+          "x": 0,
+          "y": 21,
+          "w": 25,
+          "h": 812
+        },
+        {
+          "name": "frame-right",
+          "file": "shells/iphone-x-white/frame-right.png",
+          "x": 400,
+          "y": 21,
+          "w": 20,
+          "h": 812
+        },
+        {
+          "name": "frame-bottom",
+          "file": "shells/iphone-x-white/frame-bottom.png",
+          "x": 0,
+          "y": 833,
+          "w": 420,
+          "h": 27
+        }
+      ]
+    },
+    "iphone-6-8": {
+      "outerSize": [
+        430,
+        866
+      ],
+      "screenRect": [
+        30,
+        99,
+        375,
+        667
+      ],
+      "pieces": [
+        {
+          "name": "frame-top",
+          "file": "shells/iphone-6-8/frame-top.png",
+          "x": 0,
+          "y": 0,
+          "w": 430,
+          "h": 99
+        },
+        {
+          "name": "frame-left",
+          "file": "shells/iphone-6-8/frame-left.png",
+          "x": 0,
+          "y": 99,
+          "w": 30,
+          "h": 667
+        },
+        {
+          "name": "frame-right",
+          "file": "shells/iphone-6-8/frame-right.png",
+          "x": 405,
+          "y": 99,
+          "w": 25,
+          "h": 667
+        },
+        {
+          "name": "frame-bottom",
+          "file": "shells/iphone-6-8/frame-bottom.png",
+          "x": 0,
+          "y": 766,
+          "w": 430,
+          "h": 100
+        }
+      ]
+    },
+    "iphone-x": {
+      "outerSize": [
+        420,
+        860
+      ],
+      "screenRect": [
+        25,
+        21,
+        375,
+        812
+      ],
+      "pieces": [
+        {
+          "name": "frame-top",
+          "file": "shells/iphone-x-black/frame-top.png",
+          "x": 0,
+          "y": 0,
+          "w": 420,
+          "h": 21
+        },
+        {
+          "name": "frame-left",
+          "file": "shells/iphone-x-black/frame-left.png",
+          "x": 0,
+          "y": 21,
+          "w": 25,
+          "h": 812
+        },
+        {
+          "name": "frame-right",
+          "file": "shells/iphone-x-black/frame-right.png",
+          "x": 400,
+          "y": 21,
+          "w": 20,
+          "h": 812
+        },
+        {
+          "name": "frame-bottom",
+          "file": "shells/iphone-x-black/frame-bottom.png",
+          "x": 0,
+          "y": 833,
+          "w": 420,
+          "h": 27
+        }
+      ]
+    }
+  },
+  "icons": {
+    "back": "icons/icon-back.png",
+    "right": "icons/icon-right.png",
+    "up": "icons/icon-up.png",
+    "down": "icons/icon-down.png",
+    "search": "icons/icon-search.png"
+  }
+}

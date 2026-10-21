@@ -1,8 +1,7 @@
-import { fixturePath } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-
-
+import { join } from 'node:path';
+import { TEST_DIR } from './fixture-summary.mjs';
 import { createGlobalVariable } from '../scripts/create-global-variable.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 import { addInteractions } from '../scripts/ix-actions.mjs';
@@ -15,7 +14,7 @@ export function runCreateGlobalVariableChecks() {
   };
 
   check('createGlobalVariable appends a new variable with defaultValue and three-zero health', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     const beforeRp = readRp(source);
     const initialVarCount = beforeRp.globalVariables.length;
 
@@ -38,7 +37,7 @@ export function runCreateGlobalVariableChecks() {
   });
 
   check('createGlobalVariable rejects duplicate variable names and empty names', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     assert.throws(() => createGlobalVariable(source, 'DemoValue'), /already exists/);
     assert.throws(() => createGlobalVariable(source, 'demovalue'), /already exists/);
     assert.throws(() => createGlobalVariable(source, '   '), /name must not be empty/);
@@ -46,7 +45,7 @@ export function runCreateGlobalVariableChecks() {
   });
 
   check('newly created global variable is directly consumable by ix-actions condition and assignment', () => {
-    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
+    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
     const { file } = createGlobalVariable(source, 'ACTIVE_FLAG', { defaultValue: 'false' });
 
     // 用 ix-actions 条件消费该变量，并设置它

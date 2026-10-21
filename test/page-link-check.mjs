@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { resolveBlankTemplate } from '../scripts/blank-template.mjs';
-import { createBlankPage } from '../scripts/create-blank-page.mjs';
-import { addInteractions, resolvePageRecord } from '../scripts/ix-actions.mjs';
-import { parsePayload, field } from '../scripts/parse-payload.mjs';
-import { validateSemantics } from './check-semantics.mjs';
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {resolveBlankTemplate} from '../scripts/blank-template.mjs';
+import {createBlankPage} from '../scripts/create-blank-page.mjs';
+import {addInteractions,resolvePageRecord} from '../scripts/ix-actions.mjs';
+import {parsePayload,field} from '../scripts/parse-payload.mjs';
+import {validateSemantics} from './check-semantics.mjs';
 
 const guidTable=g=>g.roots.find(n=>n.tag===0x1e).values;
 const identity=g=>guidTable(g)[g.roots.find(n=>n.tag===0x12).value-1];

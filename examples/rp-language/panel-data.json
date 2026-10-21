@@ -1,0 +1,214 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "面板内独立数据实例",
+  "domain": "web",
+  "theme": "enterprise-light",
+  "models": {
+    "Item": {
+      "id": "text",
+      "title": "text"
+    }
+  },
+  "datasets": {
+    "items": {
+      "model": "Item",
+      "rows": []
+    }
+  },
+  "pages": [
+    {
+      "id": "panelData",
+      "name": "面板数据",
+      "canvas": {
+        "w": 900,
+        "h": 550
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "column",
+        "padding": 24,
+        "gap": 16,
+        "children": [
+          {
+            "type": "label",
+            "id": "heading",
+            "text": "同一空数据集，两个独立原生列表",
+            "w": "fill",
+            "h": 28
+          },
+          {
+            "type": "dynamic-panel",
+            "id": "outer",
+            "w": 850,
+            "h": 420,
+            "states": [
+              {
+                "id": "editing",
+                "root": {
+                  "type": "box",
+                  "id": "content",
+                  "layout": "column",
+                  "gap": 16,
+                  "padding": 12,
+                  "children": [
+                    {
+                      "type": "box",
+                      "id": "lists",
+                      "layout": "row",
+                      "gap": 20,
+                      "h": 120,
+                      "children": [
+                        {
+                          "type": "repeater",
+                          "id": "left",
+                          "dataset": "items",
+                          "key": "id",
+                          "w": 390,
+                          "h": 120,
+                          "rowHeight": 40,
+                          "template": {
+                            "type": "label",
+                            "id": "title",
+                            "text": {
+                              "item": "title"
+                            },
+                            "w": "fill",
+                            "h": 28
+                          }
+                        },
+                        {
+                          "type": "repeater",
+                          "id": "right",
+                          "dataset": "items",
+                          "key": "id",
+                          "w": 390,
+                          "h": 120,
+                          "rowHeight": 40,
+                          "template": {
+                            "type": "label",
+                            "id": "title",
+                            "text": {
+                              "item": "title"
+                            },
+                            "w": "fill",
+                            "h": 28
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "box",
+                      "id": "actions",
+                      "layout": "row",
+                      "gap": 20,
+                      "children": [
+                        {
+                          "type": "button",
+                          "id": "addLeft",
+                          "text": "只添加左侧",
+                          "w": 190,
+                          "on": {
+                            "click": [
+                              {
+                                "type": "data-add",
+                                "target": {
+                                  "ref": "left"
+                                },
+                                "rows": [
+                                  {
+                                    "id": "left",
+                                    "title": "左侧独立记录"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        },
+                        {
+                          "type": "button",
+                          "id": "addRight",
+                          "text": "只添加右侧",
+                          "w": 190,
+                          "on": {
+                            "click": [
+                              {
+                                "type": "data-add",
+                                "target": {
+                                  "ref": "right"
+                                },
+                                "rows": [
+                                  {
+                                    "id": "right",
+                                    "title": "右侧独立记录"
+                                  }
+                                ]
+                              }
+                            ]
+                          }
+                        }
+                      ]
+                    },
+                    {
+                      "type": "button",
+                      "id": "leave",
+                      "text": "离开当前状态",
+                      "w": 190,
+                      "on": {
+                        "click": [
+                          {
+                            "type": "set-panel-state",
+                            "target": {
+                              "ref": "outer"
+                            },
+                            "state": "summary"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "summary",
+                "root": {
+                  "type": "box",
+                  "id": "summaryContent",
+                  "layout": "column",
+                  "gap": 16,
+                  "children": [
+                    {
+                      "type": "label",
+                      "id": "summaryText",
+                      "text": "返回后保留两个列表各自的数据",
+                      "w": "fill",
+                      "h": 28
+                    },
+                    {
+                      "type": "button",
+                      "id": "back",
+                      "text": "返回列表",
+                      "w": 190,
+                      "on": {
+                        "click": [
+                          {
+                            "type": "set-panel-state",
+                            "target": {
+                              "ref": "outer"
+                            },
+                            "state": "editing"
+                          }
+                        ]
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

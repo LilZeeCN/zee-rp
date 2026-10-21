@@ -1,0 +1,578 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "RP1 reliability matrix",
+  "domain": "web",
+  "theme": "enterprise-light",
+  "variables": {
+    "factor": {
+      "type": "number",
+      "value": 1
+    },
+    "threshold": {
+      "type": "number",
+      "value": 7
+    }
+  },
+  "datasets": {
+    "items": [
+      {
+        "id": "A",
+        "price": 10,
+        "qty": 1
+      },
+      {
+        "id": "B",
+        "price": 3,
+        "qty": 2
+      },
+      {
+        "id": "C",
+        "price": 7,
+        "qty": 3
+      }
+    ]
+  },
+  "computed": {
+    "ds_sum": {
+      "type": "number",
+      "compute": {
+        "op": "sum",
+        "dataset": "items",
+        "scope": "dataset",
+        "field": "=item.price * item.qty"
+      }
+    },
+    "ds_count": {
+      "type": "number",
+      "compute": {
+        "op": "count",
+        "dataset": "items",
+        "scope": "dataset"
+      }
+    },
+    "vs_sum": {
+      "type": "number",
+      "compute": {
+        "op": "sum",
+        "dataset": "items",
+        "scope": "visible",
+        "field": "=item.price * item.qty"
+      }
+    },
+    "vs_count": {
+      "type": "number",
+      "compute": {
+        "op": "count",
+        "dataset": "items",
+        "scope": "visible"
+      }
+    },
+    "high_sum": {
+      "type": "number",
+      "compute": {
+        "op": "sum",
+        "dataset": "items",
+        "scope": "dataset",
+        "field": "=item.price * item.qty",
+        "where": "=item.price >= var.threshold"
+      }
+    },
+    "weighted": {
+      "type": "number",
+      "compute": {
+        "op": "sum",
+        "dataset": "items",
+        "scope": "dataset",
+        "field": "=item.price * item.qty * var.factor"
+      }
+    },
+    "formula": {
+      "type": "number",
+      "compute": "=var.ds_sum * var.factor"
+    },
+    "chain": {
+      "type": "number",
+      "compute": {
+        "op": "sum",
+        "dataset": "items",
+        "scope": "dataset",
+        "field": "=item.qty * var.formula"
+      }
+    },
+    "formula_weight": {
+      "type": "number",
+      "compute": {
+        "op": "sum",
+        "dataset": "items",
+        "scope": "dataset",
+        "field": "=item.qty * var.raw_formula"
+      }
+    },
+    "raw_formula": {
+      "type": "number",
+      "compute": "=number(@scale) * 2"
+    },
+    "input_weight": {
+      "type": "number",
+      "compute": {
+        "op": "sum",
+        "dataset": "items",
+        "scope": "dataset",
+        "field": "=item.qty * number(@scale)"
+      }
+    },
+    "input_visible": {
+      "type": "number",
+      "compute": {
+        "op": "sum",
+        "dataset": "items",
+        "scope": "visible",
+        "field": "=item.qty * number(@scale)"
+      }
+    }
+  },
+  "pages": [
+    {
+      "id": "matrix",
+      "name": "Reliability matrix",
+      "canvas": {
+        "w": 1000,
+        "h": 1100
+      },
+      "root": {
+        "column": "root",
+        "w": "fill",
+        "h": "fill",
+        "padding": 24,
+        "gap": 16,
+        "children": [
+          {
+            "label": "heading",
+            "text": "RP/1 Native Reliability Matrix",
+            "w": "fill",
+            "h": 32,
+            "size": 24
+          },
+          {
+            "type": "box",
+            "id": "buttons",
+            "layout": "grid",
+            "columns": 6,
+            "columnGap": 12,
+            "rowGap": 12,
+            "w": "fill",
+            "h": 132,
+            "children": [
+              {
+                "button": "only_b",
+                "text": "Only B",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-filter",
+                  "target": "items",
+                  "name": "category",
+                  "where": "=item.id == 'B'"
+                }
+              },
+              {
+                "button": "expensive",
+                "text": "Price >= 7",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-filter",
+                  "target": "items",
+                  "name": "category",
+                  "where": "=item.price >= 7"
+                }
+              },
+              {
+                "button": "no_match",
+                "text": "No matches",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-filter",
+                  "target": "items",
+                  "name": "category",
+                  "where": "=item.price > 99"
+                }
+              },
+              {
+                "button": "clear",
+                "text": "Clear filters",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-clear-filter",
+                  "target": "items"
+                }
+              },
+              {
+                "button": "inc_all",
+                "text": "Increment all",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-update",
+                  "target": "items",
+                  "where": true,
+                  "set": {
+                    "qty": "=item.qty + 1"
+                  }
+                }
+              },
+              {
+                "button": "delete_b",
+                "text": "Delete B",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-delete",
+                  "target": "items",
+                  "where": "=item.id == 'B'"
+                }
+              },
+              {
+                "button": "delete_all",
+                "text": "Delete all",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-delete",
+                  "target": "items",
+                  "where": true
+                }
+              },
+              {
+                "button": "add",
+                "text": "Add D",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-add",
+                  "target": "items",
+                  "rows": [
+                    {
+                      "id": "D",
+                      "price": 5,
+                      "qty": 4
+                    }
+                  ]
+                }
+              },
+              {
+                "button": "sort",
+                "text": "Sort ascending",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-sort",
+                  "target": "items",
+                  "column": "price",
+                  "direction": "ascending"
+                }
+              },
+              {
+                "button": "unsort",
+                "text": "Clear sort",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-clear-sort",
+                  "target": "items"
+                }
+              },
+              {
+                "button": "next",
+                "text": "Next page",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-page",
+                  "target": "items",
+                  "page": "next"
+                }
+              },
+              {
+                "button": "last",
+                "text": "Last page",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-page",
+                  "target": "items",
+                  "page": "last"
+                }
+              },
+              {
+                "button": "first",
+                "text": "First page",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-page",
+                  "target": "items",
+                  "page": "first"
+                }
+              },
+              {
+                "button": "factor",
+                "text": "Factor = 2",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "set": {
+                    "$factor": 2
+                  }
+                }
+              },
+              {
+                "button": "threshold",
+                "text": "Threshold = 99",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "set": {
+                    "$threshold": 99
+                  }
+                }
+              },
+              {
+                "button": "swap",
+                "text": "Swap A values",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "data-update",
+                  "target": "items",
+                  "where": "=item.id == 'A'",
+                  "set": {
+                    "qty": "=item.price",
+                    "price": "=item.qty"
+                  }
+                }
+              },
+              {
+                "button": "combo",
+                "text": "Two mutations",
+                "w": 130,
+                "h": 36,
+                "onClick": [
+                  {
+                    "type": "data-update",
+                    "target": "items",
+                    "where": "=item.id == 'B'",
+                    "set": {
+                      "qty": "=item.qty + 1"
+                    }
+                  },
+                  {
+                    "type": "data-delete",
+                    "target": "items",
+                    "where": "=item.id == 'C'"
+                  }
+                ]
+              },
+              {
+                "button": "away",
+                "text": "Other page",
+                "w": 130,
+                "h": 36,
+                "onClick": {
+                  "type": "link",
+                  "page": "other"
+                }
+              }
+            ]
+          },
+          {
+            "input": "scale",
+            "value": "2",
+            "w": 260,
+            "h": 32
+          },
+          {
+            "row": "metrics",
+            "w": "fill",
+            "h": 370,
+            "gap": 12,
+            "children": [
+              {
+                "column": "metrics_col",
+                "w": 300,
+                "h": 370,
+                "gap": 4,
+                "children": [
+                  {
+                    "label": "ds_sum",
+                    "text": "=text(var.ds_sum)",
+                    "w": 260,
+                    "h": 24
+                  },
+                  {
+                    "label": "ds_count",
+                    "text": "=text(var.ds_count)",
+                    "w": 260,
+                    "h": 24
+                  },
+                  {
+                    "label": "vs_sum",
+                    "text": "=text(var.vs_sum)",
+                    "w": 260,
+                    "h": 24
+                  },
+                  {
+                    "label": "vs_count",
+                    "text": "=text(var.vs_count)",
+                    "w": 260,
+                    "h": 24
+                  },
+                  {
+                    "label": "high_sum",
+                    "text": "=text(var.high_sum)",
+                    "w": 260,
+                    "h": 24
+                  },
+                  {
+                    "label": "weighted",
+                    "text": "=text(var.weighted)",
+                    "w": 260,
+                    "h": 24
+                  },
+                  {
+                    "label": "formula",
+                    "text": "=text(var.formula)",
+                    "w": 260,
+                    "h": 24
+                  },
+                  {
+                    "label": "chain",
+                    "text": "=text(var.chain)",
+                    "w": 260,
+                    "h": 24
+                  },
+                  {
+                    "label": "formula_weight",
+                    "text": "=text(var.formula_weight)",
+                    "w": 260,
+                    "h": 24
+                  },
+                  {
+                    "label": "raw_formula",
+                    "text": "=text(var.raw_formula)",
+                    "w": 260,
+                    "h": 24
+                  },
+                  {
+                    "label": "input_weight",
+                    "text": "=text(var.input_weight)",
+                    "w": 260,
+                    "h": 24
+                  },
+                  {
+                    "label": "input_visible",
+                    "text": "=text(var.input_visible)",
+                    "w": 260,
+                    "h": 24
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "repeater": "items",
+            "dataset": "items",
+            "pageSize": 2,
+            "rowHeight": 52,
+            "w": 900,
+            "h": 240,
+            "template": {
+              "row": "row",
+              "w": 900,
+              "h": 52,
+              "gap": 16,
+              "children": [
+                {
+                  "label": "row_id",
+                  "text": "=item.id",
+                  "w": 120,
+                  "h": 28
+                },
+                {
+                  "label": "row_price",
+                  "text": "=text(item.price)",
+                  "w": 120,
+                  "h": 28
+                },
+                {
+                  "label": "row_qty",
+                  "text": "=text(item.qty)",
+                  "w": 120,
+                  "h": 28
+                },
+                {
+                  "button": "row_inc",
+                  "text": "Row +1",
+                  "w": 130,
+                  "h": 36,
+                  "onClick": {
+                    "type": "data-update",
+                    "target": "items",
+                    "where": "=item.id == caller.id",
+                    "set": {
+                      "qty": "=item.qty + 1"
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      "onLoad": [
+        {
+          "type": "data-filter",
+          "target": "items",
+          "name": "startup",
+          "where": "=item.id == 'B'"
+        },
+        {
+          "type": "data-update",
+          "target": "items",
+          "where": true,
+          "set": {
+            "qty": "=item.qty + 1"
+          }
+        }
+      ]
+    },
+    {
+      "id": "other",
+      "name": "Other page",
+      "canvas": {
+        "w": 1000,
+        "h": 920
+      },
+      "root": {
+        "column": "root",
+        "w": "fill",
+        "h": "fill",
+        "children": [
+          {
+            "button": "back",
+            "text": "Back to matrix",
+            "onClick": {
+              "type": "link",
+              "page": "matrix"
+            },
+            "w": 160,
+            "h": 40
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -1,12 +1,17 @@
 ---
 name: zee-rp
-description: Read and edit Axure RP 11 prototypes using the CLI, optional MCP sessions, and macOS GUI jobs.
+description: Reconstruct screenshots as editable Axure layouts, compile RP/1 specifications into native prototypes, and inspect or edit RP9/RP11 files using CLI or MCP.
 ---
 
 # zee-rp
 
-Read [README](README.md), [capabilities](references/capabilities.md), and [validation](docs/validation.md) before producing a prototype. Query actual commands using `node bin/axure.mjs --help` or the MCP tool schemas.
+Read [README](README.zh-CN.md), [capabilities](references/capabilities.md) and [verification](docs/verification.md). Run commands from this repository with its Python environment activated.
 
-Use a user-supplied blank template and local native libraries; these assets are not bundled. All `.rp` mutations use new output names. Respect configured `AXURE_WRITE_ROOT` and `AXURE_PROTECTED_PATHS` through the unified CLI/MCP.
+- Screenshots: `node scripts/trace.mjs draft <image> -o <new-dir> --scale <physical/logical ratio> --axvg <new.axvg.json>`. Follow [screenshot-workflow.md](references/screenshot-workflow.md). Inspect OCR and image usage. Clipboard JSON becomes `.rp` only after Axure paste and save.
+- New prototypes: `node scripts/proto.mjs check --spec <source>` then `generate --spec <source> --out-dir <new-dir> --out-rp <new.rp>`. See [rp-language.md](references/rp-language.md). Provide the matching local blank template.
+- Existing `.rp`: inspect with `node bin/axure.mjs rp-read <file> --json`, then select a supported writer from `--help`. Preserve the input and write new outputs.
+- HTML: [html-workflow.md](references/html-workflow.md) is a browser-assisted static reconstruction workflow; it does not automatically transfer website logic.
 
-Report structure, native loading, preview behavior, and GUI edit/save/reopen separately. A successful command or three-zero structure check is not native acceptance. Public recipes and tests are included; historical fixture binaries are external and unavailable prerequisites must be reported explicitly.
+Never overwrite a user's original prototype. `AXURE_PROTECTED_PATHS` can configure protected files; `AXURE_WRITE_ROOT` can limit writes. Native assets come from the user's installation.
+
+Report structure, Axure load, preview, GUI edits, and save/close/reopen separately. Local raster comparisons are not native previews; simulation is not observed native behavior.

@@ -1,0 +1,617 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "RP/1 运行期库存工作台",
+  "theme": "enterprise-light",
+  "domain": "web",
+  "models": {
+    "Item": {
+      "id": "text",
+      "title": "text",
+      "qty": "number",
+      "category": "text",
+      "active": "boolean"
+    }
+  },
+  "datasets": {
+    "items": {
+      "model": "Item",
+      "rows": [
+        {
+          "id": "1",
+          "title": "算法笔记",
+          "qty": 3,
+          "category": "学习",
+          "active": true
+        },
+        {
+          "id": "2",
+          "title": "机械键盘",
+          "qty": 1,
+          "category": "设备",
+          "active": true
+        },
+        {
+          "id": "3",
+          "title": "数据结构",
+          "qty": 7,
+          "category": "学习",
+          "active": true
+        },
+        {
+          "id": "4",
+          "title": "显示器",
+          "qty": 2,
+          "category": "设备",
+          "active": true
+        },
+        {
+          "id": "5",
+          "title": "网络教材",
+          "qty": 5,
+          "category": "学习",
+          "active": false
+        }
+      ]
+    }
+  },
+  "variables": {
+    "selected": {
+      "type": "text",
+      "value": "1"
+    },
+    "count": {
+      "type": "number",
+      "value": 0
+    }
+  },
+  "pages": [
+    {
+      "id": "inventoryRuntime",
+      "name": "运行期库存",
+      "canvas": {
+        "w": 1000,
+        "h": 820
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "column",
+        "gap": 12,
+        "padding": 24,
+        "fill": "$bg",
+        "children": [
+          {
+            "type": "label",
+            "id": "heading",
+            "text": "RP/1 · 运行期库存",
+            "fontSize": 24,
+            "fontWeight": 700,
+            "h": 32
+          },
+          {
+            "type": "label",
+            "id": "status",
+            "text": {
+              "fn": "concat",
+              "args": [
+                "当前选择：",
+                {
+                  "variable": "selected"
+                }
+              ]
+            },
+            "h": 24,
+            "w": "fill"
+          },
+          {
+            "type": "repeater",
+            "id": "items",
+            "dataset": "items",
+            "key": "id",
+            "w": 760,
+            "h": 180,
+            "rowHeight": 48,
+            "rowGap": 4,
+            "pageSize": 3,
+            "template": {
+              "type": "box",
+              "id": "row",
+              "layout": "row",
+              "gap": 12,
+              "padding": 4,
+              "fill": "$surface",
+              "children": [
+                {
+                  "type": "label",
+                  "id": "rowId",
+                  "text": {
+                    "item": "id"
+                  },
+                  "w": 48,
+                  "h": 36
+                },
+                {
+                  "type": "label",
+                  "id": "title",
+                  "text": {
+                    "item": "title"
+                  },
+                  "w": 260,
+                  "h": 36
+                },
+                {
+                  "type": "badge",
+                  "id": "quantity",
+                  "text": {
+                    "fn": "text",
+                    "args": [
+                      {
+                        "item": "qty"
+                      }
+                    ]
+                  },
+                  "w": 80,
+                  "h": 36
+                },
+                {
+                  "type": "label",
+                  "id": "category",
+                  "text": {
+                    "item": "category"
+                  },
+                  "w": 100,
+                  "h": 36
+                },
+                {
+                  "type": "button",
+                  "id": "pick",
+                  "text": "选择",
+                  "w": 140,
+                  "h": 36,
+                  "on": {
+                    "click": [
+                      {
+                        "type": "set-variable",
+                        "variable": "selected",
+                        "value": {
+                          "item": "id"
+                        }
+                      }
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "box",
+            "id": "navigation",
+            "layout": "row",
+            "gap": 12,
+            "h": 40,
+            "children": [
+              {
+                "type": "button",
+                "id": "previous",
+                "text": "上一页",
+                "w": 140,
+                "h": 36,
+                "on": {
+                  "click": [
+                    {
+                      "type": "data-page",
+                      "target": {
+                        "ref": "items"
+                      },
+                      "page": "previous"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "button",
+                "id": "next",
+                "text": "下一页",
+                "w": 140,
+                "h": 36,
+                "on": {
+                  "click": [
+                    {
+                      "type": "data-page",
+                      "target": {
+                        "ref": "items"
+                      },
+                      "page": "next"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "button",
+                "id": "sort",
+                "text": "库存降序",
+                "w": 140,
+                "h": 36,
+                "on": {
+                  "click": [
+                    {
+                      "type": "data-sort",
+                      "target": {
+                        "ref": "items"
+                      },
+                      "column": "qty",
+                      "direction": "descending"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "button",
+                "id": "unsort",
+                "text": "恢复排序",
+                "w": 140,
+                "h": 36,
+                "on": {
+                  "click": [
+                    {
+                      "type": "data-clear-sort",
+                      "target": {
+                        "ref": "items"
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "type": "box",
+            "id": "filters",
+            "layout": "row",
+            "gap": 12,
+            "h": 40,
+            "children": [
+              {
+                "type": "button",
+                "id": "filter",
+                "text": "在用学习用品",
+                "w": 140,
+                "h": 36,
+                "on": {
+                  "click": [
+                    {
+                      "type": "data-filter",
+                      "target": {
+                        "ref": "items"
+                      },
+                      "name": "study",
+                      "where": {
+                        "op": "&&",
+                        "left": {
+                          "op": "&&",
+                          "left": {
+                            "op": "==",
+                            "left": {
+                              "item": "category"
+                            },
+                            "right": "学习"
+                          },
+                          "right": {
+                            "op": ">=",
+                            "left": {
+                              "item": "qty"
+                            },
+                            "right": 2
+                          }
+                        },
+                        "right": {
+                          "op": "==",
+                          "left": {
+                            "item": "active"
+                          },
+                          "right": true
+                        }
+                      }
+                    },
+                    {
+                      "type": "data-page",
+                      "target": {
+                        "ref": "items"
+                      },
+                      "page": "first"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "button",
+                "id": "clear",
+                "text": "清除筛选",
+                "w": 140,
+                "h": 36,
+                "on": {
+                  "click": [
+                    {
+                      "type": "data-clear-filter",
+                      "target": {
+                        "ref": "items"
+                      }
+                    },
+                    {
+                      "type": "data-page",
+                      "target": {
+                        "ref": "items"
+                      },
+                      "page": "first"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "button",
+                "id": "update",
+                "text": "选中项改为 99",
+                "w": 140,
+                "h": 36,
+                "on": {
+                  "click": [
+                    {
+                      "type": "data-update",
+                      "target": {
+                        "ref": "items"
+                      },
+                      "where": {
+                        "op": "==",
+                        "left": {
+                          "item": "id"
+                        },
+                        "right": {
+                          "variable": "selected"
+                        }
+                      },
+                      "set": {
+                        "qty": 99
+                      }
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "button",
+                "id": "delete",
+                "text": "删除选中项",
+                "w": 140,
+                "h": 36,
+                "on": {
+                  "click": [
+                    {
+                      "type": "data-delete",
+                      "target": {
+                        "ref": "items"
+                      },
+                      "where": {
+                        "op": "==",
+                        "left": {
+                          "item": "id"
+                        },
+                        "right": {
+                          "variable": "selected"
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ]
+          },
+          {
+            "type": "label",
+            "id": "formLabel",
+            "text": "新记录（编号、名称、库存）",
+            "h": 24
+          },
+          {
+            "type": "box",
+            "id": "form",
+            "layout": "row",
+            "gap": 12,
+            "h": 40,
+            "children": [
+              {
+                "type": "input",
+                "id": "newId",
+                "value": "6",
+                "w": 100,
+                "h": 36
+              },
+              {
+                "type": "input",
+                "id": "newTitle",
+                "value": "编译原理",
+                "w": 220,
+                "h": 36
+              },
+              {
+                "type": "input",
+                "id": "newQty",
+                "value": "8",
+                "w": 100,
+                "h": 36
+              },
+              {
+                "type": "button",
+                "id": "add",
+                "text": "添加记录",
+                "w": 140,
+                "h": 36,
+                "on": {
+                  "click": {
+                    "cases": [
+                      {
+                        "when": {
+                          "op": "&&",
+                          "left": {
+                            "op": "!=",
+                            "left": {
+                              "widget": {
+                                "ref": "newId"
+                              }
+                            },
+                            "right": ""
+                          },
+                          "right": {
+                            "op": "!=",
+                            "left": {
+                              "widget": {
+                                "ref": "newTitle"
+                              }
+                            },
+                            "right": ""
+                          }
+                        },
+                        "actions": [
+                          {
+                            "type": "data-add",
+                            "target": {
+                              "ref": "items"
+                            },
+                            "rows": [
+                              {
+                                "id": {
+                                  "widget": {
+                                    "ref": "newId"
+                                  }
+                                },
+                                "title": {
+                                  "widget": {
+                                    "ref": "newTitle"
+                                  }
+                                },
+                                "qty": {
+                                  "fn": "number",
+                                  "args": [
+                                    {
+                                      "widget": {
+                                        "ref": "newQty"
+                                      }
+                                    }
+                                  ]
+                                },
+                                "category": "学习",
+                                "active": true
+                              }
+                            ]
+                          },
+                          {
+                            "type": "data-page",
+                            "target": {
+                              "ref": "items"
+                            },
+                            "page": "last"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          },
+          {
+            "type": "label",
+            "id": "inputPreview",
+            "text": {
+              "fn": "concat",
+              "args": [
+                "即将新增：",
+                {
+                  "widget": {
+                    "ref": "newTitle"
+                  }
+                }
+              ]
+            },
+            "h": 24
+          },
+          {
+            "type": "button",
+            "id": "bump",
+            "text": "选中库存 +1",
+            "w": 140,
+            "h": 36,
+            "on": {
+              "click": [
+                {
+                  "type": "data-update",
+                  "target": {
+                    "ref": "items"
+                  },
+                  "where": {
+                    "op": "==",
+                    "left": {
+                      "item": "id"
+                    },
+                    "right": {
+                      "variable": "selected"
+                    }
+                  },
+                  "set": {
+                    "qty": {
+                      "op": "+",
+                      "left": {
+                        "item": "qty"
+                      },
+                      "right": 1
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "type": "label",
+            "id": "counter",
+            "text": {
+              "fn": "concat",
+              "args": [
+                "操作计数：",
+                {
+                  "fn": "text",
+                  "args": [
+                    {
+                      "variable": "count"
+                    }
+                  ]
+                }
+              ]
+            },
+            "h": 24
+          },
+          {
+            "type": "button",
+            "id": "increment",
+            "text": "计数 +1",
+            "w": 140,
+            "h": 36,
+            "on": {
+              "click": [
+                {
+                  "type": "set-variable",
+                  "variable": "count",
+                  "value": {
+                    "op": "+",
+                    "left": {
+                      "variable": "count"
+                    },
+                    "right": 1
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

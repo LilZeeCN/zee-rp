@@ -1,0 +1,177 @@
+{
+  "$schema": "../../references/rp-language.schema.json",
+  "language": "rp/1",
+  "target": 9,
+  "name": "园区设施维修工单台",
+  "domain": "web",
+  "theme": "enterprise-light",
+  "strictAudit": true,
+  "product": {
+    "entities": {
+      "RepairWorkorder": {
+        "key": "id",
+        "statusField": "status",
+        "selectionVariable": "selected_wo_id",
+        "nextIdVariable": "next_wo_id",
+        "nextIdDefault": "WO-305",
+        "fields": {
+          "id": {"type": "text", "label": "工单编号"},
+          "title": {"type": "text", "label": "故障标题", "required": true},
+          "category": {"type": "text", "label": "故障类型", "default": "空调", "enum": ["空调", "照明", "门禁"]},
+          "location": {"type": "text", "label": "报修点位", "required": true},
+          "status": {"type": "text", "label": "工单状态", "default": "待派单"},
+          "claimant": {"type": "text", "label": "接单工程师", "default": "未指派"},
+          "contact": {"type": "text", "label": "值班电话", "default": "-"},
+          "note": {"type": "text", "label": "故障现象", "default": "待现场排查"}
+        },
+        "rows": [
+          {
+            "id": "WO-301",
+            "title": "三楼会议室新风主机异响",
+            "category": "空调",
+            "location": "研发楼 3F-302",
+            "status": "待派单",
+            "claimant": "未指派",
+            "contact": "-",
+            "note": "出风口伴随高频震动声，制冷正常"
+          },
+          {
+            "id": "WO-302",
+            "title": "地下车库 B 区应急照明故障",
+            "category": "照明",
+            "location": "地下车库 B2 通道",
+            "status": "待派单",
+            "claimant": "未指派",
+            "contact": "-",
+            "note": "回路模块跳闸后无法自动复位"
+          },
+          {
+            "id": "WO-303",
+            "title": "北门速通闸机刷卡无响应",
+            "category": "门禁",
+            "location": "园区北门大厅",
+            "status": "待派单",
+            "claimant": "未指派",
+            "contact": "-",
+            "note": "读卡器指示灯闪烁但闸翼不开启"
+          },
+          {
+            "id": "WO-304",
+            "title": "二楼茶水间直饮机漏水报警",
+            "category": "照明",
+            "location": "行政楼 2F 茶水间",
+            "status": "待派单",
+            "claimant": "未指派",
+            "contact": "-",
+            "note": "底座水浸传感器触发断电保护"
+          }
+        ]
+      }
+    },
+    "rules": {
+      "report_policy": {
+        "entity": "RepairWorkorder",
+        "operation": "report_workorder",
+        "description": "设施报修必填规则：必须填写故障标题与报修点位。",
+        "requiredFields": [
+          {"field": "title", "required": true, "message": "请填写故障标题"},
+          {"field": "location", "required": true, "message": "请填写报修点位"}
+        ]
+      },
+      "dispatch_policy": {
+        "entity": "RepairWorkorder",
+        "operation": "dispatch_workorder",
+        "description": "派单规则（基线）：接单工程师必填，值班电话选填；派单后记录保留在列表中。",
+        "requiredFields": [
+          {"field": "claimant", "required": true, "message": "请填写接单工程师姓名"}
+        ],
+        "requireContact": false,
+        "contactField": "contact",
+        "contactRequiredMessage": "请填写工程师值班电话",
+        "statusTransition": {"field": "status", "from": "待派单", "to": "维修处理中"},
+        "excludeClaimedFromList": false,
+        "detailClaimedText": "维修处理中"
+      }
+    },
+    "queries": {
+      "active_workorders": {
+        "entity": "RepairWorkorder",
+        "searchField": "title",
+        "filterField": "category",
+        "filters": [
+          {"label": "全部", "value": "全部", "all": true},
+          "空调",
+          "照明",
+          "门禁"
+        ],
+        "respectRule": "dispatch_policy",
+        "emptyText": "暂无匹配的维修工单"
+      }
+    },
+    "operations": {
+      "report_workorder": {
+        "kind": "create",
+        "entity": "RepairWorkorder",
+        "rule": "report_policy",
+        "fields": ["title", "category", "location", "note"],
+        "defaults": {
+          "status": "待派单",
+          "claimant": "未指派",
+          "contact": "-"
+        },
+        "successText": "报修提交成功，已生成待派单工单",
+        "navigateTo": "workorder_detail"
+      },
+      "dispatch_workorder": {
+        "kind": "update",
+        "entity": "RepairWorkorder",
+        "rule": "dispatch_policy",
+        "fields": ["claimant", "contact", "note"],
+        "successText": "派单接单成功",
+        "navigateTo": "workorder_detail"
+      }
+    },
+    "views": [
+      {
+        "id": "workorder_list",
+        "title": "维修工单列表",
+        "kind": "list",
+        "entity": "RepairWorkorder",
+        "query": "active_workorders",
+        "cardFields": {
+          "title": "title",
+          "subtitle": "location",
+          "badge": "status"
+        }
+      },
+      {
+        "id": "workorder_detail",
+        "title": "工单详情",
+        "kind": "detail",
+        "entity": "RepairWorkorder",
+        "rule": "dispatch_policy",
+        "displayFields": ["id", "title", "category", "location", "status", "claimant", "contact", "note"],
+        "primaryAction": {"label": "派单接单", "navigateTo": "dispatch_form"},
+        "secondaryAction": {"label": "发起报修", "navigateTo": "report_form"}
+      },
+      {
+        "id": "report_form",
+        "title": "故障报修",
+        "kind": "form",
+        "entity": "RepairWorkorder",
+        "operation": "report_workorder",
+        "submitText": "提交报修",
+        "backTo": "workorder_detail"
+      },
+      {
+        "id": "dispatch_form",
+        "title": "指派工程师",
+        "kind": "form",
+        "entity": "RepairWorkorder",
+        "operation": "dispatch_workorder",
+        "submitText": "确认派单",
+        "backTo": "workorder_detail"
+      }
+    ]
+  }
+}

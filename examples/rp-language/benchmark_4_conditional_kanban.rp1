@@ -1,0 +1,26 @@
+rp/1 name="行内条件动作流转看板" domain=web theme=enterprise-light computed={"todo_count":{"type":"number","compute":{"op":"count","dataset":"tasks","where":"=item.status == '待处理'"}},"doing_count":{"type":"number","compute":{"op":"count","dataset":"tasks","where":"=item.status == '处理中'"}},"done_count":{"type":"number","compute":{"op":"count","dataset":"tasks","where":"=item.status == '已完成'"}},"total_visible":{"type":"number","compute":{"op":"count","dataset":"tasks"}}} invariants=[{"id":"conservation_of_tasks","expr":"=var.todo_count + var.doing_count + var.done_count == var.total_visible && var.total_visible <= 3","message":"三种状态任务数之和恒等于当前可见任务总数且不超过 3"}]
+model KanbanTask id=id title=text assignee=text status="enum(待处理,处理中,已完成)"
+dataset tasks model=KanbanTask
+  - id=TSK-01 title="机房巡检告警排查" assignee="周工" status="待处理"
+  - id=TSK-02 title="专线带宽峰值调优" assignee="吴工" status="处理中"
+  - id=TSK-03 title="数据库备库切换演练" assignee="郑工" status="已完成"
+page #kanban_board [920x520a] name="行内条件动作流转看板"
+  @column #root_col [920x520] padding=24 gap=16 fill=$bg
+    @row #kpi_bar [872x44] gap=12 align=center
+      @label #board_title [320x28] "行内条件动作流转看板" fontSize=18 fontWeight=700
+      @badge #kpi_todo [150x28] "='待处理：' + text(var.todo_count)"
+      @badge #kpi_doing [150x28] "='处理中：' + text(var.doing_count)"
+      @badge #kpi_done [150x28] "='已完成：' + text(var.done_count)"
+    @searchable-list #task_list dataset=tasks key=id searchField=title filterField=status w=872 rowHeight=56 repeaterHeight=240
+      :filters auto
+      :template
+        @row #task_row [872x56] padding=[8,16] gap=12 align=center fill=$surface stroke=$line radius=8
+          @label #t_id [90x24] "=item.id" fontSize=12 color=$ink-2
+          @label #t_title [240x24] "=item.title" fontSize=13 fontWeight=600
+          @label #t_user [90x24] "=item.assignee" fontSize=12
+          @badge #t_status [84x24] "=item.status" fontSize=12
+          @button #btn_dispatch [88x28] "立即派单" fontSize=12 variant=primary when="=item.status == '待处理'"
+            +onClick [{"type":"data-update","target":"task_list","where":"=item.id == caller.id","set":{"status":"处理中"}}]
+          @button #btn_finish [88x28] "确认完结" fontSize=12 variant=secondary when="=item.status == '处理中'"
+            +onClick [{"type":"data-update","target":"task_list","where":"=item.id == caller.id","set":{"status":"已完成"}}]
+          @badge #tag_archived [88x24] "已归档" fontSize=12 when="=item.status == '已完成'"

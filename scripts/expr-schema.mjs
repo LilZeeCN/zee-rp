@@ -6,7 +6,9 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { readRecords } from './rp-records.mjs';
 import { parsePayload, field } from './parse-payload.mjs';
-const D = process.argv[2] ?? '/Applications/Axure RP 11.app/Contents/Resources/DefaultSettings/Libraries';
+import { installRoot, resolveTargetVersion } from './version.mjs';
+import { join } from 'node:path';
+const D = process.argv[2] ?? join(installRoot(resolveTargetVersion()), 'Libraries');
 const cls = new Map(), ops = new Map(), fns = new Map();
 let conds = 0;
 const walkCol = (n, cls2) => { if (n.tag === 3) return cls2; };

@@ -106,7 +106,8 @@ const cells = [], created = [];
 for (let index=0; index<rowCount*columnCount; index++) {
   const row=Math.floor(index/columnCount), col=index%columnCount;
   const id = index < oldCells.length ? oldCells[index] : (() => {
-    const clone=cloneInto({srcGraph:sourceGraph,srcStrings:record.strings,dstGraph:graph,dstStrings:strings,
+    const clone=cloneInto({
+    srcGraph:sourceGraph,srcStrings:record.strings,dstGraph:graph,dstStrings:strings,
       closure:closureOf(sourceGraph,templateId),rootOldId:templateId});
     created.push(...clone.created);return clone.rootNewId;
   })();

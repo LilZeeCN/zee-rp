@@ -1,0 +1,130 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "课程组件语言样本",
+  "theme": "mobile-lowfi",
+  "domain": "test",
+  "pages": [
+    {
+      "id": "courses",
+      "name": "课程管理",
+      "canvas": {
+        "w": 600,
+        "h": 640
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "layout": "column",
+        "gap": 12,
+        "padding": 16,
+        "fill": "$surface",
+        "children": [
+          {
+            "type": "label",
+            "id": "heading",
+            "text": "我的课程",
+            "w": "fill",
+            "h": 24,
+            "fontSize": 20,
+            "fontWeight": 700
+          },
+          {
+            "type": "box",
+            "id": "row",
+            "layout": "row",
+            "gap": 16,
+            "w": "fill",
+            "h": 160,
+            "children": [
+              {
+                "type": "use",
+                "id": "network",
+                "component": "Course",
+                "args": {
+                  "title": "计算机网络",
+                  "teacher": "林老师"
+                }
+              },
+              {
+                "type": "use",
+                "id": "systems",
+                "component": "Course",
+                "args": {
+                  "title": "操作系统",
+                  "teacher": "陈老师"
+                }
+              }
+            ]
+          },
+          {
+            "type": "label",
+            "id": "status",
+            "text": "点击课程加入学习",
+            "w": "fill",
+            "h": 24
+          }
+        ]
+      }
+    }
+  ],
+  "components": {
+    "Course": {
+      "params": {
+        "title": "text",
+        "teacher": "text"
+      },
+      "root": {
+        "type": "box",
+        "id": "card",
+        "layout": "column",
+        "gap": 12,
+        "padding": 16,
+        "fill": "$surface",
+        "children": [
+          {
+            "type": "label",
+            "id": "title",
+            "text": {
+              "$": "title"
+            },
+            "w": "fill",
+            "h": 24
+          },
+          {
+            "type": "label",
+            "id": "teacher",
+            "text": {
+              "format": "授课：{teacher}"
+            },
+            "w": "fill",
+            "h": 24
+          },
+          {
+            "type": "button",
+            "id": "join",
+            "text": "加入学习",
+            "w": "fill",
+            "h": 36,
+            "on": {
+              "click": [
+                {
+                  "type": "set-text",
+                  "target": {
+                    "ref": "courses/status"
+                  },
+                  "text": {
+                    "format": "已加入：{title}"
+                  }
+                }
+              ]
+            }
+          }
+        ],
+        "w": "fill",
+        "h": 160,
+        "flex": 1
+      }
+    }
+  }
+}

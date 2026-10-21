@@ -14,6 +14,7 @@ import { readManifest, readRecords } from './rp-records.mjs';
 import { parsePayload, field, walkNodes } from './parse-payload.mjs';
 import { guidKey } from './duplicate-page.mjs';
 import { EVENTS } from './ix-actions.mjs';
+import { detectFileVersion, versionLabel } from './version.mjs';
 
 // wx.MSDataObject 的 DOAName 常量（实测值）。
 const DOA = { POSITION: 3221225573, SIZE: 3221225577 };
@@ -72,7 +73,7 @@ const widgetName = widget => strOf(field(field(widget.body, 'name-block') ?? {},
 // ---- 交互树读取 ----
 // InteractionTreeMap = { node-table: dict(nodeId → 对象), tree: Tree }；
 // Tree.children = 事件 Node；事件 Node.children = 用例 Node；用例 Node.children = 动作 Node。
-function readInteractions(graph, mapNode) {
+function readInteractions(graph, mapNode, version) {
   const results = [];
   if (!mapNode) return results;
   const nodeTable = field(mapNode.body, 'node-table');
@@ -93,7 +94,7 @@ function readInteractions(graph, mapNode) {
       const actions = childrenOf(caseNode)
         .map(actionNode => target(actionNode.id))
         .filter(Boolean)
-        .map(action => describeAction(graph, action));
+        .map(action => describeAction(graph, action, version));
       cases.push({
         description: strOf(field(kase.body, 'Description')) ?? '',
         disabled: field(kase.body, 'Disabled')?.value === true,
@@ -111,7 +112,7 @@ function readInteractions(graph, mapNode) {
 }
 
 // 动作 → 人读文本。未知类型退化成「类名 → 目标」。
-function describeAction(graph, action) {
+function describeAction(graph, action, version = 11) {
   const disabled = field(action.body, 'Disabled')?.value === true;
   const literal = node => {
     if (!node) return undefined;
@@ -200,9 +201,18 @@ function describeAction(graph, action) {
       break;
     }
     case 'InteractionEnableDisableWidgetsAction': {
-      const value = intOf(field(bodyOf('EnableDisableInfos'), 'enable'));
-      type = value === 0 ? 'enable' : value === 1 ? 'disable' : 'toggle-enabled';
-      human = `${value === 0 ? '启用' : value === 1 ? '禁用' : '切换启用'} ${targets(['WidgetPaths']).join('、')}`;
+      // RP 9 的 enable 是 bool（true=启用 / false=禁用）；RP 11 是同键的 int 枚举 0/1/2。
+      // 不区分版本的话，bool true 会被读成「切换启用」。
+      const node = field(bodyOf('EnableDisableInfos'), 'enable');
+      const names = targets(['WidgetPaths']).join('、');
+      if (node?.tag === 0x19) {
+        type = node.value ? 'enable' : 'disable';
+        human = `${node.value ? '启用' : '禁用'} ${names}`;
+      } else {
+        const value = intOf(node);
+        type = value === 0 ? 'enable' : value === 1 ? 'disable' : 'toggle-enabled';
+        human = `${value === 0 ? '启用' : value === 1 ? '禁用' : '切换启用'} ${names}`;
+      }
       break;
     }
     case 'InteractionWaitAction': {
@@ -295,10 +305,11 @@ function rawDump(graph, node, depth = 0, seen = new Set()) {
 }
 
 // ---- 主分析 ----
-export function readRp(file, { full = false, path = null } = {}) {
+export function readRp(file, { full = false, path = null, includeMasterWidgets = false } = {}) {
   const problems = [];
   const problem = (kind, message, extra = {}) => problems.push({ kind, message, ...extra });
 
+  const version = detectFileVersion(file);
   const records = readRecords(file);
   const manifest = readManifest(file);
 
@@ -345,7 +356,7 @@ export function readRp(file, { full = false, path = null } = {}) {
 
   // DesignDocument：PackageInfo 表 + 站点树 + 母版树 + 全局变量。
   const docRecord = records.find(r => r.className === 'Axure:DesignDocument');
-  if (!docRecord) throw new Error('No Axure:DesignDocument record — not a readable Axure RP 11 file');
+  if (!docRecord) throw new Error(`No Axure:DesignDocument record — not a readable ${versionLabel(version)} file`);
   const docGraph = graphs.get(docRecord.index) ?? parsePayload(docRecord);
   const docRoot = docGraph.objects.get(docGraph.roots.find(n => n.tag === 0xf)?.value);
   if (!docRoot) throw new Error('DesignDocument root object is missing');
@@ -483,7 +494,8 @@ export function readRp(file, { full = false, path = null } = {}) {
         text: textOf(field(object.body, 'RichTextBlock') ?? field(object.body, 'TextBlock')),
         x: geo.x, y: geo.y, w: geo.w, h: geo.h,
         container: containerPath,
-        record: graphRecords.get(graph) ?? null
+        record: graphRecords.get(graph) ?? null,
+        ...(includeMasterWidgets ? { interactions: readInteractions(graph, graph.objects.get(field(object.body, 'InteractionMap')?.value), version) } : {})
       });
       visitWidgetContainers(graph, object, containerPath);
     }
@@ -500,6 +512,14 @@ export function readRp(file, { full = false, path = null } = {}) {
       if (object && isWidget(object)) visitWidgetContainers(graph, object, []);
     }
   }
+  // 母版定义只读一次；页面中的实例仍保留为 ReferenceDiagramObject。
+  for (const record of records.filter(item => includeMasterWidgets && item.className === 'Axure:Master')) {
+    const graph = graphs.get(record.index);
+    if (!graph) continue;
+    const master = [...graph.objects.values()].find(o => o.className === 'Axure:Master');
+    const name = strOf(field(master?.body ?? {}, 'name')) ?? `#${record.index}`;
+    visitDiagram(graph, graph.objects.get(field(master?.body ?? {}, 'diagram')?.value), [`母版:${name}`]);
+  }
   // 保留未被页面引用的状态记录，便于诊断孤儿 PanelState 内容。
   for (const record of records.filter(item => item.className === 'Axure:PanelState')) {
     const state = panelStateByRecord.get(record.index);
@@ -508,6 +528,7 @@ export function readRp(file, { full = false, path = null } = {}) {
 
   // 记录级健康检查：悬空引用。
   let danglingRefs = 0;
+  let sentinelSlotsNonZero = 0;
   for (const record of records) {
     const graph = graphs.get(record.index);
     if (!graph) continue;
@@ -516,7 +537,16 @@ export function readRp(file, { full = false, path = null } = {}) {
     walkNodes(graph.roots, node => {
       if (node.tag !== 3) return;
       if (graph.objects.has(node.value)) return;
-      if (node.value >= 1 && node.value <= guidCount) return;   // 交互对象用 GUID 表下标当 id
+      if (node.value >= 1 && node.value <= guidCount) {
+        // 交互对象用 GUID 表下标当 id。指向「表内存在但本 record 无此对象」的 id 一律是
+        // **空哨兵**（`SubmitButton`/`Condition`/`TargetRepeaterScope` 用它表示"无"）——
+        // 实测 ref(3) 664 次、ref(4) 2 次、ref(17) 3 次，全部如此，且**与槽内容无关**：
+        // 槽里的非零 GUID 只是分配残留。所以不算悬空。
+        // 但 Axure 自己写的文件里这些槽**全是零**；槽非零只有外观差异（已验证照常加载渲染），
+        // 单独计入 sentinelSlotsNonZero，不污染 problems。
+        if ((guidsOf(graph)[node.value - 1] || '') !== '0'.repeat(32)) sentinelSlotsNonZero++;
+        return;
+      }
       bad.push(node.value);
     });
     if (bad.length) {
@@ -570,12 +600,12 @@ export function readRp(file, { full = false, path = null } = {}) {
         });
       }
       const mapNode = graph.objects.get(field(object.body, 'InteractionMap')?.value);
-      const interactions = readInteractions(graph, mapNode);
+      const interactions = readInteractions(graph, mapNode, version);
       if (interactions.length) { tally(interactions); widget.interactions = interactions; }
       if (full) widget.raw = rawDump(graph, object.body);
       widgets.push(widget);
     }
-    const pageInteractions = readInteractions(graph, graph.objects.get(field(pageObject?.body ?? {}, 'interactionmap')?.value));
+    const pageInteractions = readInteractions(graph, graph.objects.get(field(pageObject?.body ?? {}, 'interactionmap')?.value), version);
     tally(pageInteractions);
     pageSummaries.push({
       name: page.name, folder: page.folder, record: record.index,
@@ -600,7 +630,7 @@ export function readRp(file, { full = false, path = null } = {}) {
       byName.get(name).push(where);
     };
     for (const p of pages) note(p.name, `页面(${p.name})`);
-    for (const w of containedWidgets) note(w.name, `${w.container.join('/')}#${w.id}(记录${w.record})`);
+    for (const w of containedWidgets) if (!w.container[0]?.startsWith('母版:')) note(w.name, `${w.container.join('/')}#${w.id}(记录${w.record})`);
     for (const [name, wheres] of byName) {
       if (wheres.length > 1) duplicates.push({ name, locations: wheres });
     }
@@ -609,7 +639,8 @@ export function readRp(file, { full = false, path = null } = {}) {
 
   return {
     path,
-    format: 'Axure RP 11 .rp',
+    version,
+    format: `${versionLabel(version)} .rp`,
     bytes: file.length,
     dataStart: manifest.dataStart,
     records: {
@@ -640,6 +671,7 @@ export function readRp(file, { full = false, path = null } = {}) {
       actions: actionCount,
       globalVariables: globalVariables.length,
       danglingRefs,
+      sentinelSlotsNonZero,
       problems: problems.length
     },
     problems
@@ -734,11 +766,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const positional = args.filter(a => !a.startsWith('--'));
   const target = positional[0];
   if (!target) {
-    console.error('Usage: node rp-read.mjs <file.rp> [--json] [--full]');
+    console.error('Usage: node rp-read.mjs <file.rp> [--json] [--full] [--include-master-widgets]');
     console.error('  --json  JSON 输出（默认人读摘要）');
     console.error('  --full  附每个 widget 的原始字段 dump');
+    console.error('  --include-master-widgets  附共享母版定义中的元件及容器交互');
     process.exit(1);
   }
-  const rp = readRp(readFileSync(target), { full: flags.has('--full'), path: target });
+  const rp = readRp(readFileSync(target), { full: flags.has('--full'), path: target, includeMasterWidgets: flags.has('--include-master-widgets') });
   console.log(flags.has('--json') ? JSON.stringify(rp, null, 2) : formatRpSummary(rp, { full: flags.has('--full') }));
 }

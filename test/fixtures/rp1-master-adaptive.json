@@ -1,0 +1,182 @@
+{
+  "language": "rp/1",
+  "name": "P1-3 母版与自适应视图原生四件套验证",
+  "masters": {
+    "app_shell": {
+      "name": "全局导航母版",
+      "w": 220,
+      "h": 800,
+      "root": {
+        "column": "nav_col",
+        "w": 220,
+        "h": 800,
+        "padding": 16,
+        "gap": 12,
+        "fill": "$surface",
+        "children": [
+          {
+            "label": "brand_lbl",
+            "text": "企业统一控制台",
+            "fontSize": 16,
+            "fontWeight": 700,
+            "w": "fill",
+            "h": 28
+          },
+          {
+            "button": "nav_p1",
+            "text": "总览页",
+            "w": "fill",
+            "h": 36,
+            "onClick": [
+              {
+                "goto": "p1"
+              }
+            ]
+          },
+          {
+            "button": "nav_p2",
+            "text": "资产页",
+            "w": "fill",
+            "h": 36,
+            "onClick": [
+              {
+                "goto": "p2"
+              }
+            ]
+          },
+          {
+            "button": "nav_p3",
+            "text": "审计页",
+            "w": "fill",
+            "h": 36,
+            "onClick": [
+              {
+                "goto": "p3"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "adaptiveViews": [
+    {
+      "id": "mobile",
+      "name": "Mobile 390",
+      "width": 390,
+      "condition": "<="
+    },
+    {
+      "id": "tablet",
+      "name": "Tablet 768",
+      "width": 768,
+      "condition": "<="
+    },
+    {
+      "id": "desktop",
+      "name": "Desktop 1280",
+      "width": 1280,
+      "condition": ">="
+    }
+  ],
+  "pages": [
+    {
+      "id": "p1",
+      "name": "总览页",
+      "canvas": {
+        "w": 1280,
+        "h": 800
+      },
+      "master": "app_shell",
+      "slot": {
+        "body": [
+          {
+            "card": "p1_card",
+            "w": "fill",
+            "h": 480,
+            "padding": 24,
+            "gap": 12,
+            "children": [
+              {
+                "label": "p1_title",
+                "text": "总览页主体内容区",
+                "fontSize": 20,
+                "fontWeight": 700,
+                "w": 600,
+                "h": 32,
+                "adaptive": {
+                  "mobile": {
+                    "w": 342
+                  },
+                  "desktop": {
+                    "w": 1000
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "p2",
+      "name": "资产页",
+      "canvas": {
+        "w": 1280,
+        "h": 800
+      },
+      "master": "app_shell",
+      "slot": {
+        "body": [
+          {
+            "card": "p2_card",
+            "w": "fill",
+            "h": 480,
+            "padding": 24,
+            "gap": 12,
+            "children": [
+              {
+                "label": "p2_title",
+                "text": "资产页主体内容区",
+                "fontSize": 20,
+                "fontWeight": 700,
+                "w": "fill",
+                "h": 32
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "p3",
+      "name": "审计页",
+      "canvas": {
+        "w": 1280,
+        "h": 800
+      },
+      "master": "app_shell",
+      "slot": {
+        "body": [
+          {
+            "card": "p3_card",
+            "w": "fill",
+            "h": 480,
+            "padding": 24,
+            "gap": 12,
+            "children": [
+              {
+                "label": "p3_title",
+                "text": "审计页主体内容区",
+                "fontSize": 20,
+                "fontWeight": 700,
+                "w": "fill",
+                "h": 32
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

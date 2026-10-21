@@ -1,15 +1,14 @@
-import { fixturePath } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
-import { readRecords } from '../scripts/rp-records.mjs';
-import { parsePayload, field, walkNodes } from '../scripts/parse-payload.mjs';
-import { readRp } from '../scripts/rp-read.mjs';
-import { placeMaster } from '../scripts/place-master.mjs';
-import { setMasterOverrides } from '../scripts/set-master-overrides.mjs';
-import { fillPanelState } from '../scripts/fill-panel-state.mjs';
-import { removePanelStateContent, resolvePanelState } from '../scripts/remove-panel-state-content.mjs';
+import {readFileSync,writeFileSync,mkdtempSync,rmSync} from 'node:fs';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {readRecords} from '../scripts/rp-records.mjs';
+import {parsePayload,field,walkNodes} from '../scripts/parse-payload.mjs';
+import {readRp} from '../scripts/rp-read.mjs';
+import {placeMaster} from '../scripts/place-master.mjs';
+import {setMasterOverrides} from '../scripts/set-master-overrides.mjs';
+import {fillPanelState} from '../scripts/fill-panel-state.mjs';
+import {removePanelStateContent,resolvePanelState} from '../scripts/remove-panel-state-content.mjs';
 
 const nameOf=o=>field(field(o.body,'name-block')??{},'text')?.text;
 const packageGuid=g=>g.roots.find(n=>n.tag===30).values[g.roots.find(n=>n.tag===18).value-1];
@@ -44,7 +43,7 @@ function sharedUnchanged(before,after,scope=owner){
  assert.ok(old.find(r=>r.className==='Axure:DesignDocument').raw.equals(now.find(r=>r.className==='Axure:DesignDocument').raw));
 }
 export function runDirectImageChecks(){
- const input=readFileSync(fixturePath('panel-direct-image-base.rp'));
+ const input=readFileSync(new URL('./fixtures/panel-direct-image-base.rp',import.meta.url));
  const original=state(input),a=original.roots.find(o=>nameOf(o)==='DIRECT_IMAGE_A'),b=original.roots.find(o=>nameOf(o)==='DIRECT_IMAGE_B');
  const red=image(original.graph,a),blue=image(original.graph,b),work=mkdtempSync(join(tmpdir(),'axure-direct-image-')),results=[];
  const check=(name,fn)=>{try{fn();results.push({name,passed:true});}catch(error){results.push({name,passed:false,detail:error.message});}};
@@ -71,7 +70,7 @@ export function runDirectImageChecks(){
   check('删 A 物理移除红 PNG 并保留 B 蓝 PNG',()=>{const out=remove({widgets:['DIRECT_IMAGE_A']});noBytes(out,red);assert.equal(streamCount(out,blue),1);assert.deepEqual(state(out).roots.map(nameOf),['DIRECT_IMAGE_B']);healthy(out);});
   check('删 A 保留共享母版及全部自有状态原字节',()=>sharedUnchanged(input,remove({widgets:['DIRECT_IMAGE_A']})));
   check('清空移除全部私有 PNG 且保留共享定义',()=>{const out=remove({all:true});noBytes(out,red);noBytes(out,blue);assert.equal(state(out).roots.length,0);sharedUnchanged(input,out);healthy(out);});
-  check('替换移除旧 PNG 且新四控件布局可解析',()=>{const source=readFileSync(fixturePath('master-state-form-source.rp'));const out=fillPanelState(source,input,{sourcePage:'Page 1',targetPage:owner.page,panel:owner.panel,state:owner.state,replace:true}).file;noBytes(out,red);noBytes(out,blue);assert.equal(state(out).roots.length,4);sharedUnchanged(input,out);healthy(out);});
+  check('替换移除旧 PNG 且新四控件布局可解析',()=>{const source=readFileSync(new URL('./fixtures/master-state-form-source.rp',import.meta.url));const out=fillPanelState(source,input,{sourcePage:'Page 1',targetPage:owner.page,panel:owner.panel,state:owner.state,replace:true}).file;noBytes(out,red);noBytes(out,blue);assert.equal(state(out).roots.length,4);sharedUnchanged(input,out);healthy(out);});
   check('图片更新移除旧红 bytes 并保留两份蓝覆盖',()=>{const out=override({target:'PANEL_IMAGE',imagePath:bluePath});noBytes(out,red);assert.equal(streamCount(out,blue),2);assert.equal(state(out).roots.length,2);sharedUnchanged(input,out);healthy(out);});
   check('清除 A 图片仅去掉图片覆盖并保留标签和 B',()=>{const out=override({target:'PANEL_IMAGE',clear:true}),s=state(out),instance=s.roots.find(o=>nameOf(o)==='DIRECT_IMAGE_A');noBytes(out,red);assert.equal(streamCount(out,blue),1);assert.equal(field(instance.body,'ObjectOverrides').items.length,4);sharedUnchanged(input,out);healthy(out);});
   check('同一 PNG 被两个实例使用时删除一个仍保留另一份',()=>{
@@ -87,7 +86,7 @@ export function runDirectImageChecks(){
 }
 
 export function runMasterDirectImageChecks(){
- const input=readFileSync(fixturePath('master-direct-image-base.rp'));
+ const input=readFileSync(new URL('./fixtures/master-direct-image-base.rp',import.meta.url));
  const scope={master:'NESTED_MASTER',panel:'CONTENT_PANEL',state:'Form'},s=state(input,scope);
  const a=s.roots.find(o=>nameOf(o)==='DIRECT_IMAGE_A'),b=s.roots.find(o=>nameOf(o)==='DIRECT_IMAGE_B');
  const red=image(s.graph,a),blue=image(s.graph,b),work=mkdtempSync(join(tmpdir(),'axure-master-image-')),results=[];
@@ -98,7 +97,7 @@ export function runMasterDirectImageChecks(){
  try {
   check('Master 所属双实例原生往返 fixture 与两份私有图片',()=>{healthy(input);assert.equal(streamCount(input,red),1);assert.equal(streamCount(input,blue),1);assert.deepEqual(s.roots.map(nameOf),['DIRECT_IMAGE_A','DIRECT_IMAGE_B']);});
   check('Master 单删/全清/替换物理回收私有 PNG 且共享定义不变',()=>{
-   const source=readFileSync(fixturePath('master-state-form-source.rp'));
+   const source=readFileSync(new URL('./fixtures/master-state-form-source.rp',import.meta.url));
    const deleted=remove({widgets:['DIRECT_IMAGE_A']}),cleared=remove({all:true});
    const replaced=fillPanelState(source,input,{sourcePage:'Page 1',targetMaster:scope.master,panel:scope.panel,state:scope.state,replace:true}).file;
    assert.equal(streamCount(deleted,blue),1);assert.deepEqual(state(deleted,scope).roots.map(nameOf),['DIRECT_IMAGE_B']);assert.equal(state(cleared,scope).roots.length,0);assert.equal(state(replaced,scope).roots.length,4);
