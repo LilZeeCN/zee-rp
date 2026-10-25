@@ -154,6 +154,7 @@ do {
         lastPhaseTime = now
         FileHandle.standardError.write(Data(("AXURE_GUI_PHASE \(value) (\(ms)ms)\n").utf8))
     }
+    let wantPreview = CommandLine.arguments.count > 3 && CommandLine.arguments[3] == "preview"
     try openTarget()
     phase("opened")
     try fileAction("保存", "Save")
@@ -167,6 +168,29 @@ do {
     phase("closed")
     try openTarget()
     phase("reopened")
+    if wantPreview {
+        try focusTarget()
+        if (try? appleScript("""
+        tell application "System Events" to tell process "\(procName)"
+          if exists menu bar item "发布" of menu bar 1 then
+            if exists menu item "预览" of menu "发布" of menu bar item "发布" of menu bar 1 then
+              click menu item "预览" of menu "发布" of menu bar item "发布" of menu bar 1
+            else
+              click menu item "预览..." of menu "发布" of menu bar item "发布" of menu bar 1
+            end if
+          else if exists menu bar item "Publish" of menu bar 1 then
+            if exists menu item "Preview" of menu "Publish" of menu bar item "Publish" of menu bar 1 then
+              click menu item "Preview" of menu "Publish" of menu bar item "Publish" of menu bar 1
+            else
+              click menu item "Preview..." of menu "Publish" of menu bar item "Publish" of menu bar 1
+            end if
+          end if
+        end tell
+        """)) == nil {
+            _ = axPressMenu(["发布", "Publish"], ["预览", "预览...", "Preview", "Preview..."])
+        }
+        phase("preview")
+    }
     print("saved-closed-reopened")
 } catch {
     FileHandle.standardError.write(Data(String(describing: error).utf8))

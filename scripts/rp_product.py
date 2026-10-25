@@ -340,7 +340,11 @@ def expand_product_spec(spec, fail_fn, ident_fn, fields_fn, typecheck_fn):
             for fname, fdefault in field_defaults.items():
                 if fname not in row and fname != key_field:
                     row[fname] = fdefault
-        dset_name = f"{ename.lower()}_items" if f"{ename.lower()}_items" not in datasets else ename.lower()
+        default_dset = f"{ename.lower()}_items"
+        if default_dset not in datasets or (isinstance(datasets.get(default_dset), dict) and datasets[default_dset].get("model") == ename):
+            dset_name = default_dset
+        else:
+            dset_name = ename.lower()
         datasets[dset_name] = {"model": ename, "rows": rows}
 
         sel_var = edef.get("selectionVariable") or f"selected_{ename.lower()}_id"
@@ -682,8 +686,9 @@ def _compile_product_views_to_pages(
     max_title_chars = max((len(str(r.get(title_field, ""))) for r in em["rows"]), default=6)
     max_sub_chars = max((len(str(r.get(sub_field, ""))) for r in em["rows"]), default=4)
     title_fsz = 12 if (not is_web or max_title_chars >= 12) else 13
-    title_w = 128 if is_tablet else (184 if is_web else 118)
-    sub_w = 64 if is_tablet else (96 if is_web else 58)
+    wide_web_sub = is_web and max_sub_chars >= 11
+    title_w = 128 if is_tablet else ((168 if wide_web_sub else 184) if is_web else 118)
+    sub_w = 64 if is_tablet else ((112 if wide_web_sub else 96) if is_web else 58)
     title_h = 34 if max_title_chars * title_fsz * 1.05 > title_w else 24
     sub_h = 34 if max_sub_chars * 12 * 1.05 > sub_w else 24
     show_empty_probe = bool(spec.get("devMode") or product.get("devMode") or qdef.get("emptyProbe"))

@@ -7,6 +7,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { buildNativeDemo } from '../examples/build-native-demo.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
+import { listMcpTools, jobTools } from '../scripts/mcp-tools.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const work = mkdtempSync(join(tmpdir(), 'zee-rp-stdio-'));
@@ -26,9 +27,11 @@ async function call(name, args) {
 try {
   const demo = buildNativeDemo(join(work,'demo')), source = join(demo.output,demo.source);
   await client.connect(transport);
-  await check('real stdio initializes and discovers all 44 unique tools', async () => {
+  await check('real stdio initializes and discovers every registered tool exactly once', async () => {
     const result = await client.listTools();
-    assert.equal(result.tools.length,44); assert.equal(new Set(result.tools.map(t=>t.name)).size,44);
+    const expected = [...listMcpTools(), ...jobTools].map(t => t.name).sort();
+    assert.deepEqual(result.tools.map(t => t.name).sort(), expected);
+    assert.equal(new Set(result.tools.map(t => t.name)).size, expected.length);
   });
   await check('real transport reads generated native widgets', async () => {
     const result = await call('rp_read',{args:[source,'--json']});

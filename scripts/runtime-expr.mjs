@@ -102,6 +102,8 @@ export function nativeRuntimeValue(ast, ctx, { targetRows = false } = {}) {
         case 'lower': return `(${a}).toLowerCase()`;
         case 'upper': return `(${a}).toUpperCase()`;
         case 'length': return `(${a}).length`;
+        case 'contains': return `((${a}).indexOf(${args[1]})>=0)`;
+        case 'remove': return `(${a}).replace(${args[1]},"")`;
         default: throw new Error(`Unknown runtime function ${node.fn}`);
       }
     }

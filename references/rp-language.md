@@ -47,7 +47,7 @@ node scripts/proto.mjs build-rp --plan ./bundle/compile-plan.json --out ./anothe
 
 ## 文件与类型
 
-顶层字段为 `$schema,language,target,name,theme,domain,static,strictAudit,product,models,datasets,variables,components,pages`（至少包含 `pages` 或 `product.views`）。未知属性是错误，并尽可能提示近似名称。主题为 `enterprise-light,modern-dark,cobalt-pro,mobile-lowfi,mobile-hifi`；领域为 `web,mobile,doc,test`。
+顶层字段包括 `$schema,language,target,name,theme,palette,tokens,domain,device,shell,static,strictAudit,devMode,product,models,datasets,variables,computed,statecharts,transactions,invariants,components,views,rules,masters,adaptiveViews,pages`（至少包含 `pages` 或 `product.views`）。未知属性是错误，并尽可能提示近似名称。主题见 [Schema](rp-language.schema.json)；领域为 `web,mobile,doc,test`。`canvas` 写在页面内，顶层不声明 canvas。未知 device 报 E_PROPERTY 并列出合法值；palette 值严格使用 #RRGGBB。源码最多嵌套 160 层 JSON 容器，超过报带深度与指针的 E_DEPTH；文本拒绝 NUL 等控制字符，保留换行、回车和 Tab。
 
 标量类型是 `text,number,boolean`。数字字面量必须有限；布尔值不是数字。JSON 不接受重复属性、NaN 或 Infinity。模型的每行数据必须完整且严格匹配字段类型，不隐式补入业务默认值。
 
@@ -65,7 +65,7 @@ node scripts/proto.mjs build-rp --plan ./bundle/compile-plan.json --out ./anothe
 
 ## 身份与引用
 
-页面至少声明 `id,root`；省略 name 时取 id，省略 canvas 时 web/doc 默认 1440×900，其他领域默认 375×812，也接受 `[w,h]`。要固定交付尺寸时显式给 canvas。标准节点使用 `id,type`，Sugar 可用元件名键同时声明二者。标识符匹配 `[A-Za-z_][A-Za-z0-9_-]*`。
+页面至少声明 `id,root`；省略 name 时取 id。省略 canvas 时，声明 device 的页面采用对应屏幕尺寸，例如 iphone-17 为 402×874；没有 device 时 web/doc 默认 1440×900，其他领域默认 375×812。canvas 也接受 `[w,h]`，值为内容尺寸。设备外框和 `(20,20)` 装配偏移见 [手机布局速查](mobile-layout.md)。标准节点使用 `id,type`，Sugar 可用元件名键同时声明二者。标识符匹配 `[A-Za-z_][A-Za-z0-9_-]*`。
 
 普通布局容器不引入作用域。组件实例、编译期重复项、面板状态和运行期行模板分别引入作用域。`{"ref":"status"}` 从当前作用域逐级向外查找；完整路径例如 `{"ref":"home/editor/editing/field"}`。
 
@@ -93,7 +93,7 @@ node scripts/proto.mjs build-rp --plan ./bundle/compile-plan.json --out ./anothe
 |---|---|
 | 通用 | `x,y,w,h,flex`；宽高支持非负数、`fill,hug,auto` |
 | `box,card` | `layout,padding,gap,align,justify,equalHeight,columns,columnGap,rowGap,children,fill,stroke,radius` |
-| `label,paragraph` | `text,fontSize,fontWeight,color,align`；段落另有 `lineGap,lineHeight` |
+| `label,paragraph` | `text,fontSize,fontWeight,color,align,letterSpacing`；段落另有 `lineGap,lineHeight`。纯文本 label 自动宽度计入字距；多行/富文本须核对盒宽与实际预览 |
 | `button,badge` | 文本属性及 `variant,fill,stroke,radius` |
 | `input` | 原生 TextBox：`value,placeholder,native,fill,stroke,radius,fontSize,fontWeight,color,align,textPaddingX`，支持 `size/weight` 别名；`native:false` 拒绝。背景矢量可编辑，TextBox 透明覆盖其上；提示文本与实际值独立 |
 | `divider` | `direction,color,fill` |
@@ -127,8 +127,10 @@ node scripts/proto.mjs build-rp --plan ./bundle/compile-plan.json --out ./anothe
 | `{"fn":"not","args":[...]}` | 一个布尔取反 |
 | `{"fn":"lower/upper/length","args":[...]}` | 实际函数名取三者之一；一个文本转小写/大写/长度 |
 | `{"fn":"concat","args":[...,...]}` | 至少两个文本拼接 |
+| `{"fn":"contains","args":[文本,片段]}` | 是否包含字面片段，返回布尔 |
+| `{"fn":"remove","args":[文本,片段]}` | 删除首个字面片段，返回文本，不解释正则 |
 
-不隐式把数字转成文字；显示库存用 `{"fn":"text","args":[{"item":"qty"}]}`。常量除零在检查阶段拒绝；其他数值计算遵循 Axure 运行期数值行为。编译期参数表达式会先求值，再检查最终运行期类型。
+结构化算术 AST 的 `+` 仅接受数字。文本表达式语法糖（如 `="前缀" + $n`）允许字符串拼接：任一操作数为 text 时编译为 `concat`，其他标量经 `text()` 转换；纯数字 `+` 仍为算术。显式显示库存可用 `{"fn":"text","args":[{"item":"qty"}]}`。常量除零在检查阶段拒绝；其他数值计算遵循 Axure 运行期数值行为。编译期参数表达式会先求值，再检查最终运行期类型。
 
 ### 文本刷新规则
 
@@ -190,7 +192,7 @@ node scripts/proto.mjs build-rp --plan ./bundle/compile-plan.json --out ./anothe
 
 ## 事件、条件与动作顺序
 
-`on` 将事件映射到有序动作数组。事件别名是 `click,change,load,mouseover,mouseout,focus,blur,statechange` 或对应 `On*` 名称。页面只支持 `load`；`change/focus/blur` 只允许输入，`statechange` 只允许面板；同一事件别名不能重复。
+`on` 将事件映射到有序动作数组。事件别名是 `click,change,load,mouseover,mouseout,focus,blur,statechange` 或对应 `On*` 名称。页面只支持 `load`，普通元件不接受 `load`（`E_EVENT_TARGET`）；`change/focus/blur` 只允许输入，`statechange` 只允许面板；同一事件别名不能重复。
 
 ```json
 {"on":{"click":{"cases":[
@@ -208,12 +210,15 @@ node scripts/proto.mjs build-rp --plan ./bundle/compile-plan.json --out ./anothe
 | `set-text` | `target:{ref},text`；目标 label/button/badge/input |
 | `set-variable` | `variable,value`；严格匹配声明类型 |
 | `set-panel-state` | `target:{ref},state`；状态须属于面板 |
+| `set-size` | `target:{ref},width,height`；可选 `duration`（毫秒）、`easing`、`anchor`，实际尺寸/动画行为须在目标宿主验证 |
 | `show,hide,toggle` | `target:{ref}` |
 | `enable,disable,focus` | `target:{ref}`；目标原生输入 |
 | `link` | `page` 为目标页面 ID |
 | `wait` | `ms` 非负整数毫秒 |
 
 元件动作只访问当前页，包括其面板状态。跨页用导航与变量传参。所有事件在页面、面板与变量身份完成装配后写入；绑定失败会报错并指向声明。
+`enable/disable/focus` 仅接受原生 input。普通按钮要拦截提交，请使用条件 Case 守卫或显隐状态。
+RP/1 的 `set-panel-state` 不开放过渡参数；原生编辑工具有独立参数，见 [原生动作表](rp-workflow.md#支持的原生动作)。
 
 ## 单份详情视图
 
@@ -275,15 +280,16 @@ npm run test:runtime
 
 | 宏 | 必要输入 | 常用覆盖与白盒插槽 (`slots`) |
 | --- | --- | --- |
-| `data-table` | id、dataset、非空 columns | key、rowHeight、headerHeight、padding、columnGap、rowGap、pageSize、repeaterHeight；列 header/field/w/flex/cell，rowOn/onRowClick；`slots: {toolbar, empty, footer}` |
-| `searchable-list` | id、dataset、searchField、template | key、filterField、`filters`（支持 `"auto"` 自动从模型 enum 推导）、filterWhere、baseWhere、inputId、value、inputHeight、rowHeight、rowGap、pageSize、repeaterHeight；`slots: {header, toolbar, filterBar, empty, footer}` |
+| `data-table` | id、dataset、非空 columns | key、rowHeight、headerHeight、padding、columnGap、rowGap、pageSize、repeaterHeight；列 header/field/w/flex/cell，rowOn/onRowClick；`slots: {toolbar, empty, emptyState, footer}` |
+| `searchable-list` | id、dataset、searchField、template | key、filterField、`filters`（支持 `"auto"` 自动从模型 `enum` 字段推导；非 `enum` 字段使用 `"auto"` 报 `E_PROPERTY`；若同时声明 `filters` 与 `filterWhere`，点击筛选胶囊时以 `&&` 组合两者条件）、filterWhere、baseWhere、inputId、value、inputHeight、rowHeight、rowGap、pageSize、repeaterHeight；`slots: {header, toolbar, filterBar, empty, emptyState, footer}` |
 | `form-card` | id、非空 fields | title、submitText/onSubmit、submitId、submitHeight、submitVariant、padding、gap；字段 id/label/value/h/fill/stroke/radius；`slots: {header, extraFields, actions, footer}` |
 | `kv-list` | id、非空 items | rowHeight、labelWidth、fontSize、padding、gap；项 id/label/key/value/text/fontWeight/color/align |
-| `detail-card` | id、非空 items | title、badgeText、badgeVariant、rowHeight、labelWidth、fontSize、padding、gap；`slots: {header, badge, body, actions, footer}` |
-| `wizard-card` | id、非空 steps | activeStepVariable；每步 `{id, title, body, nextText, prevText, nextWhen, onNext}`，顶层 `onComplete`；`slots: {header, stepper, actions, footer}` |
+| `detail-card` | id、非空 items | title、`badge`（徽章文本或徽章节点对象）、rowHeight、labelWidth、fontSize、padding、gap；`slots: {header, badge, body, actions, footer}` |
+| `wizard-card` | id、非空 steps | activeStepVariable；每步 `{id, title, body, nextText, prevText, nextWhen, onNext}`（声明 `nextWhen`/`guard` 时即使省略 `nextText`/`onNext` 仍生成受守卫下一步按钮并校验条件表达式），顶层 `onComplete`；`slots: {header, stepper, body, actions, footer}` |
 | `master-detail` | id、detail | title、dataset、searchField、filterField、`filters`（支持 `"auto"`）、listWidth/masterWidth、template/master、rowOn/onRowClick；`slots: {header, toolbar, master, detailHeader, detailFooter, footer}` |
+| `progress-bar` | id | label、`percent` 或 `value`（二者互斥，同时提供报 `E_PROPERTY`）、min、max、showPercent、fillColor/barFill、trackFill、height、barHeight、fontSize |
 
-七个业务宏均支持通用尺寸、位置、样式覆盖与白盒命名插槽 `slots`。此外，节点树支持条件视图原语 `{"type":"when","id":"...","condition":...,"then":...,"else":...}`（以及节点级 `"when": ...` 属性，支持 `item.status == '就绪'` 或 `[[Item.status == '就绪']]` 写法）：在 Repeater 行模板内由 `RepeaterRowLoweringPass` 自动降级为 `OnItemLoad` 的条件 `show`/`hide` 动作分支；对于 `type: "when"` 的 `then`/`else` 分支以及 `row`/`column` 容器内连续声明的互斥 `when` 兄弟节点（如 `==` 与 `!=`、不同枚举字面量相等、互斥数值区间等），排版引擎自动识别为**互斥显隐空间共享槽位**（按 `max(w)` / `max(h)` 计算尺寸并共享同一坐标起点，静态预览仅渲染当前激活分支，结构审计对互斥分支免报伪重叠，同时对全部分支保留裁切、字形与溢出检查）；在跨 Repeater 动作中支持 `{"caller":"field"}`（或表达式 `caller.field`）读取触发源行字段并由编译器自动提升为页面级快照变量。
+业务宏均支持通用尺寸、位置、样式覆盖与白盒命名插槽 `slots`（未知插槽名报 `E_PROPERTY`）。此外，节点树支持条件视图原语 `{"type":"when","id":"...","condition":...,"then":...,"else":...}`（以及节点级 `"when": ...` 属性，支持 `item.status == '就绪'` 或 `[[Item.status == '就绪']]` 写法）：在 Repeater 行模板内由 `RepeaterRowLoweringPass` 自动降级为 `OnItemLoad` 的条件 `show`/`hide` 动作分支；对于 `type: "when"` 的 `then`/`else` 分支以及 `row`/`column` 容器内连续声明的互斥 `when` 兄弟节点（如 `==` 与 `!=`、不同枚举字面量相等、互斥数值区间等），排版引擎自动识别为**互斥显隐空间共享槽位**（按 `max(w)` / `max(h)` 计算尺寸并共享同一坐标起点，静态预览仅渲染当前激活分支，结构审计对互斥分支免报伪重叠，同时对全部分支保留裁切、字形与溢出检查）；在跨 Repeater 动作中支持 `{"caller":"field"}`（或表达式 `caller.field`）读取触发源行字段并由编译器自动提升为页面级快照变量。
 
 ## 领域语义类型与 `.rp1` 零噪音文本 DSL
 
@@ -294,8 +300,13 @@ npm run test:runtime
 ```sh
 node scripts/proto.mjs check --spec examples/rp-language/benchmark_1_smart_cart.rp1
 node scripts/proto.mjs format --spec examples/rp-language/benchmark_1_smart_cart.json --out ./smart_cart.rp1
+node scripts/proto.mjs json-to-dsl --spec examples/rp-language/benchmark_1_smart_cart.json --out ./smart_cart_dsl.rp1
+node scripts/proto.mjs dsl-to-json --spec ./smart_cart.rp1 --out ./smart_cart_ast.json
+node scripts/proto.mjs dsl-format --spec ./smart_cart.rp1 --check
 node scripts/proto.mjs generate --spec examples/rp-language/benchmark_1_smart_cart.rp1 --out-dir ./bundle --out-rp ./smart_cart.rp
 ```
+
+`format` 根据 `--out` 扩展名（省略 `--out` 时根据 `--spec` 扩展名）自动决定输出 `.rp1` 文本 DSL 还是规范化 `.json` AST；`json-to-dsl`、`dsl-to-json` 与 `dsl-format` 则为显式格式转换/检查命令，若目标扩展名与命令语义冲突会返回 `E_CLI` 错误。
 
 ## 通用产品语义核心 (`product`) 与多端自适应外壳 (`shell`)
 
@@ -303,7 +314,7 @@ RP/1 支持在顶层或 `product` 内声明通用产品语义核心（由 [`rp_p
 
 - `entities`：声明业务实体字段（支持领域类型與 `ref<Entity>` 外键）、主键 `key`、状态字段 `statusField` 及初始行 `rows`。
 - `computed`：声明响应式派生聚合与公式变量，如 `{"op":"sum"|"count","dataset":"...","field":"=item.price * item.qty","where":"..."}` 或表达式公式，当底层 Repeater 发生 `data-add/update/delete` 或关联变量变更时自动按拓扑序重算并刷新绑定视图。
-- `statecharts`：声明有限状态机（`initial`、`states`、`transitions: [{from, to, on, guard}]`），自动校验状态转移合法性并在运行期/形式化验证器中检验状态不变量。
+- `statecharts`：声明有限状态机（`initial`、`states`、`transitions: [{from, to, on, guard}]`），编译时校验声明形状、初始状态及 from/to 状态引用，并保留到 IR 的 statecharts 元数据。此声明不会自动生成原生事件或执行状态转移；运行期行为须显式声明变量更新与事件动作，不声称自动检查状态不变量。
 - `transactions`：声明多步原子事务（`guard`、`errorTarget`、`errorMessage`、`steps`、`onSuccess`），自动展开为带前置守卫拦截与原子回滚保护的 Case 动作链。
 - `invariants`：声明形式化业务不变量（如 `var.total_credits <= 18` 或守恒律），在 `explore` / `verify_invariants` 状态空间搜索中对每个可达状态自动证明。
 - `views` 与多端外壳 `shell`：支持 `list, detail, form, wizard, master-detail, kanban, shuttle, cart` 视图及 `--shell mobile-stack | tablet-split | web-console` 一份源码三端自适应编译。
@@ -325,6 +336,10 @@ node scripts/proto.mjs complete --spec source.json --pointer /pages/0/root/child
 node scripts/proto.mjs explore --spec source.json --max-depth 3 --max-states 48
 node scripts/proto.mjs simulate --spec source.json --steps steps.json
 node scripts/proto.mjs patch --spec source.json --operations changes.json --expected-hash HASH --out revised.json
+node scripts/proto.mjs auto-heal --spec source.json --out healed.json
+node scripts/proto.mjs decompile --rp prototype.rp --out prototype.rp1
+node scripts/proto.mjs lift-rp --spec base.rp1 --base-rp base.rp --gui-rp edited.rp --out lifted.rp1
+node scripts/proto.mjs merge --base-spec base.json --base-rp base.rp --edited-rp edited.rp --new-spec new.json --out-spec merged.json --out-rp merged.rp
 python3 scripts/proto.py check source.json --auto-heal --out healed.json
 python3 scripts/rp_oracle.py examples/rp-language/benchmark_1_smart_cart.json
 ```
@@ -344,3 +359,44 @@ python3 scripts/rp_oracle.py examples/rp-language/benchmark_1_smart_cart.json
   顶层声明 `masters: { "app_shell": { "name": "应用公共外壳", "layout": [...] } }`，页面通过 `"master": "app_shell", "slot": { "body": [...] }` 复用公共导航/侧栏外壳，后端生成 `Axure:Master`、`Axure:MasterPackageInfo`、`MasterTreeMap`，每页放置真实 `ReferenceDiagramObject`，共享定义中的导航保留交互。本轮支持文本、按钮、输入等基础元件；包含动态面板或中继器的母版明确拒绝。三页导航已通过保存关闭重开后的真实预览；本轮尚未完成 GUI 手改共享定义后再次预览的验收。
 - **Axure 原生多档自适应视图 (`adaptiveViews` + `widget.adaptive`, P1-3b)**：
   顶层声明 `adaptiveViews: [{ "id": "mobile", "name": "Mobile 390", "width": 390, "condition": "<=" }, { "id": "desktop", "name": "Desktop 1280", "width": 1280, "condition": ">=" }]`，节点支持 `"adaptive": { "mobile": { "w": 342 }, "desktop": { "w": 1200 } }`，后端写入视图集及元件的独立 `AdaptiveStyles`，并在原生 OnLoad/OnResize 中按窗口宽度选择视图。显式条件按声明顺序，未命中时回 Base；无条件列表按宽度降序选择 `>=` 断点。支持页面元件的有限数值 `x/y/w/h`，尺寸非负；母版、面板及中继器模板中的覆盖暂时拒绝。真实预览已验证窗口 390/1280/900 对应元件宽度 342/1000/600（macOS + RP9）。
+
+
+## `stack` 布局约束：`after` / `afterGap` / `alignX` / `pin`（0.2.1）
+
+绝对定位之外，`layout:"stack"` 的父容器支持四类约束，编译期解析成坐标后回写，不进入原生属性：
+
+```json
+{"type":"label","id":"title","x":0,"y":0,"w":280,"h":28,"text":"标题","fontSize":18}
+{"type":"label","id":"sub","after":"title","afterGap":6,"w":280,"h":18,"text":"副标题","fontSize":12}
+{"type":"badge","id":"tag","after":"sub","afterGap":14,"alignX":"center","w":120,"h":22,"text":"居中徽标"}
+{"type":"box","id":"foot","pin":"bottom","pinGap":12,"w":280,"h":30,"fill":"$surface-2"}
+```
+
+| 属性 | 语义 | 备注 |
+| --- | --- | --- |
+| `after` | 紧跟某个兄弟的下沿 | 支持逻辑 `id`、原生名后缀、名字里的 id 段；跨容器不解析 |
+| `afterGap` | 与上一个的间距 | 与 `after` 配合，缺省 0 |
+| `alignX` | `left` / `center` / `right` 对齐父级内区 | 覆盖声明里的 `x` |
+| `pin` / `pinGap` | 贴 `top` / `bottom` / `left` / `right` 边 | 展开阶段翻译成 `y`/`bottom`/`x`/`right` |
+
+约束只对 `layout:"stack"` 的父容器生效；在 `row`/`column`/`grid` 里写会得到 `constraint_outside_stack` 告警（此前是静默失效）。`z` 同样只对 stack 有效，用于控制绘制顺序。
+
+`progress-bar` 的运行期填充**不使用**原生 Set Size（RP9 预览实测静默不执行），而是展开成 11 档动态面板，变量变化时按 `if / else-if` 链切换状态；真实预览点击验证见 `test/preview-progress-probe.mjs`。 填充条件使用与百分比文字相同的完整数值表达式（含文本转数字），跟踪全部变量及输入依赖；同页修改与页面 `OnLoad` 都会刷新状态，因此跨页进入/返回时也按当前值显示。绑定记录隔离于单次编译，不在编译间累积。
+
+## `stack` 坐标语义、透明交互热区與三方一致性同步（2026-10-23）
+
+- **嵌套 `stack` 相对父容器坐标与 `button` 显式坐标**：
+  `stack`（含 `component` 定义内部嵌套的 `stack`）子元件的 `x/y` 统一为**相对直接父 `stack` 容器左上角**的坐标，不再发生嵌套二次偏移。`stack` 内声明的 `button` 完整保留显式 `x/y` 坐标（`declared == compiled == native`）。
+- **空白透明 `box` 热区 vs 非空容器顶层事件**：
+  无子元件且带事件（如 `+onClick`）的 `box`（包括 `fill=#FFFFFF00` 全透明热区）直接编译为单个可挂载原生交互且 HTML 导出不产生断裂 `<img id="uXX_img">` 的原生 `VectorShape`；含子元件的 `box/row/column/grid/stack` 容器编译为原生 `Axure:DiagramObject:Layer` 编组；当前版本允许在编组上挂事件并写入原生交互。若要确保宿主可点、且不依赖编组事件行为，仍推荐用无子元件的透明热区（`fill:"#FFFFFF00"`）覆盖，并放在 children 末尾保证 z 序。
+- **`.rp1` 组件定义与源码行号诊断**：
+  `.rp1` 文本 DSL 支持顶层 `component <Name>(param=type, ...)` 定义与 `use <Name>(...)` 实例化，`.rp1 <-> .json` 双向无损互转；所有 `.rp1` 语法与语义诊断均包含 `line`、`column`、`sourceLine` 与 `hint`。
+- **源码 ↔ MCP 原生改稿 ↔ Axure GUI 改稿三方同步（R1–R6）**：
+  每次生成 `.rp` 自动伴生 `<output>.baseline.json`。通过 `proto.mjs lift-rp`、`proto.mjs merge` 或 MCP `sync_prototype`（`status` / `lift` / `merge` / `rebuild`）实现三方同步：
+  - 支持导回与合并：文本 (`text`)、元件名 (`name`)、几何 (`x/y/w/h`，含 `size: [w,h]` 简写同步)、样式 (`fill/stroke/color/radius/fontSize`，含 `font` 简写同步)、新增/删除元件及无条件单 Case `OnClick` 基础动作（`set-variable/set-text/set-panel-state/show/hide/toggle/goto`），导回 `.rp1` 时保留原有 `# 注释` 与未改动的 `$token` 引用；
+  - 冲突与边界保护（默认 `prefer: "fail"`）：同元件同属性双边修改、删除元件 vs 修改元件（R1）、含 `when` 条件/多 Case/`elseIf`/禁用交互/非 `OnClick` 事件的原生交互改动（R5，`E_UNSUPPORTED_NATIVE_INTERACTION`）均明确返回 `status: "conflict"` 并保留现场，绝不静默丢弃或写出半成品文件（R6）。
+
+
+CLI `proto.mjs check` 的成功与失败诊断均为 stdout 上的单个 JSON；失败 exit code 为 1。事件值支持动作对象、动作数组、cases，以及文档列出的字符串简写（例如 `onClick: "goto home"`），字符串会先转换为动作并做引用校验；无法识别的字符串报 E_EVENT。
+
+2026-10-24 复测补丁：`fontSize`（含 `size`/`font` 简写和 spans 字号）必须满足 `0 < fontSize <= 72`，上限取自渲染器字号令牌表；超限报 `E_SIZE`。`letterSpacing` 必须非负。所有容器的 `after` 都先检查兄弟引用，不存在或指向自身报 `E_REFERENCE`；有效约束在非 stack 容器中仍由布局审计提示不生效。残缺表达式在源码末尾统一报告 `Unexpected end of expression`。

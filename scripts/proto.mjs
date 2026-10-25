@@ -29,7 +29,7 @@ import { mergePages } from './merge-pages.mjs';
 import { placeMaster } from './place-master.mjs';
 import { resolvePageRecord } from './ix-actions.mjs';
 import { readRp } from './rp-read.mjs';
-import { createGlobalVariable } from './create-global-variable.mjs';
+import { createGlobalVariable, removeGlobalVariable } from './create-global-variable.mjs';
 import { setWidgetText } from './set-widget-text.mjs';
 import { setWidgetNames } from './name-widget.mjs';
 import { readRecords, encodeRecord, replaceRecord, appendPackage } from './rp-records.mjs';
@@ -54,22 +54,29 @@ const HELP_TEXT = {
 
 命令:
   schema            输出编辑器 JSON Schema（可用 --out 保存）
-  format            格式化 RP/1 源文件（--check 检查格式；--out 写新文件）
-  check             检查 RP/1 类型、数据、组件与作用域，不渲染或启动 Axure
+  format            格式化或转换 RP/1 源文件（按 --out 或 --spec 扩展名自动输出 .rp1 DSL 或 .json）
+  dsl-to-json       将 .rp1 文本 DSL 转换为 JSON AST（可用 --out <new.json> 保存）
+  json-to-dsl       将 JSON AST 转换为 .rp1 文本 DSL（可用 --out <new.rp1> 保存）
+  dsl-format        将 RP/1 源文件格式化为规范 .rp1 文本 DSL（支持 --check 或 --out <new.rp1>）
+  check             检查 RP/1 类型、数据、组件与作用域，不渲染或启动 Axure（支持 --auto-heal）
+  auto-heal         自动应用可自愈的语义/最坏情况溢出候选补丁并重验（可用 --out 保存）
   inspect           查看语义对象、来源与依赖（可选 --target）
   explain           解释指定对象的属性来源与作用域（--target 必填）
   complete          按源码位置补全（--pointer 默认为 /）
   explore           有界探索参考模型状态（不是原生行为证明）
   simulate          按 --steps JSON 文件执行参考模型步骤
   patch             按 --operations JSON 文件修改源码，--out 写新文件
-  compile           编译声明式 spec.json 或内置预设为 .axvg.json + .spec.json + 2x 预览图 + 两级审计报告
+  decompile         将二进制 .rp 反编译还原为 RP/1 规范与 .rp1 DSL（--rp 必填，可选 --out）
+  lift-rp           对比基线 .rp 与改稿后 .rp，将原生/GUI 改动导回 .rp1/.json 源码
+  merge             执行源码与二进制 .rp 的双向三方合并（--base-spec/--base-rp/--edited-rp/--new-spec）
+  compile           编译声明式 spec.json/.rp1 或内置预设为 .axvg.json + .spec.json + 2x 预览图 + 两级审计报告
   build-rp          从 compile-plan.json 装配单页/多页/多状态 .rp 文件并执行 rp-read 三零校验
   generate          一键执行 compile -> build-rp 全流程 (传 --compile-only 可仅执行离线编译与预览)
   dump-spec         导出内置预设的声明式 spec.json 模板 (别名: dump-preset-spec)
   selftest          运行 6 组全链路回归自检 (Web 三主题 + Mobile 双主题 + 自定义小画布两级审计)
 
 公共参数:
-  --spec <path>         声明式多页/组件树 spec.json 路径 (见 references/proto-spec.md)
+  --spec <path>         声明式多页/组件树 spec.json 或 .rp1 路径 (见 references/rp-language.md)
   --preset <name>       内置预设: web-dashboard | mobile-lostfound (默认: web-dashboard)
   --theme <name>        设计令牌主题: enterprise-light | modern-dark | cobalt-pro | mobile-lowfi | mobile-hifi
   --title <text>        覆盖原型/页面主标题
@@ -82,20 +89,29 @@ const HELP_TEXT = {
   -h, --help            显示帮助信息 (支持 node proto.mjs <command> --help)
 `,
   schema: `用法: node scripts/proto.mjs schema [--out <schema.json>]\n`,
-  format: `用法: node scripts/proto.mjs format --spec <source.json> [--out <new.json> | --check]\n`,
-  check: `用法: node scripts/proto.mjs check --spec <rp-language.json>\n检查 language: "rp/1" 的类型、引用、数据和事件；失败返回 JSON Pointer 诊断。\n`,
-  inspect: `用法: node scripts/proto.mjs inspect --spec <source.json> [--target <logical-id|pointer>] [--out <new.json>]\n`,
-  explain: `用法: node scripts/proto.mjs explain --spec <source.json> --target <logical-id|pointer> [--out <new.json>]\n`,
-  complete: `用法: node scripts/proto.mjs complete --spec <source.json> [--pointer <json-pointer>] [--out <new.json>]\n`,
-  explore: `用法: node scripts/proto.mjs explore --spec <source.json> [--max-depth <nonnegative-int>] [--max-states <positive-int>] [--out <new.json>]\n有界参考模型探索；结果不能代替 RP9 原生点击验证。\n`,
-  simulate: `用法: node scripts/proto.mjs simulate --spec <source.json> [--steps <steps.json>] [--out <new.json>]\nsteps 为 JSON 数组，例如 [{"target":"main/submit","event":"click"}] 或 [{"input":"main/name","value":"Alice"}]。省略表示初态。\n`,
-  patch: `用法: node scripts/proto.mjs patch --spec <source.json> --operations <operations.json> --out <new-source.json> [--expected-hash <semanticHash>]\noperations 为 JSON 数组，例如 [{"op":"replace","path":"/pages/0/root/text","oldValue":"旧","value":"新"}]。输出源码永不覆盖已有文件；stdout 返回变化说明。\n`,
+  format: `用法: node scripts/proto.mjs format --spec <source.json|source.rp1> [--out <new.json|new.rp1> | --check]\n按 --out 扩展名（省略 --out 时按 --spec 扩展名）输出规范化的 .json 或 .rp1 DSL。\n`,
+  'dsl-to-json': `用法: node scripts/proto.mjs dsl-to-json --spec <source.rp1> [--out <new.json>]\n`,
+  'json-to-dsl': `用法: node scripts/proto.mjs json-to-dsl --spec <source.json> [--out <new.rp1> | --check]\n`,
+  'dsl-format': `用法: node scripts/proto.mjs dsl-format --spec <source.rp1|source.json> [--out <new.rp1> | --check]\n`,
+  check: `用法: node scripts/proto.mjs check --spec <rp-language.json|source.rp1> [--auto-heal [--out <healed.json|healed.rp1>]]\n检查 language: "rp/1" 的类型、引用、数据和事件；失败返回 JSON Pointer 诊断。\n`,
+  diagnose: `用法: node scripts/proto.mjs diagnose --spec <source.json|source.rp1> [--limit 1..50]\n只读收集独立节点错误，保留依赖检查未完成标记和可审查补丁。\n`,
+  binding: `用法: node scripts/proto.mjs binding --spec <source.json|source.rp1> --target <page/id|pointer>\n解释编译表达式、依赖、初始值与刷新事件；不代表原生预览实测。\n`,
+  'auto-heal': `用法: node scripts/proto.mjs auto-heal --spec <source.json|source.rp1> [--out <healed.json|healed.rp1>]\n`,
+  inspect: `用法: node scripts/proto.mjs inspect --spec <source.json|source.rp1> [--target <logical-id|pointer>] [--out <new.json>]\n`,
+  explain: `用法: node scripts/proto.mjs explain --spec <source.json|source.rp1> --target <logical-id|pointer> [--out <new.json>]\n`,
+  complete: `用法: node scripts/proto.mjs complete --spec <source.json|source.rp1> [--pointer <json-pointer>] [--out <new.json>]\n`,
+  explore: `用法: node scripts/proto.mjs explore --spec <source.json|source.rp1> [--max-depth <nonnegative-int>] [--max-states <positive-int>] [--out <new.json>]\n有界参考模型探索；结果不能代替 RP9 原生点击验证。\n`,
+  simulate: `用法: node scripts/proto.mjs simulate --spec <source.json|source.rp1> [--steps <steps.json>] [--out <new.json>]\nsteps 为 JSON 数组，例如 [{"target":"main/submit","event":"click"}] 或 [{"input":"main/name","value":"Alice"}]。省略表示初态。\n`,
+  patch: `用法: node scripts/proto.mjs patch --spec <source.json|source.rp1> --operations <operations.json> --out <new-source.json|new-source.rp1> [--expected-hash <semanticHash>]\noperations 为 JSON 数组，例如 [{"op":"replace","path":"/pages/0/root/text","oldValue":"旧","value":"新"}]。输出源码永不覆盖已有文件；stdout 返回变化说明。\n`,
+  decompile: `用法: node scripts/proto.mjs decompile --rp <input.rp> [--out <output.rp1|output.json>]\n`,
+  'lift-rp': `用法: node scripts/proto.mjs lift-rp --spec <base.rp1|base.json> --base-rp <base.rp> --gui-rp <edited.rp> [--out <lifted.rp1|lifted.json>]\n`,
+  merge: `用法: node scripts/proto.mjs merge --base-spec <base.json|base.rp1> --base-rp <base.rp> --edited-rp <edited.rp> --new-spec <new.json|new.rp1> --out-spec <merged.json|merged.rp1> [--out-rp <merged.rp>] [--prefer fail|source|native]\n`,
   compile: `用法:
   node scripts/proto.mjs compile --out-dir <dir> [options]
 
 选项:
   --out-dir <dir>       编译产物输出目录 (必填)
-  --spec <spec.json>    声明式多页/组件树 JSON 路径
+  --spec <spec.json>    声明式多页/组件树 JSON 或 .rp1 路径
   --preset <name>       内置预设: web-dashboard | mobile-lostfound
   --theme <name>        主题: enterprise-light | modern-dark | cobalt-pro | mobile-lowfi | mobile-hifi
   --title <text>        主标题覆盖
@@ -120,7 +136,7 @@ const HELP_TEXT = {
 选项:
   --out-dir <dir>       编译产物目录 (必填)
   --out-rp, -o <path>   输出 .rp 文件路径 (未传 --compile-only 时必填)
-  --spec <spec.json>    声明式多页/组件树 JSON 路径
+  --spec <spec.json>    声明式多页/组件树 JSON 或 .rp1 路径
   --preset <name>       内置预设: web-dashboard | mobile-lostfound
   --theme <name>        主题: enterprise-light | modern-dark | cobalt-pro | mobile-lowfi | mobile-hifi
   --title <text>        主标题覆盖
@@ -215,14 +231,17 @@ function parseFlags(argv) {
   return { flags, positionals };
 }
 
-function runPy(args, { verbose = false } = {}) {
+function runPy(args, { verbose = false, allowAuditFailure = false } = {}) {
   const t0 = Date.now();
   logVerbose(verbose, 'compile:start', `python3 proto.py ${args.join(' ')}`);
   const r = spawnSync('python3', [PROTO_PY, ...args], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   const elapsed = Date.now() - t0;
   if (r.status !== 0) {
+    if (allowAuditFailure) {
+      try { const result = JSON.parse(r.stdout); if (result.audit) return result; } catch {}
+    }
     let diagnostics;
-    try { diagnostics = JSON.parse(r.stderr.trim()).diagnostics; } catch {}
+    try { diagnostics = JSON.parse((r.stdout || r.stderr).trim()).diagnostics; } catch {}
     if (diagnostics) {
       const error = new Error('RP/1 semantic check failed');
       error.diagnostics = diagnostics;
@@ -353,7 +372,7 @@ function createBlankPageBuffer() {
 export function buildInteractiveRp(
   planPath,
   outputRpPath,
-  { cacheDir = DEFAULT_CACHE_DIR, backend, noInteractions = false, verbose = false } = {}
+  { cacheDir = DEFAULT_CACHE_DIR, backend, noInteractions = false, verbose = false, skipBaseline = false, sourcePath = null } = {}
 ) {
   const buildT0 = Date.now();
   const absOut = resolve(outputRpPath);
@@ -491,7 +510,7 @@ export function buildInteractiveRp(
       const master = plan.masters.find(m => m.id === instance.master);
       if (!master) throw new Error(`Unknown master instance: ${instance.master}`);
       const record = resolvePageRecord(currentBuf, page.pageName);
-      currentBuf = placeMaster(currentBuf, { masterName: master.name || master.id, pageIndex: record.index, x: instance.x, y: instance.y }).file;
+      currentBuf = placeMaster(currentBuf, { masterName: master.name || master.id, pageIndex: record.index, x: instance.x, y: instance.y, behindContent: true }).file;
     }
   }
 
@@ -601,6 +620,7 @@ export function buildInteractiveRp(
     }
   }
 
+  if (plan.language === 'rp/1') currentBuf = removeGlobalVariable(currentBuf, 'OnLoadVariable');
   for (const [name, variable] of Object.entries(plan.variables ?? {})) {
     currentBuf = createGlobalVariable(currentBuf, name, { defaultValue: String(variable.value) }).file;
   }
@@ -679,6 +699,32 @@ export function buildInteractiveRp(
     })}`);
   }
   writeFileSync(absOut, currentBuf, { flag: 'wx' });
+  const rpSha256 = createHash('sha256').update(currentBuf).digest('hex');
+  const baselinePath = `${absOut}.baseline.json`;
+  if (!skipBaseline) {
+    const pageBySlug = new Map(pagesList.map(p => [p.slug, p.pageName]));
+    const resolvedSrcPath = sourcePath ?? plan.sourcePath ?? null;
+    const sourceSha256 = resolvedSrcPath && existsSync(resolvedSrcPath)
+      ? createHash('sha256').update(readFileSync(resolvedSrcPath)).digest('hex')
+      : null;
+    const baselineMeta = {
+      version: 1,
+      outputRp: absOut,
+      sourcePath: resolvedSrcPath,
+      sourceSha256,
+      semanticHash: plan.semanticHash ?? null,
+      rpSha256,
+      generatedAt: new Date().toISOString(),
+      sourceSpec: plan.sourceSpec ?? null,
+      sourceMap: sourceMap.map(sym => ({
+        ...sym,
+        logicalId: sym.id,
+        pageName: pageBySlug.get(sym.pageId) ?? sym.pageId,
+      })),
+      baseRpBase64: currentBuf.toString('base64'),
+    };
+    writeFileSync(baselinePath, JSON.stringify(baselineMeta, null, 2) + '\n');
+  }
   const totalElapsedMs = Date.now() - buildT0;
   logVerbose(verbose, 'audit:rp-read', `pages=${finalSummary.counts.pages} widgets=${finalSummary.counts.widgets} interactions=${finalSummary.counts.interactions} problems=0`, Date.now() - auditT0);
   logVerbose(verbose, 'build-rp:done', `${absOut}`, totalElapsedMs);
@@ -686,6 +732,8 @@ export function buildInteractiveRp(
   return {
     ok: true,
     outputRp: absOut,
+    baselinePath: skipBaseline ? null : baselinePath,
+    rpSha256,
     backend,
     version: finalSummary.version,
     static: staticMode,
@@ -714,6 +762,10 @@ export function buildInteractiveRp(
   };
 }
 
+export function compilePrototype(specPath, outDir, { strictAudit = false, autoHeal = false, theme, title } = {}) {
+  return runPy(buildCompileArgs({ spec: specPath, 'strict-audit': strictAudit, 'auto-heal': autoHeal, theme, title }, outDir), { allowAuditFailure: true });
+}
+
 function buildCompileArgs(flags, outDir) {
   const pyArgs = ['compile', '--out-dir', resolve(outDir)];
   if (flags.spec) pyArgs.push('--spec', resolve(String(flags.spec)));
@@ -722,6 +774,7 @@ function buildCompileArgs(flags, outDir) {
   if (flags.title) pyArgs.push('--title', String(flags.title));
   if (flags['no-interactions']) pyArgs.push('--no-interactions');
   if (flags['strict-audit']) pyArgs.push('--strict-audit');
+  if (flags['auto-heal']) pyArgs.push('--auto-heal', typeof flags['auto-heal'] === 'string' ? flags['auto-heal'] : 'safe');
   return pyArgs;
 }
 
@@ -737,7 +790,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   }
 
   try {
-    if (['check', 'format', 'schema', 'inspect', 'explain', 'complete', 'explore', 'simulate', 'patch', 'dsl-to-json', 'json-to-dsl', 'dsl-format'].includes(process.argv[2])) {
+    if (['check', 'diagnose', 'binding', 'auto-heal', 'format', 'schema', 'inspect', 'explain', 'complete', 'explore', 'simulate', 'patch', 'dsl-to-json', 'json-to-dsl', 'dsl-format', 'decompile', 'lift-rp'].includes(process.argv[2])) {
       // Preserve the actual tokens: the language parser rejects unknown or misplaced
       // options instead of silently dropping them in the general prototype parser.
       const result = spawnSync('python3', [LANGUAGE_PY, ...process.argv.slice(2)], {encoding:'utf8', maxBuffer:32*1024*1024});
@@ -800,7 +853,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const pyArgs = ['dump-spec', '-o', resolve(String(outFile))];
       if (flags.preset) pyArgs.push('--preset', String(flags.preset));
       console.log(JSON.stringify(runPy(pyArgs, { verbose }), null, 2));
-    } else if (cmd === 'merge') {
+    } else if (cmd === 'merge' || cmd === 'measure' || cmd === 'tokens' || cmd === 'doctor') {
       const result = spawnSync('python3', [PROTO_PY, ...process.argv.slice(2)], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);

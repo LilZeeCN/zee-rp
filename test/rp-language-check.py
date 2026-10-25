@@ -294,14 +294,14 @@ class LanguageContract(unittest.TestCase):
 
     def test_ai_native_event_shorthands(self):
         for shorthand, event, index in (
-            ("onClick", "click", 2), ("onChange", "change", 0), ("onLoad", "load", 1),
+            ("onClick", "click", 2), ("onChange", "change", 0),
             ("onMouseOver", "mouseover", 2), ("onMouseOut", "mouseout", 2),
             ("onFocus", "focus", 0), ("onBlur", "blur", 0), ("onStateChange", "statechange", 3),
         ):
             with self.subTest(event=shorthand):
                 standard = sugar_fixture()
                 node = standard["pages"][0]["root"]["children"][index]
-                node["on"] = {"load" if event == "click" else "click": [{"type": "wait", "ms": 1}]}
+                node["on"] = {"mouseout" if event == "click" else "click": [{"type": "wait", "ms": 1}]}
                 sugar = copy.deepcopy(standard)
                 node["on"][event] = [{"type": "wait", "ms": 2}]
                 sugar["pages"][0]["root"]["children"][index][shorthand] = {"type": "wait", "ms": 2}
@@ -589,6 +589,320 @@ class LanguageContract(unittest.TestCase):
         self.assertEqual(exp_when_box["_w"], 80)  # max(64, 80) instead of 64 + 6 + 80 = 150
         self.assertEqual(exp_when_box["children"][0]["_x"], exp_when_box["children"][1]["_x"])
         self.assertNotEqual(exp_banner["children"][1]["_x"], exp_banner["children"][2]["_x"])
+
+    def test_citu_feedback_and_efficiency_roadmap_upgrades(self) -> None:
+        # 1. visible:false / hidden:true + paragraph set-text + cross-panel @panel/state/widget + mobile macros + device preset
+        spec = {
+            "language": "rp/1",
+            "target": 9,
+            "domain": "mobile",
+            "device": "iphone-17",
+            "pages": [
+                {
+                    "id": "home",
+                    "name": "词途首页",
+                    "root": {
+                        "column": "root",
+                        "w": 402,
+                        "h": 874,
+                        "padding": 16,
+                        "gap": 12,
+                        "children": [
+                            {
+                                "type": "nav-bar",
+                                "id": "topNav",
+                                "title": "今日复习",
+                                "backText": "返回",
+                                "backPage": "home",
+                                "rightText": "设置",
+                            },
+                            {
+                                "type": "progress-bar",
+                                "id": "studyProg",
+                                "value": 45,
+                                "max": 100,
+                                "label": "学习进度 45%",
+                            },
+                            {
+                                "paragraph": "meaningPara",
+                                "name": "释义段落",
+                                "text": "初始释义内容",
+                                "w": 370,
+                                "h": 48,
+                            },
+                            {
+                                "panel": "cardDeck",
+                                "name": "卡片面板",
+                                "w": 370,
+                                "h": 140,
+                                "states": [
+                                    {
+                                        "id": "front",
+                                        "name": "正面",
+                                        "root": {
+                                            "column": "frontRoot",
+                                            "w": 370,
+                                            "h": 140,
+                                            "padding": 12,
+                                            "gap": 8,
+                                            "children": [
+                                                {
+                                                    "label": "wordTitle",
+                                                    "name": "单词标题",
+                                                    "text": "serendipity",
+                                                    "w": 300,
+                                                    "h": 28,
+                                                },
+                                                {
+                                                    "button": "flipBtn",
+                                                    "name": "翻面按钮",
+                                                    "text": "查看背面",
+                                                    "w": 120,
+                                                    "h": 36,
+                                                    "onClick": [
+                                                        {"set": {"@cardDeck/back/backNote": "已翻开释义", "@meaningPara": "意外发现珍奇事物的本领"}},
+                                                        {"show": "@toastOverlay"},
+                                                    ],
+                                                },
+                                            ],
+                                        },
+                                    },
+                                    {
+                                        "id": "back",
+                                        "name": "背面",
+                                        "root": {
+                                            "column": "backRoot",
+                                            "w": 370,
+                                            "h": 140,
+                                            "padding": 12,
+                                            "gap": 8,
+                                            "children": [
+                                                {
+                                                    "paragraph": "backNote",
+                                                    "name": "背面说明",
+                                                    "text": "待揭晓",
+                                                    "w": 300,
+                                                    "h": 48,
+                                                }
+                                            ],
+                                        },
+                                    },
+                                ],
+                            },
+                            {
+                                "box": "toastOverlay",
+                                "name": "打卡浮层",
+                                "x": 24,
+                                "y": 180,
+                                "w": 320,
+                                "h": 80,
+                                "visible": False,
+                                "fill": "#1E293B",
+                                "children": [
+                                    {
+                                        "label": "toastMsg",
+                                        "name": "浮层文案",
+                                        "text": "已记录学习状态",
+                                        "w": 260,
+                                        "h": 28,
+                                        "color": "#FFFFFF",
+                                    }
+                                ],
+                            },
+                            {
+                                "type": "tab-bar",
+                                "id": "bottomTabs",
+                                "active": "home",
+                                "items": [
+                                    {"id": "home", "label": "词库", "icon": "📘", "page": "home"},
+                                    {"id": "review", "label": "复习", "icon": "🎯", "page": "home"},
+                                ],
+                            },
+                        ],
+                    },
+                }
+            ],
+        }
+        lowered, ir = compile_language(spec)
+        page0 = lowered["pages"][0]
+        self.assertEqual(page0["canvas"], {"w": 402, "h": 874})
+        self.assertEqual(page0["device"], "iphone-17")
+        # Check initial hide action is emitted on OnLoad for toastOverlay
+        onload_events = [
+            ev
+            for ix in page0.get("interactions", [])
+            for ev in ix.get("events", [])
+            if ev.get("event") == "OnLoad"
+        ]
+        self.assertTrue(any(
+            act.get("type") == "hide" and "toastOverlay" in str(act.get("target"))
+            for ev in onload_events
+            for case in ev.get("cases", [])
+            for act in case.get("actions", [])
+        ))
+        # Check ReferenceRuntime respects visible: False and paragraph set-text + cross-panel set-text
+        rt = ReferenceRuntime((lowered, ir))
+        toast_name = rt.resolve_trigger_name("toastOverlay")
+        meaning_name = rt.resolve_trigger_name("meaningPara")
+        back_name = rt.resolve_trigger_name("backNote")
+        self.assertFalse(rt.widgets[toast_name]["visible"])
+        rt.trigger("flipBtn", "click")
+        self.assertTrue(rt.widgets[toast_name]["visible"])
+        self.assertEqual(rt.widgets[meaning_name]["text"], "意外发现珍奇事物的本领")
+        self.assertEqual(rt.widgets[back_name]["text"], "已翻开释义")
+
+        # Check audit_prototype does not report false overlap for visible: False overlay
+        import proto
+        theme = proto.THEMES["enterprise-light"]
+        root = proto.expand_declarative_tree(page0["root"], prefix="home")
+        proto.ensure_unique_names(root, scope_prefix="home")
+        proto.measure_node(root, available_w=402)
+        proto.layout_node(root, 0, 0, 402, 874)
+        emitted = proto.emit_tree_to_axvg(root, theme, include_dynamic_panel_placeholders=True)
+        audit = proto.audit_prototype(root, emitted, page0, strict_audit=False)
+        self.assertTrue(audit["gates"]["no_box_overlap"], audit["failures"])
+        self.assertTrue(audit["gates"]["no_text_overlap"], audit["failures"])
+
+        # 2. Diagnostic quality: E_NODE_TYPE before E_PROPERTY / E_IDENTIFIER, no internal _-prefixed suggestions, cross-scope hint
+        with self.assertRaises(LanguageError) as ctx_type:
+            compile_language({
+                "language": "rp/1", "target": 9,
+                "pages": [{"id": "p1", "root": {"column": "root", "w": 400, "h": 400, "children": [
+                    {"type": "rect", "id": "bad-id-1", "bogusProp": 123}
+                ]}}],
+            })
+        self.assertEqual(ctx_type.exception.diagnostic["code"], "E_NODE_TYPE")
+
+        with self.assertRaises(LanguageError) as ctx_prop:
+            compile_language({
+                "language": "rp/1", "target": 9,
+                "pages": [{"id": "p1", "root": {"column": "root", "w": 400, "h": 400, "children": [
+                    {"label": "lbl", "text": "hi", "w": 100, "h": 28, "extraField": 1}
+                ]}}],
+            })
+        self.assertEqual(ctx_prop.exception.diagnostic["code"], "E_PROPERTY")
+        self.assertNotIn("_", ctx_prop.exception.diagnostic["message"])
+
+        with self.assertRaises(LanguageError) as ctx_ref:
+            compile_language({
+                "language": "rp/1", "target": 9,
+                "pages": [{"id": "p1", "root": {"column": "root", "w": 400, "h": 400, "children": [
+                    {"panel": "pnl", "w": 200, "h": 100, "states": [
+                        {"id": "s1", "root": {"column": "s1Root", "w": 200, "h": 100, "children": [
+                            {"label": "nestedTarget", "text": "in panel", "w": 120, "h": 28}
+                        ]}}
+                    ]},
+                    {"button": "btn", "text": "go", "w": 100, "h": 36, "onClick": [
+                        {"type": "set-text", "target": "nestedTarget", "value": "updated"}
+                    ]},
+                ]}}],
+            })
+        self.assertEqual(ctx_ref.exception.diagnostic["code"], "E_REFERENCE")
+        self.assertIn("pnl.s1.nestedTarget", ctx_ref.exception.diagnostic["message"])
+
+    def progress_runtime(self, value, *, variables=None, actions=None, next_page=False, percent=False):
+        controls = [{"button": "update", "text": "更新", "onClick": actions or {"set": {"$done": 3}}}]
+        bar = {"type": "progress-bar", "id": "progress", "value": value, "max": 10, "w": 320}
+        if percent:
+            bar["percent"] = bar.pop("value")
+        spec = {"language": "rp/1", "target": 9,
+                "variables": variables or {"done": {"type": "number", "value": 2}},
+                "pages": [{"id": "home", "root": {"column": "root", "children": controls + ([] if next_page else [bar])}}]}
+        if next_page:
+            spec["pages"][0]["root"]["children"][0]["onClick"] = [{"set": {"$done": 3}}, {"goto": "result"}]
+            spec["pages"][0]["root"]["children"].append({"button": "clear", "text": "清零",
+                "onClick": [{"set": {"$done": 0}}, {"goto": "result"}]})
+            spec["pages"].append({"id": "result", "root": {"column": "root", "children": [bar,
+                {"button": "back", "text": "返回", "onClick": {"goto": "home"}}]}})
+        return ReferenceRuntime(compile_language(spec))
+
+    def test_progress_refreshes_on_page_entry(self):
+        rt = self.progress_runtime({"variable": "done"}, next_page=True)
+        rt.trigger("update", "click")
+        self.assertEqual(rt.current_page, "result")
+        self.assertEqual(rt.panels[rt.resolve_trigger_name("progress_fill")]["current"], "s30")
+        rt.trigger("back", "click")
+        rt.trigger("clear", "click")
+        self.assertEqual(rt.panels[rt.resolve_trigger_name("progress_fill")]["current"], "s0")
+
+    def test_progress_refresh_uses_complete_expression_and_all_dependencies(self):
+        rt = self.progress_runtime(
+            {"op": "+", "left": {"variable": "done"}, "right": {"variable": "bonus"}},
+            variables={"done": {"type": "number", "value": 2}, "bonus": {"type": "number", "value": 1}},
+            actions={"set": {"$bonus": 2}})
+        name = rt.resolve_trigger_name("progress_fill")
+        self.assertEqual(rt.panels[name]["current"], "s30")
+        rt.trigger("update", "click")
+        self.assertEqual(rt.panels[name]["current"], "s40")
+
+    def test_progress_text_variable_refresh_converts_to_number(self):
+        for percent, initial, updated in [(False, "2", "3"), (True, "20", "30")]:
+            with self.subTest(percent=percent):
+                rt = self.progress_runtime("$done", percent=percent,
+                    variables={"done": {"type": "text", "value": initial}},
+                    actions={"set": {"$done": updated}})
+                rt.trigger("update", "click")
+                self.assertEqual(rt.panels[rt.resolve_trigger_name("progress_fill")]["current"], "s30")
+
+    def test_progress_compilations_are_isolated(self):
+        first = self.progress_runtime("$done")
+        again = self.progress_runtime("$done")
+        self.assertEqual(first.pages_by_slug, again.pages_by_slug)
+        rt = self.progress_runtime({"variable": "other"},
+                                   variables={"other": {"type": "number", "value": 2}},
+                                   actions={"set": {"$other": 3}})
+        rt.trigger("update", "click")
+        self.assertEqual(rt.panels[rt.resolve_trigger_name("progress_fill")]["current"], "s30")
+
+    def test_retest_round2_phone_shell_progress_var_and_multiline_paragraph(self):
+        import proto
+        spec = {
+            "language": "rp/1",
+            "target": 9,
+            "variables": {"done": "20"},
+            "pages": [{
+                "id": "home",
+                "name": "今日",
+                "device": "iphone-17",
+                "root": {
+                    "type": "phone-shell",
+                    "id": "shell",
+                    "title": "知序 · 考研复习",
+                    "time": "10:23",
+                    "statusRight": "Wi-Fi",
+                    "darkIsland": False,
+                    "showHomeIndicator": False,
+                    "children": [
+                        {"type": "nav-bar", "id": "nav", "title": "导航标题", "backText": "返回", "onBack": {"set": {"@meaning": "已返回"}}},
+                        {"type": "progress-bar", "id": "prog", "label": "今日进度", "value": {"variable": "done"}},
+                        {"paragraph": "meaning", "text": "旧段落第一行。\n旧段落第二行。\n旧段落第三行。", "w": 354, "h": 96, "fontSize": 16},
+                        {"button": "btnUpdate", "text": "替换整段", "w": 354, "h": 44, "onClick": {"set": {"@meaning": "新段落只有这一行。"}}},
+                    ],
+                },
+            }],
+        }
+        lowered, ir = compile_language(spec)
+        page0 = lowered["pages"][0]
+        theme = proto.THEMES["enterprise-light"]
+        root = proto.expand_declarative_tree(page0["root"], prefix="home")
+        proto.ensure_unique_names(root, scope_prefix="home")
+        proto.measure_node(root, available_w=402)
+        proto.layout_node(root, 0, 0, 402, 874)
+        emitted = proto.emit_tree_to_axvg(root, theme, include_dynamic_panel_placeholders=True)
+        emitted = proto.compose_device_shell(emitted, "home", shell_name="iphone-17")
+        children = emitted["flatChildren"]
+        meaning_items = [it for it in children if "meaning" in str(it.get("name", ""))]
+        self.assertEqual(len(meaning_items), 1)
+        self.assertEqual(meaning_items[0]["kind"], "text")
+        self.assertTrue(meaning_items[0].get("wrap"))
+        self.assertIn("旧段落第三行。", meaning_items[0]["text"])
+        island_items = [it for it in children if "dynamic-island" in str(it.get("name", ""))]
+        home_ind_items = [it for it in children if "home-indicator" in str(it.get("name", ""))]
+        self.assertEqual(len(island_items), 0)
+        self.assertEqual(len(home_ind_items), 0)
+        prog_bar = [it for it in children if "prog_fill" in str(it.get("name", ""))]
+        self.assertEqual(len(prog_bar), 1)
+        self.assertGreater(prog_bar[0]["w"], 50)
 
 
 if __name__ == "__main__":

@@ -4,6 +4,12 @@
 
 [简体中文](README.zh-CN.md) · [Screenshot workflow](references/screenshot-workflow.md) · [RP/1 language](references/rp-language.md) · [Capabilities](references/capabilities.md)
 
+https://github.com/user-attachments/assets/39c37462-3956-48b8-b495-fe90d2ab9431
+
+**From a sentence to an editable prototype** — a 40-second, 1080p/60fps introduction built with huashu-motion, featuring the original Zhixu graduate-exam study app. [Download MP4](https://github.com/LilZeeCN/zee-rp/releases/download/v0.2.1/zee-rp-zhixu-1080p60.mp4) · [Demo details](assets/promo/README.md)
+
+The UI is reconstructed from the case specification; this is a workflow animation, not a screen recording or a generation-speed benchmark.
+
 ![Original screenshot demo](examples/screenshot/source.png)
 
 ## What ships
@@ -11,6 +17,7 @@
 - **Screenshot reconstruction:** OCR, layout and shape detection, editable text, chart geometry, layered images, automatic drafts, text corrections and visual differences.
 - **RP/1:** JSON / text syntax for layouts, native inputs, panels, repeaters, data, expressions, interactions, rules and bounded master/adaptive-view support.
 - **Native file tools:** inspect and edit text, rich text, pages, interactions, tables, connectors, panels, repeaters and masters, with version-aware RP9/RP11 serialization.
+- **Existing custom styles:** cascading rename and batch rebinding across pages, masters and panel states. Create global definitions in Axure first; see the [hybrid workflow and limits](references/custom-styles.md).
 - **Verification:** reference simulation, expression checks against a locally installed Axure runtime, native-preview replay, counterexample reduction and GUI evidence checks.
 - Complete Node, Python and Swift sources, CLI, MCP, Agent Skill, examples and tests.
 
@@ -58,6 +65,8 @@ node scripts/proto.mjs generate --spec examples/rp-language/counter.json --out-d
 ```
 
 A larger data example is `examples/rp-language/runtime-inventory.json`. Use new output names. Native templates, widget libraries and Axure JavaScript are read from your own installation and never bundled.
+
+With MCP, call `generate_prototype({spec: <RP/1 object>, output: "/absolute/path/new.rp"})` to compile and assemble a complete multi-page prototype with shared styling, cross-page variables/links and structural checks. It returns the file, page IDs, checks and diagnostic artifacts. See the [MCP guide](references/mcp-prototype.md) and [three-page example](examples/rp-language/mcp-three-pages.json).
 
 ## CLI, MCP and tests
 

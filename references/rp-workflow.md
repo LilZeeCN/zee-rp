@@ -141,7 +141,14 @@ node scripts/remove-interaction.mjs source.rp no-click.rp "提交按钮" \
 - `add-click-link` 只适用于没有交互的元件，拒绝覆盖已有交互。
 - CLI 会把数值和 true/false 自动转型；保留前导零或这些字面文本时用 JSON 字符串。复杂文本也优先 JSON。
 
-常用动作参数（完整实现见 `ix-actions.mjs`，验证范围见 [能力表](capabilities.md)）：
+### 支持的原生动作
+
+以下是原生编辑工具 `add_interaction` 的参数，**不等同于 RP/1 动作字段**；验证范围见 [能力表](capabilities.md)。
+原生 `set-panel-state` 可使用 `enterAnimation/exitAnimation`（如 `none/fade/slideLeft/slideRight/slideUp/slideDown`）、
+`enterDuration/exitDuration`（毫秒）和 `enterEasing/exitEasing`（如 `none/swing/linear/easeInCubic/easeOutCubic`）。
+RP/1 的同名动作目前只开放 `target/state`，须在目标宿主预览实际验证动画。
+
+常用动作参数：
 
 | 动作 | 参数 |
 |---|---|

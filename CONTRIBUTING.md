@@ -5,10 +5,12 @@ Install README dependencies and keep the Python environment activated when runni
 | Command | Prerequisites |
 | --- | --- |
 | `npm test` | Node; no Axure/Python/private fixtures. Source syntax, registry, guards, examples and source packaging. |
+| `npm run test:styles` | Node; synthetic RP/RPLIB style fixtures, no Axure/Python/private files. |
 | `npm run test:language` | Python dependencies; included synthetic JSON/specifications. |
 | `npm run test:scopes` | Original panel fixture set; configure `AXURE_FIXTURE_ROOT`. |
 | `npm run test:runtime` | Python dependencies and Node; reference data/aggregates and native-record construction. |
 | `npm run test:mcp` | MCP SDK, local RP11 libraries and blank project; actual stdio checks on generated native widgets. |
+| `npm run test:mcp-generate` | MCP SDK, Python dependencies and RP9 blank project/libraries; real stdio three/twelve-page generation and failure contracts. |
 | `npm run test:jobs` | Local mock job checks, no GUI. |
 | `npm run test:trace` | macOS Vision, Swift, NumPy, SciPy and Pillow. |
 | `npm run test:backend`, `test:visual` | Python, local Axure installation and matching blank project. |

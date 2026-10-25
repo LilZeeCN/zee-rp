@@ -135,7 +135,7 @@ with tempfile.TemporaryDirectory() as temp:
     for label,text,code in [('syntax','{\n"language":,}','E_JSON_SYNTAX'),('duplicate','{"language":"rp/1","language":"rp/1"}','E_DUPLICATE_PROPERTY'),('nonfinite','{"value":NaN}','E_JSON_NUMBER')]:
         source.write_text(text)
         result=subprocess.run([sys.executable,str(cli),'check','--spec',str(source)],capture_output=True,text=True)
-        issue=json.loads(result.stderr)['diagnostics'][0]
+        issue=json.loads(result.stdout)['diagnostics'][0]
         assert result.returncode==1 and issue['code']==code
         if label=='syntax':assert issue['line']==2 and issue['column']>0
         checks+=1;print('PASS diagnostic',label)

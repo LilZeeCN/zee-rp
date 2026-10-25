@@ -36,6 +36,27 @@ FONT_PATHS = (
     ]
 )
 _FONT_CACHE = {}
+FALLBACK_FONT_PATHS = [
+    "/System/Library/Fonts/Menlo.ttc",
+    "/System/Library/Fonts/Apple Symbols.ttf",
+    "/System/Library/Fonts/LucidaGrande.ttc",
+    "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
+    "/System/Library/Fonts/Supplemental/STIXTwoMath.otf",
+    "/System/Library/Fonts/STHeiti Medium.ttc",
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",
+    "/System/Library/Fonts/Helvetica.ttc",
+]
+_FALLBACK_FONT_CACHE = {}
+_NOTDEF_SIG_CACHE = {}
+_CHAR_FONT_PATH_CACHE = {}
+GLYPH_SUGGESTIONS = {
+    "\u2713": "Use '●' or icon='check' in legacy specs, or language='rp/1' with fallback fonts",
+    "\u2714": "Use '●' or icon='check' in legacy specs, or language='rp/1' with fallback fonts",
+    "\u2717": "Use '×' in legacy specs, or language='rp/1' with fallback fonts",
+    "\u2718": "Use '×' in legacy specs, or language='rp/1' with fallback fonts",
+    "\u2728": "Use '★' or an icon component (icon='sparkles')",
+    "\u2b50": "Use '★' or an icon component",
+}
 
 def load_font(size_px, weight=400):
     size_px = max(8, int(round(size_px)))
@@ -63,20 +84,123 @@ def load_font(size_px, weight=400):
     f = ImageFont.load_default()
     _FONT_CACHE[key] = f
     return f
+
+
+def load_fallback_font(fp, size_px):
+    size_px = max(8, int(round(size_px)))
+    key = (fp, size_px)
+    if key in _FALLBACK_FONT_CACHE:
+        return _FALLBACK_FONT_CACHE[key]
+    f = ImageFont.truetype(fp, size_px)
+    _FALLBACK_FONT_CACHE[key] = f
+    return f
+
+
+def _glyph_bitmap_sig(font, ch):
+    im = Image.new("L", (40, 40), 0)
+    d = ImageDraw.Draw(im)
+    try:
+        d.text((4, 4), ch, font=font, fill=255)
+    except Exception:
+        return None
+    bb = im.getbbox()
+    if not bb or bb[2] <= bb[0] or bb[3] <= bb[1]:
+        return None
+    return im.crop(bb).tobytes()
+
+
+_GLYPH_PINGFANG_CACHE = {}
+_GLYPH_RENDERABLE_CACHE = {}
+
+KINSOKU_HEAD = set("，。、；：！？）》」』】〕〉》％‰—…·,.;:!?)]}")
+KINSOKU_TAIL = set("（《「『【〔〈([{$¥")
+_LATIN_WORD_RE = re.compile(r"[A-Za-z0-9_.\-+/:=@#%×]+(?:'[A-Za-z0-9]+)?")
+
+
+def is_glyph_renderable_in_pingfang(ch):
+    if not ch or ch.isspace() or ord(ch) < 32:
+        return True
+    if ch in _GLYPH_PINGFANG_CACHE:
+        return _GLYPH_PINGFANG_CACHE[ch]
+    f = load_font(14, 400)
+    try:
+        bb = f.getbbox(ch)
+        ok = (bb[3] - bb[1]) > 0 and (bb[2] - bb[0]) > 0
+    except Exception:
+        ok = True
+    _GLYPH_PINGFANG_CACHE[ch] = ok
+    return ok
+
+
+def resolve_glyph_font_path(ch):
+    """查找字符可用的系统字体路径：优先 PingFang.ttc，其次 macOS 系统 fallback 字体链（排除 .notdef 方框）。"""
+    if not ch or ch.isspace() or ord(ch) < 32:
+        return "PingFang.ttc"
+    if ch in _CHAR_FONT_PATH_CACHE:
+        return _CHAR_FONT_PATH_CACHE[ch]
+    if is_glyph_renderable_in_pingfang(ch):
+        _CHAR_FONT_PATH_CACHE[ch] = "PingFang.ttc"
+        return "PingFang.ttc"
+    for fp in FALLBACK_FONT_PATHS:
+        if not os.path.exists(fp):
+            continue
+        try:
+            f = load_fallback_font(fp, 16)
+            if fp not in _NOTDEF_SIG_CACHE:
+                _NOTDEF_SIG_CACHE[fp] = _glyph_bitmap_sig(f, "\u0378")
+            sig = _glyph_bitmap_sig(f, ch)
+            if sig is not None and sig != _NOTDEF_SIG_CACHE[fp]:
+                _CHAR_FONT_PATH_CACHE[ch] = fp
+                return fp
+        except Exception:
+            continue
+    _CHAR_FONT_PATH_CACHE[ch] = None
+    return None
+
+
+def _measure_line_with_fallbacks(ln, font_size, font_weight):
+    f_main = load_font(font_size, font_weight)
+    if all(is_glyph_renderable_in_pingfang(c) for c in ln):
+        bb = f_main.getbbox(ln)
+        return bb[2] - bb[0], bb[3] - bb[1], bb[1]
+    total_w = 0
+    max_h = 0
+    min_top = None
+    for ch in ln:
+        if is_glyph_renderable_in_pingfang(ch):
+            f_use = f_main
+        else:
+            fp = resolve_glyph_font_path(ch)
+            f_use = load_fallback_font(fp, font_size) if fp and fp != "PingFang.ttc" else f_main
+        try:
+            bb = f_use.getbbox(ch)
+            cw = max(int(round(font_size * 0.55)) if not is_glyph_renderable_in_pingfang(ch) else 0, bb[2] - bb[0])
+            ch_h = bb[3] - bb[1]
+            top_y = bb[1]
+        except Exception:
+            cw = int(round(font_size * 0.75))
+            ch_h = int(round(font_size))
+            top_y = 0
+        total_w += cw
+        if ch_h > max_h:
+            max_h = ch_h
+        if min_top is None or top_y < min_top:
+            min_top = top_y
+    return total_w, max_h or int(round(font_size)), (min_top if min_top is not None else 0)
+
+
 def measure_text(text_str, font_size=14, font_weight=400):
-    """使用真实 PingFang.ttc 测量单行或多行文本像素宽高，附加防裁切安全余量。"""
+    """使用真实 PingFang.ttc (+ 系统 fallback 字体链) 测量单行或多行文本像素宽高，附加防裁切安全余量。"""
     s = str(text_str or "")
     if not s:
         return (8, max(16, int(round(font_size * 1.4))))
-    f = load_font(font_size, font_weight)
     lines = s.split("\n")
     max_w = 0
     for ln in lines:
         if not ln:
             continue
         try:
-            bb = f.getbbox(ln)
-            w = bb[2] - bb[0]
+            w, _, _ = _measure_line_with_fallbacks(ln, font_size, font_weight)
         except Exception:
             w = int(len(ln) * font_size * 0.85)
         if w > max_w:
@@ -86,36 +210,47 @@ def measure_text(text_str, font_size=14, font_weight=400):
     return (int(math.ceil(max_w)) + 8, int(total_h))
 
 
-_GLYPH_RENDERABLE_CACHE = {}
-
-KINSOKU_HEAD = set("，。、；：！？）》」』】〕〉》％‰—…·,.;:!?)]}")
-KINSOKU_TAIL = set("（《「『【〔〈([{$¥")
-_LATIN_WORD_RE = re.compile(r"[A-Za-z0-9_.\-+/:=@#%×]+(?:'[A-Za-z0-9]+)?")
-
-
-def is_glyph_renderable(ch):
-    """检测单个字符在 PingFang.ttc 中是否具有非零墨水高度 (防止 U+2713 ✓ 等零高度缺字产生空白缩进)。"""
+def is_glyph_renderable(ch, allow_fallback=False):
+    """检测单个字符是否具有真实可渲染字形（allow_fallback=True 时启用 macOS 系统 fallback 字体链）。"""
     if not ch or ch.isspace() or ord(ch) < 32:
         return True
-    if ch in _GLYPH_RENDERABLE_CACHE:
-        return _GLYPH_RENDERABLE_CACHE[ch]
-    f = load_font(14, 400)
-    try:
-        bb = f.getbbox(ch)
-        ok = (bb[3] - bb[1]) > 0 and (bb[2] - bb[0]) > 0
-    except Exception:
-        ok = True
-    _GLYPH_RENDERABLE_CACHE[ch] = ok
-    return ok
+    key = (ch, bool(allow_fallback))
+    if key in _GLYPH_RENDERABLE_CACHE:
+        return _GLYPH_RENDERABLE_CACHE[key]
+    if is_glyph_renderable_in_pingfang(ch):
+        _GLYPH_RENDERABLE_CACHE[key] = True
+        return True
+    if allow_fallback:
+        ok = resolve_glyph_font_path(ch) is not None
+        _GLYPH_RENDERABLE_CACHE[key] = ok
+        return ok
+    _GLYPH_RENDERABLE_CACHE[key] = False
+    return False
 
 
-def find_unrenderable_glyphs(text_str):
-    """返回字符串中在当前字体下墨水高度为 0 的不可渲染字符列表。"""
+def find_unrenderable_glyphs(text_str, allow_fallback=False):
+    """返回字符串中在当前字体（及可选 fallback 字体链）下不可渲染的字符列表。"""
     bad = []
     for ch in str(text_str or ""):
-        if not is_glyph_renderable(ch) and ch not in bad:
+        if not is_glyph_renderable(ch, allow_fallback=allow_fallback) and ch not in bad:
             bad.append(ch)
     return bad
+
+
+def describe_unrenderable_glyphs(text_str, allow_fallback=False):
+    """返回不可渲染字符的结构化诊断明细（含 U+XXXX、原字符、测量字体与替代建议）。"""
+    details = []
+    font_desc = "PingFang.ttc + macOS fallbacks (Menlo, Apple Symbols, LucidaGrande, Arial Unicode)" if allow_fallback else "PingFang.ttc"
+    for ch in find_unrenderable_glyphs(text_str, allow_fallback=allow_fallback):
+        cp = f"U+{ord(ch):04X}"
+        sug = GLYPH_SUGGESTIONS.get(ch, f"Replace {ch} ({cp}) with a standard CJK/ASCII symbol or an icon component")
+        details.append({
+            "char": ch,
+            "codepoint": cp,
+            "font": font_desc,
+            "suggestion": sug,
+        })
+    return details
 
 
 def _tokenize_for_wrap(para):
@@ -371,10 +506,7 @@ def load_image_asset(path_or_name, base_dir=None):
 
 
 # -------------------- 1. DESIGN TOKENS & MULTI-THEME PRESETS --------------------
-SPACING_TOKENS = [0, 1, 2, 3, 4] + list(range(6, 162, 2))
-RADIUS_TOKENS = [0, 1, 2, 3, 4] + list(range(6, 122, 2)) + [999]
-FONT_SIZE_TOKENS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 40, 44, 48, 56, 64, 72]
-FONT_WEIGHT_TOKENS = [300, 400, 500, 600, 700, 800, 900]
+from rp_language import SPACING_TOKENS, RADIUS_TOKENS, FONT_SIZE_TOKENS, FONT_WEIGHT_TOKENS
 
 THEMES = {
     "enterprise-light": {
@@ -652,7 +784,10 @@ def hex_to_rgb_float(hex_str, alpha=1.0):
 def hex_to_rgba_tuple(hex_str, alpha=1.0):
     if not hex_str:
         return (0, 0, 0, 0)
-    s = str(hex_str).strip().lstrip("#")
+    s_raw = str(hex_str).strip()
+    if s_raw.lower() in ("transparent", "none"):
+        return (0, 0, 0, 0)
+    s = s_raw.lstrip("#")
     if len(s) in (3, 4):
         s = "".join(c * 2 for c in s)
     a_mul = (int(s[6:8], 16) / 255.0) if len(s) >= 8 else 1.0
@@ -699,6 +834,9 @@ def make_button(name, text, variant="primary", w=None, h=32, size=13, radius=6, 
     }
     st = styles.get(variant, styles["primary"])
     tw, _ = measure_text(text, size, st["weight"])
+    spacing = float(kwargs.get("letterSpacing") or 0)
+    if spacing:
+        tw += max((max(0, len(line) - 1) * spacing for line in str(text).split("\n")), default=0)
     btn_w = w if w is not None else max(64, tw + 24)
     node = {
         "type": "shape-text",
@@ -1527,7 +1665,7 @@ def expand_inline_primitives(node, base_dir=None, available_w=None):
     if ntype == "paragraph" or "_paragraph" in node:
         # Keep the source until a parent has allocated the actual width.  A fill
         # paragraph may be measured again after row/grid allocation.
-        source = node.setdefault("_paragraph", {k: v for k, v in node.items() if not k.startswith("_")})
+        source = node.setdefault("_paragraph", {k: v for k, v in node.items() if not k.startswith("_") or k == "_rp1_single_shape"})
         fsz = snap_token(source.get("fontSize", source.get("size", 12)), FONT_SIZE_TOKENS)
         fwt = snap_token(source.get("fontWeight", source.get("weight", 400)), FONT_WEIGHT_TOKENS)
         raw_w = source.get("w")
@@ -1552,6 +1690,28 @@ def expand_inline_primitives(node, base_dir=None, available_w=None):
             line_h = max(18, int(round(fsz * 1.55)))
         if line_h <= 0 or line_gap < 0:
             raise ValueError(f"paragraph '{name}': lineHeight must be positive and lineGap non-negative")
+        content_h = max(line_h, len(lines) * line_h + max(0, len(lines) - 1) * line_gap) + para_pt + para_pb
+        if source.get("_rp1_single_shape"):
+            node["type"] = "label"
+            node["wrap"] = True
+            node["isGroup"] = False
+            node.pop("children", None)
+            node["fontSize"] = fsz
+            node["fontWeight"] = fwt
+            node["color"] = source.get("color", "$ink-2")
+            node["align"] = source.get("align", "left")
+            if max_lines and len(lines) >= int(max_lines):
+                node["text"] = "\n".join(lines)
+            else:
+                node["text"] = str(source.get("text", ""))
+            node["w"] = raw_w if raw_w is not None else max_w
+            node["h"] = source.get("h") if (source.get("h") is not None and not is_hug(source.get("h"))) else content_h
+            node["_is_single_paragraph"] = True
+            node["_paragraph_mw"] = int(available_w) if available_w is not None else resolve_size(raw_w, max_w, "w")
+            node["_paragraph_mh"] = resolve_size(source.get("h"), content_h, "h")
+            node["_paragraph_needed_h"] = content_h
+            node["_expanded"] = True
+            return
         children = []
         for idx, ln in enumerate(lines):
             children.append({
@@ -1565,7 +1725,6 @@ def expand_inline_primitives(node, base_dir=None, available_w=None):
         node["gap"] = line_gap
         node["_paragraphGap"] = line_gap  # typographic spacing is not snapped to design tokens
         node["w"] = raw_w if raw_w is not None else max_w
-        content_h = max(line_h, len(lines) * line_h + max(0, len(lines) - 1) * line_gap) + para_pt + para_pb
         node["h"] = source.get("h") if source.get("h") is not None else content_h
         node["isGroup"] = bool(source.get("isGroup", True))
         node["children"] = children
@@ -1673,21 +1832,71 @@ def measure_node(node, base_dir=None, available_w=None):
         node["_mh"] = resolve_size(node.get("h"), 36, "h")
         return node["_mw"], node["_mh"]
     if ntype == "label":
+        if node.get("_is_single_paragraph"):
+            node["_mw"] = node["_paragraph_mw"]
+            node["_mh"] = node["_paragraph_mh"]
+            return node["_mw"], node["_mh"]
         spans = node.get("spans")
         txt = "".join(str(s.get("text", "")) for s in spans) if isinstance(spans, list) and spans else node.get("text", node.get("content", ""))
         fsz = max((int(s.get("size", s.get("fontSize", 14))) for s in spans), default=14) if isinstance(spans, list) and spans else node.get("fontSize", node.get("size", 14))
         fwt = max((int(s.get("weight", s.get("fontWeight", 400))) for s in spans), default=400) if isinstance(spans, list) and spans else node.get("fontWeight", node.get("weight", 400))
         tw, th = measure_text(txt, fsz, fwt)
-        node["_mw"] = resolve_size(node.get("w"), tw, "w")
+        spacing = float(node.get("letterSpacing") or 0)
+        if spacing:
+            tw += max((max(0, len(line) - 1) * spacing for line in str(txt).split("\n")), default=0)
+        pad_x = 16 if (node.get("fill") or node.get("stroke")) else 0
+        if (
+            available_w is not None
+            and available_w > 0
+            and (
+                node.get("wrap")
+                or ((node.get("w") is None or is_fill(node.get("w"))) and (node.get("h") is None or is_hug(node.get("h"))))
+            )
+            and tw + pad_x > available_w
+        ):
+            wrap_lines = wrap_text(str(txt), max(1, int(available_w) - pad_x - 4), fsz, fwt)
+            if len(wrap_lines) > 1:
+                line_h = resolve_size(node["lineHeight"], 18, "lineHeight") if node.get("lineHeight") is not None else max(18, int(round(fsz * 1.45)))
+                th = max(th, len(wrap_lines) * line_h + 2)
+                node["wrap"] = True
+        node["_mw"] = int(available_w) if (available_w is not None and is_fill(node.get("w"))) else resolve_size(node.get("w"), tw + pad_x + (2 if is_hug(node.get("w")) else 0), "w")
         node["_mh"] = resolve_size(node.get("h"), th, "h")
         return node["_mw"], node["_mh"]
-    if ntype in ("shape-text", "native-input", "dynamic-panel", "repeater"):
+    if ntype == "dynamic-panel":
+        states = node.get("states") or []
+        known_w = available_w
+        if known_w is None and node.get("w") is not None and not (is_fill(node.get("w")) or is_hug(node.get("w"))):
+            known_w = resolve_size(node["w"], 0, "w")
+        max_sw, max_sh = 64, 32
+        for st in states:
+            st_tree = st.get("tree") if isinstance(st, dict) and "tree" in st else (st.get("root") if isinstance(st, dict) else None)
+            if isinstance(st_tree, dict):
+                sw, sh = measure_node(st_tree, base_dir=base_dir, available_w=known_w)
+                max_sw = max(max_sw, sw)
+                max_sh = max(max_sh, sh)
+        node["_mw"] = int(available_w) if (available_w is not None and (is_fill(node.get("w")) or node.get("w") is None)) else resolve_size(node.get("w"), max_sw, "w")
+        node["_mh"] = resolve_size(node.get("h"), max_sh, "h")
+        return node["_mw"], node["_mh"]
+    if ntype == "repeater":
+        rows = node.get("rows") or []
+        p_size = int(node.get("pageSize") or 0)
+        vis_rows = min(len(rows), p_size) if (p_size > 0 and rows) else max(1, len(rows))
+        row_h = int(node.get("rowHeight", 48))
+        row_gap = int(node.get("rowGap", 0))
+        rep_def_h = max(32, vis_rows * row_h + max(0, vis_rows - 1) * row_gap)
+        node["_mw"] = int(available_w) if (available_w is not None and (is_fill(node.get("w")) or node.get("w") is None)) else resolve_size(node.get("w"), 320, "w")
+        node["_mh"] = resolve_size(node.get("h"), rep_def_h, "h")
+        return node["_mw"], node["_mh"]
+    if ntype in ("shape-text", "native-input"):
         spans = node.get("spans")
         txt = "".join(str(s.get("text", "")) for s in spans) if isinstance(spans, list) and spans else node.get("text", node.get("content", node.get("placeholder", "")))
         fsz = node.get("fontSize", node.get("size", 13))
         fwt = node.get("fontWeight", node.get("weight", 500))
         tw, th = measure_text(txt, fsz, fwt)
-        node["_mw"] = resolve_size(node.get("w"), max(64, tw + 24), "w")
+        is_badge_like = "badge" in str(node.get("name", "")) or (node.get("h") is not None and isinstance(node.get("h"), (int, float)) and node["h"] <= 26)
+        min_btn_w = 36 if is_badge_like else 64
+        pad_btn_w = 18 if is_badge_like else 24
+        node["_mw"] = resolve_size(node.get("w"), max(min_btn_w, tw + pad_btn_w), "w")
         node["_mh"] = resolve_size(node.get("h"), max(32, th + 12), "h")
         return node["_mw"], node["_mh"]
     all_children = node.get("children", [])
@@ -1729,7 +1938,7 @@ def measure_node(node, base_dir=None, available_w=None):
                 measure_node(child, base_dir=base_dir, available_w=width)
         else:
             for child in children:
-                stretch = is_fill(child.get("w")) or (layout == "column" and (node.get("align") == "stretch" or (child.get("w") is None and child.get("type") == "box")))
+                stretch = is_fill(child.get("w")) or (layout == "column" and (node.get("align") == "stretch" or (child.get("w") is None and (child.get("type") in ("box", "dynamic-panel", "repeater") or child.get("_is_single_paragraph")))))
                 measure_node(child, base_dir=base_dir, available_w=inner_w if stretch else child["_mw"])
     if not children:
         cw, ch_val = 0, 0
@@ -1806,10 +2015,10 @@ def _plan_bento_grid(children, cols):
     return placements, max(1, max_row)
 
 
-def layout_node(node, x=0, y=0, w=None, h=None, _abs_pos=False):
+def layout_node(node, x=0, y=0, w=None, h=None, _abs_pos=False, _stack_pos=False):
     """Pass 2 (Top-Down): 分配 flex/fill 空间、对齐方式并递归赋予确定性整数坐标 (_x, _y, _w, _h)。"""
-    nx = int(round(node["x"] if (_abs_pos and "x" in node) else (x if _abs_pos else node.get("x", x))))
-    ny = int(round(node["y"] if (_abs_pos and "y" in node) else (y if _abs_pos else node.get("y", y))))
+    nx = int(round(x if _stack_pos else (node["x"] if (_abs_pos and "x" in node) else (x if _abs_pos else node.get("x", x)))))
+    ny = int(round(y if _stack_pos else (node["y"] if (_abs_pos and "y" in node) else (y if _abs_pos else node.get("y", y)))))
     nw = int(round(w if w is not None else resolve_size(node.get("w"), node.get("_mw", 0), "w")))
     if node.get("_measured_for_w") != nw:
         measure_node(node, available_w=nw)
@@ -1824,6 +2033,17 @@ def layout_node(node, x=0, y=0, w=None, h=None, _abs_pos=False):
     children = [ch for ch in all_children if not (isinstance(ch, dict) and ch.get("_hidden_lookup"))]
     if not children:
         return
+    if node.get("layout") == "stack":
+        _kids = node.get("children") or []
+        if any(isinstance(ch, dict) and "z" in ch for ch in _kids):
+            # z 只对 stack 有意义：稳定排序后回写 children，绘制/装配顺序随之改变；z 转存为 _z 避免未知属性告警
+            _sorted = [ch for _, ch in sorted(enumerate(_kids),
+                                              key=lambda pair: (pair[1].get("z", 0) if isinstance(pair[1], dict) else 0, pair[0]))]
+            for _ch in _sorted:
+                if isinstance(_ch, dict) and "z" in _ch:
+                    _ch["_z"] = _ch.pop("z")
+            node["children"] = _sorted
+            children = [ch for ch in _sorted if not (isinstance(ch, dict) and ch.get("_hidden_lookup"))]
     pt, pr, pb, pl = parse_padding(node.get("padding", 0))
     gap = node.get("_paragraphGap", snap_token(node.get("gap", 0), SPACING_TOKENS))
     layout = node.get("layout", "column")
@@ -1923,6 +2143,10 @@ def layout_node(node, x=0, y=0, w=None, h=None, _abs_pos=False):
                 else:
                     cy = inner_y
                 branch_cx = cur_cx + (slot_w - cw) if justify == "end" else (cur_cx + (slot_w - cw) // 2 if justify == "center" else cur_cx)
+                if isinstance(c.get("x"), (int, float)):
+                    branch_cx = int(round(c["x"]))
+                if isinstance(c.get("y"), (int, float)):
+                    cy = int(round(c["y"]))
                 layout_node(c, branch_cx, cy, cw, ch_val, _abs_pos=True)
             cx_float += slot_w + step_gap
     elif layout == "column":
@@ -1953,6 +2177,7 @@ def layout_node(node, x=0, y=0, w=None, h=None, _abs_pos=False):
                 step_gap = max(float(gap), free_h / float(len(slots) + 1))
                 cy = inner_y + int(round(step_gap))
         flex_indices = [idx for idx, fl in enumerate(eff_flexes) if fl > 0]
+        allocated_flex_w = 0
         allocated_flex_h = 0
         cy_float = float(cy)
         for idx, (slot, fl) in enumerate(zip(slots, eff_flexes)):
@@ -1971,7 +2196,7 @@ def layout_node(node, x=0, y=0, w=None, h=None, _abs_pos=False):
                 stretch_w = (
                     is_fill(c.get("w"))
                     or align == "stretch"
-                    or (c.get("w") is None and c.get("type") == "box" and not is_hug(c.get("w")))
+                    or (c.get("w") is None and (c.get("type") in ("box", "dynamic-panel", "repeater") or c.get("_is_single_paragraph")) and not is_hug(c.get("w")))
                 )
                 cw = inner_w if stretch_w else resolve_size(c.get("w"), c["_mw"], "w")
                 if align == "center":
@@ -1981,6 +2206,10 @@ def layout_node(node, x=0, y=0, w=None, h=None, _abs_pos=False):
                 else:
                     cx = inner_x
                 branch_cy = cur_cy + (slot_h - ch_val) if justify == "end" else (cur_cy + (slot_h - ch_val) // 2 if justify == "center" else cur_cy)
+                if isinstance(c.get("x"), (int, float)):
+                    cx = int(round(c["x"]))
+                if isinstance(c.get("y"), (int, float)):
+                    branch_cy = int(round(c["y"]))
                 layout_node(c, cx, branch_cy, cw, ch_val, _abs_pos=True)
             cy_float += slot_h + step_gap
     elif layout == "grid":
@@ -2031,7 +2260,47 @@ def layout_node(node, x=0, y=0, w=None, h=None, _abs_pos=False):
                     cy = inner_y + inner_h - ch_val - int(round(c.get("bottom", 0)))
                 elif anchor == "bottom-left":
                     cy = inner_y + inner_h - ch_val - int(round(c.get("bottom", 0)))
-            layout_node(c, cx, cy, cw, ch_val, _abs_pos=True)
+                if "_declared_x" in c and c.get("right") is None and not anchor:
+                    c["_expected_stack_x"] = inner_x + int(round(float(c["_declared_x"])))
+                if "_declared_y" in c and c.get("bottom") is None and not anchor:
+                    c["_expected_stack_y"] = inner_y + int(round(float(c["_declared_y"])))
+            # Stack coordinates already include parent offset, padding and anchors.
+            layout_node(c, cx, cy, cw, ch_val, _abs_pos=True, _stack_pos=True)
+
+        # 约束定位：after（紧跟某个兄弟）/ afterGap / alignX（左中右对齐父级内区）
+        def _find_sibling(key):
+            # ① 精确 / 后缀 ② 名字里的逻辑 id 段（原生名形如 badge-p-<hash>）
+            for _c in children:
+                for _cand in (_c.get("id"), _c.get("name")):
+                    if isinstance(_cand, str) and (_cand == key or _cand.endswith("/" + key) or _cand.endswith("-" + key)):
+                        return _c
+            for _c in children:
+                for _cand in (_c.get("id"), _c.get("name")):
+                    if isinstance(_cand, str) and key in _cand.split("-"):
+                        return _c
+            return None
+        for _c in children:
+            _cw, _ch_ = _c.get("_w"), _c.get("_h")
+            _nx, _ny = _c.get("_x"), _c.get("_y")
+            _moved = False
+            _ax = _c.pop("alignX", None)
+            if _ax in ("left", "center", "right") and isinstance(_cw, int):
+                if _ax == "left":
+                    _nx = inner_x
+                elif _ax == "center":
+                    _nx = inner_x + (inner_w - _cw) // 2
+                else:
+                    _nx = inner_x + inner_w - _cw
+                _moved = True
+            _after = _c.pop("after", None)
+            _after_gap = _c.pop("afterGap", 0)
+            if isinstance(_after, str):
+                _sib = _find_sibling(_after.split("/")[-1]) or _find_sibling(_after)
+                if _sib is not None and _sib is not _c:
+                    _ny = _sib.get("_y", 0) + _sib.get("_h", 0) + int(round(float(_after_gap or 0)))
+                    _moved = True
+            if _moved and isinstance(_nx, int) and isinstance(_ny, int):
+                layout_node(_c, _nx, _ny, _cw, _ch_, _abs_pos=True, _stack_pos=True)
 
 def _node_border_sides(node):
     if any(k in node for k in ("borderTop", "borderBottom", "borderLeft", "borderRight")):
@@ -2040,7 +2309,7 @@ def _node_border_sides(node):
     return int(node.get("borderSides", 15))
 
 
-def make_axvg_vector_shape(item_id, name, x, y, w, h, fill_hex=None, stroke_hex=None, radius=0, text=None, font_size=14, font_weight=400, text_color_hex="#1E293B", align="left", alpha=1.0, v_align=None, stroke_width=1, border_sides=15, spans=None, italic=False, underline=False, strikethrough=False, letter_spacing=0):
+def make_axvg_vector_shape(item_id, name, x, y, w, h, fill_hex=None, stroke_hex=None, radius=0, text=None, font_size=14, font_weight=400, text_color_hex="#1E293B", align="left", alpha=1.0, v_align=None, stroke_width=1, border_sides=15, spans=None, italic=False, underline=False, strikethrough=False, letter_spacing=0, gradient=None):
     w = max(1, int(round(w)))
     h = max(1, int(round(h)))
     x = int(round(x))
@@ -2048,15 +2317,23 @@ def make_axvg_vector_shape(item_id, name, x, y, w, h, fill_hex=None, stroke_hex=
     r = max(0, min(int(round(radius or 0)), min(w, h) // 2))
     bg_fills = []
     if fill_hex and fill_hex != "transparent":
-        bg_fills.append({"type": 1, "enabled": True, "color": hex_to_rgb_float(fill_hex, alpha)})
+        fc = hex_to_rgb_float(fill_hex, alpha)
+        if float(fc.get("a", 1.0)) > 0.0:
+            bg_fills.append({"type": 1, "enabled": True, "color": fc})
     strokes = []
     stroke_thick = 0
     border = [0, 0, 0, 0]
     bs_mask = int(border_sides if border_sides is not None else 15)
     if stroke_hex and stroke_hex != "transparent" and bs_mask > 0:
-        strokes.append({"alignment": 0, "fill": {"type": 1, "enabled": True, "color": hex_to_rgb_float(stroke_hex, alpha)}})
-        stroke_thick = float(stroke_width or 1)
-        border = [1 if (bs_mask & 2) else 0, 1 if (bs_mask & 4) else 0, 1 if (bs_mask & 8) else 0, 1 if (bs_mask & 1) else 0]
+        sc = hex_to_rgb_float(stroke_hex, alpha)
+        if float(sc.get("a", 1.0)) > 0.0:
+            strokes.append({"alignment": 0, "fill": {"type": 1, "enabled": True, "color": sc}})
+            stroke_thick = float(stroke_width or 1)
+            border = [1 if (bs_mask & 2) else 0, 1 if (bs_mask & 4) else 0, 1 if (bs_mask & 8) else 0, 1 if (bs_mask & 1) else 0]
+    has_visible_fill = bool(bg_fills and float(bg_fills[0].get("color", {}).get("a", 1.0)) > 0.0)
+    has_visible_stroke = bool(strokes and float(strokes[0].get("fill", {}).get("color", {}).get("a", 1.0)) > 0.0 and stroke_thick > 0)
+    if not has_visible_fill and not has_visible_stroke:
+        r = 0
     has_box = bool(bg_fills or strokes)
     text_align_code = 1 if (has_box or v_align == "middle") else 0
     item = {
@@ -2081,7 +2358,10 @@ def make_axvg_vector_shape(item_id, name, x, y, w, h, fill_hex=None, stroke_hex=
         "strokeThickness": stroke_thick,
         "borderSides": bs_mask if strokes else 0,
         "strokePattern": [],
-        "backgroundFills": bg_fills,
+        **({"gradient": gradient} if gradient else {}),
+        "backgroundFills": ([{"type": 2, "gradientType": 0, "from": {"x": 0, "y": 0}, "to": {"x": 1, "y": 1},
+                              "stops": [{"color": c, "offset": o} for c, o in zip(gradient["colors"], gradient["offsets"])]}]
+                             if gradient else bg_fills),
         "effects": [],
         "textAlignment": text_align_code,
         "textPadding": [],
@@ -2117,6 +2397,7 @@ def make_axvg_vector_shape(item_id, name, x, y, w, h, fill_hex=None, stroke_hex=
             "transform": 0,
             "stretch": 5,
         }
+    eff_text = " " if (not bg_fills and not strokes and (text is None or str(text) == "")) else text
     if isinstance(spans, list) and spans:
         align_code = {"left": 0, "center": 1, "right": 2}.get(align, 0)
         inlines = [
@@ -2134,9 +2415,9 @@ def make_axvg_vector_shape(item_id, name, x, y, w, h, fill_hex=None, stroke_hex=
         ]
         if inlines:
             item["text"] = {"paragraphs": [{"horizontalAlignment": align_code, "lineSpacing": 0, "inlines": inlines}]}
-    elif text is not None and str(text) != "":
+    elif eff_text is not None and str(eff_text) != "":
         align_code = {"left": 0, "center": 1, "right": 2}.get(align, 0)
-        inlines = [_make_run(str(text), font_size, font_weight, text_color_hex, italic, underline, strikethrough, letter_spacing)]
+        inlines = [_make_run(str(eff_text), font_size, font_weight, text_color_hex, italic, underline, strikethrough, letter_spacing)]
         item["text"] = {"paragraphs": [{"horizontalAlignment": align_code, "lineSpacing": 0, "inlines": inlines}]}
     return item
 
@@ -2188,6 +2469,36 @@ def make_axvg_image_shape(item_id, name, x, y, w, h, image_key):
         "type": 0,
     }
 
+
+
+def _parse_gradient_spec(node, theme_dict):
+    """把 `gradient:"135deg,#A,#B"` 解析成结构化渐变；返回 None 表示不适用。"""
+    raw = node.get("gradient")
+    if not raw:
+        return None
+    angle, parts = 180.0, []
+    if isinstance(raw, str):
+        text = raw.strip()
+        if "(" in text and text.endswith(")"):
+            text = text[text.index("(") + 1:-1]
+        tokens = [t.strip() for t in text.split(",") if t.strip()]
+        if tokens and tokens[0].lower().endswith("deg"):
+            try:
+                angle = float(tokens[0][:-3])
+            except ValueError:
+                angle = 180.0
+            tokens = tokens[1:]
+        parts = tokens
+    elif isinstance(raw, dict):
+        angle = float(raw.get("angle", 180))
+        parts = [p.get("color") if isinstance(p, dict) else p for p in (raw.get("stops") or [])]
+    colors = [resolve_color(p, theme_dict) for p in parts if isinstance(p, str)]
+    colors = [c for c in colors if c]
+    if len(colors) < 2:
+        return None
+    n = len(colors)
+    offsets = [round(i / (n - 1), 4) for i in range(n)]
+    return {"type": "linear", "angle": angle, "colors": colors, "offsets": offsets}
 
 def _has_optical_fx(node):
     return any(node.get(k) for k in ("backdropBlur", "aurora", "gradient", "shadow", "innerGlow", "noise"))
@@ -2311,7 +2622,24 @@ def _render_vector_icon(icon_name, w, h, color_hex, stroke_w=1.8):
     sw = max(2, int(round(float(stroke_w) * S * (min(w, h) / 20.0))))
     p = lambda ux, uy: (int(round(ux * W / 24.0)), int(round(uy * H / 24.0)))
     nm = str(icon_name or "sparkles").lower().strip()
-    if nm in ("sparkles", "ai", "magic", "wand"):
+    if nm in ("arrow-left", "back"):
+        d.line([p(14, 5), p(7, 12), p(14, 19)], fill=col, width=sw, joint="curve")
+        d.line([p(7, 12), p(21, 12)], fill=col, width=sw)
+    elif nm == "home":
+        d.line([p(3, 11), p(12, 3), p(21, 11)], fill=col, width=sw, joint="curve")
+        d.line([p(6, 10), p(6, 21), p(18, 21), p(18, 10)], fill=col, width=sw)
+        d.line([p(10, 21), p(10, 15), p(14, 15), p(14, 21)], fill=col, width=sw)
+    elif nm == "book":
+        d.line([p(12, 5), p(12, 21)], fill=col, width=sw)
+        d.line([p(12, 5), p(3, 3), p(3, 18), p(12, 21), p(21, 18), p(21, 3), p(12, 5)], fill=col, width=sw, joint="curve")
+    elif nm == "heart":
+        d.line([p(12, 21), p(3, 11), p(3, 6), p(7, 3), p(12, 7), p(17, 3), p(21, 6), p(21, 11), p(12, 21)], fill=col, width=sw, joint="curve")
+    elif nm == "star":
+        d.line([p(12, 2), p(15, 8), p(22, 9), p(17, 14), p(18, 21), p(12, 18), p(6, 21), p(7, 14), p(2, 9), p(9, 8), p(12, 2)], fill=col, width=sw, joint="curve")
+    elif nm == "clock":
+        d.ellipse([*p(3, 3), *p(21, 21)], outline=col, width=sw)
+        d.line([p(12, 6), p(12, 12), p(16, 15)], fill=col, width=sw)
+    elif nm in ("sparkles", "ai", "magic", "wand"):
         pts = [p(12, 2), p(14.5, 9.5), p(22, 12), p(14.5, 14.5), p(12, 22), p(9.5, 14.5), p(2, 12), p(9.5, 9.5), p(12, 2)]
         d.line(pts, fill=col, width=sw, joint="curve")
         d.line([p(19, 3), p(19, 7)], fill=col, width=max(2, sw - 1))
@@ -2414,9 +2742,11 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
     class _WhenContextList(list):
         def append(self, item):
             if active_when_ctx[0] and isinstance(item, dict):
-                item["_whenCtx"] = [list(x) for x in active_when_ctx[0]]
-                if any(not vis for _, _, vis in active_when_ctx[0]):
+                item["_whenCtx"] = [list(x[:3]) for x in active_when_ctx[0]]
+                if any(not x[2] for x in active_when_ctx[0]):
                     item["_whenHiddenPreview"] = True
+                if any(len(x) > 3 and x[3] for x in active_when_ctx[0]):
+                    item["_explicitHidden"] = True
             super().append(item)
 
     flat_spec_children = _WhenContextList()
@@ -2453,13 +2783,22 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
 
     def walk(node, in_modal=False):
         prev_when_ctx = active_when_ctx[0]
-        if isinstance(node, dict) and (node.get("_when_group") is not None or "_when_default_visible" in node):
+        explicit_hidden = isinstance(node, dict) and ((node.get("visible") is False) or (node.get("hidden") is True))
+        if isinstance(node, dict) and (node.get("_when_group") is not None or "_when_default_visible" in node or explicit_hidden):
             wg_id = node.get("_when_group") or f"wg_single_{id(node)}"
             wb_id = int(node.get("_when_branch", 0))
-            w_vis = bool(node.get("_when_default_visible", True))
-            active_when_ctx[0] = (*prev_when_ctx, (wg_id, wb_id, w_vis))
+            w_vis = False if explicit_hidden else bool(node.get("_when_default_visible", True))
+            active_when_ctx[0] = (*prev_when_ctx, (wg_id, wb_id, w_vis, explicit_hidden))
         try:
-            return _walk_inner(node, in_modal)
+            res = _walk_inner(node, in_modal)
+            if explicit_hidden:
+                if isinstance(res, dict):
+                    res["visible"] = False
+                elif isinstance(res, list):
+                    for it in res:
+                        if isinstance(it, dict):
+                            it["visible"] = False
+            return res
         finally:
             active_when_ctx[0] = prev_when_ctx
 
@@ -2470,7 +2809,17 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
         cur_modal = in_modal or bool(node.get("isModal", False))
         if node.get("_master_instance") and not include_dynamic_panel_placeholders:
             master_instances.append({"master": node["_master_instance"], "x": nx, "y": ny, "w": nw, "h": nh})
-            return None
+            slot_items = []
+            def emit_slots(parent):
+                for child in parent.get("children", []):
+                    if child.get("_master_slot"):
+                        emitted = walk(child, in_modal)
+                        if emitted is not None:
+                            slot_items.extend(emitted if isinstance(emitted, list) else [emitted])
+                    else:
+                        emit_slots(child)
+            emit_slots(node)
+            return slot_items or None
         if ntype == "repeater":
             repeaters.append({"name": name, "x": nx, "y": ny, "w": nw, "h": nh,
                 "template": node["template"], "rowHeight": node["rowHeight"], "rowGap": node.get("rowGap", 0),
@@ -2585,6 +2934,10 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
             })
             if cur_modal:
                 modal_targets.append(bg_name)
+            inp_val = str(node.get("value") or "")
+            inp_ph = str(node.get("placeholder") or "")
+            inp_txt = inp_val if inp_val else inp_ph
+            inp_col = resolve_color(node.get("color", "$ink") if inp_val else "$ink-3", theme_dict)
             flat_spec_children.append({
                 "kind": "rect",
                 "name": bg_name,
@@ -2597,6 +2950,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 "radius": node.get("radius", 6),
                 "isNativeInputBg": True,
                 "inModal": cur_modal,
+                **({"previewText": inp_txt, "size": node.get("fontSize", node.get("size", 13)), "weight": node.get("fontWeight", node.get("weight", 400)), "color": inp_col, "align": node.get("align", "left")} if inp_txt else {}),
             })
             return make_axvg_vector_shape(
                 next_id(), bg_name, nx, ny, nw, nh,
@@ -2667,6 +3021,9 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                     flat_spec_children.append({
                         "kind": "text", "name": name, "x": tx, "y": ny, "w": tw_box, "h": nh,
                         "fill": None, "stroke": None, "radius": 0, "text": txt, "size": fsz, "weight": fwt, "color": txt_h, "align": aln, "inModal": cur_modal,
+                        **({"letterSpacing": node["letterSpacing"]} if node.get("letterSpacing") else {}),
+                        **({"lineHeight": node["lineHeight"]} if node.get("lineHeight") else {}),
+                        **({"wrap": True} if node.get("wrap") else {}),
                         **({"spans": resolved_spans} if resolved_spans else {}),
                         **({"worstCase": node["_worst_case"]} if "_worst_case" in node else {}),
                     })
@@ -2736,6 +3093,9 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 "name": name, "x": nx, "y": ny, "w": nw, "h": nh,
                 "fill": fill_h, "stroke": stroke_h, "radius": rad,
                 "text": txt, "size": fsz, "weight": fwt, "color": txt_h, "align": aln, "inModal": cur_modal,
+                **({"letterSpacing": node["letterSpacing"]} if node.get("letterSpacing") else {}),
+                **({"lineHeight": node["lineHeight"]} if node.get("lineHeight") else {}),
+                **({"wrap": True} if node.get("wrap") else {}),
                 **({"spans": resolved_spans} if resolved_spans else {}),
                 **({"worstCase": node["_worst_case"]} if "_worst_case" in node else {}),
             })
@@ -2753,7 +3113,22 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
         rad = node.get("radius", 0)
         bg_name = node.get("bgName", f"bg-{name}")
         child_items = []
-        if _has_optical_fx(node):
+        _grad = _parse_gradient_spec(node, theme_dict) if os.environ.get("AXURE_VECTOR_GRADIENT") == "1" else None
+        if _grad:
+            if cur_modal:
+                modal_targets.append(bg_name)
+            flat_spec_children.append({
+                "kind": "rect", "name": bg_name, "x": nx, "y": ny, "w": nw, "h": nh,
+                "fill": None, "stroke": stroke_h, "radius": rad, "inModal": cur_modal, "gradient": _grad,
+            })
+            child_items.append(make_axvg_vector_shape(
+                next_id(), bg_name, nx, ny, nw, nh, fill_hex=None,
+                stroke_hex=stroke_h, radius=rad, alpha=float(node.get("opacity", 1.0)),
+                stroke_width=float(node.get("strokeWidth", 1)), border_sides=_node_border_sides(node),
+                gradient=_grad,
+            ))
+            _grad = None if child_items else _grad
+        elif _has_optical_fx(node):
             if cur_modal:
                 modal_targets.append(bg_name)
             opt_k, opt_b64 = _render_optical_layer(node, nx, ny, nw, nh, fill_h, stroke_h, rad, theme_dict, backdrop_canvas)
@@ -2767,6 +3142,8 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
             if cur_modal:
                 modal_targets.append(bg_name)
             if fill_h and fill_h != "transparent":
+                if nw <= 0 or nh <= 0:
+                    raise ValueError(f"节点 {node.get('name') or node.get('id')} 的尺寸非法（{nw}x{nh}）；请在源码中改为正数")
                 ImageDraw.Draw(backdrop_canvas, "RGBA").rounded_rectangle(
                     [nx, ny, nx + nw - 1, ny + nh - 1],
                     radius=max(0, min(int(rad or 0), min(nw, nh) // 2)),
@@ -2783,13 +3160,37 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                     alpha=float(node.get("opacity", 1.0)), stroke_width=float(node.get("strokeWidth", 1)), border_sides=_node_border_sides(node),
                 )
             )
+        sub_items = []
         for ch in node.get("children", []):
             emitted = walk(ch, cur_modal)
             if emitted is not None:
                 if isinstance(emitted, list):
-                    child_items.extend(emitted)
+                    sub_items.extend(emitted)
                 else:
-                    child_items.append(emitted)
+                    sub_items.append(emitted)
+        child_items.extend(sub_items)
+        if not sub_items:
+            raw_bg = node.get("bgName")
+            leaf_name = raw_bg if (raw_bg and not str(raw_bg).startswith("bg-")) else name
+            if child_items and not node.get("isGroup", False):
+                child_items[0]["name"] = leaf_name
+                if flat_spec_children and flat_spec_children[-1].get("name") == bg_name:
+                    flat_spec_children[-1]["name"] = leaf_name
+                if cur_modal and modal_targets and modal_targets[-1] == bg_name:
+                    modal_targets[-1] = leaf_name
+                return child_items[0]
+            if not child_items and not str(leaf_name).startswith("sp-") and not node.get("isGroup", False) and node is not root_node:
+                if cur_modal:
+                    modal_targets.append(leaf_name)
+                flat_spec_children.append({
+                    "kind": "rect", "name": leaf_name, "x": nx, "y": ny, "w": nw, "h": nh,
+                    "fill": "#FFFFFF00", "stroke": None, "radius": 0, "inModal": cur_modal,
+                })
+                return make_axvg_vector_shape(
+                    next_id(), leaf_name, nx, ny, nw, nh,
+                    fill_hex="#FFFFFF00", stroke_hex=None, radius=0,
+                    alpha=float(node.get("opacity", 1.0)), stroke_width=0, border_sides=0,
+                )
         if not child_items:
             return None
         if node.get("isGroup", False):
@@ -2830,6 +3231,12 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
     bg_hex = (resolve_color(root_node.get("fill", "$bg"), theme_dict) or "#F4F6F9") if canvas_background else "#00000000"
     bg_color_obj = hex_to_rgb_float(bg_hex, 1.0)
     frame_name = root_node.get("name", "Page")
+    shell_opts = root_node.get("_phone_shell_opts")
+    if not shell_opts:
+        for ch in (root_node.get("children") or []):
+            if isinstance(ch, dict) and ch.get("_phone_shell_opts"):
+                shell_opts = ch.get("_phone_shell_opts")
+                break
     axvg_doc = {
         "masters": {},
         "imageMap": image_map,
@@ -2877,16 +3284,24 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
         "repeaters": repeaters,
         "nativeInputs": native_inputs,
         "modalTargets": modal_targets,
+        "phoneShellOpts": shell_opts,
+        "screenBgHex": resolve_color(root_node.get("fill", "$bg"), theme_dict) or "#F4F6F9",
     }
 
 
 def compose_device_shell(emitted, page_prefix, shell_name="iphone-x"):
-    """将已发射的内屏 (375×812 或 375×667) 自动装入内置手机壳画板 (420×860 或 430×866)，叠加透明 PNG 外框、状态栏与 Home Indicator。"""
+    """将已发射的内屏 (375×812、393×852 或 402×874) 自动装入内置手机壳画板，叠加外框、状态栏与 Home Indicator。"""
     manifest_path = os.path.join(ASSETS_SPEC_DIR, "manifest.json")
     with open(manifest_path, "r", encoding="utf-8") as f:
         manifest = json.load(f)
     shells = manifest.get("shells", {})
-    shell_cfg = shells.get(shell_name) or shells.get("iphone-x")
+    modern_shells = {
+        "iphone-17": {"outerSize": [442, 914], "screenRect": [20, 20, 402, 874], "synthetic": True},
+        "iphone-17-pro": {"outerSize": [442, 914], "screenRect": [20, 20, 402, 874], "synthetic": True},
+        "iphone-16": {"outerSize": [433, 892], "screenRect": [20, 20, 393, 852], "synthetic": True},
+        "iphone-16-pro": {"outerSize": [433, 892], "screenRect": [20, 20, 393, 852], "synthetic": True},
+    }
+    shell_cfg = shells.get(shell_name) or modern_shells.get(shell_name) or shells.get("iphone-x")
     outer_w, outer_h = shell_cfg["outerSize"]
     sx, sy, sw, sh = shell_cfg["screenRect"]
 
@@ -2900,6 +3315,13 @@ def compose_device_shell(emitted, page_prefix, shell_name="iphone-x"):
         if r and "location" in r:
             r["location"]["x"] = int(r["location"]["x"]) + sx
             r["location"]["y"] = int(r["location"]["y"]) + sy
+            if shell_cfg.get("synthetic") and it.get("itemType") == 1:
+                loc = r["location"]
+                sz = r.get("size") or {}
+                if loc.get("x") == sx and loc.get("y") == sy and sz.get("width") == sw and sz.get("height") >= sh - 40:
+                    cur_c = (it.get("corners") or [0])[0]
+                    if cur_c < 44:
+                        it["corners"] = [44, 44, 44, 44]
         for ch in (it.get("scene") or {}).get("items", []):
             translate_axvg_item(ch)
 
@@ -2912,30 +3334,114 @@ def compose_device_shell(emitted, page_prefix, shell_name="iphone-x"):
     for ni in emitted.get("nativeInputs", []):
         ni["x"] += sx
         ni["y"] += sy
+    for instance in emitted.get("masterInstances", []):
+        instance["x"] += sx
+        instance["y"] += sy
 
+    underlay_widgets = []
+    underlay_specs = []
     overlay_widgets = []
     overlay_specs = []
     img_map = dict(axvg.get("imageMap") or {})
 
-    for piece in shell_cfg.get("pieces", []):
-        img_info = load_image_asset(piece["file"])
-        img_map[img_info["key"]] = img_info["b64"]
-        ov_name = f"{page_prefix}-img-device-{piece['name']}"
-        px, py, pw, ph = piece["x"], piece["y"], piece["w"], piece["h"]
-        overlay_widgets.append(make_axvg_image_shape(f"id-{ov_name}", ov_name, px, py, pw, ph, img_info["key"]))
-        overlay_specs.append({
-            "kind": "image",
-            "name": ov_name,
-            "x": px,
-            "y": py,
-            "w": pw,
-            "h": ph,
-            "imageKey": img_info["key"],
-            "pngPath": img_info["path"],
-            "inModal": False,
+    if shell_cfg.get("synthetic"):
+        shell_opts = emitted.get("phoneShellOpts") or {}
+        screen_bg = emitted.get("screenBgHex") or "#FAF8F4"
+        side_buttons = [
+            ("btn-action", 2, 150, 4, 26),
+            ("btn-vol-up", 2, 198, 4, 52),
+            ("btn-vol-dn", 2, 264, 4, 52),
+            ("btn-power", outer_w - 6, 208, 4, 84),
+            ("btn-camera", outer_w - 6, 320, 4, 40),
+        ]
+        for b_tag, bx, by, bw, bh in side_buttons:
+            bnm = f"{page_prefix}-img-device-{b_tag}"
+            underlay_widgets.append(
+                make_axvg_vector_shape(f"id-{bnm}", bnm, bx, by, bw, bh, fill_hex="#52525B", radius=2)
+            )
+            underlay_specs.append({
+                "kind": "rect", "name": bnm, "x": bx, "y": by, "w": bw, "h": bh,
+                "fill": "#52525B", "stroke": None, "radius": 2, "inModal": False, "_deviceShellPiece": True,
+            })
+        rim_nm = f"{page_prefix}-img-device-frame-rim"
+        underlay_widgets.append(
+            make_axvg_vector_shape(f"id-{rim_nm}", rim_nm, 6, 6, outer_w - 12, outer_h - 12, fill_hex="#3F3F46", stroke_hex="#71717A", radius=56, stroke_width=1.5)
+        )
+        underlay_specs.append({
+            "kind": "rect", "name": rim_nm, "x": 6, "y": 6, "w": outer_w - 12, "h": outer_h - 12,
+            "fill": "#3F3F46", "stroke": "#71717A", "radius": 56, "inModal": False, "_deviceShellPiece": True,
         })
+        bezel_nm = f"{page_prefix}-img-device-frame-bezel"
+        underlay_widgets.append(
+            make_axvg_vector_shape(f"id-{bezel_nm}", bezel_nm, 10, 10, outer_w - 20, outer_h - 20, fill_hex="#09090B", stroke_hex="#27272A", radius=52, stroke_width=1)
+        )
+        underlay_specs.append({
+            "kind": "rect", "name": bezel_nm, "x": 10, "y": 10, "w": outer_w - 20, "h": outer_h - 20,
+            "fill": "#09090B", "stroke": "#27272A", "radius": 52, "inModal": False, "_deviceShellPiece": True,
+        })
+        scr_nm = f"{page_prefix}-img-device-screen-base"
+        underlay_widgets.append(
+            make_axvg_vector_shape(f"id-{scr_nm}", scr_nm, sx, sy, sw, sh, fill_hex=screen_bg, radius=44)
+        )
+        underlay_specs.append({
+            "kind": "rect", "name": scr_nm, "x": sx, "y": sy, "w": sw, "h": sh,
+            "fill": screen_bg, "stroke": None, "radius": 44, "inModal": False, "_deviceShellPiece": True,
+        })
+        if shell_opts.get("darkIsland", True) is not False:
+            island_w, island_h = 122, 34
+            island_x = sx + (sw - island_w) // 2
+            island_y = sy + 10
+            island_nm = f"{page_prefix}-img-device-dynamic-island"
+            overlay_widgets.append(
+                make_axvg_vector_shape(f"id-{island_nm}", island_nm, island_x, island_y, island_w, island_h, fill_hex="#09090B", radius=12)
+            )
+            overlay_specs.append({
+                "kind": "rect", "name": island_nm, "x": island_x, "y": island_y, "w": island_w, "h": island_h,
+                "fill": "#09090B", "stroke": None, "radius": 17, "inModal": False, "_deviceShellPiece": True,
+            })
+            cam_nm = f"{page_prefix}-img-device-island-lens"
+            cam_x = island_x + island_w - 22
+            cam_y = island_y + 11
+            overlay_widgets.append(
+                make_axvg_vector_shape(f"id-{cam_nm}", cam_nm, cam_x, cam_y, 10, 10, fill_hex="#1B2431", stroke_hex="#2B3546", radius=5, stroke_width=1)
+            )
+            overlay_specs.append({
+                "kind": "rect", "name": cam_nm, "x": cam_x, "y": cam_y, "w": 12, "h": 12,
+                "fill": "#1B2431", "stroke": "#2B3546", "radius": 5, "inModal": False, "_deviceShellPiece": True,
+            })
+        if shell_opts.get("showHomeIndicator", True) is not False:
+            hi_w, hi_h = 134, 5
+            hi_x = sx + (sw - hi_w) // 2
+            hi_y = sy + sh - 12
+            hi_nm = f"{page_prefix}-img-device-home-indicator"
+            overlay_widgets.append(
+                make_axvg_vector_shape(f"id-{hi_nm}", hi_nm, hi_x, hi_y, hi_w, hi_h, fill_hex="#18181B", radius=999)
+            )
+            overlay_specs.append({
+                "kind": "rect", "name": hi_nm, "x": hi_x, "y": hi_y, "w": hi_w, "h": hi_h,
+                "fill": "#18181B", "stroke": None, "radius": 999, "inModal": False, "_deviceShellPiece": True,
+            })
+    else:
+        for piece in shell_cfg.get("pieces", []):
+            img_info = load_image_asset(piece["file"])
+            img_map[img_info["key"]] = img_info["b64"]
+            ov_name = f"{page_prefix}-img-device-{piece['name']}"
+            px, py, pw, ph = piece["x"], piece["y"], piece["w"], piece["h"]
+            overlay_widgets.append(make_axvg_image_shape(f"id-{ov_name}", ov_name, px, py, pw, ph, img_info["key"]))
+            overlay_specs.append({
+                "kind": "image",
+                "name": ov_name,
+                "x": px,
+                "y": py,
+                "w": pw,
+                "h": ph,
+                "imageKey": img_info["key"],
+                "pngPath": img_info["path"],
+                "inModal": False,
+                "_deviceShellPiece": True,
+            })
 
-    frame["scene"]["items"] = content_items + overlay_widgets
+    frame["scene"]["items"] = underlay_widgets + content_items + overlay_widgets
     frame["name"] = f"frame-{page_prefix}"
     frame["rect"] = {"location": {"x": 0, "y": 0}, "size": {"width": outer_w, "height": outer_h}}
     frame["backgroundFill"] = {"type": 1, "enabled": True, "color": hex_to_rgb_float("#FFFFFF", 1.0)}
@@ -2944,11 +3450,14 @@ def compose_device_shell(emitted, page_prefix, shell_name="iphone-x"):
     )
     axvg["imageMap"] = img_map
 
-    shifted_flat = []
+    shifted_flat = list(underlay_specs)
     for ch in emitted["flatChildren"]:
         c2 = dict(ch)
-        c2["x"] = int(c2.get("x", 0)) + sx
-        c2["y"] = int(c2.get("y", 0)) + sy
+        orig_x, orig_y = int(c2.get("x", 0)), int(c2.get("y", 0))
+        c2["x"] = orig_x + sx
+        c2["y"] = orig_y + sy
+        if shell_cfg.get("synthetic") and c2.get("kind") == "rect" and orig_x == 0 and orig_y == 0 and int(c2.get("w", 0)) == sw and int(c2.get("h", 0)) >= sh - 40:
+            c2["radius"] = max(int(c2.get("radius") or 0), 44)
         shifted_flat.append(c2)
     shifted_flat.extend(overlay_specs)
 
@@ -3016,9 +3525,11 @@ def text_ink_geometry(child, scale=1):
     width = max(1, int(round(child["w"] * scale)))
     height = max(1, int(round(child["h"] * scale)))
     font_size = max(8, int(round(int(child.get("size", 14)) * scale)))
-    font = load_font(font_size, int(child.get("weight", 400)))
+    font_weight = int(child.get("weight", 400))
+    font = load_font(font_size, font_weight)
     spans = child.get("spans")
     dummy_draw = ImageDraw.Draw(Image.new("L", (1, 1)))
+    padding = 8 * scale if (child.get("fill") or child.get("stroke")) else 0
     if isinstance(spans, list) and spans:
         tot_w = 0
         max_h = 0
@@ -3029,19 +3540,55 @@ def text_ink_geometry(child, scale=1):
                 continue
             s_sz = max(8, int(round(int(sp.get("fontSize", sp.get("size", child.get("size", 14)))) * scale)))
             s_wt = int(sp.get("fontWeight", sp.get("weight", ch.get("weight", 400) if "ch" in locals() else child.get("weight", 400))))
-            sf = load_font(s_sz, s_wt)
-            sb = dummy_draw.textbbox((0, 0), stxt, font=sf)
-            tot_w += (sb[2] - sb[0])
-            max_h = max(max_h, sb[3] - sb[1])
-            min_y = min(min_y, sb[1]) if min_y else sb[1]
+            sw, sh, sy0 = _measure_line_with_fallbacks(stxt, s_sz, s_wt)
+            tot_w += sw
+            max_h = max(max_h, sh)
+            min_y = min(min_y, sy0) if min_y else sy0
         ink_w, ink_h = tot_w, max_h
         bbox = (0, min_y, ink_w, min_y + ink_h)
     else:
         text = str(child.get("text", ""))
-        bbox = dummy_draw.textbbox((0, 0), text, font=font)
-        ink_w, ink_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
-    padding = 8 * scale if (child.get("fill") or child.get("stroke")) else 0
-    align = child.get("align", "center") if False else child.get("align", "left")
+        if all(is_glyph_renderable_in_pingfang(c) for c in text):
+            bbox = dummy_draw.textbbox((0, 0), text, font=font)
+            ink_w, ink_h = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        else:
+            ink_w, ink_h, min_y = _measure_line_with_fallbacks(text, font_size, font_weight)
+            bbox = (0, min_y, ink_w, min_y + ink_h)
+        avail_w = max(1, width - 2 * padding)
+        can_multiline = (
+            (child.get("kind") != "rect" or bool(child.get("wrap")))
+            and (not child.get("worstCase") or bool(child.get("wrap")))
+            and (height >= int(round(font_size * 2.1)) or "\n" in text or bool(child.get("wrap")))
+        )
+        if can_multiline and (ink_w > avail_w or "\n" in text):
+            fsz_1x = max(8, int(child.get("size", 14)))
+            avail_w_1x = max(1, int(round(avail_w / float(scale))) - 2)
+            wrapped_lines = wrap_text(text, avail_w_1x, fsz_1x, font_weight)
+            if len(wrapped_lines) > 1:
+                line_metrics = []
+                for ln in wrapped_lines:
+                    if not ln:
+                        line_metrics.append((0, font_size, 0))
+                    elif all(is_glyph_renderable_in_pingfang(c) for c in ln):
+                        lb = dummy_draw.textbbox((0, 0), ln, font=font)
+                        line_metrics.append((lb[2] - lb[0], lb[3] - lb[1], lb[1]))
+                    else:
+                        lw, lh, lmy = _measure_line_with_fallbacks(ln, font_size, font_weight)
+                        line_metrics.append((lw, lh, lmy))
+                max_lh = max((m[1] for m in line_metrics), default=font_size)
+                _lh_override = child.get("lineHeight")
+                line_step = int(round(float(_lh_override))) if isinstance(_lh_override, (int, float)) and _lh_override > 0 \
+                    else max(int(round(font_size * 1.35)), max_lh)
+                ink_w = max((m[0] for m in line_metrics), default=0)
+                ink_h = (len(line_metrics) - 1) * line_step + line_metrics[-1][1]
+                first_my = line_metrics[0][2]
+                bbox = (0, first_my, ink_w, first_my + ink_h)
+    _ls = child.get("letterSpacing")
+    if isinstance(_ls, (int, float)) and _ls and not isinstance(_ls, bool):
+        _txt = str(child.get("text", ""))
+        if _txt:
+            ink_w = ink_w + float(_ls) * scale * max(0, len(_txt) - 1)
+    align = child.get("align", "left")
     if align == "center":
         tx = x + (width - ink_w) // 2
     elif align == "right":
@@ -3052,6 +3599,42 @@ def text_ink_geometry(child, scale=1):
     return font, tx, ty, [tx + bbox[0], ty + bbox[1], ink_w, ink_h]
 
 
+def _draw_text_with_fallbacks(draw, xy, text_str, font_size, font_weight, fill_rgba):
+    f_main = load_font(font_size, font_weight)
+    if all(is_glyph_renderable_in_pingfang(c) for c in text_str):
+        draw.text(xy, text_str, font=f_main, fill=fill_rgba)
+        return
+    cur_x, cur_y = xy
+    for ch in text_str:
+        if is_glyph_renderable_in_pingfang(ch):
+            f_use = f_main
+        else:
+            fp = resolve_glyph_font_path(ch)
+            f_use = load_fallback_font(fp, font_size) if fp and fp != "PingFang.ttc" else f_main
+        draw.text((cur_x, cur_y), ch, font=f_use, fill=fill_rgba)
+        try:
+            bb = f_use.getbbox(ch)
+            cur_x += max(int(round(font_size * 0.55)) if not is_glyph_renderable_in_pingfang(ch) else 0, bb[2] - bb[0])
+        except Exception:
+            cur_x += int(round(font_size * 0.75))
+
+
+
+def _draw_text_spaced(draw, xy, text_str, font_size, font_weight, fill_rgba, spacing):
+    """按字距逐字绘制；spacing<=0 时退回整段绘制。"""
+    if not spacing:
+        _draw_text_with_fallbacks(draw, xy, text_str, font_size, font_weight, fill_rgba)
+        return
+    cur_x = xy[0]
+    for ch in text_str:
+        _draw_text_with_fallbacks(draw, (cur_x, xy[1]), ch, font_size, font_weight, fill_rgba)
+        try:
+            f = load_font(font_size, font_weight)
+            cur_x += max(1, f.getbbox(ch)[2] - f.getbbox(ch)[0]) + spacing
+        except Exception:
+            cur_x += int(round(font_size * 0.75)) + spacing
+
+
 def draw_child_item(draw, ch, scale=1, base_img=None):
     s = max(1, int(scale))
     x = int(round(ch["x"] * s))
@@ -3059,7 +3642,11 @@ def draw_child_item(draw, ch, scale=1, base_img=None):
     cw = max(1, int(round(ch["w"] * s)))
     ch_val = max(1, int(round(ch["h"] * s)))
     fill_h = ch.get("fill")
+    if isinstance(fill_h, str) and fill_h.strip().lower() in ("transparent", "none"):
+        fill_h = None
     stroke_h = ch.get("stroke")
+    if isinstance(stroke_h, str) and stroke_h.strip().lower() in ("transparent", "none"):
+        stroke_h = None
     rad = max(0, min(int(round((ch.get("radius", 0) or 0) * s)), min(cw, ch_val) // 2))
     if fill_h or stroke_h:
         fill_rgba = hex_to_rgba_tuple(fill_h, 1.0) if fill_h else None
@@ -3081,9 +3668,12 @@ def draw_child_item(draw, ch, scale=1, base_img=None):
                 outline=stroke_rgba,
                 width=max(1, s) if stroke_rgba else 0,
             )
-    txt = ch.get("text")
+    txt = ch.get("text") if ch.get("text") is not None else ch.get("previewText")
     if txt is not None and str(txt) != "":
-        font, tx, ty, ink_rect = text_ink_geometry(ch, scale=s)
+        ch_geom = {**ch, "text": txt} if ch.get("text") is None else ch
+        font, tx, ty, ink_rect = text_ink_geometry(ch_geom, scale=s)
+        font_size = max(8, int(round(int(ch.get("size", 14)) * s)))
+        font_weight = int(ch.get("weight", 400))
         spans = ch.get("spans")
         if isinstance(spans, list) and spans:
             cur_x = tx
@@ -3094,16 +3684,39 @@ def draw_child_item(draw, ch, scale=1, base_img=None):
                     continue
                 s_sz = max(8, int(round(int(sp.get("fontSize", sp.get("size", ch.get("size", 14)))) * s)))
                 s_wt = int(sp.get("fontWeight", sp.get("weight", ch.get("weight", 400))))
-                sf = load_font(s_sz, s_wt)
-                sb = draw.textbbox((0, 0), stxt, font=sf)
-                sw = sb[2] - sb[0]
-                sy = base_bottom - sb[3]
+                sw, sh, sy0 = _measure_line_with_fallbacks(stxt, s_sz, s_wt)
+                sy = base_bottom - (sy0 + sh)
                 scol = hex_to_rgba_tuple(sp.get("_resolved_color") or sp.get("color") or ch.get("color", "#1E293B"), 1.0)
-                draw.text((cur_x, sy), stxt, font=sf, fill=scol)
+                _draw_text_with_fallbacks(draw, (cur_x, sy), stxt, s_sz, s_wt, scol)
                 cur_x += sw
         else:
             color_rgba = hex_to_rgba_tuple(ch.get("color", "#1E293B"), 1.0)
-            draw.text((tx, ty), str(txt), font=font, fill=color_rgba)
+            padding = 8 * s if (ch.get("fill") or ch.get("stroke")) else 0
+            avail_w = max(1, cw - 2 * padding)
+            text_str = str(txt)
+            can_multiline = (
+                (ch.get("kind") != "rect" or bool(ch.get("wrap")))
+                and (not ch.get("worstCase") or bool(ch.get("wrap")))
+                and (ch_val >= int(round(font_size * 2.1)) or "\n" in text_str or bool(ch.get("wrap")))
+            )
+            wrapped_lines = None
+            if can_multiline:
+                fsz_1x = max(8, int(ch.get("size", 14)))
+                avail_w_1x = max(1, int(round(avail_w / float(s))) - 2)
+                cand_lines = wrap_text(text_str, avail_w_1x, fsz_1x, font_weight)
+                if len(cand_lines) > 1:
+                    wrapped_lines = cand_lines
+            _spacing = float(ch.get("letterSpacing") or 0) * s
+            if wrapped_lines:
+                _lh = ch.get("lineHeight")
+                line_step = int(round(float(_lh) * s)) if isinstance(_lh, (int, float)) and _lh > 0 \
+                    else max(int(round(font_size * 1.35)), font_size)
+                for idx, ln in enumerate(wrapped_lines):
+                    if not ln:
+                        continue
+                    _draw_text_spaced(draw, (tx, ty + idx * line_step), ln, font_size, font_weight, color_rgba, _spacing)
+            else:
+                _draw_text_spaced(draw, (tx, ty), text_str, font_size, font_weight, color_rgba, _spacing)
 
 
 def render_structure_overlay_png(base_img, root_node, dynamic_panels, dx=0, dy=0):
@@ -3161,7 +3774,7 @@ def count_axvg_group_coverage(axvg_doc):
                 visit(it.get("scene", {}).get("items", []), True)
             else:
                 total_leaves += 1
-                if inside_group or nm.endswith(("-img-device-frame-top", "-img-device-frame-left", "-img-device-frame-right", "-img-device-frame-bottom", "-img-device-status-bar", "-img-device-home-indicator")):
+                if inside_group or "-img-device-" in nm:
                     grouped_leaves += 1
                 else:
                     ungrouped_names.append(nm or "<UnnamedLeaf>")
@@ -3218,12 +3831,53 @@ def ensure_unique_names(root_node, scope_prefix=""):
 def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False):
     """执行领域自适应的两级量化审计：结构与安全门禁 (硬失败) + 审美与令牌门禁 (默认告警，--strict-audit 下升级为硬失败)。"""
     flat = [c for c in emitted_preview["flatChildren"] if not c.get("inModal") and not c.get("_repeaterPreviewExtraRow")]
+    # 遮挡审计：文字墨迹被后续不透明图元大面积覆盖时告警（此前完全无检查，容易“全绿但难看”）
+    _opaque_later = []
+    for _idx, _ch in enumerate(flat):
+        _fill = str(_ch.get("fill") or "")
+        _is_text = bool(_ch.get("text")) or _ch.get("kind") in ("text", "para")
+        _opaque = (not _is_text) and _fill and not _fill.endswith("00") and _fill.upper() not in ("#FFFFFF00", "TRANSPARENT", "NONE")
+        _opaque_later.append((_idx, _ch, _opaque))
+    _occluded = []
+    for _idx, _ch, _ in _opaque_later:
+        if not (bool(_ch.get("text")) or _ch.get("kind") in ("text", "para")):
+            continue
+        try:
+            _font, _tx, _ty, _ink = text_ink_geometry(dict(_ch))
+        except Exception:
+            continue
+        _area = max(1.0, _ink[2] * _ink[3])
+        for _jdx, _other, _is_opaque in _opaque_later[_idx + 1:]:
+            if not _is_opaque:
+                continue
+            _ox, _oy, _ow, _oh = _other.get("x", 0), _other.get("y", 0), _other.get("w", 0), _other.get("h", 0)
+            _x0, _y0 = max(_ink[0], _ox), max(_ink[1], _oy)
+            _x1, _y1 = min(_ink[0] + _ink[2], _ox + _ow), min(_ink[1] + _ink[3], _oy + _oh)
+            if _x1 > _x0 and _y1 > _y0 and ((_x1 - _x0) * (_y1 - _y0)) / _area > 0.5:
+                _occluded.append(f"{_ch.get('name') or _ch.get('id')} 被后声明的 {_other.get('name') or _other.get('id')} 遮挡 {int(round(((_x1-_x0)*(_y1-_y0))/_area*100))}%")
+                break
     dev_info = emitted_preview.get("device")
     canvas_w = dev_info["w"] if dev_info else root_node["_w"]
     canvas_h = dev_info["h"] if dev_info else root_node["_h"]
     canvas_area = float(max(1, canvas_w * canvas_h))
-    domain = compile_plan.get("domain") or ("mobile" if (dev_info or str(compile_plan.get("theme", "")).startswith("mobile-")) else "web")
-    is_mobile_or_doc = bool(dev_info) or domain in ("mobile", "doc") or str(compile_plan.get("theme", "")).startswith("mobile-")
+    effective_screen_area = (
+        float(max(1, int(dev_info.get("screenW", canvas_w)) * int(dev_info.get("screenH", canvas_h))))
+        if dev_info
+        else canvas_area
+    )
+    raw_syms = compile_plan.get("sourceSymbols") or []
+    sym_list = raw_syms.values() if isinstance(raw_syms, dict) else raw_syms
+    sym_displays = [str(v.get("display", "")) for v in sym_list if isinstance(v, dict)]
+    has_mobile_shell = any(
+        any(k in d for k in ("设备 /", "PhoneShell", "灵动岛", "Home Indicator", "状态栏"))
+        for d in sym_displays
+    ) or any(
+        "-img-device-" in str(c.get("name", ""))
+        or any(k in str(c.get("name", "")) for k in ("phone_shell", "home_indicator", "island"))
+        for c in flat
+    ) or (canvas_w <= 500 and canvas_h >= 750 and canvas_h >= canvas_w * 1.7)
+    domain = compile_plan.get("domain") or ("mobile" if (dev_info or has_mobile_shell or str(compile_plan.get("theme", "")).startswith("mobile-")) else "web")
+    is_mobile_or_doc = bool(dev_info) or has_mobile_shell or domain in ("mobile", "doc") or str(compile_plan.get("theme", "")).startswith("mobile-")
     is_small_or_test = domain == "test" or canvas_area < 200000.0
 
     # 1. 对齐误差
@@ -3235,14 +3889,25 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
 
     # 2. 间距与圆角令牌合规率
     spacing_checks = []
+    spacing_violations = []
     def check_tree_tokens(n):
+        nm = n.get("name") or n.get("type") or "node"
         if "gap" in n and n["gap"] is not None and "_paragraphGap" not in n:
-            spacing_checks.append(int(n["gap"]) in SPACING_TOKENS)
+            ok = int(n["gap"]) in SPACING_TOKENS
+            spacing_checks.append(ok)
+            if not ok:
+                spacing_violations.append(f"{nm}.gap={n['gap']}")
         if "padding" in n and n["padding"] is not None:
             for pv in parse_padding(n["padding"]):
-                spacing_checks.append(int(pv) in SPACING_TOKENS)
+                ok = int(pv) in SPACING_TOKENS
+                spacing_checks.append(ok)
+                if not ok:
+                    spacing_violations.append(f"{nm}.padding={pv}")
         if "radius" in n and n["radius"] is not None:
-            spacing_checks.append(int(n["radius"]) in RADIUS_TOKENS)
+            ok = int(n["radius"]) in RADIUS_TOKENS
+            spacing_checks.append(ok)
+            if not ok:
+                spacing_violations.append(f"{nm}.radius={n['radius']}")
         for ch in n.get("children", []):
             check_tree_tokens(ch)
     check_tree_tokens(root_node)
@@ -3252,9 +3917,15 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
 
     # 3. 字体字阶合规率
     font_checks = []
+    font_violations = []
     for c in flat:
         if c.get("text"):
-            font_checks.append(int(c.get("size", 14)) in FONT_SIZE_TOKENS and int(c.get("weight", 400)) in FONT_WEIGHT_TOKENS)
+            sz = int(c.get("size", 14))
+            wt = int(c.get("weight", 400))
+            ok = sz in FONT_SIZE_TOKENS and wt in FONT_WEIGHT_TOKENS
+            font_checks.append(ok)
+            if not ok:
+                font_violations.append(f"{c.get('name', 'text')}(size={sz},weight={wt})")
     font_passed = sum(1 for ok in font_checks if ok)
     font_total = len(font_checks)
     font_compliance_pct = round(100.0 * font_passed / font_total, 2) if font_total else None
@@ -3265,22 +3936,30 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
     for c in flat:
         if c.get("_whenHiddenPreview"):
             continue
-        if c.get("kind") == "image" and "-img-device-" in str(c.get("name", "")):
+        if c.get("_deviceShellPiece") or "-img-device-" in str(c.get("name", "")):
+            continue
+        _c_fill = str(c.get("fill") or "").strip().lower()
+        _c_strk = str(c.get("stroke") or "").strip().lower()
+        if not c.get("text") and c.get("kind") != "image" and _c_fill in ("", "transparent", "none") and _c_strk in ("", "transparent", "none"):
             continue
         area = c["w"] * c["h"]
-        if area > canvas_area * 0.10 and not c.get("text"):
+        if area > effective_screen_area * 0.10 and not c.get("text"):
             continue
         fg_draw.rectangle([c["x"], c["y"], c["x"] + c["w"] - 1, c["y"] + c["h"] - 1], fill=255)
     hist = fg_mask.histogram()
     fg_pixels = sum(hist[1:])
-    whitespace_ratio_pct = round(100.0 * (1.0 - fg_pixels / canvas_area), 2)
+    whitespace_ratio_pct = round(max(0.0, min(100.0, 100.0 * (1.0 - fg_pixels / effective_screen_area))), 2)
 
     # 5. 色彩收敛度
     raw_colors = set()
     for c in flat:
+        if c.get("_deviceShellPiece") or "-img-device-" in str(c.get("name", "")):
+            continue
         for k in ("fill", "stroke", "color"):
             if c.get(k):
-                col_s = str(c[k]).upper()
+                col_s = str(c[k]).strip().upper()
+                if col_s in ("TRANSPARENT", "NONE") or (col_s.startswith("#") and len(col_s) == 9 and col_s.endswith("00")):
+                    continue
                 raw_colors.add(col_s[:7] if col_s.startswith("#") and len(col_s) == 9 else col_s)
     colors = []
     for col_s in sorted(raw_colors):
@@ -3353,13 +4032,32 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
                     ],
                     "detail": f"数据集第 {wc.get('worstRowIndex', 0)} 行极值文字 '{wc_txt[:30]}' 墨迹 {wiw}×{wih}px 超出声明盒子 {a['w']}×{a['h']}px",
                 })
-        _bad = find_unrenderable_glyphs(txt_str)
-        if _bad:
+        _allow_fallback = bool(
+            compile_plan.get("language") == "rp/1"
+            or str(compile_plan.get("language", "")).startswith("rp/")
+            or compile_plan.get("sourceSymbols")
+            or compile_plan.get("allowFallbackFonts")
+        )
+        _bad_details = describe_unrenderable_glyphs(txt_str, allow_fallback=_allow_fallback)
+        if _bad_details:
+            _bad_chars = [d["char"] for d in _bad_details]
+            _bad_cps = [d["codepoint"] for d in _bad_details]
+            _bad_sugs = [d["suggestion"] for d in _bad_details if d.get("suggestion")]
             missing_glyph_count += 1
-            failures.append({"gate": "no_missing_glyphs", "severity": "structural",
-                             "widget": a.get("name", ""), "text": txt_str[:80],
-                             "chars": list(_bad), "box": [a["x"], a["y"], a["w"], a["h"]],
-                             "detail": f"{len(_bad)} 个字符在 PingFang 中零墨水高度"})
+            failures.append({
+                "gate": "no_missing_glyphs",
+                "severity": "structural",
+                "page": compile_plan.get("pageName", ""),
+                "widget": a.get("name", ""),
+                "text": txt_str[:80],
+                "chars": _bad_chars,
+                "codepoints": _bad_cps,
+                "glyphDetails": _bad_details,
+                "measurementFont": _bad_details[0].get("measurementFont", "PingFang.ttc"),
+                "suggestion": "；".join(_bad_sugs) if _bad_sugs else "请替换为 ASCII/常规中文字符或 SVG 图标",
+                "box": [a["x"], a["y"], a["w"], a["h"]],
+                "detail": f"{len(_bad_chars)} 个字符 ({', '.join(f'{c}[{cp}]' for c, cp in zip(_bad_chars, _bad_cps))}) 零墨水高度",
+            })
         nm_str = str(a.get("name", ""))
         t_strip = txt_str.strip()
         m_line = re.search(r"-l(\d+)$", nm_str)
@@ -3380,6 +4078,8 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
                                  "detail": f"行尾出现避尾标点 '{t_strip[-1]}'"})
         ctx_a = {wg: wb for wg, wb, _ in (a.get("_whenCtx") or ())}
         for b in text_boxes[i + 1:]:
+            if bool(a.get("_explicitHidden")) != bool(b.get("_explicitHidden")):
+                continue
             ctx_b = {wg: wb for wg, wb, _ in (b.get("_whenCtx") or ())}
             if ctx_a and ctx_b and any(ctx_a.get(wg) != ctx_b.get(wg) for wg in ctx_a if wg in ctx_b):
                 continue
@@ -3395,14 +4095,57 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
                                  "overlap": [ix1, iy1, ix2 - ix1, iy2 - iy1],
                                  "detail": f"文字墨迹 '{a.get('name', '')}' 与 '{b.get('name', '')}' 重叠 {ix2 - ix1}×{iy2 - iy1}px"})
 
-    # 6b. 2D 容器边界溢出与同级兄弟盒子碰撞证明器 (Spatial Prover)
+    # 6b. 2D 容器边界溢出与同级兄弟盒子碰撞证明器 (Spatial Prover) + 声明式坐标一致性校验
     container_overflow_count = 0
     box_overlap_count = 0
+    declared_position_mismatch_count = 0
+    _dev_info = emitted_preview.get("device") or {}
+    _dev_dx = int(_dev_info.get("screenX", 0) or 0)
+    _dev_dy = int(_dev_info.get("screenY", 0) or 0)
+    _emitted_pos_map = {}
+    for _fc in (emitted_preview.get("flatChildren") or []):
+        if isinstance(_fc, dict) and _fc.get("name") and "x" in _fc and "y" in _fc:
+            _emitted_pos_map[_fc["name"]] = (int(_fc["x"]) - _dev_dx, int(_fc["y"]) - _dev_dy)
+    for _ni in (compile_plan.get("nativeInputs") or []):
+        if isinstance(_ni, dict) and _ni.get("name") and "x" in _ni and "y" in _ni:
+            _emitted_pos_map[_ni["name"]] = (int(_ni["x"]) - _dev_dx, int(_ni["y"]) - _dev_dy)
 
     def walk_spatial_bounds(node):
-        nonlocal container_overflow_count, box_overlap_count
+        nonlocal container_overflow_count, box_overlap_count, declared_position_mismatch_count
         if not isinstance(node, dict) or node.get("isModal") or "_x" not in node:
             return
+        if "_expected_stack_x" in node or "_expected_stack_y" in node:
+            exp_x = node.get("_expected_stack_x", node["_x"])
+            exp_y = node.get("_expected_stack_y", node["_y"])
+            act_x, act_y = node["_x"], node["_y"]
+            nm = node.get("name", "")
+            # A left-aligned label can emit a background plus inset text. Audit
+            # the declared outer box against its background, not text padding.
+            cand_names = [f"bg-box-{nm}", nm]
+            if node.get("bgName"):
+                cand_names.append(node["bgName"])
+            if nm.startswith("grp-"):
+                cand_names.extend([f"bg-{nm[4:]}", nm[4:]])
+            em_xy = None
+            for c_nm in cand_names:
+                if c_nm in _emitted_pos_map:
+                    em_xy = _emitted_pos_map[c_nm]
+                    break
+            layout_mismatch = abs(act_x - exp_x) > 1 or abs(act_y - exp_y) > 1
+            emitted_mismatch = em_xy is not None and (abs(em_xy[0] - exp_x) > 1 or abs(em_xy[1] - exp_y) > 1)
+            if layout_mismatch or emitted_mismatch:
+                declared_position_mismatch_count += 1
+                failures.append({
+                    "gate": "declared_position_ok",
+                    "severity": "structural",
+                    "widget": nm,
+                    "declared": [exp_x, exp_y],
+                    "actual": [act_x, act_y],
+                    "emitted": list(em_xy) if em_xy is not None else [act_x, act_y],
+                    "detail": f"元件 '{nm}' 声明坐标 ({exp_x}, {exp_y}) 与实际布局/发射坐标 ({act_x}, {act_y})"
+                              + (f" / 发射 ({em_xy[0]}, {em_xy[1]})" if em_xy is not None else "")
+                              + " 不一致",
+                })
         if node.get("type") == "dynamic-panel":
             for st in node.get("states", []):
                 if isinstance(st.get("tree"), dict) and "_x" in st["tree"]:
@@ -3428,6 +4171,10 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
             for idx_a, ca in enumerate(children):
                 for cb in children[idx_a + 1:]:
                     if ca.get("_when_group") and ca.get("_when_group") == cb.get("_when_group") and ca.get("_when_branch") != cb.get("_when_branch"):
+                        continue
+                    ca_hid = (ca.get("visible") is False) or (ca.get("hidden") is True)
+                    cb_hid = (cb.get("visible") is False) or (cb.get("hidden") is True)
+                    if ca_hid != cb_hid:
                         continue
                     ix1 = max(ca["_x"], cb["_x"])
                     iy1 = max(ca["_y"], cb["_y"])
@@ -3559,6 +4306,7 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
         "kinsoku_violation_count": kinsoku_violation_count,
         "container_overflow_count": container_overflow_count,
         "box_overlap_count": box_overlap_count,
+        "declared_position_mismatch_count": declared_position_mismatch_count,
         "duplicate_name_count": struct_stats["duplicateNameCount"],
         "duplicate_names": struct_stats["duplicateNames"],
         "semantic_naming_pct": struct_stats["semanticNamingPct"] if struct_stats["totalNodes"] else None,
@@ -3587,7 +4335,8 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
                          "detail": "交互目标元件不存在" + (f"；页面内相似名：{', '.join(_d['similar'])}" if _d.get("similar") else "")})
     # 给每条明细补 pageName（由调用方注入或留空）
     for _f in failures:
-        _f.setdefault("page", "")
+        if not _f.get("page"):
+            _f["page"] = compile_plan.get("pageName", "")
     structural_gates = {
         "no_text_overlap": text_overlap_count == 0,
         "no_text_clip": text_clip_count == 0,
@@ -3595,6 +4344,7 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
         "no_kinsoku_violation": kinsoku_violation_count == 0,
         "no_container_overflow": container_overflow_count == 0,
         "no_box_overlap": box_overlap_count == 0,
+        "declared_position_ok": declared_position_mismatch_count == 0,
         "no_duplicate_names": struct_stats["duplicateNameCount"] == 0,
         "semantic_naming_ok": not struct_stats["totalNodes"] or struct_stats["semanticNamingPct"] >= 90.0,
         "group_coverage_ok": not group_applicable or struct_stats["groupCoveragePct"] >= 80.0,
@@ -3611,12 +4361,16 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
     }
     gates = {**aesthetic_gates, **structural_gates}
     warnings = list(compile_plan.get("schemaWarnings", []))
+    if _occluded:
+        warnings.append("text_occluded: " + "; ".join(_occluded[:6]) + "（调整声明顺序或用 z 指定绘制层级）")
     if not aesthetic_gates["alignment_ok"]:
         warnings.append(f"alignment_ok: alignment_error_px={alignment_error_px} > 1.0")
     if not aesthetic_gates["spacing_ok"]:
-        warnings.append(f"spacing_ok: spacing_compliance_pct={spacing_compliance_pct}% < 95.0% (存在非标准间距/圆角令牌)")
+        _sp_detail = f": {', '.join(spacing_violations[:5])}" if spacing_violations else ""
+        warnings.append(f"spacing_ok: spacing_compliance_pct={spacing_compliance_pct}% < 95.0% (存在非标准间距/圆角令牌{_sp_detail}; 允许间距={sorted(SPACING_TOKENS)}, 允许圆角={sorted(RADIUS_TOKENS)})")
     if not aesthetic_gates["font_ok"]:
-        warnings.append(f"font_ok: font_compliance_pct={font_compliance_pct}% < 90.0%")
+        _fn_detail = f": {', '.join(font_violations[:5])}" if font_violations else ""
+        warnings.append(f"font_ok: font_compliance_pct={font_compliance_pct}% < 90.0% (存在非标准字号/字重{_fn_detail}; 允许字号={sorted(FONT_SIZE_TOKENS)})")
     if not aesthetic_gates["whitespace_ok"]:
         warnings.append(f"whitespace_ok: whitespace_ratio_pct={whitespace_ratio_pct}% 超出建议区间 [{ws_min}%, {ws_max}%]")
     if not aesthetic_gates["color_ok"]:
@@ -3677,7 +4431,8 @@ def summarize_scene_audits(scenes, strict_audit=False):
             failures.append({**failure, "sceneId": scene["id"], "page": scene.get("page", "")})
         warnings.extend(f"[{scene['id']}] {warning}" for warning in audit.get("warnings", []))
     sum_keys = ("text_overlap_count", "text_clip_count", "missing_glyph_count", "kinsoku_violation_count",
-                "container_overflow_count", "box_overlap_count", "duplicate_name_count", "interaction_dangling_targets")
+                "container_overflow_count", "box_overlap_count", "declared_position_mismatch_count",
+                "duplicate_name_count", "interaction_dangling_targets")
     metrics = {key: sum(int(a["metrics"].get(key, 0) or 0) for a in audits) for key in sum_keys}
     weights = {key: sum((a.get("_weights") or {}).get(key, 0) for a in audits)
                for key in ("canvas_area", "fg_pixels", "spacing_passed", "spacing_total", "font_passed", "font_total",
@@ -5166,14 +5921,14 @@ KNOWN_NODE_PROPS = {
     "template", "rows", "model", "pageSize", "rowHeight",
     "opacity", "strokeWidth", "borderSides", "borderTop", "borderBottom", "borderLeft", "borderRight",
     "backdropBlur", "innerGlow", "noise", "gradient", "shadow", "aurora",
-    "wrap", "colSpan", "rowSpan", "right", "bottom", "anchor",
+    "wrap", "colSpan", "rowSpan", "right", "bottom", "anchor", "z", "after", "afterGap", "alignX", "pin", "pinGap",
     "spans", "italic", "underline", "strikethrough", "letterSpacing",
-    "icon", "points", "smooth", "direction",
+    "icon", "points", "smooth", "direction", "visible", "hidden", "adaptive",
     "centerAction", "_expanded", "_mw", "_mh", "_x", "_y", "_w", "_h",
 }
 
 
-def validate_node_schema(node, warnings_out=None, path="root"):
+def validate_node_schema(node, warnings_out=None, path="root", allow_fallback=False):
     """静态校验声明式节点树：拒绝未知组件 type，并对拼写错误的未知属性名给出近似建议告警。"""
     import difflib
     if not isinstance(node, dict):
@@ -5193,29 +5948,57 @@ def validate_node_schema(node, warnings_out=None, path="root"):
         for txt_key in ("text", "content", "title", "caption", "placeholder"):
             val = node.get(txt_key)
             if isinstance(val, str) and val:
-                bad_g = find_unrenderable_glyphs(val)
+                bad_g = find_unrenderable_glyphs(val, allow_fallback=allow_fallback)
                 if bad_g:
                     warnings_out.append(
                         f"[WARN_ZERO_INK_GLYPH] Unrenderable zero-ink glyph(s) {bad_g} in {nm}.{txt_key}"
                     )
     for idx, ch in enumerate(node.get("children") or []):
-        validate_node_schema(ch, warnings_out, f"{path}.children[{idx}]")
+        validate_node_schema(ch, warnings_out, f"{path}.children[{idx}]", allow_fallback=allow_fallback)
     for idx, st in enumerate(node.get("states") or []):
         if isinstance(st, dict):
             sub_root = st.get("root") or st.get("tree")
             if isinstance(sub_root, dict):
-                validate_node_schema(sub_root, warnings_out, f"{path}.states[{idx}]")
+                validate_node_schema(sub_root, warnings_out, f"{path}.states[{idx}]", allow_fallback=allow_fallback)
+            elif isinstance(st.get("children"), list):
+                for c_idx, sch in enumerate(st["children"]):
+                    validate_node_schema(sch, warnings_out, f"{path}.states[{idx}].children[{c_idx}]", allow_fallback=allow_fallback)
 
 
 def _preserve_when_attrs(src, dst):
     if isinstance(src, dict) and isinstance(dst, dict):
-        for k in ("_when_group", "_when_branch", "_when_default_visible", "_row_visibles"):
+        for k in ("_when_group", "_when_branch", "_when_default_visible", "_row_visibles", "visible", "hidden"):
             if k in src and k not in dst:
                 dst[k] = src[k]
+        for coord_k in ("x", "y", "w", "h"):
+            if coord_k in src and isinstance(src[coord_k], (int, float)):
+                dst.setdefault(f"_declared_{coord_k}", src[coord_k])
     return dst
 
 
 def expand_declarative_tree(node, prefix="p1"):
+    """包装：核心展开后再补回布局约束键（after/afterGap/alignX/z），并把 pin 翻译成贴边坐标。"""
+    out = _expand_declarative_tree_core(node, prefix)
+    if isinstance(out, dict) and isinstance(node, dict):
+        for key in ("after", "afterGap", "alignX", "z", "adaptive", "_master_instance", "_master_slot"):
+            if node.get(key) is not None and key not in out:
+                out[key] = node[key]
+        pin = node.get("pin")
+        if isinstance(pin, str):
+            gap = node.get("pinGap", 0) or 0
+            side = pin.strip().lower()
+            if side == "right" and "right" not in out:
+                out["right"] = gap
+            elif side == "bottom" and "bottom" not in out:
+                out["bottom"] = gap
+            elif side == "left" and "x" not in out:
+                out["x"] = gap
+            elif side == "top" and "y" not in out:
+                out["y"] = gap
+    return out
+
+
+def _expand_declarative_tree_core(node, prefix="p1"):
     """将声明式 JSON 组件节点递归展开为标准自动布局节点树（零静默丢弃）。"""
     import difflib
     if not isinstance(node, dict):
@@ -5244,8 +6027,9 @@ def expand_declarative_tree(node, prefix="p1"):
             "fill", "stroke", "color", "align", "textPaddingX", "opacity", "strokeWidth",
             "borderSides", "borderTop", "borderBottom", "borderLeft", "borderRight",
             "backdropBlur", "innerGlow", "noise", "gradient", "shadow", "aurora",
-            "right", "bottom", "anchor", "colSpan", "rowSpan",
+            "x", "y", "right", "bottom", "anchor", "colSpan", "rowSpan",
             "spans", "italic", "underline", "strikethrough", "letterSpacing",
+            "after", "afterGap", "alignX", "z",
         ):
             if k in node and node.get(k) is not None:
                 btn_extra[k] = node.get(k)
@@ -5259,7 +6043,7 @@ def expand_declarative_tree(node, prefix="p1"):
             btn_extra["_row_texts"] = node.get("_row_texts")
         raw_h = node.get("h")
         btn_h = raw_h if (is_fill(raw_h) or is_hug(raw_h)) else resolve_size(raw_h, 22 if is_badge else 36, "h")
-        return _preserve_when_attrs(node, make_button(
+        _btn_out = _preserve_when_attrs(node, make_button(
             btn_name,
             btn_text,
             variant=node.get("variant", "soft" if is_badge else "primary"),
@@ -5269,6 +6053,9 @@ def expand_declarative_tree(node, prefix="p1"):
             radius=node.get("radius", 4 if is_badge else 6),
             **btn_extra,
         ))
+        if isinstance(node.get("id"), str):
+            _btn_out.setdefault("id", node["id"])  # 保留逻辑 id，after/引用才能命中
+        return _btn_out
     if ntype == "input":
         inp_name = node.get("name", f"{pfx}-input")
         ph = node.get("text", node.get("value", node.get("placeholder", "请输入...")))
@@ -5287,7 +6074,7 @@ def expand_declarative_tree(node, prefix="p1"):
                 "stroke": node.get("stroke", "$line-strong"),
                 "radius": snap_token(node.get("radius", 6), RADIUS_TOKENS),
             }
-            for key in ("fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX"):
+            for key in ("fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX", "x", "y", "right", "bottom", "anchor"):
                 if key in node:
                     out_ni[key] = node[key]
             if "flex" in node:
@@ -5299,6 +6086,9 @@ def expand_declarative_tree(node, prefix="p1"):
             "color": node.get("color", "$ink" if ("value" in node or "text" in node) else "$ink-2"),
             "align": node.get("align", "left"),
         }
+        for key in ("x", "y", "right", "bottom", "anchor", "colSpan", "rowSpan"):
+            if key in node and node.get(key) is not None:
+                inp_extra[key] = node.get(key)
         if "flex" in node:
             inp_extra["flex"] = node.get("flex")
         if "textPaddingX" in node:
@@ -5317,6 +6107,10 @@ def expand_declarative_tree(node, prefix="p1"):
         div_name = node.get("name", f"{pfx}-divider")
         is_vert = node.get("direction") == "vertical"
         raw_w, raw_h = node.get("w"), node.get("h")
+        div_extra = {}
+        for key in ("x", "y", "right", "bottom", "anchor", "colSpan", "rowSpan"):
+            if key in node and node.get(key) is not None:
+                div_extra[key] = node.get(key)
         return _preserve_when_attrs(node, make_box(
             f"grp-{div_name}",
             layout="stack",
@@ -5327,6 +6121,7 @@ def expand_declarative_tree(node, prefix="p1"):
             isGroup=False,
             bgName=node.get("bgName", div_name),
             children=[],
+            **div_extra,
         ))
     if ntype == "card":
         card_name = node.get("name", f"{pfx}-card")
@@ -5378,13 +6173,29 @@ def expand_declarative_tree(node, prefix="p1"):
         out["template"] = expand_declarative_tree(out["template"], prefix=pfx)
     if "states" in out and isinstance(out["states"], list):
         new_states = []
-        for st in out["states"]:
+        for s_idx, st in enumerate(out["states"]):
+            if not isinstance(st, dict):
+                continue
             st_copy = dict(st)
-            st_pfx = st_copy.get("prefix", f"{pfx}-{st_copy.get('name', 'st')}")
-            if "tree" in st_copy:
+            if "name" not in st_copy and isinstance(st_copy.get("id"), str):
+                st_copy["name"] = st_copy["id"]
+            st_pfx = st_copy.get("prefix", f"{pfx}-{st_copy.get('name', f'st{s_idx+1}')}")
+            if "tree" in st_copy and isinstance(st_copy["tree"], dict):
                 st_copy["tree"] = expand_declarative_tree(st_copy["tree"], prefix=st_pfx)
-            elif "root" in st_copy:
+            elif "root" in st_copy and isinstance(st_copy["root"], dict):
                 st_copy["tree"] = expand_declarative_tree(st_copy["root"], prefix=st_pfx)
+            elif isinstance(st_copy.get("children"), list):
+                synth_root = {
+                    "type": "box",
+                    "name": f"{st_pfx}-root",
+                    "layout": st_copy.get("layout", "column"),
+                    "w": st_copy.get("w", "fill"),
+                    "h": st_copy.get("h", "hug"),
+                    "gap": st_copy.get("gap", 12),
+                    "padding": st_copy.get("padding", 0),
+                    "children": st_copy.pop("children"),
+                }
+                st_copy["tree"] = expand_declarative_tree(synth_root, prefix=st_pfx)
             new_states.append(st_copy)
         out["states"] = new_states
     return _preserve_when_attrs(node, out)
@@ -5885,10 +6696,410 @@ def build_mobile_lostfound_spec(title_override=None):
     }
 
 
-def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, no_interactions=False, strict_audit=False):
+STATE_PREVIEWS = []
+
+
+def render_contact_sheet_png(items, out_path, max_cols=4, max_thumb_h=640, max_thumb_w=460, title="Prototype Contact Sheet"):
+    """Stitch multiple page or state PNG previews into a single grid overview image."""
+    valid = []
+    for it in (items or []):
+        p = it.get("path")
+        if p and os.path.exists(p):
+            try:
+                im = Image.open(p).convert("RGBA")
+                valid.append((it.get("label") or os.path.basename(p), im))
+            except Exception:
+                continue
+    if not valid:
+        return None
+    cols = min(max_cols, len(valid))
+    rows = (len(valid) + cols - 1) // cols
+    thumbs = []
+    for lbl, im in valid:
+        iw, ih = im.size
+        scale = min(1.0, max_thumb_w / max(1, iw), max_thumb_h / max(1, ih))
+        tw = max(40, int(round(iw * scale)))
+        th = max(40, int(round(ih * scale)))
+        tim = im.resize((tw, th), Image.Resampling.LANCZOS) if scale < 0.999 else im
+        thumbs.append((lbl, tim, tw, th))
+    cell_w = max(260, max(t[2] for t in thumbs) + 28)
+    cell_h = max(t[3] for t in thumbs) + 52
+    pad = 24
+    hdr_h = 44
+    sheet_w = pad * 2 + cols * cell_w
+    sheet_h = pad * 2 + hdr_h + rows * cell_h
+    sheet = Image.new("RGBA", (sheet_w, sheet_h), (244, 246, 250, 255))
+    draw = ImageDraw.Draw(sheet)
+    font_title = load_font(16, 700)
+    font_lbl = load_font(13, 600)
+    draw.text((pad, pad + 8), f"{title} ({len(thumbs)})", fill=(24, 32, 44, 255), font=font_title)
+    for idx, (lbl, tim, tw, th) in enumerate(thumbs):
+        r = idx // cols
+        c = idx % cols
+        cx = pad + c * cell_w
+        cy = pad + hdr_h + r * cell_h
+        draw.rounded_rectangle([cx + 4, cy + 4, cx + cell_w - 8, cy + cell_h - 8], radius=12, fill=(255, 255, 255, 255), outline=(220, 226, 236, 255), width=1)
+        draw.text((cx + 14, cy + 12), str(lbl)[:48], fill=(32, 42, 56, 255), font=font_lbl)
+        ix = cx + (cell_w - tw) // 2
+        iy = cy + 38 + (cell_h - 46 - th) // 2
+        sheet.paste(tim, (ix, iy), tim)
+    sheet.convert("RGB").save(out_path)
+    return out_path
+
+
+def _auto_heal_spec_pre_compile(spec_data, strict_audit=False):
+    """Safe pre-compile normalization: fix outer device chassis canvas mismatch and snap non-token spacing/radius/font values."""
+    changes = []
+    if not isinstance(spec_data, dict):
+        return changes
+    from rp_language import DEVICE_CANVAS_PRESETS
+    top_dev = spec_data.get("device") or spec_data.get("shell")
+    pages = spec_data.get("pages")
+    if isinstance(pages, list):
+        for p in pages:
+            if not isinstance(p, dict):
+                continue
+            pid = p.get("id") or p.get("slug") or p.get("name") or "page"
+            dev = p.get("device") or p.get("shell") or top_dev
+            if not dev and isinstance(p.get("root"), dict):
+                r = p["root"]
+                if r.get("type") == "phone-shell" or "phone-shell" in r:
+                    dev = r.get("device", "iphone-17")
+                elif isinstance(r.get("children"), list) and len(r["children"]) == 1 and isinstance(r["children"][0], dict):
+                    ch0 = r["children"][0]
+                    if ch0.get("type") == "phone-shell" or "phone-shell" in ch0:
+                        dev = ch0.get("device", "iphone-17")
+            preset = DEVICE_CANVAS_PRESETS.get(dev) if isinstance(dev, str) else None
+            if preset:
+                cv = p.get("canvas")
+                cw = cv[0] if isinstance(cv, list) and len(cv) == 2 else (cv.get("w") if isinstance(cv, dict) else None)
+                ch = cv[1] if isinstance(cv, list) and len(cv) == 2 else (cv.get("h") if isinstance(cv, dict) else None)
+                if cw == preset["w"] + 40 and ch == preset["h"] + 40:
+                    p["canvas"] = {"w": preset["w"], "h": preset["h"]}
+                    changes.append({"kind": "normalize-device-canvas", "page": pid, "from": [cw, ch], "to": [preset["w"], preset["h"]]})
+                    r = p.get("root")
+                    if isinstance(r, dict) and isinstance(r.get("children"), list) and len(r["children"]) == 1:
+                        ch0 = r["children"][0]
+                        if isinstance(ch0, dict) and (ch0.get("type") == "phone-shell" or "phone-shell" in ch0):
+                            ch0.pop("x", None)
+                            ch0.pop("y", None)
+                            p["root"] = ch0
+                            changes.append({"kind": "unwrap-redundant-device-root", "page": pid})
+    if strict_audit or spec_data.get("strictAudit"):
+        def _snap_tree_tokens(node, path_str=""):
+            if not isinstance(node, dict):
+                return
+            for sp_k in ("gap", "columnGap", "rowGap"):
+                if isinstance(node.get(sp_k), (int, float)) and not isinstance(node.get(sp_k), bool):
+                    v = node[sp_k]
+                    sv = snap_token(v, SPACING_TOKENS)
+                    if sv != v:
+                        node[sp_k] = sv
+                        changes.append({"kind": "snap-spacing-token", "property": sp_k, "from": v, "to": sv})
+            if "padding" in node:
+                pv = node["padding"]
+                if isinstance(pv, (int, float)) and not isinstance(pv, bool):
+                    spv = snap_token(pv, SPACING_TOKENS)
+                    if spv != pv:
+                        node["padding"] = spv
+                        changes.append({"kind": "snap-padding-token", "from": pv, "to": spv})
+                elif isinstance(pv, list):
+                    sp_list = [snap_token(x, SPACING_TOKENS) if isinstance(x, (int, float)) else x for x in pv]
+                    if sp_list != pv:
+                        node["padding"] = sp_list
+                        changes.append({"kind": "snap-padding-token", "from": pv, "to": sp_list})
+            if isinstance(node.get("radius"), (int, float)) and not isinstance(node.get("radius"), bool):
+                rv = node["radius"]
+                srv = 999 if rv >= 100 else snap_token(rv, RADIUS_TOKENS)
+                if srv != rv:
+                    node["radius"] = srv
+                    changes.append({"kind": "snap-radius-token", "from": rv, "to": srv})
+            for fn_k in ("fontSize", "size"):
+                if isinstance(node.get(fn_k), (int, float)) and not isinstance(node.get(fn_k), bool):
+                    fv = node[fn_k]
+                    sfv = snap_token(fv, FONT_SIZE_TOKENS)
+                    if sfv != fv:
+                        node[fn_k] = sfv
+                        changes.append({"kind": "snap-font-token", "property": fn_k, "from": fv, "to": sfv})
+            for ch in (node.get("children") if isinstance(node.get("children"), list) else []):
+                _snap_tree_tokens(ch)
+            for st in (node.get("states") if isinstance(node.get("states"), list) else []):
+                if isinstance(st, dict):
+                    if isinstance(st.get("root") or st.get("tree"), dict):
+                        _snap_tree_tokens(st.get("root") or st.get("tree"))
+                    elif isinstance(st.get("children"), list):
+                        for sch in st["children"]:
+                            _snap_tree_tokens(sch)
+            if isinstance(node.get("template"), dict):
+                _snap_tree_tokens(node["template"])
+
+        for p in (pages if isinstance(pages, list) else []):
+            if isinstance(p, dict):
+                _snap_tree_tokens(p.get("root"))
+        for cdef in (spec_data.get("components") or {}).values() if isinstance(spec_data.get("components"), dict) else []:
+            if isinstance(cdef, dict):
+                _snap_tree_tokens(cdef.get("root"))
+    return changes
+
+
+def _auto_heal_page_tree(p_root, cw, ch, p_slug, base_dir=None):
+    """Safe post-measure layout self-healing on a page's declarative root tree.
+    Repairs text clipping (`no_text_clip`) and container overflow (`no_container_overflow`)
+    without altering explicit canvas dimensions.
+    """
+    changes = []
+    for _pass in range(2):
+        probe = expand_declarative_tree(copy.deepcopy(p_root), prefix=p_slug)
+        ensure_unique_names(probe, scope_prefix=p_slug)
+        measure_node(probe, base_dir=base_dir, available_w=cw)
+        layout_node(probe, 0, 0, cw, ch)
+
+        src_by_name = {}
+        parent_map = {}
+
+        def _index_src(node, parent=None):
+            if not isinstance(node, dict):
+                return
+            nm = node.get("name") or node.get("id")
+            if nm:
+                src_by_name[nm] = node
+                if nm.startswith("grp-"):
+                    src_by_name[nm[4:]] = node
+            if parent is not None:
+                parent_map[id(node)] = parent
+            for child in (node.get("children") or []):
+                _index_src(child, node)
+            for st in (node.get("states") or []):
+                if isinstance(st, dict):
+                    if isinstance(st.get("root") or st.get("tree"), dict):
+                        _index_src(st.get("root") or st.get("tree"), node)
+                    elif isinstance(st.get("children"), list):
+                        for sch in st["children"]:
+                            _index_src(sch, node)
+            if isinstance(node.get("template"), dict):
+                _index_src(node["template"], node)
+
+        _index_src(p_root)
+        pass_changes = 0
+
+        def _match_src(w_name):
+            if not w_name:
+                return None
+            if w_name in src_by_name:
+                return src_by_name[w_name]
+            for prefix_strip in ("bg-box-", "grp-box-", "bg-", "grp-"):
+                if w_name.startswith(prefix_strip) and w_name[len(prefix_strip):] in src_by_name:
+                    return src_by_name[w_name[len(prefix_strip):]]
+            for k, v in src_by_name.items():
+                if w_name.endswith("__" + k) or w_name.endswith("-" + k):
+                    return v
+            return None
+
+        def _heal_walk(pnode):
+            nonlocal pass_changes
+            if not isinstance(pnode, dict) or "_x" not in pnode:
+                return
+            nm = pnode.get("name") or pnode.get("id") or ""
+            snode = _match_src(nm)
+            ntype = pnode.get("type", "box")
+            if ntype in ("label", "shape-text") and snode is not None:
+                txt = pnode.get("text", "")
+                if txt is not None and str(txt).strip():
+                    fsz = snap_token(pnode.get("fontSize", pnode.get("size", 14)), FONT_SIZE_TOKENS)
+                    fwt = snap_token(pnode.get("fontWeight", pnode.get("weight", 400)), FONT_WEIGHT_TOKENS)
+                    pad_in = 16 if (pnode.get("fill") or pnode.get("stroke") or ntype == "shape-text") else 2
+                    tw, th = measure_text(str(txt), fsz, fwt)
+                    pw, ph = pnode["_w"], pnode["_h"]
+                    if tw + pad_in > pw + 2 and not pnode.get("wrap"):
+                        par = parent_map.get(id(snode))
+                        par_layout = par.get("layout", "column") if isinstance(par, dict) else "column"
+                        if snode.get("type") in ("label", "paragraph") and (par_layout == "column" or is_fill(snode.get("w")) or pw >= 120):
+                            wrap_lines = wrap_text(str(txt), max(20, pw - pad_in - 4), fsz, fwt)
+                            line_h = max(18, int(round(fsz * 1.45)))
+                            need_h = max(th, len(wrap_lines) * line_h + 4)
+                            snode["wrap"] = True
+                            snode["h"] = max(int(snode.get("h")) if isinstance(snode.get("h"), (int, float)) else 0, need_h)
+                            changes.append({"kind": "heal-text-wrap", "widget": nm, "h": snode["h"]})
+                            pass_changes += 1
+                        elif isinstance(snode.get("w"), (int, float)):
+                            new_w = int(tw + pad_in + 6)
+                            if new_w > snode["w"]:
+                                snode["w"] = new_w
+                                changes.append({"kind": "heal-text-width", "widget": nm, "w": new_w})
+                                pass_changes += 1
+                    if th > ph + 1 and isinstance(snode.get("h"), (int, float)):
+                        new_h = int(th + 6)
+                        if new_h > snode["h"]:
+                            delta_h = new_h - int(snode["h"])
+                            snode["h"] = new_h
+                            cur_p = parent_map.get(id(snode))
+                            while isinstance(cur_p, dict):
+                                if cur_p is not p_root and isinstance(cur_p.get("h"), (int, float)):
+                                    cur_p["h"] = int(cur_p["h"]) + delta_h
+                                cur_p = parent_map.get(id(cur_p))
+                            changes.append({"kind": "heal-text-height", "widget": nm, "h": new_h})
+                            pass_changes += 1
+
+            children = [c for c in (pnode.get("children") or []) if isinstance(c, dict) and not c.get("isModal") and "_x" in c]
+            if children and pnode.get("layout", "column") in ("row", "column", "grid"):
+                nx, ny, nw, nh = pnode["_x"], pnode["_y"], pnode["_w"], pnode["_h"]
+                max_bot_over = max((max(0, (c["_y"] + c["_h"]) - (ny + nh)) for c in children), default=0)
+                max_right_over = max((max(0, (c["_x"] + c["_w"]) - (nx + nw)) for c in children), default=0)
+                if max_bot_over > 2 and snode is not None:
+                    if snode is p_root or (isinstance(snode.get("h"), (int, float)) and int(snode["h"]) >= ch - 8):
+                        # Root / phone-shell overflow: compact vertical gaps and paddings
+                        def _compact_vertical(box_node):
+                            compacted = False
+                            if not isinstance(box_node, dict):
+                                return False
+                            if isinstance(box_node.get("gap"), (int, float)) and box_node["gap"] > 6:
+                                old_g = box_node["gap"]
+                                smaller = [t for t in SPACING_TOKENS if 4 <= t < old_g]
+                                box_node["gap"] = smaller[-1] if smaller else max(4, int(old_g) - 4)
+                                compacted = True
+                            for ch_b in (box_node.get("children") or []):
+                                if _compact_vertical(ch_b):
+                                    compacted = True
+                            return compacted
+                        if _compact_vertical(snode):
+                            changes.append({"kind": "compact-root-vertical-spacing", "widget": nm, "overflowPx": max_bot_over})
+                            pass_changes += 1
+                    elif isinstance(snode.get("h"), (int, float)):
+                        new_ch = int(nh + max_bot_over + 4)
+                        snode["h"] = new_ch
+                        changes.append({"kind": "expand-container-height", "widget": nm, "from": nh, "to": new_ch})
+                        pass_changes += 1
+                if max_right_over > 2 and snode is not None:
+                    if pnode.get("layout") == "row":
+                        if isinstance(snode.get("gap"), (int, float)) and snode["gap"] > 6:
+                            snode["gap"] = 6
+                            changes.append({"kind": "compact-row-gap", "widget": nm, "to": 6})
+                            pass_changes += 1
+                        else:
+                            snode["wrap"] = True
+                            if isinstance(snode.get("h"), (int, float)):
+                                snode["h"] = "hug"
+                            changes.append({"kind": "enable-row-wrap", "widget": nm})
+                            pass_changes += 1
+                    else:
+                        for c in children:
+                            if (c["_x"] + c["_w"]) > (nx + nw + 2):
+                                cs = _match_src(c.get("name") or c.get("id") or "")
+                                if cs is not None and isinstance(cs.get("w"), (int, float)):
+                                    cs["w"] = "fill"
+                                    changes.append({"kind": "clamp-child-width-fill", "widget": c.get("name", "")})
+                                    pass_changes += 1
+            for c in children:
+                _heal_walk(c)
+            if pnode.get("type") == "dynamic-panel":
+                for st in (pnode.get("states") or []):
+                    st_t = st.get("tree") if isinstance(st, dict) else None
+                    if isinstance(st_t, dict):
+                        measure_node(st_t, base_dir=base_dir, available_w=pnode["_w"])
+                        layout_node(st_t, 0, 0, pnode["_w"], pnode["_h"])
+                        _heal_walk(st_t)
+
+        _heal_walk(probe)
+        if pass_changes == 0:
+            break
+    return changes
+
+
+def _heal_property_changes(before, after, pointer=""):
+    changes = []
+    if isinstance(before, dict) and isinstance(after, dict):
+        for key in sorted(before.keys() | after.keys()):
+            path = pointer + "/" + str(key).replace("~", "~0").replace("/", "~1")
+            changes.extend(_heal_property_changes(before.get(key), after.get(key), path))
+    elif isinstance(before, list) and isinstance(after, list) and len(before) == len(after):
+        for idx, (old, new) in enumerate(zip(before, after)):
+            changes.extend(_heal_property_changes(old, new, pointer + "/" + str(idx)))
+    elif before != after:
+        changes.append({"pointer": pointer, "property": pointer.rsplit("/", 1)[-1], "from": before, "to": after})
+    return changes
+
+
+def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, no_interactions=False, strict_audit=False, source_path=None, ink_sink=None, auto_heal=False):
+    """Treat automatic changes as a transaction, checked against the original gates."""
+    import copy
+    import tempfile
+    options = dict(theme_override=theme_override, base_dir=base_dir,
+                   no_interactions=no_interactions, strict_audit=strict_audit, source_path=source_path)
+    enabled = bool(auto_heal and str(auto_heal).lower() not in ("false", "off", "0", "none"))
+    if not enabled:
+        return _compile_spec_bundle(spec_data, out_dir, ink_sink=ink_sink, **options)
+    from rp_language import validate_source_tree
+    validate_source_tree(spec_data)
+    original = copy.deepcopy(spec_data)
+    baseline = None
+    with tempfile.TemporaryDirectory(prefix="zee-heal-gates-") as probe_dir:
+        try:
+            baseline = _compile_spec_bundle(copy.deepcopy(original), probe_dir, **options)
+            baseline_audit = json.load(open(baseline["auditPath"], encoding="utf-8"))
+        except LanguageError:
+            baseline_audit = None
+        rejected = []
+        try:
+            candidate_ink = [] if ink_sink is not None else None
+            result = _compile_spec_bundle(copy.deepcopy(original), out_dir, ink_sink=candidate_ink,
+                                         auto_heal=auto_heal, **options)
+            audit = json.load(open(result["auditPath"], encoding="utf-8"))
+            def failures(report):
+                return {json.dumps(f, sort_keys=True, ensure_ascii=False) for f in report.get("failures", [])}
+            if baseline_audit is not None:
+                rejected = sorted(failures(audit) - failures(baseline_audit))
+                if baseline.get("ok") and not result.get("ok") and not rejected:
+                    rejected = ["A previously passing audit gate failed"]
+        except LanguageError as error:
+            if baseline is None:
+                raise
+            rejected = [error.diagnostic]
+            result = None
+        if rejected:
+            changes = []
+            if result:
+                plan = json.load(open(result["planPath"], encoding="utf-8"))
+                changes = plan.get("autoHeal", {}).get("changes", [])
+            else:
+                trial = copy.deepcopy(original)
+                _auto_heal_spec_pre_compile(trial, strict_audit=strict_audit)
+                changes = _heal_property_changes(original, trial)
+            result = _compile_spec_bundle(copy.deepcopy(original), out_dir, ink_sink=ink_sink, **options)
+            summary = {"mode": str(auto_heal), "healedCount": 0, "changes": [], "rolledBack": True,
+                       "rejectedChanges": changes, "rejectedDiagnostics": rejected,
+                       "validation": "all compile and audit gates rerun on original source"}
+        else:
+            if ink_sink is not None:
+                ink_sink.extend(candidate_ink)
+            plan = json.load(open(result["planPath"], encoding="utf-8"))
+            summary = {**plan.get("autoHeal", {}), "rolledBack": False,
+                       "validation": "all compile and audit gates compared with original source"}
+        for key in ("planPath", "auditPath"):
+            path = result[key]
+            with open(path, encoding="utf-8") as handle:
+                report = json.load(handle)
+            report["autoHeal"] = summary
+            if key == "planPath":
+                report["audit"]["autoHeal"] = summary
+            with open(path, "w", encoding="utf-8") as handle:
+                json.dump(report, handle, ensure_ascii=False, indent=2)
+        result["audit"]["autoHeal"] = summary
+        result["autoHeal"] = summary
+        return result
+
+
+def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, no_interactions=False, strict_audit=False, source_path=None, ink_sink=None, auto_heal=False):
+    STATE_PREVIEWS.clear()  # 每次编译先清空，避免跨次残留
     """通用声明式多页/多状态原型编译器：支持 --spec <spec.json>、数据绑定、静态模式与两级审计门禁。"""
     import copy
     os.makedirs(out_dir, exist_ok=True)
+    heal_enabled = bool(auto_heal and str(auto_heal).lower() not in ("false", "off", "0", "none"))
+    auto_heal_changes = []
+    if heal_enabled:
+        before_heal = copy.deepcopy(spec_data)
+        _auto_heal_spec_pre_compile(spec_data, strict_audit=strict_audit)
+        auto_heal_changes.extend(_heal_property_changes(before_heal, spec_data))
+    raw_source_spec = copy.deepcopy(spec_data)
     language_ir = None
     if "language" in spec_data:
         spec_data, language_ir = compile_language(spec_data)
@@ -5927,7 +7138,12 @@ def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, 
         cw, ch = int(canvas["w"]), int(canvas["h"])
 
         p_schema_warnings = []
-        validate_node_schema(p_spec["root"], warnings_out=p_schema_warnings, path=f"{p_slug}.root")
+        validate_node_schema(p_spec["root"], warnings_out=p_schema_warnings, path=f"{p_slug}.root", allow_fallback=bool(language_ir))
+        if heal_enabled:
+            before_heal = copy.deepcopy(p_spec["root"])
+            _auto_heal_page_tree(p_spec["root"], cw, ch, p_slug, base_dir=base_dir)
+            auto_heal_changes.extend({**change, "page": p_slug, "stage": "lowered-layout"} for change in
+                                     _heal_property_changes(before_heal, p_spec["root"], f"/pages/{idx}/root"))
 
         root_main = expand_declarative_tree(copy.deepcopy(p_spec["root"]), prefix=p_slug)
         ensure_unique_names(root_main, scope_prefix=p_slug)
@@ -5952,19 +7168,19 @@ def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, 
         def collect_native_metadata(node, in_master=False, in_container=False):
             if not isinstance(node, dict):
                 return
-            in_master = in_master or bool(node.get("_master_instance"))
+            in_master = False if node.get("_master_slot") else in_master or bool(node.get("_master_instance"))
             if in_master and node.get("name"):
                 master_node_names.add(node["name"])
             if node.get("adaptive"):
                 if in_master or in_container:
-                    raise ValueError("adaptive overrides currently require page-level widgets outside masters/panels/repeaters")
+                    raise LanguageError("E_ADAPTIVE", "/adaptive", "adaptive overrides currently require page-level widgets outside masters/panels/repeaters")
                 for view_id, props in node["adaptive"].items():
                     if view_id not in view_ids:
-                        raise ValueError(f"Unknown adaptive view: {view_id}")
+                        raise LanguageError("E_ADAPTIVE", "/adaptive/" + str(view_id), f"Unknown adaptive view: {view_id}")
                     if not isinstance(props, dict) or set(props) - {"x", "y", "w", "h"}:
-                        raise ValueError("adaptive overrides support x/y/w/h")
+                        raise LanguageError("E_PROPERTY", "/adaptive/" + str(view_id), "adaptive overrides support x/y/w/h")
                     if any(type(v) not in (int, float) or not math.isfinite(v) or (k in {"w", "h"} and v < 0) for k, v in props.items()):
-                        raise ValueError("adaptive geometry must be finite numeric values with nonnegative sizes")
+                        raise LanguageError("E_ADAPTIVE", "/adaptive/" + str(view_id), "adaptive geometry must be finite numeric values with nonnegative sizes")
                 adaptive_overrides[node["name"]] = copy.deepcopy(node["adaptive"])
             for child in node.get("children", []):
                 collect_native_metadata(child, in_master, in_container)
@@ -5978,9 +7194,14 @@ def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, 
                 m_tree.pop("_master_instance")
                 mw, mh = int(node["_w"]), int(node["_h"])
                 layout_node(m_tree, 0, 0, mw, mh)
+                def remove_slots(parent):
+                    parent["children"] = [c for c in parent.get("children", []) if not c.get("_master_slot")]
+                    for child in parent["children"]:
+                        remove_slots(child)
+                remove_slots(m_tree)
                 em_m = emit_tree_to_axvg(m_tree, theme_dict, canvas_background=False, base_dir=base_dir)
                 if em_m["dynamicPanels"] or em_m["repeaters"]:
-                    raise ValueError("RP/1 masters currently require primitive content; nested panels/repeaters are not supported")
+                    raise LanguageError("E_MASTER", "/masters/" + str(mid), "RP/1 masters currently require primitive content; nested panels/repeaters are not supported")
                 m_path = os.path.join(states_dir, f"master__{mid}.axvg.json")
                 with open(m_path, "w", encoding="utf-8") as f:
                     json.dump(em_m["axvg"], f, ensure_ascii=False, indent=2)
@@ -6039,11 +7260,23 @@ def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, 
                 sw, sh = emitted["device"]["w"], emitted["device"]["h"]
             axvg_path = os.path.join(states_dir, f"{tag}.axvg.json")
             spec_path = os.path.join(states_dir, f"{tag}.spec.json")
-            png_path = os.path.join(states_dir, f"{tag}@2x.png")
+            _stable_tag = re.sub(r"-[0-9a-f]{8,}", "", str(tag))  # 去掉原生 hash 后缀，便于稳定引用
+            png_path = os.path.join(states_dir, f"{_stable_tag}@2x.png")
+            STATE_PREVIEWS.append({
+                "page": str(tag).split("__")[0],
+                "scene": str(tag),
+                "stable": _stable_tag,
+                "png": png_path,
+                "panel": context.get("panel"),
+                "state": context.get("state"),
+                "repeater": context.get("repeater"),
+                "modal": context.get("modal"),
+            })
             with open(axvg_path, "w", encoding="utf-8") as f: json.dump(emitted["axvg"], f, ensure_ascii=False, indent=2)
             with open(spec_path, "w", encoding="utf-8") as f: json.dump(emitted["spec"], f, ensure_ascii=False, indent=2)
             render_flat_children_png(sw, sh, resolve_color("$surface", theme_dict), preview["flatChildren"], include_modal=False, scale=2).save(png_path)
             scene["audit"] = audit_prototype(stage_tree, preview, {
+                "pageName": p_name, "language": "rp/1" if language_ir else None,
                 "domain": p_domain, "theme": theme_name, "dynamicPanels": panels, "auditScope": "container-local",
                 "repeaters": repeaters, "allMainWidgets": emitted["flatChildren"],
                 "nativeInputs": emitted["nativeInputs"], "schemaWarnings": [],
@@ -6068,6 +7301,26 @@ def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, 
         dp_plans, repeater_plans = container_stages(em_main, p_slug)
         compile_modal_scenes(root_main, p_slug)
         preview_flat = list(em_prev["flatChildren"])
+        if ink_sink is not None:
+            _rows = []
+            for _ch in preview_flat:
+                if _ch.get("kind") not in ("text", "para") and not _ch.get("text"):
+                    continue
+                try:
+                    _font, _tx, _ty, _ink = text_ink_geometry(dict(_ch))
+                except Exception:
+                    continue
+                _rows.append({"name": _ch.get("name") or _ch.get("id"),
+                              "box": [_ch.get("x"), _ch.get("y"), _ch.get("w"), _ch.get("h")],
+                              "ink": [round(v, 1) for v in _ink],
+                              "inkBottom": round(_ink[1] + _ink[3], 1),
+                              "inkRight": round(_ink[0] + _ink[2], 1),
+                              "safeNextY": round(_ink[1] + _ink[3] + max(2, int(round(float(_ch.get("size", 13)) * 0.5))), 1),
+                              "safeNextX": round(_ink[0] + _ink[2] + max(2, int(round(float(_ch.get("size", 13)) * 0.3))), 1)})
+            ink_sink.append({"page": p_name, "slug": p_slug, "widgets": _rows,
+                             "canvas": {"w": cw, "h": ch},
+                             "offset": {"x": int(em_main.get("device", {}).get("screenX", 0)),
+                                        "y": int(em_main.get("device", {}).get("screenY", 0))}})
 
         out_w = em_main["device"]["w"] if em_main.get("device") else cw
         out_h = em_main["device"]["h"] if em_main.get("device") else ch
@@ -6096,6 +7349,7 @@ def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, 
         p_plan = {
             "pageName": p_name,
             "slug": p_slug,
+            "language": "rp/1" if language_ir else None,
             "theme": theme_name,
             "domain": p_domain,
             "static": page_static,
@@ -6137,10 +7391,86 @@ def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, 
             **p_audit,
         })
 
+    # Stitch multi-page contact sheet and panel/repeater states sheet for single-shot visual inspection
+    page_sheet_items = [
+        {"label": f"[{pp['slug']}] {pp['pageName']}", "path": pp["previews"]["preview2x"]}
+        for pp in page_plans
+        if isinstance(pp.get("previews"), dict) and pp["previews"].get("preview2x")
+    ]
+    if page_sheet_items:
+        pages_sheet_path = os.path.join(out_dir, "pages-sheet.png")
+        if render_contact_sheet_png(page_sheet_items, pages_sheet_path, max_cols=4, max_thumb_h=640, max_thumb_w=460, title="Pages Overview"):
+            all_previews["contactSheet"] = pages_sheet_path
+    if STATE_PREVIEWS:
+        def _fmt_state_sheet_label(sp):
+            pg = str(sp.get("page") or "page")
+            if sp.get("panel") and sp.get("state"):
+                clean_p = re.sub(r"-[0-9a-f]{6,}", "", str(sp["panel"]))
+                if clean_p.startswith(f"{pg}__"):
+                    clean_p = clean_p[len(pg) + 2:]
+                return f"[{pg}] {clean_p} : {sp['state']}"
+            if sp.get("repeater"):
+                clean_r = re.sub(r"-[0-9a-f]{6,}", "", str(sp["repeater"]))
+                if clean_r.startswith(f"{pg}__"):
+                    clean_r = clean_r[len(pg) + 2:]
+                return f"[{pg}] {clean_r} (item)"
+            if sp.get("modal"):
+                clean_m = re.sub(r"-[0-9a-f]{6,}", "", str(sp["modal"]))
+                return f"[{pg}] {clean_m} (modal)"
+            return sp.get("stable") or sp.get("scene") or "state"
+
+        state_sheet_items = [
+            {"label": _fmt_state_sheet_label(sp), "path": sp.get("png")}
+            for sp in STATE_PREVIEWS
+            if sp.get("png") and not (
+                re.sub(r"-[0-9a-f]{6,}", "", str(sp.get("panel") or "")).endswith("_fill")
+                and re.fullmatch(r"s\d+", str(sp.get("state") or ""))
+            )
+        ]
+        if state_sheet_items:
+            states_sheet_path = os.path.join(out_dir, "states-sheet.png")
+            if render_contact_sheet_png(state_sheet_items, states_sheet_path, max_cols=4, max_thumb_h=480, max_thumb_w=420, title="Container States Overview"):
+                all_previews["statesSheet"] = states_sheet_path
+
     overall_ok = all(pa["ok"] for pa in page_audits)
     overall_structural_ok = all(pa["structural_ok"] for pa in page_audits)
     overall_aesthetic_ok = all(pa["aesthetic_ok"] for pa in page_audits)
     all_warnings = []
+    # 光效样式（gradient/shadow/aurora/noise）会被"光效层"渲染成嵌入位图，再以 ImageBox 写入原生，
+    # 因此不是"预览专属"；只有 backdropBlur 采样的是静态背景，叠在动态内容上会失真，需要提示。
+    _backdrop_hits = {}
+    _misplaced = {}
+
+    def _scan_backdrop(node, page_name, parent_layout=None):
+        if isinstance(node, dict):
+            if parent_layout:
+                node.setdefault("_layoutParent", parent_layout)
+            if node.get("backdropBlur"):
+                _backdrop_hits.setdefault(page_name, 0)
+                _backdrop_hits[page_name] += 1
+            if node.get("after") or node.get("alignX"):
+                _constraint_parent = node.get("_layoutParent")
+                if _constraint_parent and _constraint_parent != "stack":
+                    _misplaced.setdefault(page_name, 0)
+                    _misplaced[page_name] += 1
+            _own_layout = node.get("layout")
+            for key, value in node.items():
+                _scan_backdrop(value, page_name, _own_layout if isinstance(value, dict) or isinstance(value, list) else None)
+        elif isinstance(node, list):
+            for value in node:
+                _scan_backdrop(value, page_name, parent_layout)
+
+    for _pg in (spec_data.get("pages") or []) if isinstance(spec_data, dict) else []:
+        if isinstance(_pg, dict):
+            _scan_backdrop(_pg.get("root"), _pg.get("name") or _pg.get("id") or "page")
+    for _page_name, _cnt in _misplaced.items():
+        all_warnings.append(
+            f"[{_page_name}] constraint_outside_stack: {_cnt} 个元件在非 stack 容器里用了 after/alignX，"
+            "这两个约束只对 layout:\"stack\" 的父容器生效；flow 容器请用 row/column 顺序或 gap")
+    for _page_name, _cnt in _backdrop_hits.items():
+        all_warnings.append(
+            f"[{_page_name}] backdrop_blur_static: {_cnt} 个元件使用 backdropBlur；原生以静态背景采样成图，"
+            "叠在会变化的内容上会失真，改用半透明实色更稳")
     for pa in page_audits:
         for w_msg in pa.get("warnings", []):
             all_warnings.append(f"[{pa['pageName']}] {w_msg}")
@@ -6172,6 +7502,7 @@ def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, 
     _SUM_KEYS = (
         "text_overlap_count", "text_clip_count", "missing_glyph_count",
         "kinsoku_violation_count", "container_overflow_count", "box_overlap_count",
+        "declared_position_mismatch_count",
         "duplicate_name_count", "interaction_dangling_targets",
     )
     agg_metrics = {}
@@ -6224,6 +7555,7 @@ def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, 
         "strict_audit": is_strict,
         "static": is_static,
         "warnings": all_warnings,
+        "statePreviews": list(STATE_PREVIEWS),
         "pageCount": len(page_audits),
         "metrics": agg_metrics,
         "structural_gates": agg_structural,
@@ -6240,6 +7572,18 @@ def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, 
     compile_plan["scenes"] = all_scenes
     compile_plan["sceneCoverage"] = scene_summary["sceneCoverage"]
     compile_plan["audit"] = combined_audit
+    compile_plan["sourceSpec"] = raw_source_spec
+    if heal_enabled:
+        heal_summary = {
+            "mode": str(auto_heal),
+            "healedCount": len(auto_heal_changes),
+            "changes": auto_heal_changes,
+            "needsDecision": [f for f in agg_failures if f.get("gate") not in ("no_text_clip", "no_container_overflow")],
+        }
+        compile_plan["autoHeal"] = heal_summary
+        combined_audit["autoHeal"] = heal_summary
+    if source_path:
+        compile_plan["sourcePath"] = source_path
     if language_ir:
         compile_plan["language"] = "rp/1"
         compile_plan["variables"] = language_ir["variables"]
@@ -6637,11 +7981,62 @@ def build_web_dashboard_spec(title_override=None):
         }],
     }
 
+def _build_layout_diagnostics(bundle_res, ir):
+    by_name = {}
+    by_id = {}
+    for sym in (ir or {}).get("symbols", []):
+        src = sym.get("source") or {}
+        best_ptr = src.get("parameterPointer") or sym.get("pointer") or src.get("macroPointer")
+        if best_ptr:
+            if sym.get("name"):
+                by_name[sym["name"]] = best_ptr
+            if sym.get("id"):
+                by_id[sym["id"]] = best_ptr
+                short_id = sym["id"].rsplit("/", 1)[-1]
+                by_id.setdefault(short_id, best_ptr)
+    fails = []
+    raw_failures = (
+        bundle_res.get("failures")
+        or (bundle_res.get("audit") or {}).get("failures")
+        or []
+    )
+    for _f in raw_failures:
+        resolved_ptr = "/"
+        if isinstance(_f, dict):
+            if _f.get("pointer") and _f["pointer"] != "/":
+                resolved_ptr = _f["pointer"]
+            else:
+                for k in ("symbolId", "widget", "widget_a", "child", "widget_b", "parent"):
+                    cand = _f.get(k)
+                    if isinstance(cand, str) and cand:
+                        if cand in by_id:
+                            resolved_ptr = by_id[cand]
+                            break
+                        if cand in by_name:
+                            resolved_ptr = by_name[cand]
+                            break
+        _msg = _f if isinstance(_f, str) else json.dumps(_f, ensure_ascii=False)
+        fails.append({
+            "severity": "error",
+            "code": (_f.get("code") if isinstance(_f, dict) and _f.get("code") else "E_LAYOUT"),
+            "pointer": resolved_ptr,
+            "pageName": (_f.get("page") if isinstance(_f, dict) else None),
+            "message": _msg,
+        })
+    return fails
+
+
+class _StructuredArgumentParser(argparse.ArgumentParser):
+    def error(self, message):
+        from rp_language import fail
+        fail("E_CLI", "/arguments", message)
+
+
 def main():
-    parser = argparse.ArgumentParser(
+    parser = _StructuredArgumentParser(
         description="zee-axure 直接原型生成引擎 (proto.py) — 支持声明式 JSON spec、Web/Mobile 双域组件库、两级审计门禁与静态交付"
     )
-    sub = parser.add_subparsers(dest="cmd", required=True)
+    sub = parser.add_subparsers(dest="cmd", required=True, parser_class=_StructuredArgumentParser)
     p_comp = sub.add_parser("compile", help="编译多态/多页交互原型产物包 (axvg + spec + 2x预览 + 审计报告)")
     p_comp.add_argument("--out-dir", required=True, help="输出目录")
     p_comp.add_argument("--spec", default=None, help="声明式多页/组件树 spec.json 路径")
@@ -6651,9 +8046,13 @@ def main():
     p_comp.add_argument("--title", default=None, help="页面主标题覆盖")
     p_comp.add_argument("--no-interactions", action="store_true", help="静态交付模式：清空所有交互事件，生成纯静态原型")
     p_comp.add_argument("--strict-audit", action="store_true", help="严格审计模式：将审美与令牌告警升级为硬失败 (exit 1)")
+    p_comp.add_argument("--auto-heal", nargs="?", const="safe", default=None, choices=["safe", "off", "true", "false"], help="安全自愈模式：自动修复文字裁切、容器溢出与非标令牌")
     p_check = sub.add_parser("check", help="检查 RP/1 类型、作用域、数据、交互语义与统一 10 项空间/审美门禁")
-    p_check.add_argument("--spec", required=True)
+    p_check.add_argument("spec_pos", nargs="?", default=None, help="声明式源码路径 (.json/.rp1)")
+    p_check.add_argument("--spec", default=None, help="声明式源码路径 (.json/.rp1)")
     p_check.add_argument("--shell", default=None, choices=["mobile-stack", "tablet-split", "web-console"])
+    p_check.add_argument("--auto-heal", action="store_true", help="自动应用可自愈的语义/最坏情况溢出候选补丁并重验")
+    p_check.add_argument("-o", "--out", default=None, help="配合 --auto-heal 输出修复后的源码路径")
     p_merge = sub.add_parser("merge", help="源码 ↔ .rp 三方合并 (base-spec + base-rp + edited-rp + new-spec -> merged-spec + merged-rp)")
     p_merge.add_argument("--base-spec", required=True, help="上次生成的基准 RP/1 源码")
     p_merge.add_argument("--base-rp", required=True, help="上次生成的基准 .rp")
@@ -6661,25 +8060,93 @@ def main():
     p_merge.add_argument("--new-spec", required=True, help="AI 新一轮修改后的 RP/1 源码")
     p_merge.add_argument("--out-spec", required=True, help="合并后的 RP/1 源码输出路径")
     p_merge.add_argument("--out-rp", default=None, help="合并后重新生成的 .rp 输出路径")
+    p_merge.add_argument("--prefer", default="fail", choices=["fail", "source", "native"], help="冲突解决策略：fail(默认报错保留现场) / source / native")
     for dump_cmd in ("dump-spec", "dump-preset-spec"):
         p_dump = sub.add_parser(dump_cmd, help="导出内置预设的声明式 spec.json 供二次定制")
         p_dump.add_argument("--preset", default="mobile-lostfound", choices=["mobile-lostfound", "web-dashboard"], help="预设名称 (默认 mobile-lostfound)")
         p_dump.add_argument("-o", "--out", required=True, help="输出 JSON 文件路径")
     sub.add_parser("selftest", help="运行 6 组全链路自检 (Web 三主题 + Mobile 双主题 + 自定义小画布两级审计)")
+    sub.add_parser("tokens", help="打印审美门禁使用的字号/字重/圆角/间距令牌表")
+    sub.add_parser("doctor", help="打印字体解析结果、主题令牌与版本信息（排查“字重层次变糊”这类静默降级）")
+    p_meas = sub.add_parser("measure", help="输出每个文字元件的墨迹盒与安全下一条 y（排版定位用）")
+    p_meas.add_argument("--spec", required=True)
+    p_meas.add_argument("--theme", default=None)
+
     args = parser.parse_args()
-    if args.cmd == "check":
+    if args.cmd == "doctor":
+        import platform
+        probe = load_font(14, 400)
+        font_path = getattr(probe, "path", None) or getattr(getattr(probe, "font", None), "path", None)
+        print(json.dumps({
+            "python": platform.python_version(), "platform": platform.platform(),
+            "fontFile": font_path or "（未知：PIL 未暴露路径）",
+            "boldVsRegularSameFile": bool(getattr(load_font(14, 700), "path", None) == font_path),
+            "themeTokens": sorted(THEMES["editorial-warm"].keys()) if "editorial-warm" in THEMES else sorted(next(iter(THEMES.values())).keys()),
+            "colorTokens": sorted(set().union(*[set(t.keys()) for t in THEMES.values()])),
+            "rasterizedStyles": ["gradient", "shadow", "aurora", "noise", "innerGlow", "backdropBlur"],
+            "rasterizedNote": "这些样式以嵌入位图（ImageBox）写入原生；渐变/阴影参数不可在 Axure 里再编辑",
+            "commands": ["compile", "check", "measure", "tokens", "doctor", "merge", "selftest"],
+        }, ensure_ascii=False, indent=2))
+        return
+
+    if args.cmd == "measure":
+        import tempfile
         spec_abs = os.path.abspath(args.spec)
+        spec_obj = read_source(spec_abs)
+        sink = []
+        tmp_dir = tempfile.mkdtemp(prefix="rp-measure-")
+        compile_spec_bundle(spec_obj, tmp_dir, theme_override=args.theme, base_dir=os.path.dirname(spec_abs),
+                            strict_audit=False, source_path=spec_abs, ink_sink=sink)
+        _off = (sink[0].get("offset") if sink else None) or {"x": 0, "y": 0}
+        print(json.dumps({"ok": True, "previewOffset": _off,
+                          "note": "ink 坐标为页面坐标；若 offset 非 0，说明该页套了设备壳，预览图坐标 = ink + offset",
+                          "pages": sink}, ensure_ascii=False, indent=2))
+        return
+
+    if args.cmd == "tokens":
+        print(json.dumps({"fontSize": FONT_SIZE_TOKENS, "fontWeight": FONT_WEIGHT_TOKENS,
+                          "radius": RADIUS_TOKENS, "spacing": RADIUS_TOKENS,
+                          "inkRule": "文字在声明盒内垂直居中；墨迹高≈1.3×fontSize，带 fill/stroke 时另有 8px padding；"
+                                     "相邻文字墨迹不得重叠，安全间距建议 ≥ fontSize×0.6",
+                          "pillRadius": 999}, ensure_ascii=False, indent=2))
+        return
+    if args.cmd == "check":
+        raw_spec_arg = args.spec or args.spec_pos
+        if not raw_spec_arg:
+            from rp_language import fail
+            fail("E_CLI", "/arguments", "the following arguments are required: --spec")
+        spec_abs = os.path.abspath(raw_spec_arg)
         spec_obj = read_source(spec_abs)
         if getattr(args, "shell", None):
             spec_obj["shell"] = args.shell
             spec_obj["domain"] = "mobile" if args.shell == "mobile-stack" else "web"
             if isinstance(spec_obj.get("product"), dict):
                 spec_obj["product"]["shell"] = args.shell
-        _, ir = compile_language(copy.deepcopy(spec_obj))
+        if getattr(args, "auto_heal", False):
+            from rp_language import auto_heal_spec
+            from rp_dsl import spec_to_dsl
+            if args.out and not str(args.out).endswith((".json", ".rp1")):
+                from rp_language import fail
+                fail("E_CLI", "/arguments/out", f"Unsupported output extension for check --auto-heal: {args.out} (expected .rp1 or .json)")
+            healed = auto_heal_spec(spec_obj)
+            spec_obj = healed["spec"]
+            ir = healed["ir"]
+            if args.out:
+                out_abs = os.path.abspath(args.out)
+                if os.path.exists(out_abs):
+                    from rp_language import fail
+                    fail("E_OUTPUT_EXISTS", "/arguments/out", f"Refusing to overwrite existing file: {out_abs}")
+                out_text = spec_to_dsl(spec_obj) if str(args.out).endswith(".rp1") else (json.dumps(spec_obj, ensure_ascii=False, indent=2) + "\n")
+                with open(out_abs, "w", encoding="utf-8") as fh:
+                    fh.write(out_text)
+        else:
+            healed = None
+            _, ir = compile_language(copy.deepcopy(spec_obj))
         import tempfile
         with tempfile.TemporaryDirectory(prefix="rp1-check-") as tmp_dir:
-            bundle_res = compile_spec_bundle(copy.deepcopy(spec_obj), tmp_dir, base_dir=os.path.dirname(spec_abs))
-        print(json.dumps({
+            bundle_res = compile_spec_bundle(copy.deepcopy(spec_obj), tmp_dir, base_dir=os.path.dirname(spec_abs), source_path=spec_abs)
+        _fails = _build_layout_diagnostics(bundle_res, ir)
+        out_payload = {
             "ok": bool(bundle_res.get("ok", True)),
             "structural_ok": bool(bundle_res.get("structural_ok", True)),
             "aesthetic_ok": bool(bundle_res.get("aesthetic_ok", True)),
@@ -6689,8 +8156,15 @@ def main():
             "pages": len(ir["pages"]),
             "symbols": len(ir["symbols"]),
             "semanticHash": ir["semanticHash"],
-            "diagnostics": [],
-        }, ensure_ascii=False))
+            "diagnostics": _fails,
+        }
+        if healed is not None:
+            out_payload["healed"] = healed["healed"]
+            out_payload["rounds"] = healed["rounds"]
+            out_payload["appliedPatches"] = healed["appliedPatches"]
+            if args.out:
+                out_payload["output"] = os.path.abspath(args.out)
+        print(json.dumps(out_payload, ensure_ascii=False))
         sys.exit(0 if bundle_res.get("ok", True) else 1)
     elif args.cmd == "merge":
         from rp_decompile import three_way_merge_rp
@@ -6701,6 +8175,7 @@ def main():
             new_spec_path=args.new_spec,
             out_spec_path=args.out_spec,
             out_rp_path=args.out_rp,
+            prefer=args.prefer,
         )
         print(json.dumps(res, ensure_ascii=False, indent=2))
         sys.exit(0 if res.get("ok") else 1)
@@ -6721,6 +8196,8 @@ def main():
                 base_dir=os.path.dirname(spec_abs),
                 no_interactions=args.no_interactions,
                 strict_audit=args.strict_audit,
+                source_path=spec_abs,
+                auto_heal=args.auto_heal,
             )
         elif args.preset == "mobile-lostfound" or (args.theme and args.theme.startswith("mobile-")):
             spec_obj = build_mobile_lostfound_spec(title_override=args.title)
@@ -6761,6 +8238,34 @@ if __name__ == "__main__":
     try:
         main()
     except LanguageError as error:
-        result = {"ok": False, "language": "rp/1", "diagnostics": [error.diagnostic]}
-        print(json.dumps(result, ensure_ascii=False), file=sys.stderr)
+        import rp_language_cli
+        diag = dict(error.diagnostic)
+        span_map = getattr(rp_language_cli, "_LAST_SPAN_MAP", None) or {}
+        if span_map and "sourceSpan" not in diag:
+            ptr = diag.get("pointer") or "/"
+            cur = ptr
+            while cur:
+                if cur in span_map:
+                    diag["sourceSpan"] = span_map[cur]
+                    break
+                if "/" not in cur or cur == "/":
+                    break
+                cur = cur.rsplit("/", 1)[0] or "/"
+        if isinstance(diag.get("sourceSpan"), dict):
+            if "line" not in diag and "line" in diag["sourceSpan"]:
+                diag["line"] = diag["sourceSpan"]["line"]
+            if "column" not in diag and "column" in diag["sourceSpan"]:
+                diag["column"] = diag["sourceSpan"]["column"]
+        elif "line" in diag:
+            diag["sourceSpan"] = {"line": diag["line"], **({"column": diag["column"]} if "column" in diag else {})}
+        result = {"ok": False, "language": "rp/1", "diagnostics": [diag]}
+        out_stream = sys.stdout if sys.argv[1:2] in (["check"], ["merge"], ["measure"], ["tokens"], ["doctor"]) else sys.stderr
+        print(json.dumps(result, ensure_ascii=False), file=out_stream)
+        sys.exit(1)
+    except (OSError, UnicodeError, RuntimeError, ValueError) as error:
+        result = {"ok": False, "language": "rp/1", "diagnostics": [{
+            "code": "E_SOURCE_IO", "pointer": "/", "severity": "error", "message": str(error),
+        }]}
+        out_stream = sys.stdout if sys.argv[1:2] in (["check"], ["merge"], ["measure"], ["tokens"], ["doctor"]) else sys.stderr
+        print(json.dumps(result, ensure_ascii=False), file=out_stream)
         sys.exit(1)

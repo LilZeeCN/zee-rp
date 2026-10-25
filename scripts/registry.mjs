@@ -29,6 +29,21 @@ const META = {
 // CliEntry 全集：command（调度名，axvg 三个子命令各占一条）/ script / summary / usage / output / evidence。
 const COMMANDS = [
   {
+    "command": "list-custom-styles", "script": "custom-styles.mjs",
+    "summary": "列出文件已有原生自定义样式及 GUID（不创建样式）",
+    "usage": "node custom-styles.mjs <source.rp|source.rplib>", "output": "none", "evidence": "structure"
+  },
+  {
+    "command": "rename-custom-style", "script": "rename-custom-style.mjs",
+    "summary": "按样式身份级联改名，更新所有记录的 MatchInfo 与 StyleCache 名称",
+    "usage": "node rename-custom-style.mjs <source.rp|rplib> <output.rp|rplib> <oldName> <newName>", "output": "index:3", "evidence": "gui-roundtrip"
+  },
+  {
+    "command": "rebind-widgets", "script": "rebind-widgets.mjs",
+    "summary": "筛选元件并批量绑定文件中已有原生样式；可显式清除局部样式覆盖",
+    "usage": "node rebind-widgets.mjs <source.rp|rplib> <output.rp|rplib> <styleGuid> <selector.json> [--reset-overrides]", "output": "index:3", "evidence": "gui-roundtrip"
+  },
+  {
     "command": "create-blank-project",
     "script": "create-blank-project.mjs",
     "summary": "复制用户本机的 RP 9 / RP 11 原生空白模板生成单页空白 .rp 工程（模板按目标版本绑定）",
@@ -280,6 +295,10 @@ const COMMANDS = [
 
 // 无 CLI 入口（或仅自测 main guard）的库/研究脚本，只参与存在性与 evidence 校验。
 const LIB_SCRIPTS = [
+  { "script": "prototype-worker.mjs", "summary": "异步原型生成子进程；返回结构化生成结果并保持 MCP 可响应", "evidence": "internal" },
+  { "script": "image-structure.mjs", "summary": "图片重建分组、重复模式、共享样式和编辑边界的只读审阅", "evidence": "structure" },
+  { "script": "preview-runtime.mjs", "summary": "真实 Axure 浏览器预览操作、运行变量观测及源码映射诊断", "evidence": "preview" },
+  { "script": "authoring-workflow.mjs", "summary": "创作范例、只读诊断、绑定解释、活动版本指纹与受保护改稿闭环", "evidence": "structure" },
   {
     "script": "version.mjs",
     "summary": "Axure 版本边界：文件头识别（RP9 acef0900 / RP11 acef0b00）、目标版本解析、宿主与模板按版本绑定",
@@ -317,7 +336,7 @@ const LIB_SCRIPTS = [
     "tools": [
       {
         "name": "gui_roundtrip",
-        "description": "复制到新文件后在 Axure RP 9 或 RP 11 保存、关闭、重开（宿主按 version 或源文件版本绑定）；默认立即返回 job 句柄。仅此流程，不含 GUI 改稿和预览行为。",
+        "description": "复制到新文件后在 Axure RP 9 或 RP 11 保存、关闭、重开（宿主按 version 或源文件版本绑定）；可选传 preview=true 在重开后触发菜单「发布 -> 预览」。默认立即返回 job 句柄。",
         "inputSchema": {
           "type": "object",
           "properties": {
@@ -331,6 +350,10 @@ const LIB_SCRIPTS = [
             },
             "wait": {
               "type": "boolean"
+            },
+            "preview": {
+              "type": "boolean",
+              "description": "可选：重开后是否触发 Axure 原生菜单「发布 -> 预览 / Publish -> Preview」启动本地预览，默认 false"
             },
             "version": {
               "type": "integer",
@@ -419,6 +442,18 @@ const LIB_SCRIPTS = [
       "additionalProperties": false
     },
     "commandSchemas": {
+      "list-custom-styles": {
+        "inputSchema": { "type": "object", "properties": { "source": { "type": "string", "minLength": 1 } }, "required": ["source"], "additionalProperties": false },
+        "positionals": ["source"]
+      },
+      "rename-custom-style": {
+        "inputSchema": { "type": "object", "properties": { "source": { "type": "string", "minLength": 1 }, "output": { "type": "string", "minLength": 1 }, "oldName": { "type": "string", "minLength": 1 }, "newName": { "type": "string", "minLength": 1 } }, "required": ["source", "output", "oldName", "newName"], "additionalProperties": false },
+        "positionals": ["source", "output", "oldName", "newName"]
+      },
+      "rebind-widgets": {
+        "inputSchema": { "type": "object", "properties": { "source": { "type": "string", "minLength": 1 }, "output": { "type": "string", "minLength": 1 }, "styleGuid": { "type": "string", "minLength": 1 }, "selector": { "type": "string", "minLength": 1 }, "resetOverrides": { "type": "boolean" } }, "required": ["source", "output", "styleGuid", "selector"], "additionalProperties": false },
+        "positionals": ["source", "output", "styleGuid", "selector"], "flags": { "resetOverrides": "--reset-overrides" }
+      },
       "rp-read": {
         "inputSchema": {
           "type": "object",

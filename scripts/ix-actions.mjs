@@ -682,8 +682,11 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
       }
       case 'set-size': {
         const { path } = paths();
+        // width / height 既接受字面量，也接受 RP/1 运行期表达式 AST（{kind:'binary'|'variable'|...}）
+        const sizeOperand = v => (v && typeof v === 'object' && typeof v.kind === 'string')
+          ? runtimeValue(v) : literal(v ?? '');
         const size = info('Axure:SetWidgetSizeInfo', {
-          width: ref(literal(spec.width ?? '').id), height: ref(literal(spec.height ?? '').id),
+          width: ref(sizeOperand(spec.width).id), height: ref(sizeOperand(spec.height).id),
           easing: int(pick(EASE, spec.easing ?? 'none', 'easing')), duration: f64(spec.duration ?? 500),
           anchor: str(spec.anchor ?? 'top left')
         });

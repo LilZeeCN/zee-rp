@@ -55,6 +55,12 @@ try {
     validateInput(schema, { source: '/s.rp', output: '/o.rp', name: 'Counter', defaultValue: '7' });
     assert.throws(() => validateInput(schema, { source: '/s.rp', output: '/o.rp' }));
   });
+  check('MCP generation schema exposes structured pages and restricts native target', () => {
+    const schema = listMcpTools().find(t => t.name === 'generate_prototype').inputSchema;
+    validateInput(schema, { spec: { pages: [{ id: 'home', root: { type: 'label', id: 'title', text: 'Hello' } }] }, output: '/new.rp' });
+    assert.throws(() => validateInput(schema, { spec: { pages: [] }, output: '/new.rp' }));
+    assert.throws(() => validateInput(schema, { spec: { target: 11, pages: [{ id: 'home' }] }, output: '/new.rp' }));
+  });
   check('Axvg public example builds deterministically', () => {
     const spec = JSON.parse(readFileSync(join(root, 'assets/dashboard-example.spec.json')));
     resetIds(); const first = expandSpec(spec); resetIds(); const second = expandSpec(spec);
@@ -106,6 +112,10 @@ try {
     writeFileSync(join(probe, 'test/fixtures/private.json'), 'private');
     symlinkSync(join(probe, 'test/fixtures/private.json'), join(probe, 'scripts/link.json'));
     assert.deepEqual(releasePaths(probe), ['scripts/public.mjs']);
+    writeFileSync(join(probe, 'package.json'), JSON.stringify({ files: ['test/public-check.mjs'] }));
+    writeFileSync(join(probe, 'test/public-check.mjs'), 'export const publicCheck = true;');
+    writeFileSync(join(probe, 'test/local-research.mjs'), 'export const localOnly = true;');
+    assert.deepEqual(releasePaths(probe), ['package.json', 'scripts/public.mjs', 'test/public-check.mjs']);
   });
   check('release preserves all public implementations, tests, bilingual docs, and examples', () => {
     const output = join(work, 'release'); packRelease(output);

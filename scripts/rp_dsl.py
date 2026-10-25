@@ -9,7 +9,7 @@ import json
 import re
 from rp_language import LanguageError, SHORTHAND_NODE_KINDS, EVENT_SHORTHANDS
 
-SIMPLE_STR_RE = re.compile(r"^[A-Za-z0-9_.$@/#:-]+$")
+SIMPLE_STR_RE = re.compile(r"^[A-Za-z0-9_.$@/#-]+$")
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
 
 
@@ -78,7 +78,7 @@ def _emit_node(node, indent, lines):
         "slots", "master", "detail",
         "filters", "steps", "on", *EVENT_SHORTHANDS.keys(),
     }
-    for arr_k in ("columns", "fields", "items"):
+    for arr_k in ("columns", "fields", *(() if kind == "stat-row" else ("items",))):
         if isinstance(node.get(arr_k), list):
             block_keys.add(arr_k)
     if kind == "use":
@@ -99,7 +99,7 @@ def _emit_node(node, indent, lines):
             lines.append(f"{c_pad}+on.{ev_k} {_fmt_inline(ev_v)}")
 
     # Emit macro array items compactly
-    for arr_k, tag in (("columns", "col"), ("fields", "field"), ("items", "item")):
+    for arr_k, tag in (("columns", "col"), ("fields", "field"), *(() if kind == "stat-row" else (("items", "item"),))):
         if arr_k in node and isinstance(node[arr_k], list):
             for entry in node[arr_k]:
                 if isinstance(entry, dict) and "cell" not in entry:
@@ -135,9 +135,37 @@ def _emit_node(node, indent, lines):
 
     if "states" in node and isinstance(node["states"], list):
         for st in node["states"]:
-            if isinstance(st, dict) and "id" in st and isinstance(st.get("root"), dict):
-                lines.append(f"{c_pad}:state {_fmt_scalar(st['id'])}")
-                _emit_node(st["root"], indent + 2, lines)
+            if isinstance(st, dict) and ("id" in st or "state" in st):
+                st_id = st.get("id") or st.get("state")
+                st_meta = dict(st)
+                st_root = st.get("root")
+                unwrap_root = (
+                    isinstance(st_root, dict)
+                    and st_root.get("type") == "box"
+                    and st_root.get("id") == f"{nid or 'panel'}_{st_id}_root"
+                    and isinstance(st_root.get("children"), list)
+                )
+                if unwrap_root:
+                    for bk, def_v in (
+                        ("layout", "column"), ("w", "fill"), ("h", "hug"),
+                        ("gap", 12), ("padding", 0), ("align", None),
+                        ("justify", None), ("fill", None), ("stroke", None), ("radius", None),
+                    ):
+                        if bk in st_root and st_root[bk] != def_v and bk not in st_meta:
+                            st_meta[bk] = st_root[bk]
+                st_hdr_kvs = _fmt_kv_pairs(st_meta, skip={"id", "state", "root", "children", "body", "tree", "_auto_state_root"})
+                lines.append(f"{c_pad}:state {_fmt_scalar(st_id)} {st_hdr_kvs}".rstrip())
+                if isinstance(st_root, dict):
+                    if unwrap_root:
+                        for sch in st_root["children"]:
+                            if isinstance(sch, dict):
+                                _emit_node(sch, indent + 2, lines)
+                    else:
+                        _emit_node(st_root, indent + 2, lines)
+                elif isinstance(st.get("children"), list):
+                    for sch in st["children"]:
+                        if isinstance(sch, dict):
+                            _emit_node(sch, indent + 2, lines)
 
     if "children" in node and isinstance(node["children"], list):
         for ch in node["children"]:
@@ -150,9 +178,15 @@ def spec_to_dsl(spec):
     if not isinstance(spec, dict) or spec.get("language") != "rp/1":
         raise LanguageError("E_LANGUAGE", "/language", "Expected language 'rp/1'")
     lines = []
-    header_skip = {"language", "models", "datasets", "variables", "components", "product", "pages"}
+    header_skip = {"language", "palette", "models", "datasets", "variables", "components", "product", "tabBar", "pages"}
     hdr_kvs = _fmt_kv_pairs(spec, skip=header_skip)
     lines.append(f"rp/1 {hdr_kvs}".rstrip())
+
+    if "palette" in spec and isinstance(spec["palette"], dict) and spec["palette"]:
+        lines.append("palette:")
+        for pk, pv in spec["palette"].items():
+            clean_pk = str(pk).lstrip("$")
+            lines.append(f"  ${clean_pk} = {_fmt_inline(pv)}")
 
     if "models" in spec and isinstance(spec["models"], dict):
         for mname, mfields in spec["models"].items():
@@ -204,6 +238,20 @@ def spec_to_dsl(spec):
             for vw in prod["views"]:
                 lines.append(f"  view {_fmt_kv_pairs(vw)}")
 
+    if "tabBar" in spec and spec["tabBar"] is not None:
+        tb_val = spec["tabBar"]
+        if isinstance(tb_val, list):
+            lines.append("tab-bar:")
+            for entry in tb_val:
+                if isinstance(entry, dict):
+                    lines.append(f"  :item {_fmt_kv_pairs(entry)}")
+        elif isinstance(tb_val, dict):
+            tb_hdr = _fmt_kv_pairs(tb_val, skip={"items", "tabs", "type"})
+            lines.append(f"tab-bar {tb_hdr}".rstrip())
+            for entry in (tb_val.get("items") or tb_val.get("tabs") or []):
+                if isinstance(entry, dict):
+                    lines.append(f"  :item {_fmt_kv_pairs(entry)}")
+
     if "pages" in spec and isinstance(spec["pages"], list):
         for page in spec["pages"]:
             pid = page.get("id", "main")
@@ -233,6 +281,11 @@ def spec_to_dsl(spec):
     return "\n".join(lines) + "\n"
 
 
+def _set_diag_span(err, line_no, col_no):
+    err.diagnostic.update(line=line_no, column=col_no, sourceSpan={"line": line_no, "column": col_no})
+    return err
+
+
 def _parse_value(raw, line_no=1):
     raw = raw.strip()
     if not raw:
@@ -247,9 +300,7 @@ def _parse_value(raw, line_no=1):
         try:
             return json.loads(raw)
         except json.JSONDecodeError as e:
-            err = LanguageError("E_DSL_SYNTAX", "/", f"Invalid literal at line {line_no}: {e.msg}")
-            err.diagnostic.update(line=line_no, column=e.colno)
-            raise err
+            raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"Invalid literal at line {line_no}: {e.msg}"), line_no, e.colno)
     if re.fullmatch(r"-?\d+", raw):
         return int(raw)
     if re.fullmatch(r"-?\d+\.\d+", raw):
@@ -259,7 +310,7 @@ def _parse_value(raw, line_no=1):
 
 def _scan_token(s, pos, line_no=1):
     n = len(s)
-    while pos < n and s[pos].isspace():
+    while pos < n and (s[pos].isspace() or s[pos] == ","):
         pos += 1
     if pos >= n:
         return None, pos
@@ -274,10 +325,8 @@ def _scan_token(s, pos, line_no=1):
                 pos += 1
                 return s[start:pos], pos
             pos += 1
-        err = LanguageError("E_DSL_SYNTAX", "/", f"Unterminated string at line {line_no}")
-        err.diagnostic.update(line=line_no, column=start + 1)
-        raise err
-    if s[pos] in ("{", "["):
+        raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"Unterminated string at line {line_no}"), line_no, start + 1)
+    if s[pos] in ("{", "[", "("):
         depth = 0
         in_str = False
         while pos < n:
@@ -291,19 +340,17 @@ def _scan_token(s, pos, line_no=1):
             else:
                 if ch == '"':
                     in_str = True
-                elif ch in ("{", "["):
+                elif ch in ("{", "[", "("):
                     depth += 1
-                elif ch in ("}", "]"):
+                elif ch in ("}", "]", ")"):
                     depth -= 1
                     if depth == 0:
                         pos += 1
                         return s[start:pos], pos
             pos += 1
-        err = LanguageError("E_DSL_SYNTAX", "/", f"Unterminated bracket at line {line_no}")
-        err.diagnostic.update(line=line_no, column=start + 1)
-        raise err
-    while pos < n and not s[pos].isspace():
-        if s[pos] in ('"', "{", "["):
+        raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"Unterminated bracket at line {line_no}"), line_no, start + 1)
+    while pos < n and not s[pos].isspace() and s[pos] != ",":
+        if s[pos] in ('"', "{", "[", "("):
             _, pos = _scan_token(s, pos, line_no)
         else:
             pos += 1
@@ -314,16 +361,59 @@ def _parse_kv_tail(s, pos=0, line_no=1):
     out = {}
     n = len(s)
     while pos < n:
+        while pos < n and (s[pos].isspace() or s[pos] == ","):
+            pos += 1
+        if pos >= n:
+            break
         tok, next_pos = _scan_token(s, pos, line_no)
         if tok is None:
             break
         pos = next_pos
+        if tok == ",":
+            continue
         if "=" not in tok or tok.startswith(('"', "{", "[")):
-            err = LanguageError("E_DSL_SYNTAX", "/", f"Expected key=value token, got '{tok}' at line {line_no}")
-            err.diagnostic.update(line=line_no, column=pos)
-            raise err
+            raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"Expected key=value token, got '{tok}' at line {line_no}"), line_no, pos)
         k, v_raw = tok.split("=", 1)
+        k = k.lstrip(",").strip()
+        if v_raw.endswith(","):
+            v_raw = v_raw[:-1].rstrip()
         out[k] = _parse_value(v_raw, line_no)
+    return out
+
+
+def _parse_item_line(tail, line_no):
+    s = tail.strip()
+    if s.startswith("{") and s.endswith("}"):
+        return _parse_value(s, line_no)
+    out = {}
+    pos = 0
+    while pos < len(s):
+        tok, next_pos = _scan_token(s, pos, line_no)
+        if tok is None:
+            break
+        pos = next_pos
+        if tok == ",":
+            continue
+        if "=" in tok and not tok.startswith(('"', "{", "[")):
+            k, v_raw = tok.split("=", 1)
+            k = k.lstrip(",").strip()
+            if v_raw.endswith(","):
+                v_raw = v_raw[:-1].rstrip()
+            out[k] = _parse_value(v_raw, line_no)
+        elif tok.startswith("#") and "id" not in out:
+            out["id"] = _parse_value(tok[1:], line_no)
+        elif tok.startswith('"'):
+            val = _parse_value(tok, line_no)
+            if "label" not in out:
+                out["label"] = val
+            elif "value" not in out:
+                out["value"] = val
+        else:
+            val = _parse_value(tok, line_no)
+            if "id" not in out:
+                out["id"] = str(val)
+            elif "label" not in out:
+                out["label"] = str(val)
     return out
 
 
@@ -351,13 +441,50 @@ def _parse_node_block(raw_lines, idx, base_indent, ptr_prefix, span_map):
             node["h"] = _parse_value(dims[1], line_no)
         elif ntok.startswith('"') and "text" not in node and "text" not in kvs:
             node["text"] = _parse_value(ntok, line_no)
+        elif kind == "use" and "(" in ntok and ntok.endswith(")") and not ntok.startswith(('"', "{", "[")):
+            if ntok.startswith("("):
+                inner = ntok[1:-1].strip()
+                if inner:
+                    kvs.setdefault("args", {}).update(_parse_kv_tail(inner, 0, line_no))
+            else:
+                cname, inner = ntok[:-1].split("(", 1)
+                kvs["component"] = cname.strip()
+                span_map[f"{ptr_prefix}/component"] = {"line": line_no, "column": indent + saved + 1}
+                if inner.strip():
+                    kvs.setdefault("args", {}).update(_parse_kv_tail(inner.strip(), 0, line_no))
+        elif kind == "use" and "=" not in ntok and "component" not in kvs and IDENT_RE.match(ntok):
+            kvs["component"] = ntok
+            span_map[f"{ptr_prefix}/component"] = {"line": line_no, "column": indent + saved + 1}
+        elif kind != "use" and nid is None and "id" not in kvs and "=" not in ntok and not ntok.startswith(('"', "{", "[", "(")) and IDENT_RE.match(ntok):
+            nid = ntok
         elif "=" in ntok and not ntok.startswith(('"', "{", "[", "=")):
             k, v_raw = ntok.split("=", 1)
-            kvs[k] = _parse_value(v_raw, line_no)
+            if k.startswith("+on."):
+                ev_name = k[4:]
+                node.setdefault("on", {})[ev_name] = _parse_value(v_raw, line_no)
+                span_map[f"{ptr_prefix}/on/{ev_name}"] = {"line": line_no, "column": indent + saved + 1}
+            elif k.startswith("+"):
+                ev_sh = k[1:]
+                ev_parsed = _parse_value(v_raw, line_no)
+                if ev_sh in ("click", "change", "focus", "blur", "load", "statechange"):
+                    node.setdefault("on", {})[ev_sh] = ev_parsed
+                    span_map[f"{ptr_prefix}/on/{ev_sh}"] = {"line": line_no, "column": indent + saved + 1}
+                else:
+                    kvs[ev_sh] = ev_parsed
+                    span_map[f"{ptr_prefix}/{ev_sh}"] = {"line": line_no, "column": indent + saved + 1}
+            else:
+                kvs[k] = _parse_value(v_raw, line_no)
+                span_map[f"{ptr_prefix}/{k}"] = {"line": line_no, "column": indent + saved + 1}
         else:
-            err = LanguageError("E_DSL_SYNTAX", "/", f"Expected key=value token, got '{ntok}' at line {line_no}")
-            err.diagnostic.update(line=line_no, column=saved + 1)
-            raise err
+            raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ptr_prefix, f"Expected key=value token, got '{ntok}' at line {line_no}"), line_no, indent + saved + 1)
+
+    if nid is None and "id" not in kvs:
+        if kind == "use":
+            comp_slug = re.sub(r"[^A-Za-z0-9_]", "_", str(kvs.get("component", "comp")))
+            nid = f"use_{comp_slug}_{line_no}"
+        else:
+            kind_slug = re.sub(r"[^A-Za-z0-9_]", "_", str(kind))
+            nid = f"{kind_slug}_{line_no}"
 
     if is_shorthand:
         node[kind] = nid
@@ -376,14 +503,25 @@ def _parse_node_block(raw_lines, idx, base_indent, ptr_prefix, span_map):
             break
         if c_content.startswith("+on."):
             rest = c_content[4:].strip()
-            ev_name, val_pos = _scan_token(rest, 0, c_line_no)
-            ev_val = _parse_value(rest[val_pos:], c_line_no)
+            if "=" in rest and not rest.split("=", 1)[0].strip().startswith(('"', "{", "[")) and " " not in rest.split("=", 1)[0].strip():
+                ev_name, ev_raw = rest.split("=", 1)
+                ev_name = ev_name.strip()
+                ev_val = _parse_value(ev_raw.strip(), c_line_no)
+            else:
+                ev_name, val_pos = _scan_token(rest, 0, c_line_no)
+                ev_val = _parse_value(rest[val_pos:], c_line_no)
             node.setdefault("on", {})[ev_name] = ev_val
             span_map[f"{ptr_prefix}/on/{ev_name}"] = {"line": c_line_no, "column": c_indent + 1}
             idx += 1
         elif c_content.startswith("+"):
-            ev_sh, val_pos = _scan_token(c_content[1:], 0, c_line_no)
-            ev_parsed = _parse_value(c_content[1 + val_pos:], c_line_no)
+            rest = c_content[1:].strip()
+            if "=" in rest and not rest.split("=", 1)[0].strip().startswith(('"', "{", "[")) and " " not in rest.split("=", 1)[0].strip():
+                ev_sh, ev_raw = rest.split("=", 1)
+                ev_sh = ev_sh.strip()
+                ev_parsed = _parse_value(ev_raw.strip(), c_line_no)
+            else:
+                ev_sh, val_pos = _scan_token(rest, 0, c_line_no)
+                ev_parsed = _parse_value(rest[val_pos:], c_line_no)
             if ev_sh in ("click", "change", "focus", "blur", "load", "statechange"):
                 node.setdefault("on", {})[ev_sh] = ev_parsed
                 span_map[f"{ptr_prefix}/on/{ev_sh}"] = {"line": c_line_no, "column": c_indent + 1}
@@ -391,17 +529,15 @@ def _parse_node_block(raw_lines, idx, base_indent, ptr_prefix, span_map):
                 node[ev_sh] = ev_parsed
                 span_map[f"{ptr_prefix}/{ev_sh}"] = {"line": c_line_no, "column": c_indent + 1}
             idx += 1
-        elif c_content.startswith((":col ", ":field ", ":item ")):
+        elif c_content.startswith((":col ", ":field ", ":item ", "item ", "- ")):
             tag, val_pos = _scan_token(c_content, 0, c_line_no)
-            arr_k = {"col": "columns", "field": "fields", "item": "items"}[tag[1:]]
+            tag_clean = "item" if tag in ("item", "-") else tag[1:]
+            arr_k = {"col": "columns", "field": "fields", "item": "items"}[tag_clean]
             tail = c_content[val_pos:].strip()
             arr = node.setdefault(arr_k, [])
             item_ptr = f"{ptr_prefix}/{arr_k}/{len(arr)}"
             span_map[item_ptr] = {"line": c_line_no, "column": c_indent + 1}
-            if tail.startswith("{"):
-                arr.append(_parse_value(tail, c_line_no))
-            else:
-                arr.append(_parse_kv_tail(tail, 0, c_line_no))
+            arr.append(_parse_item_line(tail, c_line_no) if tag_clean == "item" else (_parse_value(tail, c_line_no) if tail.startswith("{") else _parse_kv_tail(tail, 0, c_line_no)))
             idx += 1
         elif c_content.startswith(":filters "):
             tail = c_content[len(":filters "):].strip()
@@ -432,13 +568,71 @@ def _parse_node_block(raw_lines, idx, base_indent, ptr_prefix, span_map):
             node.setdefault("slots", {})[sk] = s_node
         elif c_content.startswith((":state ", "state ")):
             pfx_len = 7 if c_content.startswith(":state ") else 6
-            sid = _parse_value(c_content[pfx_len:].strip(), c_line_no)
+            sid_raw = c_content[pfx_len:].strip()
+            sid = None
+            st_kvs = {}
+            s_pos = 0
+            while s_pos < len(sid_raw):
+                s_tok, s_pos = _scan_token(sid_raw, s_pos, c_line_no)
+                if s_tok is None:
+                    break
+                if s_tok.startswith("#") and sid is None and "=" not in s_tok:
+                    sid = _parse_value(s_tok[1:], c_line_no)
+                elif s_tok.startswith("[") and s_tok.endswith("]") and "x" in s_tok and "=" not in s_tok:
+                    dims = s_tok[1:-1].split("x", 1)
+                    st_kvs["w"] = _parse_value(dims[0], c_line_no)
+                    st_kvs["h"] = _parse_value(dims[1], c_line_no)
+                elif s_tok.startswith(('"', "'")) and "name" not in st_kvs:
+                    st_kvs["name"] = _parse_value(s_tok, c_line_no)
+                elif "=" in s_tok and not s_tok.startswith(('"', "'", "{", "[")):
+                    sk, sv_raw = s_tok.split("=", 1)
+                    st_kvs[sk] = _parse_value(sv_raw, c_line_no)
+                elif sid is None:
+                    sid = _parse_value(s_tok.lstrip("#"), c_line_no)
+                else:
+                    raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ptr_prefix, f"Unexpected token '{s_tok}' in :state header at line {c_line_no}"), c_line_no, c_indent + 1)
+            if sid is None:
+                sid = st_kvs.pop("id", st_kvs.pop("state", f"state_{len(node.get('states', [])) + 1}"))
             st_arr = node.setdefault("states", [])
             st_ptr = f"{ptr_prefix}/states/{len(st_arr)}"
             span_map[st_ptr] = {"line": c_line_no, "column": c_indent + 1}
             idx += 1
-            s_root, idx = _parse_node_block(raw_lines, idx, c_indent, f"{st_ptr}/root", span_map)
-            st_arr.append({"id": sid, "root": s_root})
+            st_children = []
+            while idx < n_lines and raw_lines[idx][1] > c_indent and not raw_lines[idx][2].startswith((":state ", "state ")):
+                ch_lno, ch_ind, ch_txt = raw_lines[idx]
+                if ch_txt in (":root", "root", ":children", "children"):
+                    idx += 1
+                    continue
+                ch_ptr = f"{st_ptr}/root" if not st_children else f"{st_ptr}/root/children/{len(st_children)}"
+                s_child, idx = _parse_node_block(raw_lines, idx, ch_ind, ch_ptr, span_map)
+                st_children.append(s_child)
+            if not st_children and isinstance(st_kvs.get("root"), dict):
+                s_root = st_kvs.pop("root")
+            else:
+                if not st_children and "children" in st_kvs:
+                    inline_ch = st_kvs.pop("children")
+                    st_children = inline_ch if isinstance(inline_ch, list) else ([inline_ch] if isinstance(inline_ch, dict) else [])
+                has_box_overrides = any(
+                    k in st_kvs
+                    for k in ("layout", "w", "h", "gap", "padding", "align", "justify", "fill", "bg", "background", "stroke", "borderColor", "strokeWidth", "borderWidth", "radius", "rounded", "borderRadius", "columns", "equalHeight")
+                )
+                if len(st_children) == 1 and not has_box_overrides:
+                    s_root = st_children[0]
+                else:
+                    s_root = {
+                        "type": "box",
+                        "id": f"{nid or 'panel'}_{sid}_root",
+                        "layout": st_kvs.pop("layout", "column"),
+                        "w": st_kvs.pop("w", "fill"),
+                        "h": st_kvs.pop("h", "hug"),
+                        "gap": st_kvs.pop("gap", 12),
+                        "padding": st_kvs.pop("padding", 0),
+                        "children": st_children,
+                    }
+                    for bk in ("align", "justify", "fill", "bg", "background", "stroke", "borderColor", "strokeWidth", "borderWidth", "radius", "rounded", "borderRadius", "columns", "equalHeight"):
+                        if bk in st_kvs:
+                            s_root[bk] = st_kvs.pop(bk)
+            st_arr.append({"id": sid, **st_kvs, "root": s_root})
         else:
             ch_arr = node.setdefault("children", [])
             ch_ptr = f"{ptr_prefix}/children/{len(ch_arr)}"
@@ -456,37 +650,62 @@ def _parse_node_block(raw_lines, idx, base_indent, ptr_prefix, span_map):
 def dsl_to_spec(dsl_text, return_spans=False):
     """Parse `.rp1` textual DSL into canonical RP/1 JSON AST."""
     if not isinstance(dsl_text, str):
-        raise LanguageError("E_DSL_SYNTAX", "/", "DSL input must be a string")
+        raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", "DSL input must be a string"), 1, 1)
     raw_lines = []
     for lno, raw in enumerate(dsl_text.splitlines(), 1):
         stripped = raw.strip()
-        if not stripped or stripped.startswith("//") or stripped.startswith("# "):
+        if not stripped or stripped.startswith("//") or stripped.startswith("#"):
             continue
+        if len(stripped) > 1 and stripped.endswith(":"):
+            stripped = stripped[:-1].rstrip()
         indent = len(raw) - len(raw.lstrip(" "))
         raw_lines.append((lno, indent, stripped))
 
     if not raw_lines:
-        raise LanguageError("E_DSL_SYNTAX", "/", "Empty .rp1 document")
+        raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", "Empty .rp1 document"), 1, 1)
 
     span_map = {"/": {"line": raw_lines[0][0], "column": 1}}
     lno0, _, first = raw_lines[0]
     if not first.startswith("rp/1"):
-        err = LanguageError("E_DSL_SYNTAX", "/language", "First statement in .rp1 must start with 'rp/1'")
-        err.diagnostic.update(line=lno0, column=1)
-        raise err
+        raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/language", "First statement in .rp1 must start with 'rp/1'"), lno0, 1)
 
     spec = {"language": "rp/1"}
-    spec.update(_parse_kv_tail(first, 4, lno0))
+    hdr_pos = 4
+    if hdr_pos < len(first) and first[hdr_pos:].lstrip().startswith(('"', "'")):
+        h_tok, hdr_pos = _scan_token(first, hdr_pos, lno0)
+        spec["name"] = _parse_value(h_tok, lno0)
+    spec.update(_parse_kv_tail(first, hdr_pos, lno0))
+    if "title" in spec:
+        if "name" not in spec:
+            spec["name"] = spec.pop("title")
+        else:
+            spec.pop("title", None)
     idx = 1
     n = len(raw_lines)
 
     while idx < n:
         lno, indent, content = raw_lines[idx]
         tok, pos = _scan_token(content, 0, lno)
-        if tok == "palette":
-            spec.setdefault("palette", {}).update(_parse_kv_tail(content, pos, lno))
+        if tok in ("palette", "tokens"):
+            pal_obj = spec.setdefault("palette", {})
+            if pos < len(content):
+                for pk, pv in _parse_kv_tail(content, pos, lno).items():
+                    pal_obj[pk.lstrip("$")] = pv
             span_map["/palette"] = {"line": lno, "column": indent + 1}
             idx += 1
+            while idx < n and raw_lines[idx][1] > indent:
+                p_lno, p_ind, p_cnt = raw_lines[idx]
+                if "=" in p_cnt and (" = " in p_cnt or (p_cnt.startswith("$") and " " not in p_cnt.strip())):
+                    pk, pv = p_cnt.split("=", 1)
+                    pk = pk.strip().lstrip("$")
+                    pal_obj[pk] = _parse_value(pv.strip(), p_lno)
+                    span_map[f"/palette/{pk}"] = {"line": p_lno, "column": p_ind + 1}
+                else:
+                    for pk, pv in _parse_kv_tail(p_cnt, 0, p_lno).items():
+                        clean_pk = pk.lstrip("$")
+                        pal_obj[clean_pk] = pv
+                        span_map[f"/palette/{clean_pk}"] = {"line": p_lno, "column": p_ind + 1}
+                idx += 1
         elif tok == "model":
             mname, pos = _scan_token(content, pos, lno)
             mfields = _parse_kv_tail(content, pos, lno)
@@ -518,11 +737,17 @@ def dsl_to_spec(dsl_text, return_spans=False):
                 spec.setdefault("datasets", {})[dname] = {**d_hdr, "rows": rows}
         elif tok == "var":
             vtok, pos = _scan_token(content, pos, lno)
-            vname = vtok[1:] if vtok.startswith("$") else vtok
+            vname = (vtok[1:] if vtok.startswith("$") else vtok).rstrip(":")
             rest = content[pos:].strip()
+            if rest.startswith(":"):
+                rest = rest[1:].strip()
             span_map[f"/variables/{vname}"] = {"line": lno, "column": indent + 1}
             if rest.startswith("="):
                 spec.setdefault("variables", {})[vname] = _parse_value(rest[1:].strip(), lno)
+            elif "=" in rest and rest.split("=", 1)[0].strip() in ("number", "text", "string", "boolean", "bool"):
+                raw_t, raw_v = rest.split("=", 1)
+                norm_t = {"string": "text", "bool": "boolean"}.get(raw_t.strip(), raw_t.strip())
+                spec.setdefault("variables", {})[vname] = {"type": norm_t, "value": _parse_value(raw_v.strip(), lno)}
             else:
                 spec.setdefault("variables", {})[vname] = _parse_kv_tail(content, pos, lno)
             idx += 1
@@ -596,6 +821,29 @@ def dsl_to_spec(dsl_text, return_spans=False):
                 else:
                     idx += 1
             spec["product"] = prod
+        elif tok in ("tab-bar", "tabBar"):
+            tb_obj = {}
+            while pos < len(content):
+                ntok, pos = _scan_token(content, pos, lno)
+                if ntok is None:
+                    break
+                if ntok.startswith("#") and "id" not in tb_obj and "=" not in ntok:
+                    tb_obj["id"] = _parse_value(ntok[1:], lno)
+                elif "=" in ntok:
+                    k, v_raw = ntok.split("=", 1)
+                    tb_obj[k] = _parse_value(v_raw, lno)
+            span_map["/tabBar"] = {"line": lno, "column": indent + 1}
+            idx += 1
+            while idx < n and raw_lines[idx][1] > indent:
+                t_lno, t_ind, t_cnt = raw_lines[idx]
+                if t_cnt.startswith((":item ", "item ", "- ")):
+                    _, t_pos = _scan_token(t_cnt, 0, t_lno)
+                    tail = t_cnt[t_pos:].strip()
+                    arr = tb_obj.setdefault("items", [])
+                    span_map[f"/tabBar/items/{len(arr)}"] = {"line": t_lno, "column": t_ind + 1}
+                    arr.append(_parse_item_line(tail, t_lno))
+                idx += 1
+            spec["tabBar"] = tb_obj
         elif tok == "page":
             ptok, pos = _scan_token(content, pos, lno)
             pid = ptok[1:] if ptok.startswith("#") else ptok
@@ -619,39 +867,146 @@ def dsl_to_spec(dsl_text, return_spans=False):
                     k, v_raw = ctok.split("=", 1)
                     page_obj[k] = _parse_value(v_raw, lno)
                 else:
-                    err = LanguageError("E_DSL_SYNTAX", "/", f"Expected key=value token, got '{ctok}' at line {lno}")
-                    err.diagnostic.update(line=lno, column=saved + 1)
-                    raise err
+                    raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"Expected key=value token, got '{ctok}' at line {lno}"), lno, indent + saved + 1)
             pages_arr = spec.setdefault("pages", [])
             p_ptr = f"/pages/{len(pages_arr)}"
             span_map[p_ptr] = {"line": lno, "column": indent + 1}
             idx += 1
             while idx < n and raw_lines[idx][1] > indent:
                 c_lno, c_ind, c_cnt = raw_lines[idx]
-                if c_cnt.startswith("+onLoad "):
+                if c_cnt.startswith("+onLoad ") or c_cnt.startswith("+onLoad="):
                     page_obj["onLoad"] = _parse_value(c_cnt[8:].strip(), c_lno)
                     idx += 1
                 elif c_cnt.startswith("+on."):
                     rest = c_cnt[4:].strip()
-                    ev_name, vpos = _scan_token(rest, 0, c_lno)
-                    page_obj.setdefault("on", {})[ev_name] = _parse_value(rest[vpos:], c_lno)
+                    if "=" in rest and not rest.split("=", 1)[0].strip().startswith(('"', "{", "[")) and " " not in rest.split("=", 1)[0].strip():
+                        ev_name, ev_raw = rest.split("=", 1)
+                        page_obj.setdefault("on", {})[ev_name.strip()] = _parse_value(ev_raw.strip(), c_lno)
+                    else:
+                        ev_name, vpos = _scan_token(rest, 0, c_lno)
+                        page_obj.setdefault("on", {})[ev_name] = _parse_value(rest[vpos:], c_lno)
                     idx += 1
                 elif c_cnt.startswith(":bind "):
                     page_obj.setdefault("bindings", []).append(_parse_kv_tail(c_cnt, 6, c_lno))
                     idx += 1
                 else:
                     proot, idx = _parse_node_block(raw_lines, idx, c_ind, f"{p_ptr}/root", span_map)
-                    page_obj["root"] = proot
+                    if "root" not in page_obj:
+                        page_obj["root"] = proot
+                    else:
+                        prev_root = page_obj["root"]
+                        if isinstance(prev_root, dict) and prev_root.get("_auto_page_root"):
+                            prev_root["children"].append(proot)
+                        else:
+                            page_obj["root"] = {
+                                "type": "box",
+                                "id": f"{pid}_root",
+                                "layout": "column",
+                                "w": "fill",
+                                "h": "fill",
+                                "padding": 16,
+                                "gap": 12,
+                                "children": [prev_root, proot],
+                                "_auto_page_root": True,
+                            }
+            if isinstance(page_obj.get("root"), dict):
+                page_obj["root"].pop("_auto_page_root", None)
             pages_arr.append(page_obj)
         else:
-            err = LanguageError("E_DSL_SYNTAX", "/", f"Unexpected top-level statement '{tok}' at line {lno}")
-            err.diagnostic.update(line=lno, column=indent + 1)
+            hint_map = {"colors": "palette", "color": "palette", "theme": "palette", "vars": "var", "variables": "var", "pages": "page", "components": "component"}
+            suggestion_msg = f" (did you mean '{hint_map[tok]}'?)" if tok in hint_map else ""
+            err = _set_diag_span(
+                LanguageError("E_DSL_SYNTAX", "/", f"Unexpected top-level statement '{tok}' at line {lno}{suggestion_msg}; expected one of: palette, tokens, model, dataset, var, computed, component, product, page"),
+                lno,
+                indent + 1,
+            )
+            if tok in hint_map:
+                err.diagnostic["suggestions"] = [hint_map[tok]]
             raise err
 
     return (spec, span_map) if return_spans else spec
 
 
+def _dsl_line_anchor(stripped):
+    s = stripped[:-1].rstrip() if stripped.endswith(":") and not stripped.startswith(":") else stripped
+    parts = s.split()
+    if not parts:
+        return None
+    head = parts[0]
+    if head == "rp/1":
+        return ("rp/1",)
+    if head in ("palette", "tokens"):
+        return ("palette",)
+    if head == "var" and len(parts) >= 2:
+        return ("var", parts[1].lstrip("$"))
+    if head == "model" and len(parts) >= 2:
+        return ("model", parts[1])
+    if head == "dataset" and len(parts) >= 2:
+        return ("dataset", parts[1])
+    if head == "component" and len(parts) >= 2:
+        return ("component", parts[1].split("(", 1)[0])
+    if head == "page" and len(parts) >= 2:
+        return ("page", parts[1].lstrip("#"))
+    for tok in parts[1:]:
+        if tok.startswith("#") and "=" not in tok and len(tok) > 1:
+            return ("node", tok[1:])
+    if head.startswith("$") and "=" in s:
+        return ("token", head.lstrip("$"))
+    return ("raw", s)
+
+
+def preserve_rp1_comments(original_dsl_text, new_dsl_text):
+    """Re-attach `#` and `//` comment lines from `original_dsl_text` into `new_dsl_text` based on semantic anchors."""
+    if not isinstance(original_dsl_text, str) or not isinstance(new_dsl_text, str):
+        return new_dsl_text
+    anchored = {}
+    first_var_comments = []
+    seen_first_var = False
+    pending = []
+    for raw in original_dsl_text.splitlines():
+        stripped = raw.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#") or stripped.startswith("//"):
+            pending.append(stripped)
+            continue
+        anchor = _dsl_line_anchor(stripped)
+        if anchor and pending:
+            if anchor[0] == "var" and not seen_first_var:
+                first_var_comments.extend(pending)
+            anchored.setdefault(anchor, []).extend(pending)
+            pending = []
+        if anchor and anchor[0] == "var":
+            seen_first_var = True
+
+    if not anchored and not pending:
+        return new_dsl_text
+
+    out_lines = []
+    used_first_var = False
+    for raw in new_dsl_text.splitlines():
+        stripped = raw.strip()
+        indent = len(raw) - len(raw.lstrip(" "))
+        pad = " " * indent
+        anchor = _dsl_line_anchor(stripped) if stripped else None
+        if anchor:
+            comments = anchored.pop(anchor, None)
+            if comments is None and anchor[0] == "var" and not used_first_var and first_var_comments:
+                comments = first_var_comments
+            if anchor[0] == "var":
+                used_first_var = True
+            if comments:
+                for c in comments:
+                    out_lines.append(f"{pad}{c}")
+        out_lines.append(raw)
+
+    for c in pending:
+        out_lines.append(c)
+
+    return "\n".join(out_lines) + "\n"
+
+
 def format_dsl(dsl_text):
     """Canonical formatter for `.rp1` source files."""
     spec = dsl_to_spec(dsl_text, return_spans=False)
-    return spec_to_dsl(spec)
+    return preserve_rp1_comments(dsl_text, spec_to_dsl(spec))

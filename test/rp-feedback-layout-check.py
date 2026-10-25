@@ -2,6 +2,7 @@
 """Regression contracts for paragraph sizing and independent scene audits."""
 import copy
 import json
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -216,6 +217,112 @@ class LayoutFeedbackContract(unittest.TestCase):
         self.assertEqual(scene["audit"]["coverage"]["semanticNaming"]["applicable"], 1)
         self.assertEqual(result["audit"]["sceneCoverage"]["status"], "complete")
         self.assertEqual(result["audit"]["sceneCoverage"]["resultStatus"], "pass")
+
+    def test_pin_bottom_and_top_edges(self):
+        root = {"type": "box", "id": "root", "layout": "stack", "w": 300, "h": 300, "padding": 10,
+                "children": [
+                    {"type": "box", "id": "foot", "pin": "bottom", "pinGap": 12, "w": 280, "h": 30, "fill": "#EEE"},
+                    {"type": "box", "id": "head", "pin": "top", "pinGap": 4, "w": 280, "h": 20, "fill": "#EEE"},
+                    {"type": "box", "id": "side", "pin": "right", "pinGap": 6, "w": 40, "h": 40, "fill": "#DDD"},
+                ]}
+        root = proto.expand_declarative_tree(copy.deepcopy(root), prefix="t")  # pin 在展开阶段翻译成贴边坐标
+        proto.measure_node(root, available_w=300)
+        proto.layout_node(root, 0, 0, 300, 300)
+        nodes = {c["id"]: c for c in root["children"]}
+        self.assertEqual(nodes["foot"]["_y"], 10 + 280 - 30 - 12)
+        self.assertEqual(nodes["head"]["_y"], 10 + 4)
+        self.assertEqual(nodes["side"]["_x"], 10 + 280 - 40 - 6)
+
+    def test_constraints_survive_badge_expansion(self):
+        root = {"type": "box", "id": "root", "layout": "stack", "w": 300, "h": 300, "padding": 10,
+                "children": [
+                    {"type": "label", "id": "a", "x": 0, "y": 0, "w": 120, "h": 24, "text": "A", "fontSize": 13},
+                    {"type": "badge", "id": "p", "after": "a", "afterGap": 8, "alignX": "center",
+                     "w": 100, "h": 22, "text": "P", "fontSize": 10},
+                ]}
+        expanded = proto.expand_declarative_tree(copy.deepcopy(root), prefix="t")
+        proto.measure_node(expanded, available_w=300)
+        proto.layout_node(expanded, 0, 0, 300, 300)
+        nodes = {c.get("id"): c for c in expanded["children"]}
+        self.assertIn("p", nodes, "badge 展开后必须保留逻辑 id，after 才能命中")
+        self.assertEqual(nodes["p"]["_y"], 10 + 24 + 8)
+
+
+class CliCheckDiagnostics(unittest.TestCase):
+    """check 命令在布局失败时必须给出理由，而不是只回 ok:false。"""
+
+    def _run_check(self, source):
+        with tempfile.TemporaryDirectory(prefix="rp-check-diag-") as directory:
+            source = {"language": "rp/1", "target": 9, **source}
+            spec_path = Path(directory) / "spec.json"
+            spec_path.write_text(json.dumps(source, ensure_ascii=False), encoding="utf-8")
+            proc = subprocess.run([sys.executable, str(ROOT / "scripts" / "proto.py"), "check", "--spec", str(spec_path)],
+                                  capture_output=True, text=True)
+        return proc, json.loads(proc.stdout or proc.stderr)
+
+    def test_overlapping_labels_report_e_layout_with_page(self):
+        root = {"type": "box", "id": "root", "layout": "stack", "w": 300, "h": 300, "fill": "#FFFFFF",
+                "children": [
+                    {"type": "label", "id": "a", "text": "第一行标题", "x": 20, "y": 40, "w": 240, "h": 24,
+                     "fontSize": 20, "fontWeight": 700, "color": "#15181B"},
+                    {"type": "label", "id": "b", "text": "第二行紧贴上来", "x": 20, "y": 52, "w": 240, "h": 20,
+                     "fontSize": 14, "color": "#15181B"},
+                ]}
+        proc, payload = self._run_check(spec(root))
+        self.assertNotEqual(proc.returncode, 0, "布局失败时 check 应返回非零退出码")
+        self.assertFalse(payload["ok"])
+        self.assertTrue(payload["diagnostics"], "check 失败必须带 diagnostics，不能只回 ok:false")
+        self.assertEqual(payload["diagnostics"][0]["code"], "E_LAYOUT")
+        self.assertTrue(payload["diagnostics"][0].get("pageName"))
+
+    def test_clean_page_reports_no_diagnostics(self):
+        root = {"type": "box", "id": "root", "layout": "column", "w": 300, "h": 300, "padding": 16, "gap": 12,
+                "fill": "#FFFFFF", "children": [
+                    {"type": "label", "id": "a", "text": "标题", "fontSize": 18, "fontWeight": 700, "w": "fill"},
+                    {"type": "label", "id": "b", "text": "正文说明文字", "fontSize": 13, "w": "fill"},
+                    {"type": "label", "id": "c", "text": "第二段正文", "fontSize": 13, "w": "fill"},
+                    {"type": "box", "id": "blk", "w": "fill", "h": 120, "fill": "#EEF2F7", "radius": 12}]}
+        proc, payload = self._run_check(spec(root))
+        self.assertEqual(proc.returncode, 0, payload.get("warnings"))
+        self.assertEqual(payload["diagnostics"], [])
+
+
+class StackConstraints(unittest.TestCase):
+    """after / afterGap / alignX：让"紧跟上一个、居中"成为布局一等公民。"""
+
+    def _layout(self, children, w=300, h=400, padding=16):
+        root = {"type": "box", "id": "root", "layout": "stack", "w": w, "h": h,
+                "padding": padding, "children": children}
+        proto.measure_node(root, available_w=w)
+        proto.layout_node(root, 0, 0, w, h)
+        return {c["id"]: c for c in root["children"]}
+
+    def test_after_chains_with_gap(self):
+        nodes = self._layout([
+            {"type": "label", "id": "a", "x": 10, "y": 10, "w": 120, "h": 24, "text": "A", "fontSize": 13},
+            {"type": "label", "id": "b", "after": "a", "afterGap": 12, "w": 120, "h": 24, "text": "B", "fontSize": 13},
+            {"type": "label", "id": "c", "after": "b", "afterGap": 8, "w": 100, "h": 24, "text": "C", "fontSize": 13},
+        ])
+        self.assertEqual(nodes["b"]["_y"], nodes["a"]["_y"] + nodes["a"]["_h"] + 12)
+        self.assertEqual(nodes["c"]["_y"], nodes["b"]["_y"] + nodes["b"]["_h"] + 8)
+
+    def test_align_x_center_and_right(self):
+        nodes = self._layout([
+            {"type": "label", "id": "c", "alignX": "center", "w": 100, "h": 24, "text": "C", "fontSize": 13},
+            {"type": "label", "id": "r", "alignX": "right", "w": 100, "h": 24, "text": "R", "fontSize": 13},
+        ])
+        inner_x, inner_w = 16, 300 - 32
+        self.assertEqual(nodes["c"]["_x"], inner_x + (inner_w - 100) // 2)
+        self.assertEqual(nodes["r"]["_x"], inner_x + inner_w - 100)
+
+    def test_constraint_keys_do_not_leak_into_emitted_children(self):
+        nodes = self._layout([
+            {"type": "label", "id": "a", "x": 0, "y": 0, "w": 100, "h": 24, "text": "A", "fontSize": 13},
+            {"type": "label", "id": "b", "after": "a", "afterGap": 4, "alignX": "center",
+             "w": 100, "h": 24, "text": "B", "fontSize": 13},
+        ])
+        for key in ("after", "afterGap", "alignX"):
+            self.assertNotIn(key, nodes["b"])
 
 
 if __name__ == '__main__':

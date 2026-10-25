@@ -13,6 +13,19 @@ function stringNode(strings, text) {
   return { tag: 8, value: index + 1, text };
 }
 
+export function removeGlobalVariable(file, name) {
+  const record = readRecords(file).find(r => r.className === 'Axure:DesignDocument');
+  const doc = parsePayload(record);
+  const variable = [...doc.objects.values()].find(o => o.className === 'Axure:GlobalVariable'
+    && field(o.body, 'name')?.text === name);
+  if (!variable) return file;
+  const varSet = [...doc.objects.values()].find(o => o.className === 'Axure:GlobalVariableSet');
+  const list = field(varSet.body, 'global-variables');
+  list.items = list.items.filter(item => item.value !== variable.id);
+  doc.roots = doc.roots.filter(node => node !== variable);
+  return replaceRecord(file, record, encodeRecord(record, record.strings, encodePayload(doc.roots)));
+}
+
 export function createGlobalVariable(file, name, { defaultValue = '' } = {}) {
   const buf = Buffer.isBuffer(file) ? file : Buffer.from(file);
   if (buf[0] !== 0xac || buf[1] !== 0xef) {

@@ -57,6 +57,18 @@ export function writeNativeScene(file, scene) {
     return ((channel(c.a ?? 1) << 24) | (channel(c.r) << 16) | (channel(c.g) << 8) | channel(c.b)) >>> 0;
   };
   const paint = c => map({ 'fill-type': str('solid'), 'fill-color': int(c ? color(c) : 0) });
+  // 渐变填充：候选编码由 GRADIENT_ENCODING 选择，用于实测 RP9 真实接受的形状
+  const paintGradient = g => {
+    const enc = process.env.GRADIENT_ENCODING || 'A';
+    const cols = (g.colors || []).map(hex => int(color(typeof hex === 'string' ? { r: parseInt(hex.slice(1,3),16)/255, g: parseInt(hex.slice(3,5),16)/255, b: parseInt(hex.slice(5,7),16)/255, a: 1 } : hex)));
+    const offs = (g.offsets || []).map(v => f64(v));
+    const angle = f64(g.angle ?? 180);
+    if (enc === 'A') return map({ 'fill-type': str('linearGradient'), 'fill-colors': list(cols), 'fill-offsets': list(offs), 'fill-angle': angle });
+    if (enc === 'B') return map({ 'fill-type': str('linearGradient'), stops: list(cols.map((c, i) => map({ color: c, offset: offs[i] || f64(0) }))), angle });
+    if (enc === 'C') return map({ 'fill-type': str('gradient'), 'fill-colors': list(cols), 'fill-offsets': list(offs), 'fill-angle': angle });
+    if (enc === 'D') return map({ 'fill-type': str('linearGradient'), 'fill-colors': list(cols), 'fill-offsets': list(offs) });
+    return map({ 'fill-type': str('linearGradient'), 'fill-colors': list(cols), 'fill-offsets': list(offs), 'fill-angle': angle });
+  };
   function style(id, item, kind) {
     const props = kind === 'Layer' ? list([]) : structuredClone(defaultProps);
     const put = (key, value, det = true) => {
@@ -67,12 +79,16 @@ export function writeNativeScene(file, scene) {
     const r = item.rect;
     put(101, xy(r.location.x, r.location.y));
     if (kind !== 'Layer') {
+      const fillColor = item.backgroundFills?.[0]?.type === 1 ? item.backgroundFills[0].color : null;
+      const strokeColor = item.strokes?.[0]?.fill?.color;
+      const hasVisibleFill = Boolean(fillColor && (fillColor.a ?? 1) > 0);
+      const hasVisibleStroke = Boolean(item.strokes?.length && (item.strokeThickness ?? 0) > 0 && strokeColor && (strokeColor.a ?? 1) > 0);
       put(105, map({ Width: f64(r.size.width), Height: f64(r.size.height) }));
       put(70, f64(item.opacity ?? 1));
-      put(71, f64(item.corners?.[0] ?? 0));
+      put(71, f64((hasVisibleFill || hasVisibleStroke) ? (item.corners?.[0] ?? 0) : 0));
       put(80, int(0)); // no phantom border sides
-      put(7, paint(item.backgroundFills?.[0]?.type === 1 ? item.backgroundFills[0].color : null));
-      put(8, paint(item.strokes?.[0]?.fill?.color));
+      put(7, item.gradient ? paintGradient(item.gradient) : paint(fillColor));
+      put(8, paint(strokeColor));
       put(15, f64(item.strokes?.length ? item.strokeThickness : 0));
       put(10, int(item.textAlignment ?? 0));
       for (const key of [11, 12, 13, 14]) put(key, f64(0));
@@ -144,7 +160,8 @@ export function writeNativeScene(file, scene) {
     const children = group ? [...(item.itemType === 2 && item.backgroundShape ? [item.backgroundShape] : []), ...(item.scene?.items ?? [])] : [];
     if (!group) {
       if (item.type !== 0 || (item.corners ?? []).some(n => n !== item.corners[0])) fail('only rectangular shapes with uniform radius are supported');
-      if (item.backgroundFills?.length > 1 || item.strokes?.length > 1 || (item.backgroundFills ?? []).some(p => ![1, 3].includes(p.type) || p.enabled === false)) fail('unsupported fill');
+      const allowGradient = Boolean(item.gradient);
+      if (item.backgroundFills?.length > 1 || item.strokes?.length > 1 || (item.backgroundFills ?? []).some(p => (!allowGradient && ![1, 3].includes(p.type)) || p.enabled === false)) fail('unsupported fill');
       if ((item.strokes ?? []).some(s => s.fill?.type !== 1) || item.textPadding?.length) fail('unsupported stroke or padding');
     }
     const kind = group ? 'Layer' : item.backgroundFills?.[0]?.type === 3 ? 'ImageBox' : 'VectorShape';

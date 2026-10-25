@@ -11,6 +11,7 @@ import math
 import re
 import string
 from rp_product import expand_product_spec, compute_product_impact
+from rp_icons import ICON_NAMES
 
 
 class LanguageError(ValueError):
@@ -125,12 +126,67 @@ def ptr(path, key):
     return path + "/" + str(key).replace("~", "~0").replace("/", "~1")
 
 
+MAX_SOURCE_DEPTH = 160
+
+
+def validate_source_tree(spec):
+    """Bound recursive compiler work before any deepcopy or normalization."""
+    pending = [(spec, "", 0)]
+    while pending:
+        value, path, depth = pending.pop()
+        if isinstance(value, (dict, list)):
+            if depth > MAX_SOURCE_DEPTH:
+                fail("E_DEPTH", path, f"Source nesting depth {depth} exceeds limit {MAX_SOURCE_DEPTH}",
+                     counterexample={"depth": depth, "limit": MAX_SOURCE_DEPTH})
+            entries = value.items() if isinstance(value, dict) else enumerate(value)
+            pending.extend((child, ptr(path, key), depth + 1) for key, child in entries)
+        elif isinstance(value, str) and re.search(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]", value):
+            fail("E_TEXT_CONTROL", path, "Text contains an unsupported control character")
+
+
+def validate_statecharts(charts, path="/statecharts"):
+    if not isinstance(charts, dict):
+        fail("E_STATECHART", path, "statecharts must map names to statechart objects")
+    for name, chart in charts.items():
+        cp = ptr(path, name)
+        if not isinstance(chart, dict):
+            fail("E_STATECHART", cp, "Expected a statechart object")
+        states = chart.get("states")
+        if not isinstance(states, list) or not states or any(not isinstance(s, str) or not s for s in states):
+            fail("E_STATECHART", ptr(cp, "states"), "Expected a nonempty array of state names")
+        if len(set(states)) != len(states):
+            fail("E_STATECHART", ptr(cp, "states"), "State names must be unique")
+        if chart.get("initial") not in states:
+            fail("E_STATECHART", ptr(cp, "initial"), "Initial state must be declared in states")
+        transitions = chart.get("transitions", [])
+        if not isinstance(transitions, list):
+            fail("E_STATECHART", ptr(cp, "transitions"), "Expected a transition array")
+        for i, transition in enumerate(transitions):
+            tp = ptr(ptr(cp, "transitions"), i)
+            if not isinstance(transition, dict):
+                fail("E_STATECHART", tp, "Expected a transition object")
+            for key in ("from", "to"):
+                if transition.get(key) not in states:
+                    fail("E_STATECHART", ptr(tp, key), "Transition state must be declared in states")
+            if not isinstance(transition.get("on"), str) or not transition["on"]:
+                fail("E_STATECHART", ptr(tp, "on"), "Transition requires an event name")
+            if "guard" in transition and not isinstance(transition["guard"], (str, dict, bool)):
+                fail("E_STATECHART", ptr(tp, "guard"), "Guard must be a boolean expression")
+
+
+def validate_device(source, path):
+    for key in ("device",):
+        if key in source and (not isinstance(source[key], str) or source[key] not in DEVICE_CANVAS_PRESETS):
+            fail("E_PROPERTY", ptr(path, key), f"Expected device in {sorted(DEVICE_CANVAS_PRESETS)}")
+
+
 def fields(value, allowed, path):
     if not isinstance(value, dict):
         fail("E_OBJECT", path, "Expected an object")
+    public_allowed = sorted(k for k in allowed if isinstance(k, str) and not k.startswith("_"))
     for key in value:
         if key not in allowed:
-            hint = difflib.get_close_matches(key, sorted(allowed), n=3)
+            hint = difflib.get_close_matches(str(key), public_allowed, n=3, cutoff=0.68)
             suffix = f"; did you mean '{hint[0]}'?" if hint else ""
             cands = None
             if hint:
@@ -162,12 +218,35 @@ DOMAIN_SCALARS = {
 }
 THEMES = {"enterprise-light", "modern-dark", "cobalt-pro", "mobile-lowfi", "mobile-hifi",
           "aurora-glass", "editorial-warm", "cyber-neon"}
+SPACING_TOKENS = [0, 1, 2, 3, 4] + list(range(6, 162, 2))
+RADIUS_TOKENS = [0, 1, 2, 3, 4] + list(range(6, 122, 2)) + [999]
+FONT_SIZE_TOKENS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 40, 44, 48, 56, 64, 72]
+FONT_WEIGHT_TOKENS = [300, 400, 500, 600, 700, 800, 900]
+MAX_FONT_SIZE = max(FONT_SIZE_TOKENS)
+
+
+def validate_font_size(value, path):
+    if type(value) not in (int, float) or not math.isfinite(value):
+        fail("E_TYPE", path, "fontSize must be a finite number")
+    if not 0 < value <= MAX_FONT_SIZE:
+        fail("E_SIZE", path, f"fontSize must be greater than 0 and at most {MAX_FONT_SIZE}")
+DEVICE_CANVAS_PRESETS = {
+    "iphone-17": {"w": 402, "h": 874},
+    "iphone-17-pro": {"w": 402, "h": 874},
+    "iphone-16": {"w": 393, "h": 852},
+    "iphone-16-pro": {"w": 393, "h": 852},
+    "iphone-x": {"w": 375, "h": 812},
+    "iphone-x-black": {"w": 375, "h": 812},
+    "iphone-x-white": {"w": 375, "h": 812},
+    "iphone-6-8": {"w": 375, "h": 667},
+}
 COLOR_TOKENS = {"bg", "surface", "surface-2", "surface-3", "sidebar-bg", "sidebar-surface",
                 "sidebar-active", "sidebar-ink", "sidebar-ink-active", "ink", "ink-2", "ink-3",
                 "ink-inv", "line", "line-strong", "brand", "brand-soft", "accent", "accent-soft",
                 "success", "success-soft", "warning", "warning-soft", "danger", "danger-soft", "backdrop",
                 "glass", "glass-strong", "glass-border", "glass-stroke", "glow", "glow-2"}
-GEOMETRY = {"x", "y", "w", "h", "flex", "colSpan", "rowSpan", "right", "bottom", "anchor"}
+GEOMETRY = {"x", "y", "w", "h", "flex", "colSpan", "rowSpan", "right", "bottom", "anchor", "z",
+            "after", "afterGap", "alignX", "pin", "pinGap"}
 STYLE_EXTRAS = {"opacity", "strokeWidth", "borderSides", "borderTop", "borderBottom", "borderLeft", "borderRight",
                 "backdropBlur", "shadow", "gradient", "aurora", "noise", "innerGlow"}
 TEXT = {"text", "fontSize", "size", "fontWeight", "weight", "color", "align", "letterSpacing", "italic", "underline", "strikethrough", "spans"}
@@ -176,7 +255,7 @@ BOX = {"layout", "padding", "gap", "align", "justify", "wrap", "equalHeight", "c
 NODE_PROPS = {
     "box": BOX,
     "card": BOX | {"variant"},
-    "label": TEXT | {"fill", "stroke", "radius"} | STYLE_EXTRAS,
+    "label": TEXT | {"wrap", "lineGap", "lineHeight", "maxLines", "fill", "stroke", "radius"} | STYLE_EXTRAS,
     "paragraph": TEXT | {"lineGap", "lineHeight", "maxLines", "padding", "fill", "stroke", "radius"} | STYLE_EXTRAS,
     "button": TEXT | {"variant", "fill", "stroke", "radius", "icon"} | STYLE_EXTRAS,
     "badge": TEXT | {"variant", "fill", "stroke", "radius", "icon"} | STYLE_EXTRAS,
@@ -200,6 +279,7 @@ ACTION_PROPS = {
     "show": {"target"}, "hide": {"target"}, "toggle": {"target"},
     "enable": {"target"}, "disable": {"target"}, "focus": {"target"},
     "link": {"page"}, "wait": {"ms"},
+    "set-size": {"target", "width", "height", "duration", "easing", "anchor"},
     "data-add": {"target", "rows"}, "data-delete": {"target", "where"},
     "data-update": {"target", "where", "set"}, "data-filter": {"target", "where", "name"},
     "data-clear-filter": {"target"}, "data-sort": {"target", "column", "direction"},
@@ -209,10 +289,12 @@ ACTION_PROPS = {
 
 SHORTHAND_NODE_KINDS = {
     "box", "card", "row", "column", "grid", "stack", "label", "paragraph",
-    "button", "badge", "input", "divider", "image", "icon", "sparkline", "dynamic-panel",
+    "button", "badge", "input", "divider", "image", "icon", "sparkline", "dynamic-panel", "panel",
     "repeater", "repeat", "use", "when",
     "data-table", "searchable-list", "form-card", "kv-list",
     "detail-card", "wizard-card", "master-detail",
+    "tab-bar", "nav-bar", "progress-bar", "phone-shell",
+    "stat-row", "list-item",
 }
 EVENT_SHORTHANDS = {
     "onClick": "click", "onChange": "change", "onLoad": "load",
@@ -220,7 +302,7 @@ EVENT_SHORTHANDS = {
     "onFocus": "focus", "onBlur": "blur", "onStateChange": "statechange",
 }
 # Source contracts are shared with the editor schema; expansion must not erase input.
-MACRO_COMMON_PROPS = {"type", "id", "name", "on", "size", "slots", "when"} | GEOMETRY | set(EVENT_SHORTHANDS)
+MACRO_COMMON_PROPS = {"type", "id", "name", "on", "size", "slots", "when", "visible", "hidden"} | GEOMETRY | set(EVENT_SHORTHANDS)
 MACRO_PROPS = {
     "data-table": MACRO_COMMON_PROPS | {"dataset", "key", "columns", "rowHeight", "headerHeight", "columnGap", "gap", "padding", "headerFill", "headerStroke", "headerRadius", "rowFill", "rowStroke", "rowRadius", "rowOn", "onRowClick", "repeaterHeight", "rowGap", "pageSize", "tableGap"},
     "searchable-list": MACRO_COMMON_PROPS | {"dataset", "key", "searchField", "filterField", "filterWhere", "baseWhere", "template", "inputId", "value", "inputHeight", "inputFill", "inputStroke", "inputRadius", "filters", "repeaterHeight", "rowHeight", "rowGap", "pageSize", "gap", "padding", "fill", "stroke", "radius"},
@@ -229,6 +311,20 @@ MACRO_PROPS = {
     "detail-card": MACRO_COMMON_PROPS | {"title", "subtitle", "badge", "items", "actions", "rowHeight", "labelWidth", "fontSize", "padding", "gap", "fill", "stroke", "radius"},
     "wizard-card": MACRO_COMMON_PROPS | {"title", "stepVariable", "steps", "bodyHeight", "onComplete", "padding", "gap", "fill", "stroke", "radius"},
     "master-detail": MACRO_COMMON_PROPS | {"master", "detail", "masterWidth", "listWidth", "dataset", "key", "searchField", "filterField", "filters", "template", "repeaterHeight", "rowHeight", "rowGap", "gap", "padding", "fill", "stroke", "radius"},
+    "tab-bar": MACRO_COMMON_PROPS | {"items", "tabs", "active", "activeIndex", "gap", "padding", "fill", "stroke", "radius", "activeFill", "activeColor", "inactiveFill", "inactiveColor", "fontSize", "itemHeight"},
+    "nav-bar": MACRO_COMMON_PROPS | {"title", "text", "subtitle", "back", "backText", "backPage", "backGoto", "onBack", "right", "rightText", "rightPage", "rightGoto", "onRight", "actions", "padding", "gap", "fill", "stroke", "radius", "titleFontSize", "color"},
+    "progress-bar": MACRO_COMMON_PROPS | {"value", "max", "percent", "label", "text", "rightText", "showValue", "barHeight", "trackHeight", "trackColor", "trackFill", "barColor", "barFill", "fill", "color", "stroke", "radius", "gap"},
+    "phone-shell": MACRO_COMMON_PROPS | {
+        "device", "title", "subtitle", "navBar", "tabBar", "statusBar",
+        "time", "timeText", "statusRight", "statusText",
+        "darkIsland", "showHomeIndicator", "screenFill", "frameFill",
+        "right", "rightText", "rightPage", "rightGoto", "onRight",
+        "back", "backText", "backPage", "backGoto", "onBack",
+        "padding", "gap", "children", "body", "fill", "stroke", "radius",
+        "justify", "align",
+    },
+    "stat-row": MACRO_COMMON_PROPS | {"items", "gap", "padding", "cardPadding", "fill", "stroke", "radius", "valueFontSize", "equalHeight"},
+    "list-item": MACRO_COMMON_PROPS | {"title", "text", "subtitle", "tag", "badge", "badgeVariant", "tagTone", "tone", "index", "icon", "rightText", "meta", "value", "status", "rightBadge", "rightVariant", "rightTone", "goto", "page", "link", "padding", "gap", "fill", "stroke", "radius"},
 }
 MACRO_ITEM_PROPS = {
     "data-table": {"columns": {"header", "title", "field", "align", "headerAlign", "width", "w", "flex", "headerId", "headerFontSize", "headerFontWeight", "headerColor", "cell", "kind", "text", "id", "h", "font", "fontSize", "fontWeight", "color", "variant", "fill", "stroke", "radius", "on", "onClick"}},
@@ -243,6 +339,28 @@ MACRO_ITEM_PROPS = {
         "steps": {"id", "title", "body", "root", "nextText", "prevText", "guard", "nextWhen", "guardMessage", "errorText", "errorMessage", "onNext"},
     },
     "master-detail": {"filters": {"label", "text", "value", "all"}},
+    "tab-bar": {
+        "items": {"id", "text", "label", "title", "page", "goto", "link", "active", "on", "onClick", "icon", "variant", "flex", "w", "h", "radius", "fontSize", "fontWeight", "fill", "color", "stroke"},
+        "tabs": {"id", "text", "label", "title", "page", "goto", "link", "active", "on", "onClick", "icon", "variant", "flex", "w", "h", "radius", "fontSize", "fontWeight", "fill", "color", "stroke"},
+    },
+    "nav-bar": {
+        "actions": {"id", "label", "text", "variant", "w", "h", "radius", "fontSize", "fontWeight", "on", "onClick", "goto", "page", "link"},
+    },
+    "progress-bar": {},
+    "phone-shell": {},
+    "stat-row": {
+        "items": {"id", "label", "title", "value", "text", "sub", "subtitle", "trend", "color", "subColor", "fill", "stroke", "radius", "valueFontSize", "on", "onClick", "goto", "page", "link"},
+    },
+    "list-item": {},
+}
+MACRO_SLOTS = {
+    "data-table": {"header", "toolbar", "rowActions", "empty", "emptyState", "footer"},
+    "searchable-list": {"header", "toolbar", "filterBar", "rowActions", "empty", "emptyState", "footer"},
+    "form-card": {"header", "toolbar", "extraFields", "actions", "footer"},
+    "kv-list": {"header", "footer"},
+    "detail-card": {"header", "badge", "body", "actions", "footer"},
+    "wizard-card": {"header", "stepper", "body", "actions", "footer"},
+    "master-detail": {"header", "toolbar", "master", "detailHeader", "detailFooter", "footer"},
 }
 DINGBAT_SAFE_MAP = str.maketrans({
     "\u2713": "●", "\u2714": "●", "\u2717": "×", "\u2718": "×",
@@ -258,15 +376,15 @@ TOKEN_RE = re.compile(
     r"""(?P<OP2>==|!=|>=|<=|&&|\|\|)|"""
     r"""(?P<NUMBER>\d+(?:\.\d+)?)|"""
     r"""(?P<STRING>'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*")|"""
-    r"""(?P<SIGIL>[$@][A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)|"""
+    r"""(?P<SIGIL>@[A-Za-z_][A-Za-z0-9_-]*(?:[./][A-Za-z_][A-Za-z0-9_-]*)*|\$[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)|"""
     r"""(?P<IDENT>[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)|"""
-    r"""(?P<OP1>[+\-*/><!(),])"""
+    r"""(?P<OP1>[+\-*/><!(),.])"""
     r""")"""
 )
 
 
 def sanitize_dingbats(val):
-    return val.translate(DINGBAT_SAFE_MAP) if isinstance(val, str) else val
+    return val
 
 
 def tokenize_inline_expr(text, path):
@@ -291,7 +409,8 @@ def tokenize_inline_expr(text, path):
     return tokens
 
 
-def parse_inline_expr(expr_text, path):
+def parse_inline_expr(expr_text, path, prefer_condition=False):
+    # prefer_condition: 兼容调用方语义（条件式取值），当前解析器行为一致，保留参数以便后续区分。
     if not isinstance(expr_text, str):
         fail("E_EXPRESSION", path, "Inline expression must be text")
     s = expr_text.strip()
@@ -316,11 +435,51 @@ def parse_inline_expr(expr_text, path):
         idx[0] += 1
         return tok
 
+    def _ident_node(tok_val):
+        if tok_val in ("true", "True"):
+            return True
+        if tok_val in ("false", "False"):
+            return False
+        if "." in tok_val:
+            head, rest = tok_val.split(".", 1)
+            if head in ("row", "Item", "TargetItem") and "." not in rest:
+                return {"item": rest}
+            if head == "caller" and "." not in rest:
+                return {"caller": rest}
+            if head in ("var", "variable") and "." not in rest:
+                return {"variable": rest}
+            if head == "widget" and "." not in rest:
+                return {"widget": {"ref": rest}}
+            if head == "param":
+                return {"$": rest}
+            return {"_auto_path": tok_val}
+        return {"_auto_ident": tok_val}
+
+    def _apply_method(recv, m_name, args):
+        if m_name == "toString" and len(args) == 0:
+            return {"fn": "text", "args": [recv]}
+        if m_name == "toLowerCase" and len(args) == 0:
+            return {"fn": "lower", "args": [recv]}
+        if m_name == "toUpperCase" and len(args) == 0:
+            return {"fn": "upper", "args": [recv]}
+        if m_name == "concat" and len(args) >= 1:
+            return {"fn": "concat", "args": [recv, *args]}
+        if m_name == "replace" and len(args) == 2 and args[1] == "":
+            return {"fn": "remove", "args": [recv, args[0]]}
+        if m_name == "indexOf" and len(args) == 1:
+            return {"_index_of": (recv, args[0])}
+        fail("E_EXPRESSION", path, f"Unsupported method '.{m_name}()' in expression")
+
     def parse_or():
         left = parse_and()
         while peek()[1] == "||":
             consume("||")
-            left = {"op": "||", "left": left, "right": parse_and()}
+            right = parse_and()
+            if right == 0 and isinstance(left, dict) and (left.get("fn") == "number" or (left.get("op") == "*" and left.get("right") == 1)):
+                inner = left["args"][0] if left.get("fn") == "number" else left["left"]
+                left = {"fn": "number", "args": [inner]}
+            else:
+                left = {"op": "||", "left": left, "right": right}
         return left
 
     def parse_and():
@@ -341,7 +500,16 @@ def parse_inline_expr(expr_text, path):
         left = parse_add()
         while peek()[1] in (">", "<", ">=", "<="):
             op = consume()[1]
-            left = {"op": op, "left": left, "right": parse_add()}
+            right = parse_add()
+            if isinstance(left, dict) and "_index_of" in left:
+                recv, sub = left["_index_of"]
+                if op == ">=" and right == 0:
+                    left = {"fn": "contains", "args": [recv, sub]}
+                    continue
+                if op == "<" and right == 0:
+                    left = {"fn": "not", "args": [{"fn": "contains", "args": [recv, sub]}]}
+                    continue
+            left = {"op": op, "left": left, "right": right}
         return left
 
     def parse_add():
@@ -358,7 +526,13 @@ def parse_inline_expr(expr_text, path):
         left = parse_unary()
         while peek()[1] in ("*", "/"):
             op = consume()[1]
-            left = {"op": op, "left": left, "right": parse_unary()}
+            right = parse_unary()
+            if op == "*" and right == 1 and isinstance(left, dict) and (
+                "widget" in left or left.get("fn") in ("text", "lower", "upper", "concat", "remove")
+            ):
+                left = {"fn": "number", "args": [left]}
+            else:
+                left = {"op": op, "left": left, "right": right}
         return left
 
     def parse_unary():
@@ -375,10 +549,38 @@ def parse_inline_expr(expr_text, path):
         if tok_val == "+":
             consume("+")
             return parse_unary()
-        return parse_primary()
+        return parse_postfix()
+
+    def parse_postfix():
+        node = parse_primary()
+        while peek()[1] == ".":
+            consume(".")
+            m_kind, m_raw = consume()
+            if m_kind != "IDENT":
+                fail("E_EXPRESSION", path, f"Expected property/method name after '.', got '{m_raw}'")
+            parts = m_raw.split(".")
+            for idx_p, seg in enumerate(parts):
+                is_last = idx_p == len(parts) - 1
+                if is_last and peek()[1] == "(":
+                    consume("(")
+                    args = []
+                    if peek()[1] != ")":
+                        args.append(parse_or())
+                        while peek()[1] == ",":
+                            consume(",")
+                            args.append(parse_or())
+                    consume(")")
+                    node = _apply_method(node, seg, args)
+                elif seg == "length":
+                    node = {"fn": "length", "args": [node]}
+                else:
+                    fail("E_EXPRESSION", path, f"Unsupported property '.{seg}' in expression")
+        return node
 
     def parse_primary():
         tok_kind, tok_val = peek()
+        if tok_kind is None:
+            fail("E_EXPRESSION", path, "Unexpected end of expression")
         if tok_val == "(":
             consume("(")
             expr = parse_or()
@@ -390,6 +592,22 @@ def parse_inline_expr(expr_text, path):
         if tok_kind == "SIGIL":
             consume()
             sigil, name = tok_val[0], tok_val[1:]
+            if peek()[1] == "(" and "." in name:
+                base_name, m_name = name.rsplit(".", 1)
+                recv = {"widget": {"ref": base_name}} if sigil == "@" else ({"_auto_path": base_name} if "." in base_name else {"_sigil_var": base_name})
+                consume("(")
+                args = []
+                if peek()[1] != ")":
+                    args.append(parse_or())
+                    while peek()[1] == ",":
+                        consume(",")
+                        args.append(parse_or())
+                consume(")")
+                return _apply_method(recv, m_name, args)
+            if name.endswith(".length") and len(name) > 7:
+                base_name = name[:-7]
+                recv = {"widget": {"ref": base_name}} if sigil == "@" else ({"_auto_path": base_name} if "." in base_name else {"_sigil_var": base_name})
+                return {"fn": "length", "args": [recv]}
             if sigil == "@":
                 return {"widget": {"ref": name}}
             if "." in name:
@@ -397,10 +615,6 @@ def parse_inline_expr(expr_text, path):
             return {"_sigil_var": name}
         if tok_kind == "IDENT":
             consume()
-            if tok_val in ("true", "True"):
-                return True
-            if tok_val in ("false", "False"):
-                return False
             if peek()[1] == "(":
                 consume("(")
                 args = []
@@ -410,21 +624,14 @@ def parse_inline_expr(expr_text, path):
                         consume(",")
                         args.append(parse_or())
                 consume(")")
+                if "." in tok_val:
+                    base_ident, m_name = tok_val.rsplit(".", 1)
+                    return _apply_method(_ident_node(base_ident), m_name, args)
                 return {"fn": tok_val, "args": args}
-            if "." in tok_val:
-                head, rest = tok_val.split(".", 1)
-                if head in ("row", "Item") and "." not in rest:
-                    return {"item": rest}
-                if head == "caller" and "." not in rest:
-                    return {"caller": rest}
-                if head in ("var", "variable") and "." not in rest:
-                    return {"variable": rest}
-                if head == "widget" and "." not in rest:
-                    return {"widget": {"ref": rest}}
-                if head == "param":
-                    return {"$": rest}
-                return {"_auto_path": tok_val}
-            return {"_auto_ident": tok_val}
+            if tok_val.endswith(".length") and "." in tok_val:
+                base_ident = tok_val[:-7]
+                return {"fn": "length", "args": [_ident_node(base_ident)]}
+            return _ident_node(tok_val)
         fail("E_EXPRESSION", path, f"Unexpected token '{tok_val}' in expression")
 
     ast = parse_or()
@@ -733,7 +940,7 @@ def expand_data_table_macro(source, path):
             snode["_slot_origin"] = ptr(ptr(path, "slots"), sk)
             outer_children.append(snode)
     outer_children.extend([header_box, rep_node])
-    for sk in ("emptyState", "footer"):
+    for sk in ("empty", "emptyState", "footer"):
         if sk in slots and isinstance(slots[sk], dict):
             snode = copy.deepcopy(slots[sk])
             snode["_slot_origin"] = ptr(ptr(path, "slots"), sk)
@@ -807,6 +1014,10 @@ def expand_searchable_list_macro(source, path, filter_variable=None):
             snode["_slot_origin"] = ptr(ptr(path, "slots"), sk)
             children.append(snode)
     children.append(search_input)
+    if "filterBar" in slots and isinstance(slots["filterBar"], dict):
+        snode = copy.deepcopy(slots["filterBar"])
+        snode["_slot_origin"] = ptr(ptr(path, "slots"), "filterBar")
+        children.append(snode)
     filters = source.get("filters")
     filter_field = source.get("filterField", search_field)
     if isinstance(filters, list) and filters:
@@ -840,6 +1051,10 @@ def expand_searchable_list_macro(source, path, filter_variable=None):
         ra_node = copy.deepcopy(slots["rowActions"])
         ra_node["_slot_origin"] = ptr(ptr(path, "slots"), "rowActions")
         tpl_copy["children"].append(ra_node)
+    _raw_rh = source.get("rowHeight", 64)
+    _tpl_h = tpl_copy.get("h")
+    if isinstance(_raw_rh, (int, float)) and isinstance(_tpl_h, (int, float)) and _tpl_h > _raw_rh:
+        _raw_rh = _tpl_h
     rep_node = {
         "type": "repeater",
         "id": list_id,
@@ -847,14 +1062,14 @@ def expand_searchable_list_macro(source, path, filter_variable=None):
         "key": key,
         "w": "fill",
         "h": source.get("repeaterHeight", "hug"),
-        "rowHeight": source.get("rowHeight", 64),
+        "rowHeight": _raw_rh,
         "rowGap": source.get("rowGap", 8),
         "template": tpl_copy,
     }
     if "pageSize" in source:
         rep_node["pageSize"] = source["pageSize"]
     children.append(rep_node)
-    for sk in ("emptyState", "footer"):
+    for sk in ("empty", "emptyState", "footer"):
         if sk in slots and isinstance(slots[sk], dict):
             snode = copy.deepcopy(slots[sk])
             snode["_slot_origin"] = ptr(ptr(path, "slots"), sk)
@@ -935,6 +1150,10 @@ def expand_form_card_macro(source, path):
                 },
             ],
         })
+    if "extraFields" in slots and isinstance(slots["extraFields"], dict):
+        snode = copy.deepcopy(slots["extraFields"])
+        snode["_slot_origin"] = ptr(ptr(path, "slots"), "extraFields")
+        children.append(snode)
     if "submitText" in source or "onSubmit" in source:
         submit_btn = {
             "type": "button",
@@ -948,10 +1167,11 @@ def expand_form_card_macro(source, path):
         if "onSubmit" in source:
             submit_btn["onClick"] = copy.deepcopy(source["onSubmit"])
         children.append(submit_btn)
-    if "footer" in slots and isinstance(slots["footer"], dict):
-        snode = copy.deepcopy(slots["footer"])
-        snode["_slot_origin"] = ptr(ptr(path, "slots"), "footer")
-        children.append(snode)
+    for sk in ("actions", "footer"):
+        if sk in slots and isinstance(slots[sk], dict):
+            snode = copy.deepcopy(slots[sk])
+            snode["_slot_origin"] = ptr(ptr(path, "slots"), sk)
+            children.append(snode)
     outer = {
         "type": "card",
         "id": form_id,
@@ -1053,7 +1273,7 @@ def expand_detail_card_macro(source, path):
         fail("E_PROPERTY_REQUIRED", ptr(path, "items"), "detail-card requires a nonempty items array")
     slots = source.get("slots") if isinstance(source.get("slots"), dict) else {}
     children = []
-    if "title" in source or "badge" in source:
+    if "title" in source or "badge" in source or ("badge" in slots and isinstance(slots["badge"], dict)):
         hdr_children = []
         if "title" in source:
             hdr_children.append({
@@ -1076,6 +1296,10 @@ def expand_detail_card_macro(source, path):
                 "variant": "soft",
                 "radius": 6,
             })
+        if "badge" in slots and isinstance(slots["badge"], dict):
+            snode = copy.deepcopy(slots["badge"])
+            snode["_slot_origin"] = ptr(ptr(path, "slots"), "badge")
+            hdr_children.append(snode)
         children.append({
             "type": "box",
             "id": f"{card_id}_hdr",
@@ -1141,6 +1365,10 @@ def expand_detail_card_macro(source, path):
                 },
             ],
         })
+    if "body" in slots and isinstance(slots["body"], dict):
+        snode = copy.deepcopy(slots["body"])
+        snode["_slot_origin"] = ptr(ptr(path, "slots"), "body")
+        children.append(snode)
     if isinstance(source.get("actions"), list) and source["actions"]:
         act_btns = []
         for idx, act_spec in enumerate(source["actions"]):
@@ -1169,10 +1397,11 @@ def expand_detail_card_macro(source, path):
             "align": "center",
             "children": act_btns,
         })
-    if "footer" in slots and isinstance(slots["footer"], dict):
-        snode = copy.deepcopy(slots["footer"])
-        snode["_slot_origin"] = ptr(ptr(path, "slots"), "footer")
-        children.append(snode)
+    for sk in ("actions", "footer"):
+        if sk in slots and isinstance(slots[sk], dict):
+            snode = copy.deepcopy(slots[sk])
+            snode["_slot_origin"] = ptr(ptr(path, "slots"), sk)
+            children.append(snode)
     outer = {
         "type": "card",
         "id": card_id,
@@ -1254,17 +1483,18 @@ def expand_wizard_card_macro(source, path, step_var):
                 {"type": "set-panel-state", "target": panel_id, "state": next_sid},
             ])
         guard_expr = st.get("guard", st.get("nextWhen"))
+        guard_key = "guard" if "guard" in st else "nextWhen"
         guard_msg = st.get("guardMessage", st.get("errorText", st.get("errorMessage", "请先完成当前步骤必填项")))
         if guard_expr is not None:
             next_click = {
                 "cases": [
-                    {"when": guard_expr, "actions": ok_actions},
+                    {"when": guard_expr, "_when_origin": ptr(sp, guard_key), "actions": ok_actions},
                     {"else": True, "actions": [{"type": "set-text", "target": err_id, "text": guard_msg}]},
                 ]
             }
         else:
             next_click = ok_actions
-        if next_sid or user_next or "nextText" in st:
+        if next_sid or user_next or "nextText" in st or guard_expr is not None:
             nav_btns.append({
                 "type": "button",
                 "id": f"{sid}_next",
@@ -1314,10 +1544,11 @@ def expand_wizard_card_macro(source, path, step_var):
             "fontWeight": 700,
             "color": "$ink",
         })
-    if "header" in slots and isinstance(slots["header"], dict):
-        snode = copy.deepcopy(slots["header"])
-        snode["_slot_origin"] = ptr(ptr(path, "slots"), "header")
-        children.append(snode)
+    for sk in ("header", "stepper"):
+        if sk in slots and isinstance(slots[sk], dict):
+            snode = copy.deepcopy(slots[sk])
+            snode["_slot_origin"] = ptr(ptr(path, "slots"), sk)
+            children.append(snode)
     children.extend([
         {
             "type": "box",
@@ -1346,10 +1577,11 @@ def expand_wizard_card_macro(source, path, step_var):
             "states": states,
         },
     ])
-    if "footer" in slots and isinstance(slots["footer"], dict):
-        snode = copy.deepcopy(slots["footer"])
-        snode["_slot_origin"] = ptr(ptr(path, "slots"), "footer")
-        children.append(snode)
+    for sk in ("body", "actions", "footer"):
+        if sk in slots and isinstance(slots[sk], dict):
+            snode = copy.deepcopy(slots[sk])
+            snode["_slot_origin"] = ptr(ptr(path, "slots"), sk)
+            children.append(snode)
     outer = {
         "type": "card",
         "id": wiz_id,
@@ -1373,6 +1605,7 @@ def expand_master_detail_macro(source, path):
     md_id = ident(source.get("id"), ptr(path, "id"))
     master_node = source.get("master")
     detail_node = source.get("detail")
+    slots = source.get("slots") if isinstance(source.get("slots"), dict) else {}
     list_w = source.get("masterWidth", source.get("listWidth", 360))
     if master_node is None and "dataset" in source and "searchField" in source and "template" in source:
         master_node = {
@@ -1391,20 +1624,54 @@ def expand_master_detail_macro(source, path):
         if "filters" in source:
             master_node["filters"] = copy.deepcopy(source["filters"])
         master_origin = path
+    elif master_node is None and isinstance(slots.get("master"), dict):
+        master_node = slots["master"]
+        master_origin = ptr(ptr(path, "slots"), "master")
     else:
         if not isinstance(master_node, dict):
             fail("E_PROPERTY_REQUIRED", ptr(path, "master"), "master-detail requires a master node object or dataset/searchField/template")
         master_origin = ptr(path, "master")
     if not isinstance(detail_node, dict):
         fail("E_PROPERTY_REQUIRED", ptr(path, "detail"), "master-detail requires a detail node object")
-    slots = source.get("slots") if isinstance(source.get("slots"), dict) else {}
     m_copy = copy.deepcopy(master_node)
     m_copy["_slot_origin"] = master_origin
     m_copy.setdefault("w", list_w)
+    if "master" in slots and isinstance(slots["master"], dict) and master_origin != ptr(ptr(path, "slots"), "master"):
+        mslot = copy.deepcopy(slots["master"])
+        mslot["_slot_origin"] = ptr(ptr(path, "slots"), "master")
+        m_copy = {
+            "type": "box",
+            "id": f"{md_id}_master_col",
+            "layout": "column",
+            "w": list_w,
+            "h": "hug",
+            "gap": 8,
+            "children": [mslot, m_copy],
+        }
     d_copy = copy.deepcopy(detail_node)
     d_copy["_slot_origin"] = ptr(path, "detail")
     if "w" not in d_copy and "flex" not in d_copy:
         d_copy["flex"] = 1
+    if ("detailHeader" in slots and isinstance(slots["detailHeader"], dict)) or ("detailFooter" in slots and isinstance(slots["detailFooter"], dict)):
+        d_children = []
+        if "detailHeader" in slots and isinstance(slots["detailHeader"], dict):
+            dh = copy.deepcopy(slots["detailHeader"])
+            dh["_slot_origin"] = ptr(ptr(path, "slots"), "detailHeader")
+            d_children.append(dh)
+        d_children.append(d_copy)
+        if "detailFooter" in slots and isinstance(slots["detailFooter"], dict):
+            df = copy.deepcopy(slots["detailFooter"])
+            df["_slot_origin"] = ptr(ptr(path, "slots"), "detailFooter")
+            d_children.append(df)
+        d_copy = {
+            "type": "box",
+            "id": f"{md_id}_detail_col",
+            "layout": "column",
+            "flex": 1,
+            "h": "hug",
+            "gap": 8,
+            "children": d_children,
+        }
     row_box = {
         "type": "box",
         "id": f"{md_id}_split",
@@ -1415,8 +1682,9 @@ def expand_master_detail_macro(source, path):
         "align": "start",
         "children": [m_copy, d_copy],
     }
+    has_self_id = m_copy.get("id") == md_id or (isinstance(master_node, dict) and master_node.get("id") == md_id)
     if not slots:
-        row_box["id"] = f"{md_id}_container" if m_copy.get("id") == md_id else md_id
+        row_box["id"] = f"{md_id}_container" if has_self_id else md_id
         for gk in ("x", "y", "w", "h", "flex", "padding", "fill", "stroke", "radius"):
             if gk in source:
                 row_box[gk] = copy.deepcopy(source[gk])
@@ -1434,7 +1702,7 @@ def expand_master_detail_macro(source, path):
         children.append(snode)
     outer = {
         "type": "box",
-        "id": f"{md_id}_container" if m_copy.get("id") == md_id else md_id,
+        "id": f"{md_id}_container" if has_self_id else md_id,
         "layout": "column",
         "w": source.get("w", "fill"),
         "h": source.get("h", "hug"),
@@ -1445,6 +1713,780 @@ def expand_master_detail_macro(source, path):
         if gk in source:
             outer[gk] = copy.deepcopy(source[gk])
     return outer
+
+
+def expand_tab_bar_macro(source, path):
+    tab_id = ident(source.get("id"), ptr(path, "id"))
+    items_key = "items" if "items" in source else "tabs"
+    raw_items = source.get(items_key)
+    if not isinstance(raw_items, list) or not raw_items:
+        fail("E_PROPERTY_REQUIRED", ptr(path, items_key), "tab-bar requires a nonempty 'items' or 'tabs' array")
+    active_val = source.get("active")
+    item_h = source.get("itemHeight", 38)
+    children = []
+    for idx, entry in enumerate(raw_items):
+        ep = ptr(ptr(path, items_key), idx)
+        if isinstance(entry, str):
+            label = entry
+            item_id = f"{tab_id}_tab_{idx + 1}"
+            goto_page = None
+            entry_on = None
+            entry_click = None
+            is_active = active_val in (entry, idx)
+            entry_dict = {}
+        elif isinstance(entry, dict):
+            raw_item_id = entry.get("id", f"{tab_id}_tab_{idx + 1}")
+            item_id = ident(raw_item_id, ptr(ep, "id") if "id" in entry else ep)
+            label = entry.get("label", entry.get("text", raw_item_id))
+            goto_page = entry.get("goto", entry.get("page", entry.get("link")))
+            entry_on = entry.get("on")
+            entry_click = entry.get("onClick")
+            is_active = bool(entry.get("active")) or (
+                active_val is not None and active_val in (raw_item_id, item_id, label, idx)
+            )
+            entry_dict = entry
+        else:
+            fail("E_OBJECT", ep, "tab-bar item must be an object or string")
+        btn = {
+            "type": "button",
+            "id": item_id,
+            "text": label,
+            "variant": entry_dict.get("variant", "primary" if is_active else "ghost"),
+            "flex": entry_dict.get("flex", 1),
+            "h": entry_dict.get("h", item_h),
+            "radius": entry_dict.get("radius", 12),
+            "fontSize": entry_dict.get("fontSize", 12),
+            "fontWeight": entry_dict.get("fontWeight", 700 if is_active else 500),
+        }
+        for ck in ("w", "fill", "color", "stroke", "icon"):
+            if ck in entry_dict:
+                btn[ck] = copy.deepcopy(entry_dict[ck])
+        if entry_on:
+            btn["on"] = copy.deepcopy(entry_on)
+        elif entry_click:
+            btn["onClick"] = copy.deepcopy(entry_click)
+        elif goto_page:
+            btn["onClick"] = [{"goto": goto_page}]
+        children.append(btn)
+    bar = {
+        "type": "box",
+        "id": tab_id,
+        "layout": "row",
+        "w": source.get("w", "fill"),
+        "h": source.get("h", 56),
+        "padding": source.get("padding", [8, 12]),
+        "gap": source.get("gap", 8),
+        "radius": source.get("radius", 16),
+        "fill": source.get("fill", "$surface"),
+        "stroke": source.get("stroke", "$line"),
+        "align": "center",
+        "justify": "space-between",
+        "children": children,
+    }
+    for gk in ("x", "y", "right", "bottom", "flex", "visible", "hidden"):
+        if gk in source:
+            bar[gk] = copy.deepcopy(source[gk])
+    return bar
+
+
+def expand_nav_bar_macro(source, path):
+    nav_id = ident(source.get("id"), ptr(path, "id"))
+    title = source.get("title", source.get("text", ""))
+    subtitle = source.get("subtitle")
+    back_val = source.get("back")
+    back_text = source.get("backText", back_val if isinstance(back_val, str) else None)
+    back_page = source.get("backPage", source.get("backGoto"))
+    on_back = source.get("onBack")
+    right_val = source.get("right")
+    right_text = source.get("rightText", right_val if isinstance(right_val, str) else None)
+    right_page = source.get("rightPage", source.get("rightGoto"))
+    on_right = source.get("onRight")
+    has_left = bool(back_text or back_page or back_val or on_back)
+    has_right = bool(right_text or right_page or right_val or on_right or source.get("actions"))
+    title_align = "center" if (has_left and has_right) else "left"
+    children = []
+    if has_left:
+        back_btn = {
+            "type": "button",
+            "id": f"{nav_id}_back",
+            "text": back_text or "返回",
+            "variant": "ghost",
+            "w": 68,
+            "h": 32,
+            "radius": 8,
+            "fontSize": 13,
+            "fontWeight": 500,
+        }
+        if on_back:
+            back_btn["onClick"] = copy.deepcopy(on_back)
+        elif back_page:
+            back_btn["onClick"] = [{"goto": back_page}]
+        children.append(back_btn)
+    if subtitle:
+        children.append({
+            "type": "box",
+            "id": f"{nav_id}_title_group",
+            "layout": "column",
+            "flex": 1,
+            "h": "hug",
+            "gap": 2,
+            "children": [
+                {
+                    "type": "label",
+                    "id": f"{nav_id}_title",
+                    "text": title,
+                    "w": "fill",
+                    "h": 24,
+                    "fontSize": source.get("titleFontSize", 18),
+                    "fontWeight": 700,
+                    "color": "$ink",
+                    "align": title_align,
+                },
+                {
+                    "type": "label",
+                    "id": f"{nav_id}_subtitle",
+                    "text": subtitle,
+                    "w": "fill",
+                    "h": 16,
+                    "fontSize": 12,
+                    "fontWeight": 400,
+                    "color": "$ink-2",
+                    "align": title_align,
+                },
+            ],
+        })
+    else:
+        children.append({
+            "type": "label",
+            "id": f"{nav_id}_title",
+            "text": title,
+            "flex": 1,
+            "h": 28,
+            "fontSize": source.get("titleFontSize", 18),
+            "fontWeight": 700,
+            "color": "$ink",
+            "align": title_align,
+        })
+    if right_text or right_page or right_val or on_right:
+        right_interactive = bool(right_page or on_right)
+        right_node = {
+            "type": "button" if right_interactive else "badge",
+            "id": f"{nav_id}_right",
+            "text": right_text or "更多",
+            "variant": "soft",
+            "w": 76,
+            "h": 30,
+            "radius": 8,
+            "fontSize": 12,
+            "fontWeight": 600,
+        }
+        if on_right:
+            right_node["onClick"] = copy.deepcopy(on_right)
+        elif right_page:
+            right_node["onClick"] = [{"goto": right_page}]
+        children.append(right_node)
+    for idx, act in enumerate(source.get("actions") or []):
+        ap = ptr(ptr(path, "actions"), idx)
+        aid = ident(act.get("id", f"{nav_id}_act_{idx + 1}"), ptr(ap, "id") if "id" in act else ap)
+        abtn = {
+            "type": "button",
+            "id": aid,
+            "text": act.get("label", act.get("text", aid)),
+            "variant": act.get("variant", "soft"),
+            "w": act.get("w", 72),
+            "h": act.get("h", 30),
+            "radius": act.get("radius", 8),
+            "fontSize": act.get("fontSize", 12),
+            "fontWeight": act.get("fontWeight", 600),
+        }
+        if "on" in act:
+            abtn["on"] = copy.deepcopy(act["on"])
+        elif "onClick" in act:
+            abtn["onClick"] = copy.deepcopy(act["onClick"])
+        elif act.get("goto") or act.get("page") or act.get("link"):
+            abtn["onClick"] = [{"goto": act.get("goto", act.get("page", act.get("link")))}]
+        children.append(abtn)
+    nav = {
+        "type": "box",
+        "id": nav_id,
+        "layout": "row",
+        "w": source.get("w", "fill"),
+        "h": source.get("h", 56 if subtitle else 48),
+        "padding": source.get("padding", [8, 12] if ("fill" in source or "stroke" in source) else 0),
+        "gap": source.get("gap", 8),
+        "align": "center",
+        "justify": "space-between",
+        "children": children,
+    }
+    for gk in ("x", "y", "right", "bottom", "flex", "fill", "stroke", "radius", "visible", "hidden"):
+        if gk in source:
+            nav[gk] = copy.deepcopy(source[gk])
+    return nav
+
+
+def expand_progress_bar_macro(source, path, variables=None, bindings=None, scope=None):
+    pb_id = ident(source.get("id"), ptr(path, "id"))
+    if "showValue" in source and type(source["showValue"]) is not bool:
+        fail("E_TYPE", ptr(path, "showValue"), "Expected boolean for showValue")
+    max_val = float(source.get("max", 100)) if isinstance(source.get("max", 100), (int, float)) and not isinstance(source.get("max"), bool) else 100.0
+    raw_pct = source.get("percent")
+    raw_val = source.get("value")
+    runtime_pct_expr = None
+    runtime_val_prop = None
+
+    def _eval_const(expr, default=None):
+        """编译期常量求值：数字 / "$var" / {"variable":..} / 四则运算 / number()"""
+        if isinstance(expr, bool):
+            return default
+        if isinstance(expr, (int, float)):
+            return float(expr)
+        if isinstance(expr, str):
+            t = expr.strip()
+            if t.startswith("$") and isinstance(variables, dict):
+                vobj = variables.get(t[1:])
+                vval = vobj.get("default", vobj.get("value")) if isinstance(vobj, dict) else vobj
+                if isinstance(vval, bool):
+                    return default
+                if isinstance(vval, (int, float)):
+                    return float(vval)
+                if isinstance(vval, str):
+                    try:
+                        return float(vval)
+                    except ValueError:
+                        return default
+            return default
+        if isinstance(expr, dict):
+            vname = expr.get("variable") or expr.get("var") or expr.get("_sigil_var")
+            if isinstance(vname, str):
+                return _eval_const("$" + vname, default)
+            if "fn" in expr and expr.get("fn") == "number" and isinstance(expr.get("args"), list) and expr["args"]:
+                return _eval_const(expr["args"][0], default)
+            op = expr.get("op")
+            if op in ("+", "-", "*", "/"):
+                l = _eval_const(expr.get("left"), None)
+                r = _eval_const(expr.get("right"), None)
+                if l is None or r is None:
+                    return default
+                if op == "+":
+                    return l + r
+                if op == "-":
+                    return l - r
+                if op == "*":
+                    return l * r
+                if op == "/":
+                    return (l / r) if r else default
+        return default
+
+    def _resolve_static_num(expr, default=50.0):
+        if isinstance(expr, (int, float)) and not isinstance(expr, bool):
+            return float(expr)
+        if isinstance(expr, str):
+            s = expr.strip()
+            const = _eval_const(expr, None)
+            if const is not None:
+                return const
+            if s.startswith("$") and isinstance(variables, dict):
+                vobj = variables.get(s[1:])
+                vval = vobj.get("default", vobj.get("value")) if isinstance(vobj, dict) else vobj
+                if isinstance(vval, (int, float)) and not isinstance(vval, bool):
+                    return float(vval)
+                if isinstance(vval, str):
+                    try:
+                        return float(vval)
+                    except ValueError:
+                        pass
+        elif isinstance(expr, dict):
+            const = _eval_const(expr, None)
+            if const is not None:
+                return const
+            vname = expr.get("variable") or expr.get("var") or expr.get("_sigil_var")
+            if isinstance(vname, str) and isinstance(variables, dict):
+                vobj = variables.get(vname)
+                vval = vobj.get("default", vobj.get("value")) if isinstance(vobj, dict) else vobj
+                if isinstance(vval, (int, float)) and not isinstance(vval, bool):
+                    return float(vval)
+                if isinstance(vval, str):
+                    try:
+                        return float(vval)
+                    except ValueError:
+                        pass
+        return default
+
+    if "percent" in source:
+        if isinstance(raw_pct, (int, float)) and not isinstance(raw_pct, bool):
+            pct = float(raw_pct)
+        else:
+            pct = _resolve_static_num(raw_pct, 50.0)
+            p_expr = parse_inline_expr(raw_pct, ptr(path, "percent"), prefer_condition=False) if isinstance(raw_pct, str) else copy.deepcopy(raw_pct)
+            runtime_pct_expr = {"fn": "number", "args": [p_expr]}
+            runtime_val_prop = "percent"
+    elif "value" in source:
+        if isinstance(raw_val, (int, float)) and not isinstance(raw_val, bool):
+            pct = (float(raw_val) / max_val * 100.0) if max_val > 0 else 0.0
+        else:
+            init_v = _resolve_static_num(raw_val, max_val * 0.5)
+            pct = (init_v / max_val * 100.0) if max_val > 0 else 0.0
+            val_expr = parse_inline_expr(raw_val, ptr(path, "value"), prefer_condition=False) if isinstance(raw_val, str) else copy.deepcopy(raw_val)
+            num_expr = {"fn": "number", "args": [val_expr]}
+            max_num = int(max_val) if float(max_val).is_integer() else max_val
+            if max_num == 100:
+                runtime_pct_expr = num_expr
+            elif isinstance(max_num, int) and max_num > 0 and 100 % max_num == 0:
+                runtime_pct_expr = {"op": "*", "left": num_expr, "right": 100 // max_num}
+            else:
+                runtime_pct_expr = {"op": "/", "left": {"op": "*", "left": num_expr, "right": 100}, "right": max_num}
+            runtime_val_prop = "value"
+    else:
+        pct = 50.0
+    pct = max(0.0, min(100.0, pct))
+    has_header = bool("label" in source or "text" in source or "rightText" in source or source.get("showValue") or runtime_pct_expr is not None)
+    show_value = source.get("showValue") is not False
+    if not show_value:
+        has_header = bool(source.get("label") or source.get("text"))
+    bar_h = source.get("barHeight", source.get("trackHeight", 8 if has_header else (source.get("h") if isinstance(source.get("h"), (int, float)) else 8)))
+    total_w = source.get("w", "fill")
+    numeric_w = total_w if isinstance(total_w, (int, float)) else 320
+    fluid_width = total_w == "fill"
+    if runtime_pct_expr is not None and bindings is not None:
+        bindings.append({"fill": f"{pb_id}_fill", "percent": copy.deepcopy(runtime_pct_expr),
+                         "scope": scope, "pointer": ptr(path, runtime_val_prop)})
+    fill_w = max(4, int(round(numeric_w * (pct / 100.0)))) if pct > 0 else 0
+    track_color = source.get("trackColor", source.get("trackFill", "$surface-2"))
+    bar_color = source.get("barColor", source.get("barFill", source.get("color", "$brand")))
+    rad = source.get("radius", max(4, int(bar_h // 2) if isinstance(bar_h, (int, float)) else 4))
+    def _bar_box(state_pct):
+        return {"type": "box", "id": f"{pb_id}_fill_{int(state_pct)}", "layout": "row",
+                "w": max(4, int(round(numeric_w * (state_pct / 100.0)))) if state_pct > 0 else 0,
+                "h": bar_h, "padding": 0, "radius": rad, "fill": bar_color, "children": []}
+
+    def _fluid_children(state_pct, zero_pixel=False):
+        out = []
+        if state_pct > 0:
+            out.append(dict(_bar_box(state_pct), w="fill", flex=state_pct))
+        elif zero_pixel:
+            out.append(dict(_bar_box(0), w=1))
+        if state_pct < 100:
+            out.append({"type": "box", "id": f"{pb_id}_space_{int(state_pct)}", "w": "fill", "flex": 100 - state_pct,
+                        "h": bar_h, "children": []})
+        return out
+
+    def _fill_children():
+        """有变量绑定时用 11 态面板承载宽度（RP9 预览不执行 Set Size，实测无效）；
+        初始状态取当前百分比的档位，保证静态预览与首屏一致。"""
+        if runtime_pct_expr is None:
+            if fluid_width:
+                return _fluid_children(pct)
+            return [_bar_box(pct)] if fill_w > 0 else []
+        steps = [p for p in range(0, 101, 10)]
+        nearest = min(steps, key=lambda p: abs(p - pct))
+        ordered = [nearest] + [p for p in steps if p != nearest]
+        states = []
+        for p in ordered:
+            box_w = max(4, int(round(numeric_w * (p / 100.0)))) if p > 0 else 1
+            states.append({"id": f"s{p}", "root": {"type": "box", "id": f"{pb_id}_fillstate_{p}",
+                                                   "layout": "row" if fluid_width else "stack", "w": "fill", "h": bar_h,
+                                                   "children": _fluid_children(p, zero_pixel=True) if fluid_width else [dict(_bar_box(p), w=box_w)]}})
+        return [{"type": "dynamic-panel", "id": f"{pb_id}_fill", "w": "fill" if fluid_width else numeric_w, "h": bar_h,
+                 "states": states}]
+
+    track = {
+        "type": "box",
+        "id": f"{pb_id}_track" if has_header else pb_id,
+        "layout": "row",
+        "w": "fill" if has_header else total_w,
+        "h": bar_h,
+        "padding": 0,
+        "gap": 0,
+        "radius": rad,
+        "fill": track_color,
+        "children": _fill_children(),
+    }
+    if has_header:
+        lbl_text = source.get("label", source.get("text", "进度"))
+        if "rightText" in source:
+            rt_text = source["rightText"]
+        elif runtime_pct_expr is not None:
+            rt_text = {"fn": "concat", "args": [runtime_pct_expr, "%"]}
+        else:
+            rt_text = f"{int(round(pct))}%"
+        val_label = {
+            "type": "label",
+            "id": f"{pb_id}_value",
+            "text": rt_text,
+            "w": 64,
+            "h": 20,
+            "fontSize": 12,
+            "fontWeight": 600,
+            "color": "$ink",
+            "align": "right",
+        }
+        if runtime_val_prop is not None and "rightText" not in source:
+            val_label["_slot_origin"] = ptr(path, runtime_val_prop)
+        header_row = {
+            "type": "box",
+            "id": f"{pb_id}_header",
+            "layout": "row",
+            "w": "fill",
+            "h": 20,
+            "justify": "space-between",
+            "align": "center",
+            "children": [
+                {
+                    "type": "label",
+                    "id": f"{pb_id}_label",
+                    "text": lbl_text,
+                    "flex": 1,
+                    "h": 20,
+                    "fontSize": 12,
+                    "fontWeight": 500,
+                    "color": "$ink-2",
+                },
+                val_label,
+            ],
+        }
+        if not show_value:
+            header_row["children"].pop()
+        pb_gap = source.get("gap", 6)
+        min_outer_h = 20 + (pb_gap if isinstance(pb_gap, (int, float)) else 6) + (bar_h if isinstance(bar_h, (int, float)) else 8)
+        raw_outer_h = source.get("h", "hug")
+        outer_h = max(int(raw_outer_h), int(min_outer_h)) if isinstance(raw_outer_h, (int, float)) else raw_outer_h
+        outer = {
+            "type": "box",
+            "id": pb_id,
+            "layout": "column",
+            "w": total_w,
+            "h": outer_h,
+            "gap": pb_gap,
+            "children": [header_row, track],
+        }
+        for gk in ("x", "y", "right", "bottom", "flex", "padding", "fill", "stroke", "visible", "hidden"):
+            if gk in source:
+                outer[gk] = copy.deepcopy(source[gk])
+        return outer
+    for gk in ("x", "y", "right", "bottom", "flex", "stroke", "visible", "hidden"):
+        if gk in source:
+            track[gk] = copy.deepcopy(source[gk])
+    return track
+
+
+def expand_phone_shell_macro(source, path):
+    sh_id = ident(source.get("id"), ptr(path, "id"))
+    dev = source.get("device", "iphone-17")
+    preset = DEVICE_CANVAS_PRESETS.get(dev, {"w": 402, "h": 874})
+    children = []
+    if source.get("statusBar", True) is not False:
+        time_txt = source.get("time", source.get("timeText", "9:41"))
+        status_txt = source.get("statusRight", source.get("statusText", "5G · 100%"))
+        children.append({
+            "type": "box",
+            "id": f"{sh_id}_status",
+            "layout": "row",
+            "w": "fill",
+            "h": 28,
+            "padding": [0, 6],
+            "justify": "space-between",
+            "align": "center",
+            "children": [
+                {
+                    "type": "label",
+                    "id": f"{sh_id}_time",
+                    "text": time_txt,
+                    "w": 64,
+                    "h": 20,
+                    "fontSize": 13,
+                    "fontWeight": 600,
+                    "color": "$ink",
+                },
+                {
+                    "type": "label",
+                    "id": f"{sh_id}_status_icons",
+                    "text": status_txt,
+                    "w": 92,
+                    "h": 20,
+                    "fontSize": 12,
+                    "fontWeight": 600,
+                    "color": "$ink",
+                    "align": "right",
+                },
+            ],
+        })
+    if isinstance(source.get("navBar"), dict):
+        nb = copy.deepcopy(source["navBar"])
+        nb.setdefault("type", "nav-bar")
+        nb.setdefault("id", f"{sh_id}_nav")
+        children.append(nb)
+    elif any(k in source for k in ("title", "back", "backText", "backPage", "backGoto", "onBack", "right", "rightText", "rightPage", "rightGoto", "onRight")):
+        nb = {"type": "nav-bar", "id": f"{sh_id}_nav", "title": source.get("title", "")}
+        for nk in ("subtitle", "right", "rightText", "rightPage", "rightGoto", "onRight", "back", "backText", "backPage", "backGoto", "onBack"):
+            if nk in source:
+                nb[nk] = copy.deepcopy(source[nk])
+        children.append(nb)
+    body_start_idx = len(children)
+    if "body" in source and not isinstance(source.get("body"), dict):
+        fail("E_OBJECT", ptr(path, "body"), "Expected a node object")
+    if isinstance(source.get("body"), dict):
+        bnode = copy.deepcopy(source["body"])
+        bnode["_slot_origin"] = ptr(path, "body")
+        children.append(bnode)
+    for idx, ch in enumerate(source.get("children") or []):
+        if not isinstance(ch, dict):
+            fail("E_OBJECT", ptr(ptr(path, "children"), idx), "Expected a node object")
+        cnode = copy.deepcopy(ch)
+        cnode["_slot_origin"] = ptr(ptr(path, "children"), idx)
+        children.append(cnode)
+    if isinstance(source.get("tabBar"), dict):
+        body_slice = [c for c in children[body_start_idx:] if isinstance(c, dict)]
+        if body_slice and not any(c.get("flex") or c.get("h") == "fill" for c in body_slice):
+            b0 = body_slice[0]
+            if (
+                len(body_slice) == 1
+                and b0.get("type", "box") == "box"
+                and "box" not in [k for k in b0 if k != "type"]
+                and b0.get("h") in (None, "hug")
+                and not b0.get("fill")
+                and not b0.get("stroke")
+            ):
+                b0["flex"] = 1
+            else:
+                children[body_start_idx:] = [{
+                    "type": "box",
+                    "id": f"{sh_id}_body_wrap",
+                    "layout": "column",
+                    "w": "fill",
+                    "h": "hug",
+                    "flex": 1,
+                    "gap": source.get("gap", 12),
+                    "children": body_slice,
+                }]
+        tb = copy.deepcopy(source["tabBar"])
+        tb.setdefault("type", "tab-bar")
+        tb.setdefault("id", f"{sh_id}_tabs")
+        children.append(tb)
+    outer = {
+        "type": "box",
+        "id": sh_id,
+        "layout": "column",
+        "w": source.get("w", preset["w"]),
+        "h": source.get("h", preset["h"]),
+        "padding": source.get("padding", [14, 16, 20, 16]),
+        "gap": source.get("gap", 12),
+        "fill": source.get("fill", source.get("screenFill", "$bg")),
+        "radius": source.get("radius", 44),
+        "children": children,
+        "_phone_shell_opts": {
+            "darkIsland": bool(source.get("darkIsland", True)),
+            "showHomeIndicator": bool(source.get("showHomeIndicator", True)),
+        },
+    }
+    for gk in ("x", "y", "flex", "stroke", "radius", "justify", "align", "visible", "hidden"):
+        if gk in source:
+            outer[gk] = copy.deepcopy(source[gk])
+    return outer
+
+
+def expand_stat_row_macro(source, path):
+    sr_id = ident(source.get("id"), ptr(path, "id"))
+    items = source.get("items")
+    if not isinstance(items, list) or not items:
+        fail("E_PROPERTY_REQUIRED", ptr(path, "items"), "stat-row requires a nonempty items array")
+    cards = []
+    for idx, item in enumerate(items):
+        ip = ptr(ptr(path, "items"), idx)
+        if not isinstance(item, dict):
+            fail("E_OBJECT", ip, "stat-row item must be an object")
+        iid = ident(item.get("id", f"{sr_id}_{idx + 1}"), ptr(ip, "id") if "id" in item else ip)
+        lbl_txt = str(item.get("label", item.get("title", item.get("text", f"指标 {idx + 1}"))))
+        val_txt = str(item.get("value", item.get("text", "0")))
+        sub_txt = item.get("sub", item.get("subtitle", item.get("trend")))
+        c_children = [
+            {
+                "type": "label",
+                "id": f"{iid}_label",
+                "text": lbl_txt,
+                "w": "fill",
+                "h": 18,
+                "fontSize": 12,
+                "fontWeight": 400,
+                "color": "$ink-2",
+            },
+            {
+                "type": "label",
+                "id": f"{iid}_value",
+                "text": val_txt,
+                "w": "fill",
+                "h": 28,
+                "fontSize": item.get("valueFontSize", source.get("valueFontSize", 20)),
+                "fontWeight": 700,
+                "color": item.get("color", "$ink"),
+            },
+        ]
+        if sub_txt is not None:
+            c_children.append({
+                "type": "label",
+                "id": f"{iid}_sub",
+                "text": str(sub_txt),
+                "w": "fill",
+                "h": 16,
+                "fontSize": 11,
+                "fontWeight": 400,
+                "color": item.get("subColor", "$ink-3"),
+            })
+        card_node = {
+            "type": "card",
+            "id": iid,
+            "flex": 1,
+            "w": "fill",
+            "h": "hug",
+            "padding": source.get("cardPadding", 12),
+            "gap": 4,
+            "radius": item.get("radius", source.get("radius", 12)),
+            "fill": item.get("fill", source.get("fill", "$surface")),
+            "stroke": item.get("stroke", source.get("stroke", "$line")),
+            "children": c_children,
+        }
+        if "on" in item:
+            card_node["on"] = copy.deepcopy(item["on"])
+        elif "onClick" in item:
+            card_node["onClick"] = copy.deepcopy(item["onClick"])
+        elif item.get("goto") or item.get("page") or item.get("link"):
+            card_node["onClick"] = [{"goto": item.get("goto", item.get("page", item.get("link")))}]
+        cards.append(card_node)
+    out = {
+        "type": "box",
+        "id": sr_id,
+        "layout": "row",
+        "w": source.get("w", "fill"),
+        "h": source.get("h", "hug"),
+        "gap": source.get("gap", 8),
+        "equalHeight": source.get("equalHeight", True),
+        "children": cards,
+    }
+    for gk in ("x", "y", "right", "bottom", "flex", "padding", "visible", "hidden"):
+        if gk in source:
+            out[gk] = copy.deepcopy(source[gk])
+    return out
+
+
+def expand_list_item_macro(source, path):
+    li_id = ident(source.get("id"), ptr(path, "id"))
+    title = str(source.get("title", source.get("text", li_id)))
+    subtitle = source.get("subtitle")
+    tag = source.get("tag", source.get("badge", source.get("index")))
+    icon_name = source.get("icon")
+    right_badge = source.get("rightBadge")
+    right_txt = source.get("rightText", source.get("meta", source.get("value", source.get("status"))))
+    raw_tag_tone = source.get("tagTone", source.get("tone", source.get("badgeVariant", "soft")))
+    tag_variant = raw_tag_tone if raw_tag_tone in ("soft", "solid", "outline", "brand", "primary", "secondary", "ghost", "glass", "success", "warning", "danger", "error", "neutral") else "soft"
+    raw_right_tone = source.get("rightTone", source.get("rightVariant", "soft"))
+    right_variant = raw_right_tone if raw_right_tone in ("soft", "solid", "outline", "brand", "primary", "secondary", "ghost", "glass", "success", "warning", "danger", "error", "neutral") else "soft"
+    children = []
+    if tag is not None:
+        children.append({
+            "type": "badge",
+            "id": f"{li_id}_tag",
+            "text": str(tag),
+            "variant": tag_variant,
+            "w": "hug",
+            "h": 24,
+            "radius": 6,
+            "fontSize": 11,
+        })
+    elif icon_name:
+        children.append({
+            "type": "icon",
+            "id": f"{li_id}_icon",
+            "icon": str(icon_name),
+            "w": 20,
+            "h": 20,
+            "color": "$brand",
+        })
+    if subtitle is not None:
+        children.append({
+            "type": "box",
+            "id": f"{li_id}_body",
+            "layout": "column",
+            "flex": 1,
+            "w": "fill",
+            "h": "hug",
+            "gap": 2,
+            "children": [
+                {
+                    "type": "label",
+                    "id": f"{li_id}_title",
+                    "text": title,
+                    "w": "fill",
+                    "h": "hug",
+                    "fontSize": 14,
+                    "fontWeight": 600,
+                    "color": "$ink",
+                },
+                {
+                    "type": "label",
+                    "id": f"{li_id}_subtitle",
+                    "text": str(subtitle),
+                    "w": "fill",
+                    "h": "hug",
+                    "fontSize": 12,
+                    "fontWeight": 400,
+                    "color": "$ink-2",
+                },
+            ],
+        })
+    else:
+        children.append({
+            "type": "label",
+            "id": f"{li_id}_title",
+            "text": title,
+            "flex": 1,
+            "w": "fill",
+            "h": "hug",
+            "fontSize": 14,
+            "fontWeight": 600,
+            "color": "$ink",
+        })
+    if right_badge is not None:
+        children.append({
+            "type": "badge",
+            "id": f"{li_id}_rbadge",
+            "text": str(right_badge),
+            "variant": right_variant,
+            "w": "hug",
+            "h": 24,
+            "radius": 6,
+            "fontSize": 11,
+        })
+    elif right_txt is not None:
+        children.append({
+            "type": "label",
+            "id": f"{li_id}_right",
+            "text": str(right_txt),
+            "w": "hug",
+            "h": 20,
+            "fontSize": 12,
+            "fontWeight": 500,
+            "color": "$ink-2",
+            "align": "right",
+        })
+    out = {
+        "type": "card",
+        "id": li_id,
+        "layout": "row",
+        "w": source.get("w", "fill"),
+        "h": source.get("h", "hug"),
+        "padding": source.get("padding", [12, 16]),
+        "gap": source.get("gap", 12),
+        "align": "center",
+        "radius": source.get("radius", 12),
+        "fill": source.get("fill", "$surface"),
+        "stroke": source.get("stroke", "$line"),
+        "children": children,
+    }
+    if source.get("goto") or source.get("page") or source.get("link"):
+        out["onClick"] = [{"goto": source.get("goto", source.get("page", source.get("link")))}]
+    for gk in ("x", "y", "right", "bottom", "flex", "visible", "hidden"):
+        if gk in source:
+            out[gk] = copy.deepcopy(source[gk])
+    return out
 
 
 def parse_domain_type(spec_val, path):
@@ -1616,8 +2658,101 @@ def are_when_asts_mutually_exclusive(ast_a, ast_b):
     return any(_atomic_mutually_exclusive(ca, cb) for ca in conj_a for cb in conj_b)
 
 
+_STATE_BOX_PROPS = (
+    "layout", "w", "h", "gap", "padding", "align", "justify",
+    "fill", "bg", "background", "stroke", "borderColor",
+    "strokeWidth", "borderWidth", "radius", "rounded", "borderRadius",
+    "columns", "equalHeight",
+)
+
+
+def normalize_panel_state_dict(st, pid, s_idx):
+    if not isinstance(st, dict):
+        return st
+    st = copy.copy(st)
+    if "id" not in st and isinstance(st.get("state"), str):
+        st["id"] = st.pop("state")
+    sid = st.get("id", f"state_{s_idx + 1}")
+    for alias_k in ("title", "label"):
+        if alias_k in st:
+            if "name" not in st:
+                st["name"] = st.pop(alias_k)
+            else:
+                st.pop(alias_k, None)
+    if "root" not in st and (
+        any(k in st for k in ("children", "body", "tree"))
+        or isinstance(st.get("layout"), list)
+    ):
+        st_type = st.pop("type", None)
+        if "children" in st:
+            st_children = st.pop("children")
+        elif "body" in st:
+            st_children = st.pop("body")
+        elif "tree" in st:
+            st_children = st.pop("tree")
+        else:
+            st_children = st.pop("layout")
+        default_layout = st_type if st_type in ("row", "column", "stack", "grid") else "column"
+        box_root = {
+            "type": "box",
+            "id": f"{pid}_{sid}_root",
+            "layout": st.pop("layout", default_layout) if isinstance(st.get("layout"), str) else default_layout,
+            "w": st.pop("w", "fill"),
+            "h": st.pop("h", "hug"),
+            "gap": st.pop("gap", 12),
+            "padding": st.pop("padding", 0),
+            "children": st_children if isinstance(st_children, list) else ([st_children] if isinstance(st_children, dict) else st_children),
+            "_auto_state_root": True,
+        }
+        for bk in _STATE_BOX_PROPS:
+            if bk in st:
+                box_root[bk] = st.pop(bk)
+        st["root"] = box_root
+    elif isinstance(st.get("root"), dict) and any(bk in st for bk in _STATE_BOX_PROPS):
+        root_copy = copy.copy(st["root"])
+        for bk in _STATE_BOX_PROPS:
+            if bk in st:
+                val = st.pop(bk)
+                root_copy.setdefault(bk, val)
+        st["root"] = root_copy
+    return st
+
+
+def normalize_panel_states_in_tree(node):
+    if isinstance(node, dict):
+        is_panel = (
+            node.get("type") in ("dynamic-panel", "panel")
+            or isinstance(node.get("dynamic-panel"), str)
+            or isinstance(node.get("panel"), str)
+        )
+        if is_panel:
+            pid = node.get("id") or node.get("dynamic-panel") or node.get("panel") or "panel"
+            if isinstance(node.get("states"), dict) and node["states"]:
+                node["states"] = [
+                    (
+                        {"id": sk, **sv}
+                        if isinstance(sv, dict) and any(k in sv for k in ("root", "children", "body", "tree"))
+                        else ({"id": sk, "root": sv} if isinstance(sv, dict) else {"id": sk, "children": sv})
+                    )
+                    for sk, sv in node["states"].items()
+                ]
+            if isinstance(node.get("states"), list):
+                node["states"] = [
+                    normalize_panel_state_dict(st, pid, s_idx)
+                    for s_idx, st in enumerate(node["states"])
+                ]
+        for k, v in list(node.items()):
+            if k in ("children", "states", "steps", "root", "template", "then", "else", "master", "detail", "body", "slots", "cell"):
+                normalize_panel_states_in_tree(v)
+    elif isinstance(node, list):
+        for item in node:
+            normalize_panel_states_in_tree(item)
+
+
 class Frontend:
     def __init__(self, spec):
+        validate_source_tree(spec)
+        self.raw_spec = copy.deepcopy(spec)
         self.spec = copy.deepcopy(spec)
         self.models = {}
         self.domain_models = {}
@@ -1631,8 +2766,10 @@ class Frontend:
         self.pending = []
         self.repeaters = {}
         self.value_bindings = []
+        self.progress_bindings = []
         self.row_conditionals = []
         self.page_conditionals = []
+        self.initial_hidden_nodes = []
         self.passthrough_layers = {}
         self.source_origins = {}
         self.macro_calls = {}
@@ -1756,11 +2893,21 @@ class Frontend:
     def desugar_spec(self):
         if not isinstance(self.spec, dict):
             return
+        validate_device(self.spec, "")
+        if "statecharts" in self.spec:
+            validate_statecharts(self.spec["statecharts"])
+        if isinstance(self.spec.get("product"), dict) and "statecharts" in self.spec["product"]:
+            validate_statecharts(self.spec["product"]["statecharts"], "/product/statecharts")
         if isinstance(self.spec.get("product"), dict):
             expanded, prov = expand_product_spec(self.spec, fail, ident, fields, self.typecheck)
             self.spec.clear()
             self.spec.update(expanded)
             self.product_provenance = prov
+        if "title" in self.spec:
+            if "name" not in self.spec:
+                self.spec["name"] = self.spec.pop("title")
+            else:
+                self.spec.pop("title", None)
         if "theme" not in self.spec and self.spec.get("domain") in ("web", "doc"):
             self.spec["theme"] = "enterprise-light"
         raw_models = self.spec.get("models")
@@ -1842,23 +2989,61 @@ class Frontend:
                     rid = r_item.get("id", f"rule_{idx + 1}")
                     self.declarative_rules[rid] = copy.deepcopy(r_item)
         raw_masters = self.spec.get("masters")
+        if isinstance(raw_masters, dict):
+            for m_def in raw_masters.values():
+                if isinstance(m_def, dict):
+                    normalize_panel_states_in_tree(m_def.get("root") or m_def.get("layout"))
+        raw_comps = self.spec.get("components")
+        if isinstance(raw_comps, dict):
+            for c_def in raw_comps.values():
+                if isinstance(c_def, dict):
+                    normalize_panel_states_in_tree(c_def.get("root"))
         raw_pages = self.spec.get("pages")
         if isinstance(raw_pages, list):
             domain = self.spec.get("domain", "mobile")
+            if self.spec.get("shell") in DEVICE_CANVAS_PRESETS and "device" not in self.spec:
+                self.spec["device"] = self.spec["shell"]
+            top_device = self.spec.get("device") if self.spec.get("device") in DEVICE_CANVAS_PRESETS else None
             default_canvas = {"w": 1440, "h": 900} if domain in ("web", "doc") else {"w": 375, "h": 812}
             for idx, page in enumerate(raw_pages):
                 if isinstance(page, dict):
+                    validate_device(page, ptr("/pages", idx))
+                    if "slug" in page:
+                        page.setdefault("id", page.pop("slug"))
                     if "name" not in page and isinstance(page.get("id"), str):
                         page["name"] = page["id"]
                     if "passthrough_layer" in page:
                         pid_key = page.get("id", f"page_{idx}")
                         self.passthrough_layers[pid_key] = copy.deepcopy(page.pop("passthrough_layer"))
+                    if page.get("shell") in DEVICE_CANVAS_PRESETS:
+                        page.setdefault("device", page.pop("shell"))
+                    if "device" not in page:
+                        def _find_shell_device(node):
+                            if isinstance(node, dict):
+                                if node.get("type") == "phone-shell" and isinstance(node.get("device"), str) and node["device"] in DEVICE_CANVAS_PRESETS:
+                                    return node["device"]
+                                for value in node.values():
+                                    found = _find_shell_device(value)
+                                    if found:
+                                        return found
+                            elif isinstance(node, list):
+                                for value in node:
+                                    found = _find_shell_device(value)
+                                    if found:
+                                        return found
+                            return None
+                        _shell_dev = _find_shell_device(page.get("root"))
+                        if _shell_dev:
+                            page["device"] = _shell_dev
+                    if "device" not in page and top_device and page.get("domain", domain) not in ("web", "doc"):
+                        page["device"] = top_device
                     if "canvas" not in page:
-                        page["canvas"] = copy.deepcopy(default_canvas)
+                        dev_preset = DEVICE_CANVAS_PRESETS.get(page.get("device"))
+                        page["canvas"] = copy.deepcopy(dev_preset if dev_preset else default_canvas)
                     elif isinstance(page.get("canvas"), list) and len(page["canvas"]) == 2:
                         page["canvas"] = {"w": page["canvas"][0], "h": page["canvas"][1]}
-                    if "layout" in page and "root" not in page:
-                        lay_val = page.pop("layout")
+                    if ("layout" in page or "children" in page) and "root" not in page:
+                        lay_val = page.pop("layout") if "layout" in page else page.pop("children")
                         page["root"] = {
                             "type": "box",
                             "id": "root",
@@ -1869,6 +3054,9 @@ class Frontend:
                             "gap": 16,
                             "children": lay_val if isinstance(lay_val, list) else [lay_val],
                         }
+                    normalize_panel_states_in_tree(page.get("root"))
+                    if "slot" in page:
+                        normalize_panel_states_in_tree(page.get("slot"))
                     if "onLoad" in page:
                         page_path = ptr("/pages", idx)
                         events = page.get("on", {})
@@ -1883,13 +3071,19 @@ class Frontend:
                         if isinstance(m_refs, str):
                             m_refs = [m_refs]
                         placements, master_nodes = [], []
+                        slots_injected = False
                         for m_item in (m_refs if isinstance(m_refs, list) else []):
                             m_id = m_item if isinstance(m_item, str) else m_item.get("master", m_item.get("id"))
                             m_x = 0 if isinstance(m_item, str) else m_item.get("x", 0)
                             m_y = 0 if isinstance(m_item, str) else m_item.get("y", 0)
                             m_def = raw_masters.get(m_id)
+                            def contains_phone(node):
+                                if isinstance(node, dict):
+                                    return node.get("type") == "phone-shell" or "phone-shell" in node or any(contains_phone(v) for v in node.values())
+                                return isinstance(node, list) and any(contains_phone(v) for v in node)
+                            default_master_w = page["canvas"]["w"] if contains_phone(m_def) else 220
                             if isinstance(m_def, dict) and "root" not in m_def and isinstance(m_def.get("layout"), list):
-                                m_def["root"] = {"column": m_id, "w": m_def.get("w", 220), "h": m_def.get("h", page["canvas"]["h"]), "children": copy.deepcopy(m_def["layout"])}
+                                m_def["root"] = {"column": m_id, "w": m_def.get("w", default_master_w), "h": m_def.get("h", page["canvas"]["h"]), "children": copy.deepcopy(m_def["layout"])}
                             if not isinstance(m_def, dict) or not isinstance(m_def.get("root"), dict):
                                 fail("E_MASTER", ptr("/masters", m_id), "Master must exist and define a root or layout")
                             if isinstance(m_def, dict) and isinstance(m_def.get("root"), dict):
@@ -1898,15 +3092,40 @@ class Frontend:
                                     "name": m_def.get("name", m_id),
                                     "x": m_x,
                                     "y": m_y,
-                                    "w": m_def.get("w", 220),
+                                    "w": m_def.get("w", default_master_w),
                                     "h": m_def.get("h", page["canvas"]["h"]),
                                 })
                                 m_copy = copy.deepcopy(m_def["root"])
                                 m_copy["_master_instance"] = m_id
+                                def inject_slots(node):
+                                    nonlocal slots_injected
+                                    if not isinstance(node, dict):
+                                        return
+                                    node_id = node.get("id") or next((node[k] for k in SHORTHAND_NODE_KINDS if isinstance(node.get(k), str)), None)
+                                    slots = page.get("slot")
+                                    if isinstance(slots, dict) and node_id in slots:
+                                        value = slots[node_id]
+                                        content = value if isinstance(value, list) else [value]
+                                        node["children"] = []
+                                        for slot_index, child in enumerate(content):
+                                            if not isinstance(child, dict):
+                                                fail("E_MASTER", ptr(ptr(ptr("/pages", idx), "slot"), node_id), "Slot content must be a node or node array")
+                                            origin = ptr(ptr(ptr("/pages", idx), "slot"), node_id)
+                                            if isinstance(value, list):
+                                                origin = ptr(origin, slot_index)
+                                            node["children"].append({**copy.deepcopy(child), "_master_slot": True, "_slot_origin": origin})
+                                        slots_injected = True
+                                        return
+                                    for child in node.get("children", []):
+                                        inject_slots(child)
+                                inject_slots(m_copy)
                                 master_nodes.append(m_copy)
                         if placements:
                             self.page_master_placements[page.get("id", f"page_{idx}")] = placements
-                        if "slot" in page and "root" not in page:
+                        if slots_injected and "root" not in page:
+                            page["root"] = {"type": "box", "id": f"{page['id']}_shell", "layout": "stack",
+                                            "w": page["canvas"]["w"], "h": page["canvas"]["h"], "children": master_nodes}
+                        elif "slot" in page and "root" not in page:
                             slot_map = page["slot"]
                             body_node = slot_map.get("body") if isinstance(slot_map, dict) and "body" in slot_map else (
                                 next(iter(slot_map.values())) if isinstance(slot_map, dict) and slot_map else slot_map
@@ -1937,6 +3156,63 @@ class Frontend:
                         elif "root" in page and isinstance(page["root"], dict) and master_nodes:
                             if isinstance(page["root"].get("children"), list):
                                 page["root"]["children"] = [*master_nodes, *page["root"]["children"]]
+            # Top-level tabBar auto-injection into each page's phone-shell (or root column)
+            top_tab_bar = self.spec.get("tabBar")
+            if top_tab_bar is not None and top_tab_bar is not False and not isinstance(top_tab_bar, (list, dict)):
+                fail("E_TYPE", "/tabBar", "tabBar must be an array, object or false")
+            if top_tab_bar is not None and isinstance(raw_pages, list):
+                all_page_ids = {p.get("id") for p in raw_pages if isinstance(p, dict) and isinstance(p.get("id"), str)}
+                for idx_tb, page in enumerate(raw_pages):
+                    if not isinstance(page, dict) or page.get("tabBar") is False:
+                        continue
+                    pid_tb = page.get("id", f"page_{idx_tb}")
+                    if isinstance(top_tab_bar, list):
+                        tb_cfg = {"id": f"{pid_tb}_tabs", "active": pid_tb, "items": copy.deepcopy(top_tab_bar)}
+                    elif isinstance(top_tab_bar, dict):
+                        tb_cfg = copy.deepcopy(top_tab_bar)
+                        tb_cfg["id"] = f"{pid_tb}_{tb_cfg.get('id', 'tabs')}"
+                        tb_cfg.setdefault("active", pid_tb)
+                    else:
+                        continue
+                    for arr_k in ("items", "tabs"):
+                        if isinstance(tb_cfg.get(arr_k), list):
+                            for item_idx, it in enumerate(tb_cfg[arr_k]):
+                                item_path = ptr("/tabBar", item_idx) if isinstance(top_tab_bar, list) else ptr(ptr("/tabBar", arr_k), item_idx)
+                                if isinstance(it, str):
+                                    if it not in all_page_ids:
+                                        fail("E_REFERENCE", item_path, "Tab target page does not exist")
+                                    it = {"id": it, "text": it, "page": it}
+                                    tb_cfg[arr_k][item_idx] = it
+                                if isinstance(it, dict):
+                                    orig_id = it.get("id")
+                                    if not any(k in it for k in ("onClick", "on")):
+                                        target = it.get("page", it.get("goto", it.get("link", orig_id)))
+                                        if not isinstance(target, str) or target not in all_page_ids:
+                                            fail("E_REFERENCE", item_path, "Tab target page does not exist")
+                                    if not any(k in it for k in ("page", "goto", "link", "onClick", "on")) and orig_id in all_page_ids:
+                                        it["page"] = orig_id
+                                    if orig_id == pid_tb and tb_cfg.get("active") == pid_tb:
+                                        it["active"] = True
+                                    if isinstance(orig_id, str) and not orig_id.startswith("tab_"):
+                                        it["id"] = f"tab_{orig_id}"
+                    def _inject_tab_bar(node):
+                        if not isinstance(node, dict):
+                            return False
+                        if node.get("type") == "phone-shell" or isinstance(node.get("phone-shell"), str):
+                            if "tabBar" not in node:
+                                node["tabBar"] = tb_cfg
+                            return True
+                        for ch in (node.get("children") or []):
+                            if _inject_tab_bar(ch):
+                                return True
+                        return False
+                    if isinstance(page.get("root"), dict):
+                        if not _inject_tab_bar(page["root"]):
+                            r_node = page["root"]
+                            if isinstance(r_node.get("children"), list) and not any(
+                                isinstance(c, dict) and (c.get("type") == "tab-bar" or "tab-bar" in c) for c in r_node["children"]
+                            ):
+                                r_node["children"].append({"type": "tab-bar", **tb_cfg})
             # P0-1: Desugar top-level and page-level `views` into runtime selection bindings
             def _collect_node_ids(node, out_set):
                 if not isinstance(node, dict):
@@ -1944,9 +3220,9 @@ class Frontend:
                 for k in ("id", *SHORTHAND_NODE_KINDS):
                     if k in node and isinstance(node[k], str) and k != "type":
                         out_set.add(node[k])
-                for ch in (node.get("children") or []):
+                for ch in (node.get("children") if isinstance(node.get("children"), list) else []):
                     _collect_node_ids(ch, out_set)
-                for st in (node.get("states") or []):
+                for st in (node.get("states") if isinstance(node.get("states"), list) else []):
                     if isinstance(st, dict):
                         _collect_node_ids(st.get("root"), out_set)
                 if isinstance(node.get("template"), dict):
@@ -1959,12 +3235,24 @@ class Frontend:
                     _collect_node_ids(page.get("root"), s_ids)
                     page_widget_ids[page["id"]] = s_ids
 
-            def _normalize_view_entry(vid, vdef, default_page_id=None):
+            def _normalize_view_entry(vid, vdef, default_page_id=None, view_path="/views"):
                 if not isinstance(vdef, dict):
                     return None
                 ds_name = vdef.get("source") or vdef.get("dataset")
                 key_field = vdef.get("key", "id")
-                sel_var = (vdef.get("selector") or vdef.get("variable") or f"selected_{ds_name}").lstrip("$")
+                sel_value = vdef.get("selector", vdef.get("variable", f"selected_{ds_name}"))
+                if not isinstance(sel_value, str) or not sel_value:
+                    fail("E_VARIABLE", view_path, "View selector must name a text variable")
+                sel_var = sel_value.lstrip("$")
+                if "selector" in vdef or "variable" in vdef:
+                    vp = ptr(view_path, "selector" if "selector" in vdef else "variable")
+                    declared = self.spec.get("variables", {}).get(sel_var, {})
+                    if not isinstance(declared, dict) or declared.get("type") != "text":
+                        fail("E_VARIABLE", vp, "View selector requires a declared text variable")
+                    dataset = self.spec.get("datasets", {}).get(ds_name, {})
+                    rows = dataset.get("rows", []) if isinstance(dataset, dict) else []
+                    if not any(isinstance(row, dict) and row.get(key_field) == declared.get("value") for row in rows):
+                        fail("E_VARIABLE", vp, "View selector default must identify an existing row")
                 fields_map = vdef.get("fields") or vdef.get("targets") or {}
                 target_page_id = vdef.get("page") or default_page_id
                 if not target_page_id and fields_map:
@@ -1990,28 +3278,28 @@ class Frontend:
             normalized_views = []
             if isinstance(top_views, dict):
                 for vid, vdef in top_views.items():
-                    nv = _normalize_view_entry(vid, vdef)
+                    nv = _normalize_view_entry(vid, vdef, view_path=ptr("/views", vid))
                     if nv:
                         normalized_views.append(nv)
             elif isinstance(top_views, list):
                 for idx_v, vdef in enumerate(top_views):
                     vid = vdef.get("id", f"view_{idx_v + 1}") if isinstance(vdef, dict) else f"view_{idx_v + 1}"
-                    nv = _normalize_view_entry(vid, vdef)
+                    nv = _normalize_view_entry(vid, vdef, view_path=ptr("/views", idx_v))
                     if nv:
                         normalized_views.append(nv)
-            for page in raw_pages:
+            for page_idx, page in enumerate(raw_pages):
                 if not isinstance(page, dict):
                     continue
                 p_views = page.get("views")
                 if isinstance(p_views, dict):
                     for vid, vdef in p_views.items():
-                        nv = _normalize_view_entry(vid, vdef, default_page_id=page.get("id"))
+                        nv = _normalize_view_entry(vid, vdef, default_page_id=page.get("id"), view_path=ptr(ptr(ptr("/pages", page_idx), "views"), vid))
                         if nv:
                             normalized_views.append(nv)
                 elif isinstance(p_views, list):
                     for idx_v, vdef in enumerate(p_views):
                         vid = vdef.get("id", f"view_{idx_v + 1}") if isinstance(vdef, dict) else f"view_{idx_v + 1}"
-                        nv = _normalize_view_entry(vid, vdef, default_page_id=page.get("id"))
+                        nv = _normalize_view_entry(vid, vdef, default_page_id=page.get("id"), view_path=ptr(ptr(ptr("/pages", page_idx), "views"), idx_v))
                         if nv:
                             normalized_views.append(nv)
             for target_pid, b_entry in normalized_views:
@@ -2087,9 +3375,9 @@ class Frontend:
                                     extra.append(act)
                             if rule_hit is not None:
                                 node[ev_key] = {"cases": self._compile_declarative_rule_cases(rule_hit[0], rule_hit[1], extra_actions=extra)}
-                    for ch in (node.get("children") or []):
+                    for ch in (node.get("children") if isinstance(node.get("children"), list) else []):
                         _expand_rules_in_node(ch)
-                    for st in (node.get("states") or []):
+                    for st in (node.get("states") if isinstance(node.get("states"), list) else []):
                         if isinstance(st, dict):
                             _expand_rules_in_node(st.get("root"))
                     if isinstance(node.get("template"), dict):
@@ -2115,9 +3403,9 @@ class Frontend:
                     if isinstance(rid, str):
                         page_repeaters_by_ds.setdefault((pid, ds_n), []).append(rid)
                         rep_id_to_ds[rid] = ds_n
-                for ch in (node.get("children") or []):
+                for ch in (node.get("children") if isinstance(node.get("children"), list) else []):
                     _scan_repeaters_and_adds(ch, pid, rep_id_to_ds)
-                for st in (node.get("states") or []):
+                for st in (node.get("states") if isinstance(node.get("states"), list) else []):
                     if isinstance(st, dict):
                         _scan_repeaters_and_adds(st.get("root"), pid, rep_id_to_ds)
                 if isinstance(node.get("template"), dict):
@@ -2203,10 +3491,21 @@ class Frontend:
 
     def validate_macro(self, source, path):
         kind = source["type"]
-        fields(source, MACRO_PROPS[kind], path)
+        fields(source, MACRO_PROPS[kind] | {"adaptive", "_master_instance", "_master_slot"}, path)
+        if kind == "phone-shell":
+            validate_device(source, path)
+            for key in ("navBar", "tabBar"):
+                if key in source and not isinstance(source[key], dict) and source[key] is not False:
+                    fail("E_TYPE", ptr(path, key), f"{key} must be an object or false")
+        if kind == "tab-bar" and "items" not in source and "tabs" not in source:
+            fail("E_PROPERTY_REQUIRED", ptr(path, "items"), "tab-bar requires 'items' or 'tabs'")
+        if kind == "progress-bar" and "percent" in source and "value" in source:
+            fail("E_PROPERTY", ptr(path, "percent"), "progress-bar accepts either 'percent' or 'value' (+ 'max'), not both")
         if "slots" in source:
             if not isinstance(source["slots"], dict):
                 fail("E_OBJECT", ptr(path, "slots"), "slots must be an object mapping slot names to node objects")
+            allowed_slots = MACRO_SLOTS.get(kind, set())
+            fields(source["slots"], allowed_slots, ptr(path, "slots"))
             for sk, sval in source["slots"].items():
                 if not isinstance(sval, dict):
                     fail("E_OBJECT", ptr(ptr(path, "slots"), sk), f"Slot '{sk}' must be a node object")
@@ -2222,16 +3521,23 @@ class Frontend:
                         {"label": labels.get(v, v), "value": v} for v in dom_meta["values"]
                     ]
                 elif source.get("filters") == "auto":
-                    source["filters"] = []
+                    fail("E_PROPERTY", ptr(path, "filters"), f"filters: 'auto' requires filterField '{ff}' to be an enum field in model '{mname}'")
         for array_key, allowed in MACRO_ITEM_PROPS[kind].items():
-            if array_key not in source and array_key in ("filters", "actions"):
+            if array_key not in source and (
+                array_key in ("filters", "actions")
+                or (kind == "tab-bar" and array_key in ("items", "tabs"))
+                or (kind == "phone-shell" and array_key == "children")
+            ):
                 continue
             entries = source.get(array_key)
-            if not isinstance(entries, list) or (not entries and array_key not in ("filters", "actions")):
-                fail("E_TYPE", ptr(path, array_key), f"{array_key} must be a {'nonempty ' if array_key not in ('filters', 'actions') else ''}array")
+            optional_empty = array_key in ("filters", "actions") or (kind == "phone-shell" and array_key == "children")
+            if not isinstance(entries, list) or (not entries and not optional_empty):
+                fail("E_TYPE", ptr(path, array_key), f"{array_key} must be a {'nonempty ' if not optional_empty else ''}array")
+            if kind == "phone-shell" and array_key == "children":
+                continue
             for idx, entry in enumerate(entries):
                 ep = ptr(ptr(path, array_key), idx)
-                if array_key == "filters" and isinstance(entry, str):
+                if array_key in ("filters", "items", "tabs") and isinstance(entry, str) and kind in ("searchable-list", "tab-bar"):
                     continue
                 fields(entry, allowed, ep)
                 for w_prop in ("fontWeight", "headerFontWeight"):
@@ -2242,8 +3548,12 @@ class Frontend:
                         entry[a_prop] = TEXT_ALIGN_ALIASES.get(entry[a_prop].strip().lower(), entry[a_prop])
                 if "all" in entry:
                     self.typecheck(entry["all"], "boolean", ptr(ep, "all"))
+                if "active" in entry:
+                    self.typecheck(entry["active"], "boolean", ptr(ep, "active"))
                 for prop in {"h", "fontSize", "fontWeight", "headerFontSize", "headerFontWeight", "radius", "flex"} & set(entry):
                     self.typecheck(entry[prop], "number", ptr(ep, prop))
+                    if prop in {"fontSize", "headerFontSize"}:
+                        validate_font_size(entry[prop], ptr(ep, prop))
                     if entry[prop] < 0:
                         fail("E_SIZE", ptr(ep, prop), "Value must be nonnegative")
                 for prop in {"w", "width"} & set(entry):
@@ -2255,11 +3565,20 @@ class Frontend:
                     fail("E_OBJECT", ptr(ep, "cell"), "Column cell must be a node object")
                 if "body" in entry and not isinstance(entry["body"], dict):
                     fail("E_OBJECT", ptr(ep, "body"), "Step body must be a node object")
-        for prop in {"rowHeight", "headerHeight", "columnGap", "gap", "rowGap", "tableGap", "inputHeight", "inputRadius", "titleFontSize", "submitHeight", "labelWidth", "fontSize", "radius", "pageSize", "bodyHeight", "masterWidth"} & set(source):
+        for prop in {"rowHeight", "headerHeight", "columnGap", "gap", "rowGap", "tableGap", "inputHeight", "inputRadius", "titleFontSize", "submitHeight", "labelWidth", "fontSize", "radius", "pageSize", "bodyHeight", "masterWidth", "itemHeight", "percent", "value", "max", "barHeight", "trackHeight"} & set(source):
             value = source[prop]
+            if kind == "progress-bar" and prop in {"value", "percent"} and (
+                isinstance(value, dict)
+                or (isinstance(value, str) and (value.startswith("$") or value.startswith("=") or "${" in value or INLINE_EXPR_HINT_RE.search(value)))
+            ):
+                continue
             self.typecheck(value, "number", ptr(path, prop))
+            if prop in {"fontSize", "titleFontSize"}:
+                validate_font_size(value, ptr(path, prop))
             if value < 0:
                 fail("E_SIZE", ptr(path, prop), "Value must be nonnegative")
+            if prop == "max" and value <= 0:
+                fail("E_SIZE", ptr(path, prop), "max must be positive")
             if prop in {"rowHeight", "pageSize"} and kind in {"data-table", "searchable-list"} and (type(value) is not int or value < 1):
                 fail("E_SIZE", ptr(path, prop), f"{prop} must be a positive integer")
         if kind in ("kv-list", "detail-card") and source.get("rowHeight", 24) < 4:
@@ -2302,16 +3621,35 @@ class Frontend:
         self.macro_calls[path] = kind
 
         def mark(node, origin, structural=False):
-            if isinstance(node, dict) and "_slot_origin" in node:
+            if not isinstance(node, dict):
+                return
+            if "_slot_origin" in node:
                 origin = node.pop("_slot_origin")
                 structural = True
             self.source_origins[id(node)] = (node, origin)
-            for idx, child in enumerate(node.get("children", [])):
-                mark(child, ptr(ptr(origin, "children"), idx) if structural else origin, structural)
+            if isinstance(node.get("children"), list):
+                for idx, child in enumerate(node["children"]):
+                    if isinstance(child, dict):
+                        mark(child, ptr(ptr(origin, "children"), idx) if structural else origin, structural)
             if isinstance(node.get("template"), dict):
                 mark(node["template"], ptr(origin, "template") if structural else origin, structural)
-            for idx, state in enumerate(node.get("states", [])):
-                mark(state["root"], ptr(ptr(ptr(origin, "states"), idx), "root") if structural else origin, structural)
+            for idx, state in enumerate(node.get("states") if isinstance(node.get("states"), list) else []):
+                if not isinstance(state, dict):
+                    continue
+                st_origin = ptr(ptr(origin, "states"), idx) if structural else origin
+                if isinstance(state.get("root"), dict):
+                    st_root = state["root"]
+                    if st_root.get("_auto_state_root"):
+                        self.source_origins[id(st_root)] = (st_root, st_origin)
+                        for c_idx, s_ch in enumerate(st_root.get("children") if isinstance(st_root.get("children"), list) else []):
+                            if isinstance(s_ch, dict):
+                                mark(s_ch, ptr(ptr(st_origin, "children"), c_idx) if structural else origin, structural)
+                    else:
+                        mark(st_root, ptr(st_origin, "root") if structural else origin, structural)
+                elif isinstance(state.get("children"), list):
+                    for c_idx, s_ch in enumerate(state["children"]):
+                        if isinstance(s_ch, dict):
+                            mark(s_ch, ptr(ptr(st_origin, "children"), c_idx) if structural else origin, structural)
 
         mark(expanded, path)
         children = expanded.get("children", [])
@@ -2365,6 +3703,9 @@ class Frontend:
                         elif k == "use" and "component" not in source and "id" in source:
                             source["type"] = "use"
                             source["component"] = val
+                        elif k == "panel":
+                            source["type"] = "dynamic-panel"
+                            source["id"] = val
                         else:
                             source["type"] = k
                             source["id"] = val
@@ -2373,6 +3714,228 @@ class Frontend:
             kind = source["type"]
             source["type"] = "box"
             source.setdefault("layout", kind)
+        elif source.get("type") == "panel":
+            source["type"] = "dynamic-panel"
+        # Intuitive property aliases (zero-guesswork for common CSS/UI naming)
+        for alias_k, canonical_k in (
+            ("bg", "fill"),
+            ("background", "fill"),
+            ("textColor", "color"),
+            ("fg", "color"),
+            ("borderColor", "stroke"),
+            ("borderWidth", "strokeWidth"),
+            ("rounded", "radius"),
+            ("borderRadius", "radius"),
+        ):
+            if alias_k in source:
+                val_a = source.pop(alias_k)
+                source.setdefault(canonical_k, val_a)
+        if source.get("type") not in MACRO_PROPS:
+            for nav_k in ("goto", "link", "navigate"):
+                if nav_k in source:
+                    nav_target = source.pop(nav_k)
+                    if isinstance(nav_target, str):
+                        nav_act = {"type": "link", "page": nav_target}
+                        if "onClick" not in source and "on" not in source:
+                            source["onClick"] = [nav_act]
+                        elif isinstance(source.get("onClick"), list):
+                            source["onClick"] = [*source["onClick"], nav_act]
+                        elif isinstance(source.get("onClick"), dict) and "cases" not in source["onClick"]:
+                            source["onClick"] = [source["onClick"], nav_act]
+        # Allow box with `text` and no `children` to gracefully act as a styled label/box
+        if source.get("type") == "box" and "text" in source and "children" not in source:
+            txt_val = source.pop("text")
+            if not any(k in source for k in ("layout", "padding", "gap", "justify", "columns")):
+                source["type"] = "label"
+                source["text"] = txt_val
+            else:
+                source["children"] = [{
+                    "type": "label",
+                    "id": f"{source.get('id', 'box')}_text",
+                    "text": txt_val,
+                    "w": "fill",
+                    "h": "hug",
+                    **({k: source.pop(k) for k in ("fontSize", "fontWeight", "color") if k in source}),
+                }]
+        # Card content shorthand props (title, subtitle, body/text, tag/eyebrow/badge, rightBadge, rightText/meta, actionText/buttonText)
+        if source.get("type") == "card" and any(
+            k in source for k in ("title", "subtitle", "text", "body", "eyebrow", "tag", "badge", "rightBadge", "rightText", "meta", "actionText", "buttonText")
+        ):
+            cid = source.get("id", "card")
+            c_tag = source.pop("tag", source.pop("eyebrow", source.pop("badge", None)))
+            c_tag_tone = source.pop("tagTone", source.pop("badgeVariant", "soft"))
+            c_right_badge = source.pop("rightBadge", None)
+            c_right_tone = source.pop("rightTone", "soft")
+            c_right = source.pop("rightText", source.pop("meta", None))
+            c_title = source.pop("title", None)
+            c_title_fs = source.pop("titleFontSize", 16)
+            c_sub = source.pop("subtitle", None)
+            c_body = source.pop("body", source.pop("text", None))
+            c_act = source.pop("actionText", source.pop("buttonText", None))
+            c_act_var = source.pop("actionVariant", "soft")
+            auto_children = []
+            hdr_right_node = None
+            if c_right_badge is not None:
+                hdr_right_node = {"type": "badge", "id": f"{cid}_rbadge", "text": str(c_right_badge), "variant": c_right_tone if c_right_tone in ("soft", "solid", "outline", "brand", "primary", "secondary", "ghost", "glass", "success", "warning", "danger", "error", "neutral") else "soft", "w": "hug", "h": 22, "radius": 6, "fontSize": 11}
+            elif c_right is not None:
+                hdr_right_node = {"type": "label", "id": f"{cid}_meta", "text": str(c_right), "w": "hug", "h": 18, "fontSize": 12, "color": "$ink-3", "align": "right"}
+            if c_tag is not None and hdr_right_node is not None:
+                auto_children.append({
+                    "type": "box",
+                    "id": f"{cid}_hdr",
+                    "layout": "row",
+                    "w": "fill",
+                    "h": "hug",
+                    "justify": "space-between",
+                    "align": "center",
+                    "children": [
+                        {"type": "badge", "id": f"{cid}_tag", "text": str(c_tag), "variant": c_tag_tone if c_tag_tone in ("soft", "solid", "outline", "brand", "primary", "secondary", "ghost", "glass", "success", "warning", "danger", "error", "neutral") else "soft", "w": "hug", "h": 22, "radius": 6, "fontSize": 11},
+                        hdr_right_node,
+                    ],
+                })
+            elif c_tag is not None:
+                auto_children.append({"type": "badge", "id": f"{cid}_tag", "text": str(c_tag), "variant": c_tag_tone if c_tag_tone in ("soft", "solid", "outline", "brand", "primary", "secondary", "ghost", "glass", "success", "warning", "danger", "error", "neutral") else "soft", "w": "hug", "h": 22, "radius": 6, "fontSize": 11})
+            elif hdr_right_node is not None:
+                auto_children.append(hdr_right_node)
+            if c_title is not None:
+                auto_children.append({
+                    "type": "label",
+                    "id": f"{cid}_title",
+                    "text": str(c_title),
+                    "w": "fill",
+                    "h": "hug",
+                    "fontSize": c_title_fs,
+                    "fontWeight": 700,
+                    "color": "$ink",
+                    "wrap": True,
+                })
+            if c_sub is not None:
+                auto_children.append({
+                    "type": "label",
+                    "id": f"{cid}_subtitle",
+                    "text": str(c_sub),
+                    "w": "fill",
+                    "h": "hug",
+                    "fontSize": 12,
+                    "color": "$ink-2",
+                    "wrap": True,
+                })
+            if c_body is not None:
+                auto_children.append({
+                    "type": "paragraph",
+                    "id": f"{cid}_body",
+                    "text": str(c_body),
+                    "w": "fill",
+                    "h": "hug",
+                    "fontSize": 13,
+                    "color": "$ink-2",
+                })
+            if c_act is not None:
+                act_btn = {
+                    "type": "button",
+                    "id": f"{cid}_action",
+                    "text": str(c_act),
+                    "variant": c_act_var,
+                    "w": "hug",
+                    "h": 32,
+                    "radius": 8,
+                    "fontSize": 12,
+                }
+                if "onClick" in source:
+                    act_btn["onClick"] = copy.deepcopy(source["onClick"])
+                auto_children.append(act_btn)
+            if "children" in source:
+                if not isinstance(source["children"], list):
+                    fail("E_CHILDREN", ptr(path, "children"), "children must be an array")
+                for c_idx, ch in enumerate(source["children"]):
+                    if not isinstance(ch, dict):
+                        fail("E_OBJECT", ptr(ptr(path, "children"), c_idx), "Expected a node object")
+            source["children"] = auto_children + list(source.get("children") or [])
+            source.setdefault("w", "fill")
+            source.setdefault("h", "hug")
+        source.pop("_auto_state_root", None)
+        # Dynamic-panel state root normalization and optional `tabs` bar auto-generation
+        if source.get("type") == "dynamic-panel":
+            pid = source.get("id", "panel")
+            if isinstance(source.get("states"), dict) and source["states"]:
+                source["states"] = [
+                    (
+                        {"id": sk, **sv}
+                        if isinstance(sv, dict) and any(k in sv for k in ("root", "children", "body", "tree"))
+                        else ({"id": sk, "root": sv} if isinstance(sv, dict) else {"id": sk, "children": sv})
+                    )
+                    for sk, sv in source["states"].items()
+                ]
+            if isinstance(source.get("states"), list):
+                source["states"] = [
+                    normalize_panel_state_dict(st, pid, s_idx)
+                    for s_idx, st in enumerate(source["states"])
+                ]
+            if source.get("tabs"):
+                tabs_cfg = source.pop("tabs")
+                tab_gap = source.pop("tabGap", 10)
+                if "panelHeight" in source:
+                    source["h"] = source.pop("panelHeight")
+                states_list = source.get("states") or []
+                state_tab_meta = []
+                for s_idx, st in enumerate(states_list):
+                    sid = st.get("id", f"state_{s_idx + 1}") if isinstance(st, dict) else f"state_{s_idx + 1}"
+                    if isinstance(tabs_cfg, list) and s_idx < len(tabs_cfg):
+                        t_item = tabs_cfg[s_idx]
+                        t_label = t_item.get("text", t_item.get("label", sid)) if isinstance(t_item, dict) else str(t_item)
+                    else:
+                        t_label = (st.get("name", sid) if isinstance(st, dict) else sid)
+                    state_tab_meta.append((sid, str(t_label)))
+                for s_idx, st in enumerate(states_list):
+                    if not isinstance(st, dict):
+                        continue
+                    sid, _ = state_tab_meta[s_idx]
+                    tab_btns = []
+                    for t_idx, (target_sid, t_label) in enumerate(state_tab_meta):
+                        btn_id = f"{pid}_tab_{target_sid}" if s_idx == 0 else f"{pid}_{sid}_tab_{target_sid}"
+                        tab_btns.append({
+                            "type": "button",
+                            "id": btn_id,
+                            "text": t_label,
+                            "variant": "primary" if t_idx == s_idx else "ghost",
+                            "flex": 1,
+                            "h": 28,
+                            "radius": 8,
+                            "fontSize": 12,
+                            "onClick": [{"type": "set-panel-state", "target": {"ref": pid}, "state": target_sid}],
+                        })
+                    tabbar_box = {
+                        "type": "box",
+                        "id": f"{pid}_tabbar" if s_idx == 0 else f"{pid}_{sid}_tabbar",
+                        "layout": "row",
+                        "w": "fill",
+                        "h": 36,
+                        "padding": 4,
+                        "gap": 6,
+                        "radius": 10,
+                        "fill": "$surface-2",
+                        "children": tab_btns,
+                    }
+                    st_root = st.get("root")
+                    if isinstance(st_root, dict) and st_root.get("id") == f"{pid}_{sid}_root" and st_root.get("layout", "column") == "column":
+                        if "children" in st_root and not isinstance(st_root["children"], list):
+                            fail("E_CHILDREN", ptr(ptr(ptr(path, "states"), s_idx), "children"), "children must be an array")
+                        for c_idx, ch in enumerate(st_root.get("children") or []):
+                            if not isinstance(ch, dict):
+                                fail("E_OBJECT", ptr(ptr(ptr(ptr(path, "states"), s_idx), "children"), c_idx), "Expected a node object")
+                        st_root["children"] = [tabbar_box] + list(st_root.get("children") or [])
+                    elif isinstance(st_root, dict):
+                        st["root"] = {
+                            "type": "box",
+                            "id": f"{pid}_{sid}_tabs_root",
+                            "layout": "column",
+                            "w": "fill",
+                            "h": "hug",
+                            "gap": tab_gap,
+                            "children": [tabbar_box, st_root],
+                        }
+                if isinstance(source.get("h"), (int, float)):
+                    source["h"] = int(source["h"]) + 36 + tab_gap
         if "size" in source and isinstance(source["size"], list) and len(source["size"]) == 2:
             w_val, h_val = source.pop("size")
             source.setdefault("w", w_val)
@@ -2399,6 +3962,10 @@ class Frontend:
                 if step_var not in self.variables:
                     self.variables[step_var] = {"type": "text", "value": first_step}
                 source = expand_wizard_card_macro(source, path, step_var)
+            elif kind == "progress-bar":
+                source = expand_progress_bar_macro(
+                    source, path, self.variables or (self.spec.get("variables") if isinstance(self.spec, dict) else None),
+                    bindings=self.progress_bindings, scope=scope)
             else:
                 source = {
                     "data-table": expand_data_table_macro,
@@ -2406,8 +3973,13 @@ class Frontend:
                     "kv-list": expand_kv_list_macro,
                     "detail-card": expand_detail_card_macro,
                     "master-detail": expand_master_detail_macro,
+                    "tab-bar": expand_tab_bar_macro,
+                    "nav-bar": expand_nav_bar_macro,
+                    "phone-shell": expand_phone_shell_macro,
+                    "stat-row": expand_stat_row_macro,
+                    "list-item": expand_list_item_macro,
                 }[kind](source, path)
-            for key in {"on", "name", "when"} | set(EVENT_SHORTHANDS):
+            for key in {"on", "name", "when", "visible", "hidden", "adaptive", "_master_instance", "_master_slot"} | set(EVENT_SHORTHANDS):
                 if key in original:
                     source[key] = copy.deepcopy(original[key])
             self.mark_macro_sources(source, original, path)
@@ -2447,13 +4019,43 @@ class Frontend:
         return source
 
     def desugar_action_list(self, actions, path):
-        if isinstance(actions, dict) and "cases" not in actions:
+        if isinstance(actions, str):
+            actions = [actions]
+        elif isinstance(actions, dict) and "cases" not in actions:
             actions = [actions]
         if not isinstance(actions, list):
             return actions
         expanded = []
         for idx, act in enumerate(actions):
-            if not isinstance(act, dict):
+            if isinstance(act, str):
+                s_act = act.strip()
+                if s_act.startswith(("goto ", "link ", "navigate ")):
+                    expanded.append({"type": "link", "page": s_act.split(None, 1)[1].strip()})
+                    continue
+                if "=" in s_act and not s_act.startswith("=="):
+                    lhs, rhs = s_act.split("=", 1)
+                    lhs_k = lhs.strip()
+                    rhs_s = rhs.strip()
+                    if (rhs_s.startswith('"') and rhs_s.endswith('"')) or (rhs_s.startswith("'") and rhs_s.endswith("'")):
+                        rhs_v = rhs_s[1:-1]
+                    elif rhs_s in ("true", "false"):
+                        rhs_v = rhs_s == "true"
+                    else:
+                        try:
+                            rhs_v = int(rhs_s) if rhs_s.lstrip("-").isdigit() else float(rhs_s)
+                        except ValueError:
+                            rhs_v = rhs_s if rhs_s.startswith("=") else f"={rhs_s}"
+                    act = {"set": {lhs_k: rhs_v}}
+                elif "." in s_act and " " not in s_act:
+                    p, s = s_act.split(".", 1)
+                    expanded.append({"type": "set-panel-state", "target": {"ref": p}, "state": s})
+                    continue
+                elif re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", s_act):
+                    expanded.append({"type": "link", "page": s_act})
+                    continue
+                else:
+                    fail("E_EVENT", ptr(path, idx), "Unrecognized action shorthand; use an action object or a documented string shorthand")
+            elif not isinstance(act, dict):
                 expanded.append(act)
                 continue
             act = copy.deepcopy(act)
@@ -2498,8 +4100,9 @@ class Frontend:
                         p, s = st.split(".", 1)
                         expanded.append({"type": "set-panel-state", "target": {"ref": p}, "state": s})
                         continue
-                if keys == {"goto"}:
-                    expanded.append({"type": "link", "page": act["goto"]})
+                if keys in ({"goto"}, {"link"}, {"navigate"}):
+                    page_target = act.get("goto", act.get("link", act.get("navigate")))
+                    expanded.append({"type": "link", "page": page_target})
                     continue
                 for simple_act in ("show", "hide", "toggle", "enable", "disable", "focus"):
                     if simple_act in act:
@@ -2510,8 +4113,14 @@ class Frontend:
                 else:
                     expanded.append(act)
                 continue
+            if act.get("type") in ("goto", "navigate"):
+                act["type"] = "link"
+            if act.get("type") == "link" and "target" in act and "page" not in act and "url" not in act:
+                act["page"] = act.pop("target")
             if isinstance(act.get("target"), str):
                 act["target"] = {"ref": act["target"]}
+            if act.get("type") == "set-text" and "value" in act and "text" not in act:
+                act["text"] = act.pop("value")
             if act.get("type") == "data-filter" and "name" not in act:
                 act["name"] = "default_filter"
             if act.get("type") == "data-sort" and act.get("direction") in ("asc", "desc"):
@@ -2531,6 +4140,10 @@ class Frontend:
             if not valid:
                 fail("E_TYPE", path, f"Expected {typename}, got {type(value).__name__}")
         elif typename in self.models:
+            if isinstance(value, dict):
+                unknown = next((key for key in value if key not in self.models[typename]), None)
+                if unknown is not None:
+                    fail("E_DATA_FIELD", ptr(path, unknown), f"Unknown field '{unknown}' of {typename}")
             fields(value, self.models[typename], path)
             for name, typ in self.models[typename].items():
                 if name not in value:
@@ -2588,8 +4201,12 @@ class Frontend:
                         return args[0].upper()
                     if fn == "length" and len(args) == 1 and type(args[0]) is str:
                         return len(args[0].encode("utf-16-le")) // 2
-                    if fn == "concat" and len(args) >= 2 and all(type(a) is str for a in args):
-                        return "".join(args)
+                    if fn == "contains" and len(args) == 2 and all(type(a) is str for a in args):
+                        return args[1] in args[0]
+                    if fn == "remove" and len(args) == 2 and all(type(a) is str for a in args):
+                        return args[0].replace(args[1], "", 1)
+                    if fn == "concat" and len(args) >= 2 and all(type(a) in (str, int, float, bool) for a in args):
+                        return "".join(self._format_scalar(a) for a in args)
                 return {"fn": fn, "args": args}
         return node
 
@@ -2597,8 +4214,14 @@ class Frontend:
         if isinstance(value, str):
             if "${" in value:
                 return self.expression(parse_template_string(value, path), env, path)
-            if value.startswith("=") and not value.startswith("=="):
+            if (value.startswith("=") and not value.startswith("==")) or (value.startswith("[[") and value.endswith("]]")):
                 return self.expression(parse_inline_expr(value, path), env, path)
+            if value.startswith("$") and len(value) > 1 and "." not in value:
+                vname = value[1:]
+                if vname in env and not vname.startswith("_"):
+                    return copy.deepcopy(env[vname])
+                if vname in self.variables and vname not in COLOR_TOKENS:
+                    return {"variable": vname}
             return value
         if isinstance(value, dict) and "expr" in value and set(value.keys()) == {"expr"}:
             return self._fold_compile_ast(self.expression(parse_inline_expr(value["expr"], ptr(path, "expr")), env, path), path)
@@ -2712,36 +4335,102 @@ class Frontend:
         name = reference.get("ref")
         if not isinstance(name, str) or not name:
             fail("E_REFERENCE", path, "Expected {ref: 'id'}")
+        if name.startswith("@") and len(name) > 1:
+            name = name[1:]
+        variants = [name]
+        if "." in name and "/" not in name:
+            variants.append(name.replace(".", "/"))
         candidates = []
-        current = scope
-        while current:
-            candidates.append(current + "/" + name)
-            current = current.rpartition("/")[0]
-        candidates.append(name)
+        for var_name in variants:
+            current = scope
+            while current:
+                candidates.append(current + "/" + var_name)
+                current = current.rpartition("/")[0]
+            candidates.append(var_name)
         for candidate in candidates:
             if candidate in self.symbols:
                 return self.symbols[candidate]
         page_prefix = scope.split("/")[0] + "/"
-        local_ids = sorted({k.rsplit("/", 1)[-1] for k in self.symbols if k.startswith(page_prefix)})
+        nested_matches = sorted(
+            k for k in self.symbols
+            if k.startswith(page_prefix) and (k.rsplit("/", 1)[-1] == name or k.endswith("/" + name))
+        )
+        if nested_matches:
+            rel_suggestions = []
+            for k in nested_matches:
+                rel = k[len(scope) + 1:] if k.startswith(scope + "/") else k[len(page_prefix):]
+                dot_rel = rel.replace("/", ".")
+                for cand_rel in (rel, dot_rel, k):
+                    if cand_rel not in rel_suggestions:
+                        rel_suggestions.append(cand_rel)
+            best_rel = rel_suggestions[0]
+            best_dot = best_rel.replace("/", ".")
+            fail(
+                "E_REFERENCE",
+                path,
+                f"Unknown reference '{name}' in scope '{scope}'; target is inside a nested panel/component scope — use '{best_rel}' (or '{best_dot}')",
+                suggestions=rel_suggestions[:3],
+            )
+        local_ids = sorted({k.rsplit("/", 1)[-1] for k in self.symbols if k.startswith(page_prefix) and k.rsplit("/", 1)[-1] != name})
         hint = difflib.get_close_matches(name, local_ids, n=3)
         fail("E_REFERENCE", path, f"Unknown reference '{name}' in scope '{scope}'", suggestions=hint)
+
+    _COLOR_PROPS = {"fill", "stroke", "color", "trackColor", "trackFill", "barColor", "barFill",
+                    "headerFill", "headerStroke", "rowFill", "rowStroke", "screenFill", "frameFill",
+                    "activeFill", "activeColor", "inactiveFill", "inactiveColor", "headerColor"}
+
+    def _check_color_tokens(self, source, path):
+        for key in self._COLOR_PROPS & set(source):
+            value = source.get(key)
+            if isinstance(value, str) and value.startswith("$") and len(value) > 1:
+                token = value[1:]
+                palette = self.spec.get("palette") if isinstance(self.spec, dict) else None
+                palette_keys = set(palette.keys()) if isinstance(palette, dict) else set()
+                if token not in COLOR_TOKENS and token not in palette_keys:
+                    hint = difflib.get_close_matches(token, sorted(COLOR_TOKENS), n=3, cutoff=0.5)
+                    fail("E_COLOR", ptr(path, key),
+                         f"Unknown color token '${token}'（不在内置颜色令牌或 palette 里；可跑 proto.py tokens 查内置表）",
+                         suggestions=hint)
 
     def node(self, source, scope, env, path, stack=(), panel_depth=0):
         if not isinstance(source, dict):
             fail("E_OBJECT", path, "Expected a node object")
+        if "_slot_origin" in source:
+            path = source["_slot_origin"]
+            source = {k: v for k, v in source.items() if k != "_slot_origin"}
         origin = self.source_origins.get(id(source))
         if origin is not None and origin[0] is source:
             path = origin[1]
+        elif source.get("_auto_state_root") and path.endswith("/root"):
+            path = path[:-5]
         source = self.desugar_node(source, path, scope)
         if not isinstance(source.get("type"), str):
             fail("E_NODE_TYPE", ptr(path, "type"), "Node type must be text")
-        fields(source, {"type", "id", "name", "on", "when", "adaptive", "_hidden_lookup", "_master_instance"} | GEOMETRY |
-               NODE_PROPS.get(source.get("type"), set()) |
-               ({"component", "args"} if source.get("type") == "use" else set()) |
-               ({"dataset", "as", "key", "template"} if source.get("type") == "repeat" else set()), path)
-        nid = ident(source.get("id"), ptr(path, "id"))
         kind = source.get("type")
+        if kind not in NODE_PROPS and kind not in {"use", "repeat", "when"}:
+            known_types = sorted(set(NODE_PROPS.keys()) | set(MACRO_PROPS.keys()) | {"use", "repeat", "when", "row", "column", "grid", "stack"})
+            hint = difflib.get_close_matches(str(kind), known_types, n=3, cutoff=0.5)
+            fail("E_NODE_TYPE", ptr(path, "type"), f"Unsupported RP/1 node '{kind}'", suggestions=hint)
+        fields(source, {"type", "id", "name", "on", "when", "visible", "hidden", "adaptive", "_hidden_lookup", "_master_instance", "_master_slot", "_phone_shell_opts"} | GEOMETRY |
+               NODE_PROPS.get(kind, set()) |
+               ({"component", "args"} if kind == "use" else set()) |
+               ({"dataset", "as", "key", "template"} if kind == "repeat" else set()), path)
+        self._check_color_tokens(source, path)
+        nid = ident(source.get("id"), ptr(path, "id"))
+        for _gk in ("w", "h"):
+            _gv = source.get(_gk)
+            if isinstance(_gv, (int, float)) and not isinstance(_gv, bool) and _gv <= 0:
+                fail("E_SIZE", ptr(path, _gk),
+                     f"{_gk} must be positive (got {_gv}); zero-size widgets cannot be laid out or rendered")
         logical = scope + "/" + nid
+        for vis_key in ("visible", "hidden"):
+            if vis_key in source:
+                self.typecheck(source[vis_key], "boolean", ptr(path, vis_key))
+        if "visible" in source and "hidden" in source and bool(source["visible"]) == bool(source["hidden"]):
+            fail("E_PROPERTY", ptr(path, "hidden"), "Conflicting 'visible' and 'hidden' values on node")
+        init_hidden = (source.get("hidden") is True) or (source.get("visible") is False)
+        if init_hidden and "when" not in source and kind != "when":
+            self.initial_hidden_nodes.append((scope, logical, ptr(path, "hidden" if "hidden" in source else "visible")))
         node_when_meta = None
         if "when" in source and kind != "when":
             cond_expr = self.expression(source.get("when"), env, ptr(path, "when"))
@@ -2798,6 +4487,10 @@ class Frontend:
             }
             if node_when_meta is not None:
                 when_box["_when_meta"] = node_when_meta
+            if init_hidden:
+                when_box["visible"] = False
+                when_box["hidden"] = True
+                when_box["_when_default_visible"] = False
             return when_box
         if kind == "use":
             component = source.get("component")
@@ -2820,13 +4513,23 @@ class Frontend:
                 comp_env["_repeater_shadows_item"] = True
             use_res = self.node(definition["root"], logical, comp_env,
                                 ptr(ptr("/components", component), "root"), (*stack, component), panel_depth)
+            if source.get("_master_slot") and isinstance(use_res, dict):
+                use_res["_master_slot"] = True
             if node_when_meta is not None and isinstance(use_res, dict):
                 use_res["_when_meta"] = node_when_meta
+            if init_hidden and isinstance(use_res, dict):
+                use_res["visible"] = False
+                use_res["hidden"] = True
+                use_res["_when_default_visible"] = False
             return use_res
         if kind == "repeater":
             rep_res = self.repeater_node(source, scope, env, path, stack, panel_depth)
             if node_when_meta is not None and isinstance(rep_res, dict):
                 rep_res["_when_meta"] = node_when_meta
+            if init_hidden and isinstance(rep_res, dict):
+                rep_res["visible"] = False
+                rep_res["hidden"] = True
+                rep_res["_when_default_visible"] = False
             return rep_res
         if kind == "repeat":
             if "on" in source or "name" in source:
@@ -2859,14 +4562,18 @@ class Frontend:
                           **{k: source[k] for k in GEOMETRY if k in source}}
             if node_when_meta is not None:
                 repeat_box["_when_meta"] = node_when_meta
+            if init_hidden:
+                repeat_box["visible"] = False
+                repeat_box["hidden"] = True
+                repeat_box["_when_default_visible"] = False
             return repeat_box
-        if kind not in NODE_PROPS:
-            fail("E_NODE_TYPE", ptr(path, "type"), f"Unsupported RP/1 node '{kind}'")
-        eval_text = self.expression(source["text"], env, ptr(path, "text")) if "text" in source else None
-        runtime_text = eval_text if isinstance(eval_text, dict) else None
+        raw_src_text = source.get("text")
+        is_shorthand_text = isinstance(raw_src_text, str) or (isinstance(raw_src_text, dict) and "_sigil_var" in raw_src_text)
+        eval_text = self.expression(raw_src_text, env, ptr(path, "text")) if "text" in source else None
+        runtime_text = ({"_coerce_text": eval_text} if (is_shorthand_text and "_coerce_text" not in eval_text) else eval_text) if isinstance(eval_text, dict) else None
         if runtime_text is not None:
-            if kind not in {"label", "button", "badge"}:
-                fail("E_TARGET_TYPE", ptr(path, "text"), "Runtime text bindings need label/button/badge")
+            if kind not in {"label", "paragraph", "button", "badge"}:
+                fail("E_TARGET_TYPE", ptr(path, "text"), "Runtime text bindings need label/paragraph/button/badge")
             self.value_bindings.append((logical, scope, runtime_text, ptr(path, "text")))
         if self.row_context(scope)[1] is not None and kind in {"input", "dynamic-panel"}:
             fail("E_ROW_CONTAINER", path, "Row templates currently support visual nodes and events")
@@ -2876,8 +4583,40 @@ class Frontend:
             source = {**source, "fontWeight": source["weight"]}
         values = self.expression({k: ("" if k == "text" and runtime_text is not None else (eval_text if k == "text" else v)) for k, v in source.items()
                                   if k not in {"children", "states", "on", "id", "name", "when", "size", "weight"}}, env, path)
+        if kind == "icon" and isinstance(values.get("icon"), str) and values["icon"].strip().lower() not in ICON_NAMES:
+            fail("E_ICON_NAME", ptr(path, "icon"), f"Unknown built-in icon '{values['icon']}'",
+                 suggestions=sorted(ICON_NAMES))
         if "fontWeight" in values:
             values["fontWeight"] = normalize_font_weight(values["fontWeight"])
+        if "variant" in values and isinstance(values["variant"], str):
+            v_norm = values["variant"].strip().lower()
+            if v_norm in ("solid", "brand"):
+                if kind == "badge" and v_norm == "brand":
+                    values.setdefault("fill", "$brand-soft")
+                    values.setdefault("color", "$brand")
+                    values["variant"] = "soft"
+                else:
+                    values["variant"] = "primary"
+            elif v_norm in ("success", "ok"):
+                values.setdefault("fill", "$success-soft")
+                values.setdefault("color", "$success")
+                values["variant"] = "soft"
+            elif v_norm in ("warning", "warn"):
+                values.setdefault("fill", "$warning-soft")
+                values.setdefault("color", "$warning")
+                values["variant"] = "soft"
+            elif v_norm in ("error", "err", "danger"):
+                if kind == "badge":
+                    values.setdefault("fill", "$danger-soft")
+                    values.setdefault("color", "$danger")
+                    values["variant"] = "soft"
+                else:
+                    values["variant"] = "danger"
+            elif v_norm in ("muted", "default", "neutral"):
+                if kind == "badge":
+                    values.setdefault("fill", "$surface-2")
+                    values.setdefault("color", "$ink-2")
+                values["variant"] = "soft"
         for c_prop in ("fill", "stroke", "color"):
             if c_prop in values:
                 values[c_prop] = normalize_color_token(values[c_prop])
@@ -2895,10 +4634,12 @@ class Frontend:
                         fail("E_SIZE", pp, "Size must be nonnegative")
             elif key in {"x", "y", "right", "bottom", "flex", "gap", "columnGap", "rowGap", "radius", "fontSize", "fontWeight", "textPaddingX", "lineGap", "lineHeight", "letterSpacing", "opacity", "strokeWidth", "backdropBlur", "maxLines"}:
                 self.typecheck(value, "number", pp)
-                if key not in {"x", "y", "right", "bottom", "letterSpacing"} and value < 0:
+                if key not in {"x", "y", "right", "bottom"} and value < 0:
                     fail("E_SIZE", pp, "Value must be nonnegative")
-                if key == "lineHeight" and value == 0:
-                    fail("E_SIZE", pp, "lineHeight must be positive")
+                if key == "fontSize":
+                    validate_font_size(value, pp)
+                if key in {"lineHeight", "fontSize"} and value == 0:
+                    fail("E_SIZE", pp, f"{key} must be positive")
             elif key in {"colSpan", "rowSpan"}:
                 if type(value) is not int or value < 1:
                     fail("E_SIZE", pp, f"{key} must be a positive integer")
@@ -2911,7 +4652,7 @@ class Frontend:
                     valid_rgba = bool(re.fullmatch(r"rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)", value))
                     if not (valid_token or valid_hex or valid_rgba or value == "transparent"):
                         fail("E_COLOR", pp, "Expected a known $color-token, #RGB, #RRGGBB, #RRGGBBAA, or rgba(...)")
-            elif key in {"native", "equalHeight", "wrap", "italic", "underline", "strikethrough", "smooth", "borderTop", "borderBottom", "borderLeft", "borderRight"}:
+            elif key in {"native", "equalHeight", "wrap", "italic", "underline", "strikethrough", "smooth", "borderTop", "borderBottom", "borderLeft", "borderRight", "visible", "hidden"}:
                 self.typecheck(value, "boolean", pp)
             elif key == "columns":
                 if type(value) is not int or value < 1:
@@ -2924,6 +4665,16 @@ class Frontend:
                     self.typecheck(val, "number", pp)
                     if val < 0:
                         fail("E_SIZE", pp, "padding must be nonnegative")
+        if isinstance(values.get("spans"), list):
+            for index, span in enumerate(values["spans"]):
+                if isinstance(span, dict):
+                    for key in ("fontSize", "size"):
+                        if key in span:
+                            validate_font_size(span[key], ptr(ptr(ptr(path, "spans"), index), key))
+        if init_hidden:
+            values["visible"] = False
+            values["hidden"] = True
+            values["_when_default_visible"] = False
         for key, choices in {"layout": {"row", "column", "stack", "grid"},
                              "justify": {"start", "center", "end", "space-between", "space-around", "space-evenly"},
                              "variant": {"primary", "secondary", "outline", "soft", "danger", "glass", "ghost"},
@@ -2931,6 +4682,12 @@ class Frontend:
                              "anchor": {"top-left", "top-right", "bottom-left", "bottom-right", "center"}}.items():
             if key in values and values[key] not in choices:
                 fail("E_ENUM", ptr(path, key), f"Expected one of {sorted(choices)}")
+        for key, choices in {"alignX": {"left", "center", "right"}, "pin": {"top", "bottom", "left", "right"}}.items():
+            if key in values and (not isinstance(values[key], str) or values[key] not in choices):
+                fail("E_PROPERTY", ptr(path, key), f"Expected one of {sorted(choices)}")
+        for key in ("afterGap", "pinGap"):
+            if key in values:
+                self.typecheck(values[key], "number", ptr(path, key))
         if "align" in values:
             choices = {"start", "center", "end", "stretch"} if kind in {"box", "card"} else {"left", "center", "right"}
             if values["align"] not in choices:
@@ -2942,14 +4699,39 @@ class Frontend:
         if kind == "image" and not values.get("src"):
             fail("E_PROPERTY_REQUIRED", ptr(path, "src"), "Image requires src")
         if "name" in source:
-            self.typecheck(source["name"], "text", ptr(path, "name"))
+            eval_name = self.expression(source["name"], env, ptr(path, "name")) if isinstance(source["name"], str) and source["name"].startswith("$") and env else source["name"]
+            self.typecheck(eval_name, "text", ptr(path, "name"))
+            source = {**source, "name": eval_name}
         if runtime_text is not None: values.setdefault("w", "fill")
+        if kind == "paragraph":
+            values["_rp1_single_shape"] = True
         values["name"] = self.register(logical, kind, source, path)
         if "children" in source:
             if not isinstance(source["children"], list):
                 fail("E_TYPE", ptr(path, "children"), "Expected a node array")
             values["children"] = [self.node(c, scope, env, ptr(ptr(path, "children"), i), stack, panel_depth)
                                   for i, c in enumerate(source["children"])]
+            if any(isinstance(child, dict) and "after" in child for child in source["children"]):
+                sibling_refs = {}
+                for child, lowered_child in zip(source["children"], values["children"]):
+                    if not isinstance(child, dict):
+                        continue
+                    child_id = child.get("id") or next((child[k] for k in SHORTHAND_NODE_KINDS if isinstance(child.get(k), str)), None)
+                    for alias in (child_id, child.get("name"), lowered_child.get("name")):
+                        if isinstance(alias, str):
+                            sibling_refs[alias] = lowered_child
+                for i, child in enumerate(source["children"]):
+                    if isinstance(child, dict) and "after" in child:
+                        ref = child["after"]
+                        target = sibling_refs.get(ref) if isinstance(ref, str) else None
+                        if target is None and isinstance(ref, str) and ref.startswith(scope + "/"):
+                            target = sibling_refs.get(ref[len(scope) + 1:])
+                        if target is None or target is values["children"][i]:
+                            origin = self.source_origins.get(id(child))
+                            child_path = origin[1] if origin is not None and origin[0] is child else ptr(ptr(path, "children"), i)
+                            fail("E_REFERENCE", ptr(child_path, "after"), "after must reference another sibling ID")
+                        if values.get("layout") == "stack":
+                            values["children"][i]["after"] = target["name"]
         if kind == "dynamic-panel":
             states = source.get("states")
             if not isinstance(states, list) or not states:
@@ -2957,10 +4739,16 @@ class Frontend:
             values["states"], names = [], set()
             for i, state in enumerate(states):
                 sp = ptr(ptr(path, "states"), i)
-                fields(state, {"id", "root"}, sp)
+                if not isinstance(state, dict):
+                    fail("E_STATE", sp, "Panel state must be an object with 'id' and 'root' (or 'children')")
+                fields(state, {"id", "name", "root"}, sp)
+                if "name" in state:
+                    self.typecheck(state["name"], "text", ptr(sp, "name"))
                 sid = ident(state.get("id"), ptr(sp, "id"))
                 if sid in names:
                     fail("E_STATE", sp, f"Duplicate state '{sid}'")
+                if not isinstance(state.get("root"), dict):
+                    fail("E_STATE", ptr(sp, "root"), f"Panel state '{sid}' requires a 'root' node object or 'children' array")
                 names.add(sid)
                 values["states"].append({"name": sid, "prefix": values["name"] + "-" + sid,
                     "root": self.node(state.get("root"), logical + "/" + sid, env,
@@ -2969,6 +4757,8 @@ class Frontend:
         if "on" in source:
             if not isinstance(source["on"], dict):
                 fail("E_EVENT", ptr(path, "on"), "on must be an event map")
+            if any(event in source["on"] for event in ("load", "OnLoad")):
+                fail("E_EVENT_TARGET", ptr(path, "on"), "load events require a page target")
             if kind != "input" and any(event in source["on"] for event in ("change", "focus", "blur", "OnTextChange", "OnFocus", "OnLostFocus")):
                 fail("E_EVENT_TARGET", ptr(path, "on"), "Input events require a native input")
             if kind != "dynamic-panel" and any(event in source["on"] for event in ("statechange", "OnPanelStateChange")):
@@ -3079,16 +4869,48 @@ class Frontend:
                     if isinstance(node.get("w"), (int, float)):
                         actual_w = node["w"]
                         actual_h = node.get("h", 24) if isinstance(node.get("h"), (int, float)) else 24
-                        lines_cap = max(1, int(actual_h // max(14, fsz + 3))) if node.get("type") == "label" else 1
+                        lines_cap = max(1, int(actual_h // max(14, fsz + 3))) if (node.get("type") == "label" and bool(node.get("wrap"))) else 1
                         pad_extra = 8 if node.get("type") in ("badge", "button") else 0
-                        needed_w = int(math.ceil((max_px / lines_cap) + max(4, pad_extra)))
-                        if (max_px / lines_cap) + pad_extra > actual_w + 2:
+                        needed_w = int(math.ceil((max_px / lines_cap) + max(12, pad_extra)))
+                        if (max_px / lines_cap) + max(4, pad_extra) > actual_w + 2:
                             w_ptr = ptr(symbol["pointer"], "w")
+                            wrap_ptr = ptr(symbol["pointer"], "wrap")
+                            h_ptr = ptr(symbol["pointer"], "h")
+                            eff_line_w = max(20.0, float(actual_w) - 18.0)
+                            needed_lines = max(2, int(math.ceil(max_px / eff_line_w)) + 1)
+                            needed_h = max(actual_h, needed_lines * max(16, int(math.ceil(fsz * 1.5))) + 4)
+                            wrap_expand_ops = [
+                                {"op": "add", "path": wrap_ptr, "value": True},
+                                {"op": "replace", "path": h_ptr, "value": needed_h},
+                            ]
+                            if "/template/" in symbol["pointer"]:
+                                tpl_h_ptr = symbol["pointer"].split("/template/")[0] + "/template/h"
+                                wrap_expand_ops.append({"op": "replace", "path": tpl_h_ptr, "value": needed_h + 18})
                             cands = [
                                 {
                                     "description": f"Expand width to {needed_w}px to fit worst-case dataset row #{worst_idx} ('{worst_txt}')",
                                     "operations": [{"op": "replace", "path": w_ptr, "value": needed_w}],
                                 },
+                                *(
+                                    [
+                                        {
+                                            "description": "Enable multi-line text wrapping ('wrap': true)",
+                                            "operations": [{"op": "add", "path": wrap_ptr, "value": True}],
+                                        }
+                                    ]
+                                    if node.get("type") == "label" and actual_h >= max(26, int(round(fsz * 2.1)))
+                                    else []
+                                ),
+                                *(
+                                    [
+                                        {
+                                            "description": f"Enable multi-line text wrapping ('wrap': true) and expand height to {needed_h}px",
+                                            "operations": wrap_expand_ops,
+                                        }
+                                    ]
+                                    if node.get("type") == "label" and needed_h > actual_h
+                                    else []
+                                ),
                                 {
                                     "description": "Use elastic width 'fill'",
                                     "operations": [{"op": "replace", "path": w_ptr, "value": "fill"}],
@@ -3097,7 +4919,7 @@ class Frontend:
                             fail(
                                 "E_DATASET_WORST_CASE_OVERFLOW",
                                 w_ptr,
-                                f"Dataset row #{worst_idx} text '{worst_txt}' (~{int(math.ceil(max_px))}px) overflows fixed width {actual_w}px (recommended >= {needed_w}px)",
+                                f"Dataset row #{worst_idx} text '{worst_txt}' (~{int(math.ceil(max_px + 4))}px) overflows fixed width {actual_w}px (recommended >= {needed_w}px)",
                                 counterexample={
                                     "rowIndex": worst_idx,
                                     "worstText": worst_txt,
@@ -3151,10 +4973,12 @@ class Frontend:
         args = [self._eval_static_ast(a, row_override) for a in ast["args"]]
         fn = ast["fn"]
         if fn == "text": return str(args[0]).lower() if type(args[0]) is bool else str(int(args[0])) if type(args[0]) is float and args[0].is_integer() else str(args[0])
-        if fn == "concat": return "".join(args)
+        if fn == "concat": return "".join(self._format_scalar(a) if type(a) in (str, int, float, bool) else str(a) for a in args)
         if fn == "lower": return args[0].lower()
         if fn == "upper": return args[0].upper()
         if fn == "length": return len(args[0].encode("utf-16-le")) // 2
+        if fn == "contains": return args[1] in args[0]
+        if fn == "remove": return args[0].replace(args[1], "", 1)
         if fn == "not": return not args[0]
         if fn == "number":
             if type(args[0]) in (int, float): return args[0]
@@ -3326,6 +5150,30 @@ class Frontend:
                 "aggregateInitialization": True,
                 "events": [{"event": "OnLoad", "cases": cases}],
             })
+        for h_scope, h_logical, h_ptr in self.initial_hidden_nodes:
+            if h_logical not in self.symbols:
+                continue
+            h_name = self.symbols[h_logical]["name"]
+            rep_id, rep_ctx = self.row_context(h_scope)
+            if rep_ctx is not None:
+                by_id[rep_ctx["pageId"]]["interactions"].insert(0, {
+                    "trigger": rep_ctx["name"], "sourceId": rep_id, "sourcePointer": h_ptr,
+                    "events": [{"event": "OnItemLoad", "cases": [{
+                        "description": "RP/1 initial hidden",
+                        "isNewIfGroup": True,
+                        "actions": [{"type": "hide", "target": h_name}],
+                    }]}],
+                })
+            else:
+                page_id = h_scope.split("/")[0]
+                by_id[page_id]["interactions"].insert(0, {
+                    "trigger": "page", "sourceId": page_id, "sourcePointer": h_ptr,
+                    "events": [{"event": "OnLoad", "cases": [{
+                        "description": "RP/1 initial hidden",
+                        "isNewIfGroup": True,
+                        "actions": [{"type": "hide", "target": h_name}],
+                    }]}],
+                })
         for rep_id, scope, cond_expr, then_ids, else_ids, cond_ptr in self.row_conditionals:
             rep_ctx = self.repeaters[rep_id]
             cond_ast = self.condition(cond_expr, scope, cond_ptr)
@@ -3378,6 +5226,43 @@ class Frontend:
             })
             by_id[page_id]["interactions"].append({
                 "trigger": "page", "sourceId": page_id, "sourcePointer": cond_ptr,
+                "events": [{"event": "OnLoad", "cases": copy.deepcopy(cases)}],
+            })
+
+        for binding in self.progress_bindings:
+            symbol = self.resolve(binding["fill"], binding["scope"], binding["pointer"])
+            percent = self.runtime(binding["percent"], binding["scope"], binding["pointer"], expected="number")
+            variables, widgets = set(), set()
+
+            def collect_progress_dependencies(node):
+                if node.get("kind") == "variable": variables.add(node["name"])
+                if node.get("kind") == "widget": widgets.add(node["name"])
+                for value in node.values():
+                    if isinstance(value, dict): collect_progress_dependencies(value)
+                    elif isinstance(value, list):
+                        for child in value:
+                            if isinstance(child, dict): collect_progress_dependencies(child)
+
+            collect_progress_dependencies(percent)
+            cases = []
+            for idx, threshold in enumerate(range(100, 0, -10)):
+                comparison = {"kind": "binary", "op": ">=", "left": percent,
+                              "right": {"kind": "literal", "value": threshold, "valueType": "number"},
+                              "valueType": "boolean"}
+                cases.append({
+                    "description": f"progress-bar {binding['fill']} >= {threshold}%",
+                    "isNewIfGroup": idx == 0, "condition": "if" if idx == 0 else "else-if",
+                    "when": {"left": {"runtime": comparison}, "op": "==",
+                             "right": {"runtime": {"kind": "literal", "value": True, "valueType": "boolean"}}},
+                    "actions": [{"type": "set-panel-state", "target": symbol["name"], "state": f"s{threshold}"}],
+                })
+            cases.append({"description": f"progress-bar {binding['fill']} < 10%",
+                          "isNewIfGroup": False, "condition": "else",
+                          "actions": [{"type": "set-panel-state", "target": symbol["name"], "state": "s0"}]})
+            self.compiled_page_conditionals.append({"pageId": symbol["pageId"], "variables": variables,
+                                                    "widgets": widgets, "cases": cases})
+            by_id[symbol["pageId"]]["interactions"].append({
+                "trigger": "page", "sourceId": symbol["id"], "sourcePointer": binding["pointer"],
                 "events": [{"event": "OnLoad", "cases": copy.deepcopy(cases)}],
             })
 
@@ -3530,6 +5415,7 @@ class Frontend:
                                 actions.append(action)
                             if action["type"] == "set-variable":
                                 changed_variables.add(action["variable"])
+
                             if action["type"] == "set-text":
                                 changed_widgets.add(action["target"])
                             for computed in getattr(self, "computed_order", []):
@@ -3601,6 +5487,8 @@ class Frontend:
                 parsed = self.expression(parse_template_string(value, path), {}, path)
                 return self.runtime(parsed, scope, path, expected=expected, row=row)
             if (value.startswith("=") and not value.startswith("==")) or (
+                value.startswith("[[") and value.endswith("]]")
+            ) or (
                 expected in ("boolean", "number") and INLINE_EXPR_HINT_RE.search(value)
             ):
                 parsed = self.expression(parse_inline_expr(value, path), {}, path)
@@ -3646,7 +5534,7 @@ class Frontend:
             elif "widget" in value:
                 fields(value, {"widget"}, path)
                 symbol = self.resolve(value["widget"], scope, ptr(path, "widget"))
-                if symbol["pageId"] != scope.split("/")[0] or symbol["kind"] not in {"input", "label", "button", "badge"}:
+                if symbol["pageId"] != scope.split("/")[0] or symbol["kind"] not in {"input", "label", "paragraph", "button", "badge"}:
                     fail("E_TARGET_TYPE", path, "Runtime text read needs a text-capable widget in this page")
                 source_row = self.row_context(symbol["id"])[0]
                 if source_row and source_row != self.row_context(scope)[0]:
@@ -3722,13 +5610,25 @@ class Frontend:
                 fn, args = value["fn"], value.get("args")
                 self.typecheck(fn, "text", ptr(path, "fn"))
                 signatures = {"text": (None, "text"), "number": (None, "number"), "not": ("boolean", "boolean"),
-                              "lower": ("text", "text"), "upper": ("text", "text"), "length": ("text", "number")}
-                if not isinstance(args, list) or (fn == "concat" and len(args) < 2) or (fn != "concat" and len(args) != 1):
-                    fail("E_ARGUMENT", path, "concat needs at least two values; other functions need one")
+                              "lower": ("text", "text"), "upper": ("text", "text"), "length": ("text", "number"),
+                              "contains": ("text", "boolean"), "remove": ("text", "text")}
+                arity = {"contains": 2, "remove": 2}.get(fn, 1)
+                if not isinstance(args, list) or (fn == "concat" and len(args) < 2) or (fn != "concat" and len(args) != arity):
+                    fail("E_ARGUMENT", path, f"concat needs at least two values; {fn} needs {arity}")
                 if fn != "concat" and fn not in signatures:
                     fail("E_FUNCTION", path, f"Unknown runtime function '{fn}'")
-                arg_type, typ = ("text", "text") if fn == "concat" else signatures[fn]
+                arg_type, typ = (None, "text") if fn == "concat" else signatures[fn]
                 compiled = [self.runtime(v, scope, ptr(ptr(path, "args"), i), expected=arg_type, row=row) for i, v in enumerate(args)]
+                if fn == "concat":
+                    coerced = []
+                    for c in compiled:
+                        if c.get("valueType") == "text":
+                            coerced.append(c)
+                        elif c.get("kind") == "literal" and type(c.get("value")) in (int, float, bool):
+                            coerced.append({"kind": "literal", "value": self._format_scalar(c["value"]), "valueType": "text"})
+                        else:
+                            coerced.append({"kind": "call", "fn": "text", "args": [c], "valueType": "text"})
+                    compiled = coerced
                 if fn == "number" and compiled[0]["valueType"] not in {"text", "number"}:
                     fail("E_TYPE", ptr(path, "args"), "number requires text or number")
                 out = {"kind": "call", "fn": fn, "args": compiled, "valueType": typ}
@@ -3777,7 +5677,7 @@ class Frontend:
         template = self.node(source.get("template"), logical + "/item", {**env, "_repeater_shadows_item": True}, ptr(path, "template"), stack, panel_depth)
         result = {"type": "repeater", "name": name, "template": template, "rows": dataset["rows"], "model": model,
                   "rowGap": source.get("rowGap", 0), "rowHeight": source.get("rowHeight", 48), "pageSize": source.get("pageSize", 0),
-                  **{k: source[k] for k in (GEOMETRY | {"adaptive", "_hidden_lookup", "_master_instance"}) if k in source}}
+                  **{k: source[k] for k in (GEOMETRY | {"adaptive", "_hidden_lookup", "_master_instance", "_master_slot"}) if k in source}}
         if "on" in source:
             fields(source["on"], source["on"], ptr(path, "on"))
             for event in source["on"]:
@@ -3821,6 +5721,10 @@ class Frontend:
             out["rows"] = []
             for i, record in enumerate(rows):
                 rp = ptr(ptr(path, "rows"), i)
+                if isinstance(record, dict):
+                    unknown = next((key for key in record if key not in context["model"]), None)
+                    if unknown is not None:
+                        fail("E_DATA_FIELD", ptr(rp, unknown), f"Unknown data-add field '{unknown}'")
                 fields(record, context["model"], rp)
                 for key in context["model"]:
                     if key not in record:
@@ -3964,13 +5868,18 @@ class Frontend:
         ]
 
     def action(self, action, scope, path):
-        if isinstance(action, dict) and "type" not in action:
-            expanded = self.desugar_action_list([action], path)
-            if len(expanded) > 1:
-                return [self.action(item, scope, path) for item in expanded]
-            action = expanded[0]
+        if isinstance(action, dict):
+            if "type" not in action or action.get("type") in ("goto", "navigate") or (
+                action.get("type") == "link" and "target" in action and "page" not in action
+            ):
+                expanded = self.desugar_action_list([action], path)
+                if len(expanded) > 1:
+                    return [self.action(item, scope, path) for item in expanded]
+                action = expanded[0]
         kind = action.get("type") if isinstance(action, dict) else None
         if not isinstance(kind, str) or kind not in ACTION_PROPS:
+            if isinstance(action, dict) and kind is None:
+                fail("E_ACTION", path, f"Action object missing 'type' (got keys {sorted(action.keys())}); expected 'type' or shorthand like 'set', 'goto', 'link', 'state', 'show', 'hide'")
             fail("E_ACTION", path, f"Unsupported action '{kind}'")
         fields(action, {"type"} | ACTION_PROPS[kind], path)
         if kind.startswith("data-"):
@@ -3983,8 +5892,8 @@ class Frontend:
             target_row = self.row_context(target["id"])[0]
             if target_row and self.row_context(scope)[0] != target_row:
                 fail("E_ROW_SCOPE", path, "Row widgets are only accessible from their own row events")
-            if kind == "set-text" and target["kind"] not in {"label", "button", "badge", "input"}:
-                fail("E_TARGET_TYPE", path, "set-text requires label/button/badge/input")
+            if kind == "set-text" and target["kind"] not in {"label", "paragraph", "button", "badge", "input"}:
+                fail("E_TARGET_TYPE", path, "set-text requires label/paragraph/button/badge/input")
             if kind in {"focus", "enable", "disable"} and target["kind"] != "input":
                 fail("E_TARGET_TYPE", path, f"{kind} requires a native input")
             if kind == "set-panel-state":
@@ -3992,7 +5901,13 @@ class Frontend:
                     fail("E_STATE", ptr(path, "state"), "State must belong to the target panel")
             out["target"] = target["name"]
         if kind == "set-text":
-            value = self.runtime(action.get("text"), scope, ptr(path, "text"), expected="text")
+            raw_act_text = action.get("text")
+            if isinstance(raw_act_text, str) and (
+                (raw_act_text.startswith("=") and not raw_act_text.startswith("=="))
+                or (raw_act_text.startswith("[[") and raw_act_text.endswith("]]"))
+            ):
+                raw_act_text = {"_coerce_text": raw_act_text}
+            value = self.runtime(raw_act_text, scope, ptr(path, "text"), expected="text")
             if value["kind"] != "literal": out["runtime"] = value
             else: out["text"] = value["value"]
         if kind == "set-variable":
@@ -4030,7 +5945,9 @@ class Frontend:
             if native in names:
                 fail("E_EVENT", ep, f"Duplicate event alias '{event}'")
             names.add(native)
-            if isinstance(actions, dict) and "cases" not in actions:
+            if isinstance(actions, str):
+                actions = [actions]
+            elif isinstance(actions, dict) and "cases" not in actions:
                 actions = [actions]
             shorthand = isinstance(actions, list)
             if shorthand:
@@ -4046,9 +5963,18 @@ class Frontend:
                 if isinstance(case, dict) and "do" in case and "actions" not in case:
                     case = {**case, "actions": case["do"]}
                     del case["do"]
+                when_origin = None
+                if isinstance(case, dict) and "_when_origin" in case:
+                    case = dict(case)
+                    when_origin = case.pop("_when_origin", None)
                 fields(case, {"when", "else", "actions"}, cp)
+                if "when" in case and isinstance(case["when"], str) and not case["when"].strip():
+                    fail("E_EXPRESSION", when_origin or ptr(cp, "when"), "Expected a nonempty condition expression")
+                if not shorthand and "when" not in case and not case.get("else") and not case.get("actions"):
+                    fail("E_EXPRESSION", cp, "Case requires when/else and actions, or a nonempty unconditional action list")
                 if "else" in case:
                     self.typecheck(case["else"], "boolean", ptr(cp, "else"))
+                checked_when = self.condition(case["when"], scope, when_origin or ptr(cp, "when")) if "when" in case else None
                 desugared_acts = self.desugar_action_list(case.get("actions"), cp) if not shorthand else case.get("actions")
                 if not isinstance(desugared_acts, list) or not desugared_acts:
                     fail("E_EVENT", cp, "Case requires nonempty actions")
@@ -4060,7 +5986,7 @@ class Frontend:
                         fail("E_CONDITION", cp, "else must end a conditional chain")
                     compiled["condition"] = "else"
                 elif "when" in case:
-                    compiled["when"] = self.condition(case["when"], scope, ptr(cp, "when"))
+                    compiled["when"] = checked_when
                     compiled["condition"] = "if" if i == 0 else "else-if"
                 elif len(cases) > 1:
                     fail("E_CONDITION", cp, "Multi-case events require when or final else")
@@ -4077,7 +6003,15 @@ class Frontend:
             path = error.diagnostic["pointer"]
             if any(path == call or path.startswith(call + "/") for call in self.macro_calls):
                 call = max((call for call in self.macro_calls if path == call or path.startswith(call + "/")), key=len)
-                raw_macro = _resolve_pointer(self.spec, call)
+                try:
+                    raw_macro = _resolve_pointer(self.raw_spec, call)
+                except LanguageError:
+                    try:
+                        raw_macro = _resolve_pointer(self.spec, call)
+                    except LanguageError:
+                        raw_macro = {}
+                if self.macro_calls[call] == "form-card" and path.startswith(call + "/on/click"):
+                    error.diagnostic["pointer"] = path = call + "/onSubmit" + path[len(call + "/on/click"):]
                 if error.diagnostic["code"] == "E_EVENT_TARGET" and path == ptr(call, "on") and "on" not in raw_macro:
                     unsupported = next((key for key in ("onChange", "onFocus", "onBlur", "onStateChange") if key in raw_macro), None)
                     if unsupported:
@@ -4085,18 +6019,28 @@ class Frontend:
                 candidate = path
                 while candidate:
                     try:
-                        _resolve_pointer(self.spec, candidate)
+                        try:
+                            _resolve_pointer(self.raw_spec, candidate)
+                        except LanguageError:
+                            _resolve_pointer(self.spec, candidate)
                         break
                     except LanguageError:
                         candidate = candidate.rpartition("/")[0]
                 if candidate and candidate != path:
-                    fail(error.diagnostic["code"], candidate, error.diagnostic["message"], error.diagnostic.get("suggestions"))
+                    fail(
+                        error.diagnostic["code"],
+                        candidate,
+                        error.diagnostic["message"],
+                        error.diagnostic.get("suggestions"),
+                        counterexample=error.diagnostic.get("counterexample"),
+                        candidate_patches=error.diagnostic.get("candidatePatches"),
+                    )
             raise
 
     def _compile(self):
-        fields(self.spec, {"$schema", "language", "target", "name", "theme", "palette", "domain", "shell", "static", "strictAudit", "devMode",
+        fields(self.spec, {"$schema", "language", "target", "name", "theme", "palette", "tokens", "domain", "device", "shell", "static", "strictAudit", "devMode",
                            "product", "models", "datasets", "variables", "computed", "statecharts", "transactions", "invariants", "components",
-                           "views", "rules", "masters", "adaptiveViews", "pages"}, "")
+                           "views", "rules", "masters", "adaptiveViews", "tabBar", "pages"}, "")
         if "$schema" in self.spec: self.typecheck(self.spec["$schema"], "text", "/$schema")
         if self.spec.get("language") != "rp/1":
             fail("E_LANGUAGE", "/language", "Expected language: rp/1")
@@ -4111,6 +6055,12 @@ class Frontend:
                 self.typecheck(self.spec[key], "boolean", ptr("", key))
         if self.spec.get("domain", "mobile") not in {"mobile", "web", "doc", "test"}:
             fail("E_ENUM", "/domain", "Expected mobile/web/doc/test")
+        palette = self.spec.get("palette", {})
+        if not isinstance(palette, dict):
+            fail("E_COLOR", "/palette", "Expected a palette object")
+        for name, color in palette.items():
+            if not isinstance(color, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+                fail("E_COLOR", ptr("/palette", name), "Palette colors must use #RRGGBB")
         self.models = self.spec.get("models", {})
         fields(self.models, self.models, "/models")
         for name, definition in self.models.items():
@@ -4172,15 +6122,21 @@ class Frontend:
         pages = self.spec.get("pages")
         if not isinstance(pages, list) or not pages:
             fail("E_PAGE", "/pages", "Expected a nonempty page array")
-        lowered = {k: copy.deepcopy(self.spec[k]) for k in ["name", "theme", "palette", "domain", "static", "strictAudit", "masters", "adaptiveViews"] if k in self.spec}
+        lowered = {k: copy.deepcopy(self.spec[k]) for k in ["name", "theme", "palette", "domain", "device", "static", "strictAudit", "masters", "adaptiveViews"] if k in self.spec}
         lowered["pages"] = []
         for i, page in enumerate(pages):
             pp = ptr("/pages", i)
-            fields(page, {"id", "name", "canvas", "root", "on", "bindings", "views", "master", "masters", "slot"}, pp)
+            fields(page, {"id", "slug", "name", "canvas", "domain", "device", "shell", "root", "on", "bindings", "views", "master", "masters", "slot", "tabBar"}, pp)
+            if "slug" in page:
+                if "id" in page and page["id"] != page["slug"]:
+                    fail("E_PAGE", ptr(pp, "slug"), "slug 与 id 冲突；只保留一个")
+                page.setdefault("id", page.pop("slug"))
             pid = ident(page.get("id"), ptr(pp, "id"))
             self.typecheck(page.get("name"), "text", ptr(pp, "name"))
-            if pid in self.pages or any(p["name"] == page["name"] for p in self.pages.values()):
-                fail("E_PAGE", pp, "Duplicate page ID or name")
+            if pid in self.pages:
+                fail("E_ID_DUPLICATE", ptr(pp, "id"), "Duplicate page ID")
+            if any(p["name"] == page["name"] for p in self.pages.values()):
+                fail("E_PAGE", ptr(pp, "name"), "Duplicate page name")
             fields(page.get("canvas"), {"w", "h"}, ptr(pp, "canvas"))
             for axis in ("w", "h"):
                 value = page["canvas"].get(axis)
@@ -4191,6 +6147,8 @@ class Frontend:
         for i, page in enumerate(pages):
             pid, pp = page["id"], ptr("/pages", i)
             result = {"name": page["name"], "slug": pid, "canvas": page["canvas"],
+                      **({"domain": page["domain"]} if "domain" in page else ({"domain": self.spec["domain"]} if "domain" in self.spec else {})),
+                      **({"device": page["device"]} if "device" in page else {}),
                       "root": self.node(page["root"], pid, {}, ptr(pp, "root")), "interactions": []}
             if pid in self.passthrough_layers:
                 result["passthrough_layer"] = copy.deepcopy(self.passthrough_layers[pid])
@@ -4236,7 +6194,7 @@ class Frontend:
                 for target_id, field_name in targets.items():
                     self.typecheck(field_name, "text", ptr(ptr(bp, "targets"), target_id))
                     symbol = self.resolve({"ref": target_id}, pid, ptr(ptr(bp, "targets"), target_id))
-                    if symbol["pageId"] != pid or symbol["kind"] not in {"label", "button", "badge", "input"}:
+                    if symbol["pageId"] != pid or symbol["kind"] not in {"label", "paragraph", "button", "badge", "input"}:
                         fail("E_TARGET_TYPE", bp, "Binding requires text-capable targets in this page")
                     if field_name not in self.models[dataset["model"]]:
                         fail("E_DATA_FIELD", ptr(ptr(bp, "targets"), target_id), f"Unknown field '{field_name}'")
@@ -4434,7 +6392,7 @@ class Frontend:
         master_native_names = {}
         symbols_by_name = {symbol["name"]: symbol for symbol in self.symbols.values()}
         def assign_master_names(node, page_id, owner=None):
-            owner = node.get("_master_instance", owner)
+            owner = None if node.get("_master_slot") else node.get("_master_instance", owner)
             symbol = symbols_by_name.get(node.get("name"))
             if owner and symbol:
                 relative = symbol["id"][len(page_id) + 1:]
@@ -4446,10 +6404,65 @@ class Frontend:
             assign_master_names(page["root"], page["slug"])
         symbols = sorted(self.symbols.values(), key=lambda symbol: symbol["id"])
         ir = {"language": "rp/1", "irVersion": 2, "target": 9,
+              "theme": lowered.get("theme", "slate"),
+              "palette": copy.deepcopy(lowered.get("palette") or {}),
               "models": self.models, "datasets": self.datasets, "variables": self.variables,
               "symbols": symbols, "pages": lowered["pages"], "diagnostics": []}
+        def validate_adaptive(node, in_master=False, in_container=False):
+            if not isinstance(node, dict):
+                return
+            in_master = False if node.get("_master_slot") else in_master or bool(node.get("_master_instance"))
+            symbol = symbols_by_name.get(node.get("name"))
+            path = symbol["pointer"] if symbol else "/"
+            if "adaptive" in node:
+                ap = ptr(path, "adaptive")
+                if in_master or in_container:
+                    fail("E_ADAPTIVE", ap, "adaptive overrides require page widgets outside masters/panels/repeaters")
+                if not isinstance(node["adaptive"], dict):
+                    fail("E_ADAPTIVE", ap, "adaptive must map declared view IDs to geometry objects")
+                for view_id, props in node["adaptive"].items():
+                    vp = ptr(ap, view_id)
+                    if view_id not in view_ids:
+                        fail("E_ADAPTIVE", vp, f"Unknown adaptive view '{view_id}'")
+                    if not isinstance(props, dict):
+                        fail("E_ADAPTIVE", vp, "Expected x/y/w/h geometry overrides")
+                    for key, value in props.items():
+                        if key not in {"x", "y", "w", "h"}:
+                            fail("E_PROPERTY", ptr(vp, key), "adaptive overrides support x/y/w/h")
+                        self.typecheck(value, "number", ptr(vp, key))
+                        if key in {"w", "h"} and value < 0:
+                            fail("E_SIZE", ptr(vp, key), "Adaptive size must be nonnegative")
+            for child in node.get("children", []):
+                validate_adaptive(child, in_master, in_container)
+            for state in node.get("states", []):
+                validate_adaptive(state.get("root"), in_master, True)
+            if isinstance(node.get("template"), dict):
+                validate_adaptive(node["template"], in_master, True)
+
+        view_ids = set()
+        views = self.spec.get("adaptiveViews", [])
+        if not isinstance(views, list):
+            fail("E_ADAPTIVE", "/adaptiveViews", "Expected an adaptive view array")
+        for i, view in enumerate(views):
+            vp = ptr("/adaptiveViews", i)
+            fields(view, {"id", "name", "width", "height", "condition"}, vp)
+            vid = ident(view.get("id", view.get("name")), ptr(vp, "id"))
+            if vid in view_ids:
+                fail("E_ADAPTIVE", ptr(vp, "id"), "Duplicate adaptive view ID")
+            view_ids.add(vid)
+            for key in ("width", "height"):
+                if key == "width" or key in view:
+                    self.typecheck(view.get(key), "number", ptr(vp, key))
+                    if view[key] < 0 or (key == "width" and view[key] == 0):
+                        fail("E_SIZE", ptr(vp, key), "Adaptive view width must be positive and height nonnegative")
+            if "condition" in view and view["condition"] not in {"<=", ">="}:
+                fail("E_ADAPTIVE", ptr(vp, "condition"), "Expected <= or >=")
+        for page in lowered["pages"]:
+            validate_adaptive(page["root"])
         if self.domain_models:
             ir["domainModels"] = self.domain_models
+        if self.spec.get("statecharts"):
+            ir["statecharts"] = copy.deepcopy(self.spec["statecharts"])
         if self.product_provenance is not None:
             ir["productProvenance"] = self.product_provenance
         if compiled_invariants:
@@ -4469,7 +6482,10 @@ class Frontend:
 
 
 def compile_language(spec):
-    return Frontend(spec).compile()
+    try:
+        return Frontend(spec).compile()
+    except RecursionError:
+        fail("E_DEPTH", "/", "Expanded source exceeds the compiler recursion limit")
 
 
 class ReferenceRuntime:
@@ -4503,7 +6519,7 @@ class ReferenceRuntime:
             self.widgets[name] = {
                 "name": name, "kind": kind, "page": page_slug, "repeater": rep_name,
                 "text": str(node.get("value" if kind == "input" else "text", "")),
-                "visible": True, "enabled": True,
+                "visible": (node.get("visible", True) is not False) and not bool(node.get("hidden", False)), "enabled": True,
                 "parent": parent, "panelStates": list(panel_states),
             }
         if kind == "dynamic-panel":
@@ -4629,6 +6645,8 @@ class ReferenceRuntime:
             if fn == "lower": return str(args[0]).lower()
             if fn == "upper": return str(args[0]).upper()
             if fn == "length": return len(str(args[0]).encode("utf-16-le")) // 2
+            if fn == "contains": return args[1] in args[0]
+            if fn == "remove": return args[0].replace(args[1], "", 1)
             if fn == "not": return not bool(args[0])
             if fn == "number":
                 v = args[0]
@@ -5448,6 +7466,85 @@ def merge_gui_passthrough(base_spec, gui_spec, ai_patched_spec=None):
     return target
 
 
+def _build_effective_theme(lowered, page):
+    try:
+        from proto import THEMES, resolve_color as _res_col
+    except Exception:
+        THEMES, _res_col = {}, None
+    th_name = page.get("theme") or lowered.get("theme", "enterprise-light")
+    th = dict(THEMES.get(th_name, THEMES.get("enterprise-light", {})))
+    pal = lowered.get("palette")
+    if isinstance(pal, dict) and th_name == lowered.get("theme", "enterprise-light"):
+        for k, v in pal.items():
+            th[k.lstrip("$")] = v
+    page_pal = page.get("palette")
+    if isinstance(page_pal, dict):
+        for k, v in page_pal.items():
+            th[k.lstrip("$")] = v
+    return th, _res_col
+
+def _effective_node_props(node, th, _res_col):
+    ntype = node.get("type", "box")
+    out = {k: copy.deepcopy(v) for k, v in node.items() if k not in {"children", "states", "template"}}
+    variant = out.get("variant")
+    if ntype in ("button", "badge"):
+        is_badge = ntype == "badge"
+        var = variant or ("soft" if is_badge else "primary")
+        if "fill" not in out:
+            out["fill"] = {
+                "primary": "$brand", "soft": "$brand-soft", "secondary": "$surface",
+                "ghost": "transparent", "danger": "$danger", "danger-soft": "$danger-soft",
+                "success-soft": "$success-soft", "warning-soft": "$warning-soft", "neutral-soft": "$surface-2",
+            }.get(var, "$surface")
+        if "color" not in out:
+            out["color"] = {
+                "primary": "#FFFFFF", "soft": "$brand", "secondary": "$ink",
+                "ghost": "$ink-2", "danger": "#FFFFFF", "danger-soft": "$danger",
+                "success-soft": "$success", "warning-soft": "$warning", "neutral-soft": "$ink-2",
+            }.get(var, "$ink")
+        if "stroke" not in out:
+            out["stroke"] = "$line" if var == "secondary" else None
+    elif ntype == "label":
+        out.setdefault("color", "$ink")
+    elif ntype == "input":
+        out.setdefault("fill", "$surface-2")
+        out.setdefault("stroke", "$line-strong" if out.get("native") is True else "$line")
+        out.setdefault("color", "$ink" if ("value" in out or "text" in out) else "$ink-2")
+    elif ntype == "divider":
+        out.setdefault("fill", out.get("color", "$line"))
+    elif ntype == "card":
+        is_glass = variant == "glass"
+        out.setdefault("fill", "$glass" if is_glass else "$surface")
+        out.setdefault("stroke", "$glass-border" if is_glass else "$line")
+
+    def _resolve_val(v):
+        if isinstance(v, str) and v.startswith("$") and _res_col is not None:
+            return _res_col(v, th)
+        if isinstance(v, dict):
+            return {dk: _resolve_val(dv) for dk, dv in v.items()}
+        if isinstance(v, list):
+            return [_resolve_val(x) for x in v]
+        return v
+
+    return _resolve_val(out)
+
+def effective_scene_nodes(lowered):
+    nodes = {}
+    for page in lowered["pages"]:
+        th, _res_col = _build_effective_theme(lowered, page)
+        def index(node):
+            if node.get("name"):
+                nodes[node["name"]] = _effective_node_props(node, th, _res_col)
+            for child in node.get("children", []):
+                index(child)
+            for state in node.get("states", []):
+                index(state["root"])
+            if isinstance(node.get("template"), dict):
+                index(node["template"])
+        index(page["root"])
+    return nodes
+
+
 def patch_spec(spec, operations, expected_hash=None):
     """Apply preconditioned source patches with semanticHash guard and impact analysis."""
     before_lowered, before_ir = compile_language(spec)
@@ -5500,19 +7597,9 @@ def patch_spec(spec, operations, expected_hash=None):
     after_syms = {s["id"]: s for s in after_ir["symbols"]}
     added = sorted(set(after_syms) - set(before_syms))
     removed = sorted(set(before_syms) - set(after_syms))
-    def semantic_nodes(lowered):
-        nodes = {}
-        def index(node):
-            if node.get("name"):
-                nodes[node["name"]] = {k:v for k,v in node.items() if k not in {"children", "states", "template"}}
-            for child in node.get("children", []): index(child)
-            for state in node.get("states", []): index(state["root"])
-            if isinstance(node.get("template"), dict): index(node["template"])
-        for page in lowered["pages"]: index(page["root"])
-        return nodes
     def behaviors(ir):
         return {ix["trigger"]: ix["events"] for page in ir["pages"] for ix in page["interactions"]}
-    before_nodes, after_nodes = semantic_nodes(before_lowered), semantic_nodes(after_lowered)
+    before_nodes, after_nodes = effective_scene_nodes(before_lowered), effective_scene_nodes(after_lowered)
     before_behavior, after_behavior = behaviors(before_ir), behaviors(after_ir)
     shared = set(before_syms) & set(after_syms)
     identity_changed = sorted(k for k in shared if any(before_syms[k].get(p) != after_syms[k].get(p) for p in ("kind", "name")))
@@ -5522,7 +7609,13 @@ def patch_spec(spec, operations, expected_hash=None):
     changed = sorted(set(identity_changed + property_changed + behavior_changed + source_changed))
     before_pages = {p["slug"]: p for p in before_ir["pages"]}
     after_pages = {p["slug"]: p for p in after_ir["pages"]}
-    affected_pages = sorted(k for k in set(before_pages) | set(after_pages) if before_pages.get(k) != after_pages.get(k))
+    sym_affected_pages = {
+        (after_syms.get(sid) or before_syms.get(sid, {})).get("pageId")
+        for sid in (set(added) | set(removed) | set(changed))
+    }
+    sym_affected_pages.discard(None)
+    raw_changed_pages = {k for k in set(before_pages) | set(after_pages) if before_pages.get(k) != after_pages.get(k)}
+    affected_pages = sorted(raw_changed_pages | sym_affected_pages)
     diff_obj = {
         "beforeHash": before_ir["semanticHash"],
         "afterHash": after_ir["semanticHash"],
@@ -5646,11 +7739,31 @@ def complete_spec(spec, pointer="/"):
 
 def auto_heal_spec(spec, max_rounds=5):
     """Automatically heal static/layout/type diagnostics using pre-verified candidatePatches."""
+    import sys
     cur_spec = copy.deepcopy(spec)
     applied = []
     for round_idx in range(1, max_rounds + 1):
         try:
             lowered, ir = compile_language(cur_spec)
+            if not getattr(sys.flags, "no_site", 0):
+                try:
+                    import tempfile
+                    from proto import compile_spec_bundle
+                    with tempfile.TemporaryDirectory(prefix="zee-rp-heal-") as _td:
+                        _bres = compile_spec_bundle(copy.deepcopy(cur_spec), _td, strict_audit=False)
+                    if not _bres.get("structural_ok", True):
+                        for _f in _bres.get("failures", []):
+                            if _f.get("candidatePatches"):
+                                fail(
+                                    _f.get("code", "E_LAYOUT"),
+                                    _f.get("pointer", "/"),
+                                    _f.get("detail", "Layout gate failed"),
+                                    candidate_patches=_f["candidatePatches"],
+                                )
+                except LanguageError:
+                    raise
+                except Exception:
+                    pass
             return {
                 "ok": True,
                 "healed": len(applied) > 0,
@@ -5670,7 +7783,19 @@ def auto_heal_spec(spec, max_rounds=5):
             for cand in cands:
                 trial = copy.deepcopy(cur_spec)
                 try:
-                    for op_spec in cand.get("operations", []):
+                    ops = cand.get("operations", [])
+                    if (
+                        isinstance(trial, dict)
+                        and "pages" not in trial
+                        and isinstance(trial.get("product"), dict)
+                        and any(str(op_s.get("path", "")).startswith("/pages/") for op_s in ops)
+                    ):
+                        expanded_trial, _ = expand_product_spec(
+                            copy.deepcopy(trial), fail, ident, fields, lambda v, t, p: None
+                        )
+                        if "pages" in expanded_trial:
+                            trial["pages"] = expanded_trial["pages"]
+                    for op_spec in ops:
                         op = op_spec.get("op", "replace")
                         t_ptr = op_spec.get("path", "/")
                         parts = _pointer_parts(t_ptr, "E_PATCH")
@@ -5705,6 +7830,18 @@ def auto_heal_spec(spec, max_rounds=5):
                                     parent[last] = val
                                 if last == "w" and "width" in parent:
                                     parent.pop("width", None)
+                    if (
+                        len(cands) > 1
+                        and diag.get("code") in ("E_DATASET_WORST_CASE_OVERFLOW", "E_LAYOUT")
+                        and not getattr(sys.flags, "no_site", 0)
+                    ):
+                        import tempfile
+                        from proto import compile_spec_bundle
+                        compile_language(copy.deepcopy(trial))
+                        with tempfile.TemporaryDirectory(prefix="zee-rp-cand-") as _ctd:
+                            _cbres = compile_spec_bundle(copy.deepcopy(trial), _ctd, strict_audit=False)
+                        if not _cbres.get("structural_ok", True):
+                            continue
                     cur_spec = trial
                     applied.append({
                         "round": round_idx,

@@ -1,0 +1,15 @@
+# 手机布局示例：省略 canvas，device 自动选择屏幕；全容器/卡片/面板使用 [fillxhug] 零手算高度。
+rp/1 target=9 name="手机布局入门" domain=mobile theme=enterprise-light
+var $done type=number value=0
+page #home name="布局入门" device=iphone-17
+  phone-shell #shell title="从一件小事开始" gap=16
+    label #eyebrow [fillxhug] "DAILY STUDY" fontSize=12 letterSpacing=2
+    label #headline [fillxhug] "完成一次主动回忆" fontSize=24 fontWeight=700
+    stat-row #stats [fillxhug] gap=10 items=[{"label":"今日完成","value":"=var.done","sub":"主动回忆","color":"$brand"},{"label":"目标状态","value":"进行中","sub":"每日一练","color":"$success"}]
+    card #note [fillxhug] padding=16 gap=12
+      label #tag [fillxhug] "一个知识点" fontSize=12
+      paragraph #body [fillxhug] "先独立回忆定义，再核对答案。容器与正文一律使用 [fillxhug]，无需手算像素高度。" fontSize=16 lineHeight=24
+    button #start [180x44] "记录一次完成"
+      +onClick [{"type":"set-variable","variable":"done","value":1}]
+    progress-bar #progress value={"variable":"done"} max=1 showValue=false label="" w=370 barHeight=8
+    label #count [fillxhug] "='已完成 ' + text(var.done) + ' 次'" fontSize=16

@@ -9,6 +9,7 @@
 //   --json  输出 JSON（默认输出人读文本摘要）
 //   --full  额外输出每个 widget 的原始字段 dump
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { readManifest, readRecords } from './rp-records.mjs';
 import { parsePayload, field, walkNodes } from './parse-payload.mjs';
@@ -70,10 +71,36 @@ function textOf(node) {
 
 const widgetName = widget => strOf(field(field(widget.body, 'name-block') ?? {}, 'text')) ?? '';
 
+// Retain condition presence and content changes without claiming to decompile
+// arbitrary Axure expressions. References expand by value, not allocation IDs.
+function caseCondition(graph, kase) {
+  const ref = field(kase.body, 'Condition');
+  const nullId = guidsOf(graph).indexOf('00000000000000000000000000000000') + 1;
+  if (!ref) return { hasCondition: null, conditionHash: null };
+  if (nullId && ref.value === nullId) return { hasCondition: false, conditionHash: null };
+  const seen = new Set();
+  const snapshot = node => {
+    if (!node) return null;
+    if (node.tag === 3) {
+      const obj = graph.objects.get(node.value);
+      if (!obj) return { ref: guidsOf(graph)[node.value - 1] ?? node.value };
+      if (seen.has(obj.id)) return { cycle: obj.className };
+      seen.add(obj.id);
+      const value = { className: obj.className, body: snapshot(obj.body) };
+      seen.delete(obj.id);
+      return value;
+    }
+    if (node.entries) return { tag: node.tag, entries: node.entries.map(([k, v]) => [snapshot(k), snapshot(v)]) };
+    if (node.items) return { tag: node.tag, items: node.items.map(snapshot) };
+    return { tag: node.tag, text: node.text, value: node.value, values: node.values };
+  };
+  return { hasCondition: true, conditionHash: createHash('sha256').update(JSON.stringify(snapshot(ref))).digest('hex') };
+}
+
 // ---- 交互树读取 ----
 // InteractionTreeMap = { node-table: dict(nodeId → 对象), tree: Tree }；
 // Tree.children = 事件 Node；事件 Node.children = 用例 Node；用例 Node.children = 动作 Node。
-function readInteractions(graph, mapNode, version) {
+function readInteractions(graph, mapNode, version, widgetsByGuid = null) {
   const results = [];
   if (!mapNode) return results;
   const nodeTable = field(mapNode.body, 'node-table');
@@ -94,10 +121,12 @@ function readInteractions(graph, mapNode, version) {
       const actions = childrenOf(caseNode)
         .map(actionNode => target(actionNode.id))
         .filter(Boolean)
-        .map(action => describeAction(graph, action, version));
+        .map(action => describeAction(graph, action, version, widgetsByGuid));
       cases.push({
         description: strOf(field(kase.body, 'Description')) ?? '',
         disabled: field(kase.body, 'Disabled')?.value === true,
+        ...caseCondition(graph, kase),
+        isNewIfGroup: field(kase.body, 'IsNewIfGroup')?.value === true,
         actions
       });
     }
@@ -112,12 +141,57 @@ function readInteractions(graph, mapNode, version) {
 }
 
 // 动作 → 人读文本。未知类型退化成「类名 → 目标」。
-function describeAction(graph, action, version = 11) {
+function describeAction(graph, action, version = 11, widgetsByGuid = null) {
   const disabled = field(action.body, 'Disabled')?.value === true;
+  const resolveWidget = id => {
+    if (id === undefined || id === null) return undefined;
+    const local = graph.objects.get(id);
+    if (local) return local;
+    const guid = guidsOf(graph)[id - 1];
+    return guid ? widgetsByGuid?.get(guid) : undefined;
+  };
+  const resolveStringLiteral = litObj => {
+    if (!litObj?.body) return undefined;
+    let raw = strOf(field(litObj.body, 'value'));
+    if (typeof raw !== 'string') return raw;
+    const scopeField = field(litObj.body, 'scope');
+    if (scopeField?.entries?.length) {
+      for (const [kNode, vNode] of scopeField.entries) {
+        const alias = strOf(kNode);
+        if (!alias) continue;
+        const exprObj = graph.objects.get(vNode?.value);
+        if (!exprObj?.body) continue;
+        let replacement = null;
+        if (exprObj.className === 'Axure:Expr:FCall') {
+          const fnName = strOf(field(exprObj.body, 'function-name'));
+          const callArgs = field(exprObj.body, 'args')?.items ?? [];
+          if (fnName === 'GetGlobalVariableValue') {
+            const gv = graph.objects.get(callArgs[0]?.value);
+            const vName = strOf(field(gv?.body ?? {}, 'variable-name'));
+            if (vName) replacement = `var.${vName}`;
+          } else if (fnName === 'GetWidgetText') {
+            const pl = graph.objects.get(callArgs[0]?.value);
+            const pObj = graph.objects.get(field(pl?.body ?? {}, 'value')?.value);
+            const wId = field(pObj?.body ?? {}, 'object-id')?.value;
+            const wTarget = resolveWidget(wId);
+            const wName = wTarget ? widgetName(wTarget) : null;
+            if (wName) replacement = `@${wName}`;
+          }
+        } else if (exprObj.className === 'Axure:Expr:StringLiteral') {
+          const sVal = strOf(field(exprObj.body, 'value'));
+          if (typeof sVal === 'string') replacement = JSON.stringify(sVal);
+        }
+        if (replacement) {
+          raw = raw.replace(new RegExp(`\\b${alias.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b`, 'g'), replacement);
+        }
+      }
+    }
+    return raw;
+  };
   const literal = node => {
     if (!node) return undefined;
     if (node.tag === 8) return node.text;
-    return strOf(field(graph.objects.get(node.value)?.body ?? {}, 'value'));
+    return resolveStringLiteral(graph.objects.get(node.value));
   };
   // WidgetPaths / Paths / PanelPaths 里的 DiagramObjectPath.object-id → widget 名。
   const targets = keys => {
@@ -130,7 +204,7 @@ function describeAction(graph, action, version = 11) {
         // WidgetPaths 和 panelobjectpaths 常常指向同一条路径，去重。
         if (seen.has(id)) continue;
         seen.add(id);
-        const widget = graph.objects.get(id);
+        const widget = resolveWidget(id);
         names.push(widget ? (widgetName(widget) || `${shortType(widget.className)}#${widget.id}`) : `#${id}`);
       }
     }
@@ -248,20 +322,34 @@ function describeAction(graph, action, version = 11) {
         const pathLiteral = graph.objects.get(args[0]?.value);
         const path = graph.objects.get(field(pathLiteral?.body ?? {}, 'value')?.value);
         const targetId = field(path?.body ?? {}, 'object-id')?.value;
-        const target = graph.objects.get(targetId);
+        const target = resolveWidget(targetId);
         const value = graph.objects.get(args[1]?.value);
         const text = strOf(field(value?.body ?? {}, 'value')) ?? '';
         const targetName = target ? widgetName(target) || `${shortType(target.className)}#${target.id}` : '(未指定)';
         const identifier = (field(value?.body ?? {}, 'variable-identifiers')?.items ?? [])
           .map(item => graph.objects.get(item.value))
           .find(candidate => candidate?.className === 'Axure:Expr:TextVariableIdentifier');
-        const variableName = strOf(field(identifier?.body ?? {}, 'Name'));
-        if (variableName && text.includes(`[[${variableName}]]`)) {
+        let variableName = strOf(field(identifier?.body ?? {}, 'Name'));
+        let isDirectVariable = Boolean(variableName && text.includes(`[[${variableName}]]`));
+        if (isDirectVariable && /^rpv\d+$/.test(variableName)) {
+          const scopeEntry = (field(value?.body ?? {}, 'scope')?.entries ?? [])
+            .find(([k]) => strOf(k) === variableName);
+          const exprObj = scopeEntry ? graph.objects.get(scopeEntry[1]?.value) : undefined;
+          if (exprObj?.className === 'Axure:Expr:FCall' && strOf(field(exprObj.body, 'function-name')) === 'GetGlobalVariableValue') {
+            const gv = graph.objects.get((field(exprObj.body, 'args')?.items ?? [])[0]?.value);
+            const resolvedVar = strOf(field(gv?.body ?? {}, 'variable-name'));
+            if (resolvedVar) variableName = resolvedVar;
+          } else {
+            isDirectVariable = false;
+          }
+        }
+        if (isDirectVariable && variableName) {
           type = 'set-rich-text-from-variable';
           human = `设置富文本 ${targetName} = 全局变量 ${variableName}`;
         } else {
           type = 'set-rich-text';
-          human = `设置富文本 ${targetName} = ${JSON.stringify(text)}`;
+          const resolvedText = resolveStringLiteral(value) ?? text;
+          human = `设置富文本 ${targetName} = ${JSON.stringify(resolvedText)}`;
         }
       } else {
         type = /SetText/i.test(fn) ? 'set-text' : /Check/i.test(fn) ? 'set-check' : /Select/i.test(fn) ? 'set-selected' : 'set-function';
@@ -452,6 +540,14 @@ export function readRp(file, { full = false, path = null, includeMasterWidgets =
     if (!name) problem('unnamed-panel-state', `PanelState 记录 #${record.index} 没有 Axure:PanelDiagram.Name`, { record: record.index });
   }
 
+  const widgetsByGuid = new Map();
+  for (const g of graphs.values()) {
+    const gs = guidsOf(g);
+    for (const o of g.objects.values()) {
+      if (isWidget(o) && gs[o.id - 1]) widgetsByGuid.set(gs[o.id - 1], o);
+    }
+  }
+
   // 递归列表：面板状态内部、中继器行模板内部的 widget（含所属容器路径）。
   // 用于定位（重名歧义停机）与读取（阶段1：嵌套状态中的同名控件要能按容器区分）。
   const containedWidgets = [];
@@ -495,7 +591,7 @@ export function readRp(file, { full = false, path = null, includeMasterWidgets =
         x: geo.x, y: geo.y, w: geo.w, h: geo.h,
         container: containerPath,
         record: graphRecords.get(graph) ?? null,
-        ...(includeMasterWidgets ? { interactions: readInteractions(graph, graph.objects.get(field(object.body, 'InteractionMap')?.value), version) } : {})
+        ...(includeMasterWidgets ? { interactions: readInteractions(graph, graph.objects.get(field(object.body, 'InteractionMap')?.value), version, widgetsByGuid) } : {})
       });
       visitWidgetContainers(graph, object, containerPath);
     }
@@ -600,12 +696,12 @@ export function readRp(file, { full = false, path = null, includeMasterWidgets =
         });
       }
       const mapNode = graph.objects.get(field(object.body, 'InteractionMap')?.value);
-      const interactions = readInteractions(graph, mapNode, version);
+      const interactions = readInteractions(graph, mapNode, version, widgetsByGuid);
       if (interactions.length) { tally(interactions); widget.interactions = interactions; }
       if (full) widget.raw = rawDump(graph, object.body);
       widgets.push(widget);
     }
-    const pageInteractions = readInteractions(graph, graph.objects.get(field(pageObject?.body ?? {}, 'interactionmap')?.value), version);
+    const pageInteractions = readInteractions(graph, graph.objects.get(field(pageObject?.body ?? {}, 'interactionmap')?.value), version, widgetsByGuid);
     tally(pageInteractions);
     pageSummaries.push({
       name: page.name, folder: page.folder, record: record.index,

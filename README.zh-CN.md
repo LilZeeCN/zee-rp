@@ -4,6 +4,12 @@
 
 [English](README.md) · [图片转原型](references/screenshot-workflow.md) · [RP/1](references/rp-language.md) · [能力边界](references/capabilities.md)
 
+https://github.com/user-attachments/assets/39c37462-3956-48b8-b495-fe90d2ab9431
+
+**从一句话，到可编辑原型**：以原创「知序」考研复习 App 为案例，使用 huashu-motion 制作的 40 秒宣传片，1080p、60 fps，含配乐与音效。[下载 MP4](https://github.com/LilZeeCN/zee-rp/releases/download/v0.2.1/zee-rp-zhixu-1080p60.mp4) · [案例与素材说明](assets/promo/README.md)
+
+画面按案例规格重建，是工作流动效演示；不是软件录屏，剪辑时间不代表原型生成耗时。
+
 ![自制看板](examples/screenshot/source.png)
 
 ## 包含什么
@@ -11,6 +17,7 @@
 - **图片转原型**：OCR、布局与几何识别、图文分离、图表还原、背景分层、自动成稿、批量改字和视觉差分。
 - **RP/1 原型语言**：JSON / 文本语法、布局、主题、组件、原生输入、动态面板、中继器、数据、表达式、交互、规则，以及有限母版和自适应支持。
 - **原生文件读写**：文字、富文本、页、交互、表格、连接线、面板、中继器和母版；包含 RP9/RP11 版本适配。
+- **已有全局样式维护**：级联改名和批量绑定，覆盖页面、母版与面板状态的名称引用和缓存；采用 Axure 先建样式、脚本再绑定的[混合流程](references/custom-styles.md)。
 - **验证工具**：参考模拟、本机 Axure 表达式检查、真实预览重放、反例缩减和 GUI 证据检查。
 - Node、Python、Swift、CLI、MCP、Agent Skill、示例和配套测试完整提供。
 
@@ -58,6 +65,8 @@ node scripts/proto.mjs generate --spec examples/rp-language/counter.json --out-d
 ```
 
 数据业务示例见 `examples/rp-language/runtime-inventory.json`。输出必须使用新文件名。原生模板、元件库和官方运行时均从用户本机读取，不随项目分发。
+
+使用 MCP 时，直接调用 `generate_prototype({spec: RP1规格对象, output: "/绝对路径/新原型.rp"})`，即可一次完成多页生成、跨页传值/跳转和结构检查，返回文件路径、页面标识与检查摘要，无需手工装配。共享主题、色板和组件仍在规格中声明。见[调用示例与错误格式](references/mcp-prototype.md)及[三页案例](examples/rp-language/mcp-three-pages.json)。
 
 节点的 `name` 直接作为 Axure OUTLINE 显示名，支持中文和重名；引用继续用 `id`。已有工程只改名字可直接执行：
 

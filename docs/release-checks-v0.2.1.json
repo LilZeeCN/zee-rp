@@ -1,0 +1,122 @@
+{
+  "version": "0.2.1",
+  "date": "2026-10-25",
+  "status": "verified_release_candidate",
+  "baselinePublicCommit": "4d734553a8375fda1c3050144a40b386a372de29",
+  "checks": [
+    {
+      "name": "public Node suite",
+      "passed": 17,
+      "failed": 0
+    },
+    {
+      "name": "custom style synthetic groups",
+      "passed": 8,
+      "failed": 0
+    },
+    {
+      "name": "CLI parity",
+      "passed": 23,
+      "failed": 0
+    },
+    {
+      "name": "RP/1 language",
+      "passed": 50,
+      "failed": 0
+    },
+    {
+      "name": "source/native merge",
+      "passed": 22,
+      "failed": 0
+    },
+    {
+      "name": "authoring workflow stdio",
+      "passed": 18,
+      "failed": 0
+    },
+    {
+      "name": "creation quality Python",
+      "passed": 10,
+      "failed": 0
+    },
+    {
+      "name": "creation quality MCP",
+      "passed": 11,
+      "failed": 0
+    },
+    {
+      "name": "round 3 workflow MCP",
+      "passed": 13,
+      "failed": 0
+    },
+    {
+      "name": "MCP session",
+      "passed": 7,
+      "failed": 0
+    },
+    {
+      "name": "MCP multi-page generation",
+      "passed": 10,
+      "failed": 0
+    },
+    {
+      "name": "report Python",
+      "passed": 69,
+      "failed": 0
+    },
+    {
+      "name": "report MCP",
+      "passed": 36,
+      "failed": 0
+    },
+    {
+      "name": "runtime reference",
+      "passed": 58,
+      "failed": 0
+    },
+    {
+      "name": "aggregate semantics",
+      "passed": 354,
+      "failed": 0
+    },
+    {
+      "name": "native runtime records",
+      "passed": 11,
+      "failed": 0
+    },
+    {
+      "name": "job lifecycle mocks",
+      "passed": 11,
+      "failed": 0
+    },
+    {
+      "name": "horizontal image recovery (project Python environment)",
+      "passed": 1,
+      "failed": 0
+    }
+  ],
+  "nativeStyleEvidence": {
+    "host": "macOS / Axure RP9",
+    "singleWidgetLoadedSavedClosedReopened": true,
+    "nameAndGeometryPreserved": true,
+    "asteriskSymptomReproducedInControl": false,
+    "masterPanelRplib": "synthetic structure only",
+    "rp11Gui": false
+  },
+  "video": {
+    "title": "zee-rp · 从一句话，到可编辑原型",
+    "case": "知序",
+    "seconds": 40,
+    "width": 1920,
+    "height": 1080,
+    "fps": 60,
+    "sha256": "2e36210dcde4f043bb1c225e2ba7749e650103177640e9b21847ea615ba5b059",
+    "attachment": "https://github.com/user-attachments/assets/39c37462-3956-48b8-b495-fe90d2ab9431",
+    "scope": "Animated reconstruction of an original prototype case; not a screen recording or generation timing."
+  },
+  "limits": [
+    "Existing native custom styles only; complex object/package reference styles are explicitly refused.",
+    "The reported asterisk symptom and hidden-signature theory were not independently reproduced.",
+    "No new RP11, Windows or arbitrary-file native behavior claims."
+  ]
+}
