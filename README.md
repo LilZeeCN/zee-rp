@@ -60,8 +60,7 @@ page #notes name="手记" device=iphone-17-pro
 ```json
 {
   "source": "/absolute/path/birding.rp1",
-  "output": "/absolute/path/birding.rp",
-  "strictAudit": true
+  "output": "/absolute/path/birding.rp"
 }
 ```
 

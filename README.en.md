@@ -60,8 +60,7 @@ Save as `birding.rp1`, then call MCP `generate_prototype`:
 ```json
 {
   "source": "/absolute/path/birding.rp1",
-  "output": "/absolute/path/birding.rp",
-  "strictAudit": true
+  "output": "/absolute/path/birding.rp"
 }
 ```
 
