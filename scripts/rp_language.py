@@ -311,7 +311,7 @@ MACRO_PROPS = {
     "detail-card": MACRO_COMMON_PROPS | {"title", "subtitle", "badge", "items", "actions", "rowHeight", "labelWidth", "fontSize", "padding", "gap", "fill", "stroke", "radius"},
     "wizard-card": MACRO_COMMON_PROPS | {"title", "stepVariable", "steps", "bodyHeight", "onComplete", "padding", "gap", "fill", "stroke", "radius"},
     "master-detail": MACRO_COMMON_PROPS | {"master", "detail", "masterWidth", "listWidth", "dataset", "key", "searchField", "filterField", "filters", "template", "repeaterHeight", "rowHeight", "rowGap", "gap", "padding", "fill", "stroke", "radius"},
-    "tab-bar": MACRO_COMMON_PROPS | {"items", "tabs", "active", "activeIndex", "gap", "padding", "fill", "stroke", "radius", "activeFill", "activeColor", "inactiveFill", "inactiveColor", "fontSize", "itemHeight"},
+    "tab-bar": MACRO_COMMON_PROPS | {"items", "tabs", "active", "activeIndex", "gap", "padding", "fill", "stroke", "radius", "activeFill", "activeColor", "inactiveFill", "inactiveColor", "fontSize", "itemHeight", "activeVariant", "activeIndicator", "justify", "itemFlex"},
     "nav-bar": MACRO_COMMON_PROPS | {"title", "text", "subtitle", "back", "backText", "backPage", "backGoto", "onBack", "right", "rightText", "rightPage", "rightGoto", "onRight", "actions", "padding", "gap", "fill", "stroke", "radius", "titleFontSize", "color"},
     "progress-bar": MACRO_COMMON_PROPS | {"value", "max", "percent", "label", "text", "rightText", "showValue", "barHeight", "trackHeight", "trackColor", "trackFill", "barColor", "barFill", "fill", "color", "stroke", "radius", "gap"},
     "phone-shell": MACRO_COMMON_PROPS | {
@@ -1722,6 +1722,13 @@ def expand_tab_bar_macro(source, path):
     if not isinstance(raw_items, list) or not raw_items:
         fail("E_PROPERTY_REQUIRED", ptr(path, items_key), "tab-bar requires a nonempty 'items' or 'tabs' array")
     active_val = source.get("active")
+    indicator = source.get("activeIndicator", "none")
+    if indicator not in ("none", "underline", "dot"):
+        fail("E_PROPERTY", ptr(path, "activeIndicator"), "Expected none, underline or dot")
+    active_variant = source.get("activeVariant", "ghost" if indicator != "none" else "primary")
+    if active_variant not in ("primary", "brand", "secondary", "outline", "ghost", "soft", "danger",
+                              "success", "warning", "error"):
+        fail("E_PROPERTY", ptr(path, "activeVariant"), "Expected a supported button variant")
     item_h = source.get("itemHeight", 38)
     children = []
     for idx, entry in enumerate(raw_items):
@@ -1751,23 +1758,41 @@ def expand_tab_bar_macro(source, path):
             "type": "button",
             "id": item_id,
             "text": label,
-            "variant": entry_dict.get("variant", "primary" if is_active else "ghost"),
-            "flex": entry_dict.get("flex", 1),
+            "variant": entry_dict.get("variant", active_variant if is_active else "ghost"),
+            "flex": entry_dict.get("flex", source.get("itemFlex", 1)),
             "h": entry_dict.get("h", item_h),
             "radius": entry_dict.get("radius", 12),
-            "fontSize": entry_dict.get("fontSize", 12),
+            "fontSize": entry_dict.get("fontSize", source.get("fontSize", 12)),
             "fontWeight": entry_dict.get("fontWeight", 700 if is_active else 500),
         }
         for ck in ("w", "fill", "color", "stroke", "icon"):
             if ck in entry_dict:
                 btn[ck] = copy.deepcopy(entry_dict[ck])
+        for prop, style in (("fill", "Fill"), ("color", "Color")):
+            key = ("active" if is_active else "inactive") + style
+            if prop not in entry_dict and key in source:
+                btn[prop] = copy.deepcopy(source[key])
         if entry_on:
             btn["on"] = copy.deepcopy(entry_on)
         elif entry_click:
             btn["onClick"] = copy.deepcopy(entry_click)
         elif goto_page:
             btn["onClick"] = [{"goto": goto_page}]
-        children.append(btn)
+        if indicator == "none":
+            children.append(btn)
+        else:
+            wrapper = {"type": "box", "id": f"{item_id}_item", "layout": "stack",
+                       "h": btn["h"], "children": [], "flex": btn.pop("flex")}
+            if "w" in btn:
+                wrapper["w"] = btn.pop("w")
+            btn["w"] = "fill"
+            wrapper["children"] = [btn, {
+                "type": "box", "id": f"{item_id}_indicator", "w": 16 if indicator == "underline" else 4,
+                "h": 3 if indicator == "underline" else 4, "radius": 999,
+                "alignX": "center", "pin": "bottom", "fill":
+                    source.get("activeColor", "$brand") if is_active else "#FFFFFF00",
+            }]
+            children.append(wrapper)
     bar = {
         "type": "box",
         "id": tab_id,
@@ -1780,7 +1805,7 @@ def expand_tab_bar_macro(source, path):
         "fill": source.get("fill", "$surface"),
         "stroke": source.get("stroke", "$line"),
         "align": "center",
-        "justify": "space-between",
+        "justify": source.get("justify", "space-between"),
         "children": children,
     }
     for gk in ("x", "y", "right", "bottom", "flex", "visible", "hidden"):

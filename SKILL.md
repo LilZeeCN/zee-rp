@@ -104,6 +104,8 @@ page #detail name="打卡录入" device=iphone-17
 
 ## 四、其他场景与按需参考（日常 RP/1 创作无需查阅）
 
+- **视觉细节**：单个 label 在 `align=center justify=center` 的 row/column 中默认居中（显式 align 优先）；`image.radius/opacity` 写入图片 Alpha。导航可用 `activeIndicator=underline|dot|none`、`activeVariant`、`justify`、`itemFlex`，或让 `phone-shell.tabBar` 接完整 box。`panel [fillxhug]` 取所有状态的最大高度；状态拼图标注 viewport/content 尺寸。RP/1 暂无 `fontFamily` 和独立 `previewInitial`；字体、位图光效、初始态和导航示例见 [视觉创作说明](references/visual-authoring.md)。
+
 - **安全与证据原则**：切勿覆盖用户原始 `.rp`（可用 `AXURE_PROTECTED_PATHS` / `AXURE_WRITE_ROOT` 限制）；汇报时区分结构校验、Axure 打开、离线预览、GUI 编辑与保存重开。
 - **按需扩展文档（仅在对应特殊任务时读取）**：
   - 截图 1:1 转可编辑 `.rp`：`generate_from_image({image, output, scale, replace})` → [screenshot-workflow.md](references/screenshot-workflow.md)

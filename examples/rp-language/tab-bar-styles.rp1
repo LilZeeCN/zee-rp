@@ -1,0 +1,11 @@
+rp/1 target=9 name="文字与标记导航" domain=mobile theme=mobile-hifi
+palette:
+  $brand = "#365E49"
+
+page #home name="下划线导航" device=iphone-17-pro
+  phone-shell #shell title="今天，从自然开始" subtitle="下划线激活态，两个等宽条目" gap=16 tabBar={"type":"tab-bar","id":"nav","active":"today","activeIndicator":"underline","activeVariant":"ghost","activeColor":"#365E49","inactiveColor":"#7A887E","itemFlex":1,"justify":"center","items":[{"id":"today","label":"今日","goto":"home"},{"id":"notes","label":"手记","goto":"notes"}]}
+    card #intro [fillxhug] title="一条可继续编辑的导航" body="点击手记，查看另一种激活标记。" actionText="打开手记" goto="notes"
+
+page #notes name="圆点导航" device=iphone-17-pro
+  phone-shell #shell title="我的手记" subtitle="保留相同布局，切换为圆点标记" gap=16 tabBar={"type":"tab-bar","id":"nav","active":"notes","activeIndicator":"dot","activeColor":"#365E49","itemFlex":1,"items":[{"id":"today","label":"今日","goto":"home"},{"id":"notes","label":"手记","goto":"notes"}]}
+    card #entry [fillxhug] title="水边的一次相遇" body="图文内容、导航文字与标记都是独立元件。" actionText="返回今日" goto="home"
