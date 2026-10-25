@@ -23,7 +23,7 @@ import base64
 import io
 from rp_language import compile_language, LanguageError
 from rp_language_cli import read_source
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
 HERE = os.path.dirname(os.path.abspath(__file__))
 
 FONT_PATHS = (
@@ -2896,7 +2896,24 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
         if ntype == "image":
             src = node.get("src") or node.get("image") or node.get("file")
             img_info = load_image_asset(src, base_dir=base_dir)
-            image_map[img_info["key"]] = img_info["b64"]
+            image_key, image_data = img_info["key"], img_info["b64"]
+            radius = max(0, min(float(node.get("radius") or 0), nw / 2, nh / 2))
+            opacity = max(0, min(1, float(node.get("opacity", 1))))
+            if radius or opacity != 1:
+                # Bake the alpha mask once so native ImageBox and offline preview agree.
+                pic = Image.open(img_info["path"]).convert("RGBA").resize(
+                    (max(1, int(nw * 2)), max(1, int(nh * 2))), Image.Resampling.LANCZOS)
+                alpha = pic.getchannel("A")
+                if radius:
+                    mask = Image.new("L", pic.size, 0)
+                    ImageDraw.Draw(mask).rounded_rectangle(
+                        [0, 0, pic.width - 1, pic.height - 1], radius=radius * 2, fill=255)
+                    alpha = ImageChops.multiply(alpha, mask)
+                if opacity != 1:
+                    alpha = alpha.point(lambda value: round(value * opacity))
+                pic.putalpha(alpha)
+                image_key, image_data = _encode_pil_png(pic)
+            image_map[image_key] = image_data
             if cur_modal:
                 modal_targets.append(name)
             flat_spec_children.append({
@@ -2906,11 +2923,11 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 "y": ny,
                 "w": nw,
                 "h": nh,
-                "imageKey": img_info["key"],
-                "pngPath": img_info["path"],
+                "imageKey": image_key,
+                **({"b64": image_data} if radius or opacity != 1 else {"pngPath": img_info["path"]}),
                 "inModal": cur_modal,
             })
-            return make_axvg_image_shape(next_id(), name, nx, ny, nw, nh, img_info["key"])
+            return make_axvg_image_shape(next_id(), name, nx, ny, nw, nh, image_key)
         if ntype == "native-input":
             fill_h = resolve_color(node.get("fill", "$surface-2"), theme_dict)
             stroke_h = resolve_color(node.get("stroke", "$line-strong"), theme_dict)
@@ -3387,6 +3404,27 @@ def compose_device_shell(emitted, page_prefix, shell_name="iphone-x"):
             "kind": "rect", "name": scr_nm, "x": sx, "y": sy, "w": sw, "h": sh,
             "fill": screen_bg, "stroke": None, "radius": 44, "inModal": False, "_deviceShellPiece": True,
         })
+        # Foreground fills are not clipped by a rounded parent in Axure.
+        # Cover only the pixels outside the display, leaving every UI object editable.
+        screen_mask = Image.new("RGBA", (sw * 2, sh * 2), "#09090B")
+        ImageDraw.Draw(screen_mask).rounded_rectangle(
+            [0, 0, sw * 2 - 1, sh * 2 - 1], radius=88, fill=(0, 0, 0, 0))
+        bezel_clip = Image.new("L", screen_mask.size, 0)
+        ImageDraw.Draw(bezel_clip).rounded_rectangle(
+            [-20, -20, sw * 2 + 19, sh * 2 + 19], radius=104, fill=255)
+        screen_mask.putalpha(ImageChops.multiply(screen_mask.getchannel("A"), bezel_clip))
+        for corner, cx, cy in (("tl", 0, 0), ("tr", sw - 44, 0),
+                               ("bl", 0, sh - 44), ("br", sw - 44, sh - 44)):
+            mask_key, mask_data = _encode_pil_png(screen_mask.crop(
+                (cx * 2, cy * 2, (cx + 44) * 2, (cy + 44) * 2)))
+            img_map[mask_key] = mask_data
+            mask_name = f"{page_prefix}-img-device-screen-mask-{corner}"
+            overlay_widgets.append(make_axvg_image_shape(
+                f"id-{mask_name}", mask_name, sx + cx, sy + cy, 44, 44, mask_key))
+            overlay_specs.append({
+                "kind": "image", "name": mask_name, "x": sx + cx, "y": sy + cy, "w": 44, "h": 44,
+                "imageKey": mask_key, "b64": mask_data, "inModal": False, "_deviceShellPiece": True,
+            })
         if shell_opts.get("darkIsland", True) is not False:
             island_w, island_h = 122, 34
             island_x = sx + (sw - island_w) // 2
@@ -5978,6 +6016,13 @@ def _preserve_when_attrs(src, dst):
 
 def expand_declarative_tree(node, prefix="p1"):
     """包装：核心展开后再补回布局约束键（after/afterGap/alignX/z），并把 pin 翻译成贴边坐标。"""
+    if (isinstance(node, dict) and node.get("type", "box") in ("box", "card")
+            and node.get("align") == "center" and node.get("justify") == "center"
+            and node.get("layout", "column") in ("column", "row")
+            and len(node.get("children") or []) == 1):
+        child = node["children"][0]
+        if isinstance(child, dict) and child.get("type") == "label" and "align" not in child:
+            node = {**node, "children": [{**child, "align": "center"}]}
     out = _expand_declarative_tree_core(node, prefix)
     if isinstance(out, dict) and isinstance(node, dict):
         for key in ("after", "afterGap", "alignX", "z", "adaptive", "_master_instance", "_master_slot"):
@@ -7271,6 +7316,8 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
                 "state": context.get("state"),
                 "repeater": context.get("repeater"),
                 "modal": context.get("modal"),
+                "viewport": {"w": int(stage_canvas["w"]), "h": int(stage_canvas["h"])},
+                "content": {"w": int(stage_tree.get("_mw", sw)), "h": int(stage_tree.get("_mh", sh))},
             })
             with open(axvg_path, "w", encoding="utf-8") as f: json.dump(emitted["axvg"], f, ensure_ascii=False, indent=2)
             with open(spec_path, "w", encoding="utf-8") as f: json.dump(emitted["spec"], f, ensure_ascii=False, indent=2)
@@ -7408,7 +7455,9 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
                 clean_p = re.sub(r"-[0-9a-f]{6,}", "", str(sp["panel"]))
                 if clean_p.startswith(f"{pg}__"):
                     clean_p = clean_p[len(pg) + 2:]
-                return f"[{pg}] {clean_p} : {sp['state']}"
+                vp, content = sp.get("viewport", {}), sp.get("content", {})
+                dimensions = f" · {vp.get('w')}×{vp.get('h')} / content {content.get('h')}px" if vp else ""
+                return f"[{pg}] {clean_p} : {sp['state']}{dimensions}"
             if sp.get("repeater"):
                 clean_r = re.sub(r"-[0-9a-f]{6,}", "", str(sp["repeater"]))
                 if clean_r.startswith(f"{pg}__"):

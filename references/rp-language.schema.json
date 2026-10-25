@@ -31364,6 +31364,75 @@
                   "$ref": "#/$defs/compileExpression"
                 }
               ]
+            },
+            "activeIndicator": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "none",
+                    "underline",
+                    "dot"
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/compileExpression"
+                }
+              ]
+            },
+            "activeVariant": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "primary",
+                    "brand",
+                    "secondary",
+                    "outline",
+                    "ghost",
+                    "soft",
+                    "danger",
+                    "success",
+                    "warning",
+                    "error"
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/compileExpression"
+                }
+              ]
+            },
+            "justify": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "start",
+                    "center",
+                    "end",
+                    "space-between",
+                    "space-around",
+                    "space-evenly",
+                    "around",
+                    "evenly"
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/compileExpression"
+                }
+              ]
+            },
+            "itemFlex": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                },
+                {
+                  "$ref": "#/$defs/compileExpression"
+                }
+              ]
             }
           },
           "required": [
@@ -32213,6 +32282,75 @@
             "tab-bar": {
               "type": "string",
               "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+            },
+            "activeIndicator": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "none",
+                    "underline",
+                    "dot"
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/compileExpression"
+                }
+              ]
+            },
+            "activeVariant": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "primary",
+                    "brand",
+                    "secondary",
+                    "outline",
+                    "ghost",
+                    "soft",
+                    "danger",
+                    "success",
+                    "warning",
+                    "error"
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/compileExpression"
+                }
+              ]
+            },
+            "justify": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "start",
+                    "center",
+                    "end",
+                    "space-between",
+                    "space-around",
+                    "space-evenly",
+                    "around",
+                    "evenly"
+                  ]
+                },
+                {
+                  "$ref": "#/$defs/compileExpression"
+                }
+              ]
+            },
+            "itemFlex": {
+              "anyOf": [
+                {
+                  "type": "number",
+                  "minimum": 0
+                },
+                {
+                  "type": "string",
+                  "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                },
+                {
+                  "$ref": "#/$defs/compileExpression"
+                }
+              ]
             }
           },
           "required": [

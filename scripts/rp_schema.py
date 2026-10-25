@@ -78,6 +78,9 @@ def language_schema():
         "additionalProperties": False,
     }
     special = {
+        "activeIndicator": enum_expr(["none", "underline", "dot"]),
+        "activeVariant": enum_expr(["primary", "brand", "secondary", "outline", "ghost", "soft", "danger", "success", "warning", "error"]),
+        "itemFlex": numeric,
         "children": array(ref("node")), "states": array(panel_state, 1),
         "template": ref("node"), "master": ref("node"), "detail": ref("node"), "dataset": ident, "key": ident, "as": ident,
         "slots": {"type": "object", "additionalProperties": either(ref("node"), array(ref("node")))},

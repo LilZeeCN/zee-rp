@@ -7,7 +7,7 @@ import { listCommands } from './registry.mjs';
 import { listMcpTools, jobTools } from './mcp-tools.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const TOP = ['README.md', 'README.zh-CN.md', 'CONTRIBUTING.md', 'CHANGELOG.md', 'LICENSE', 'SKILL.md', '.gitignore', '.npmignore', 'package.json', 'package-lock.json', 'requirements.txt'];
+const TOP = ['README.md', 'README.en.md', 'README.zh-CN.md', 'CONTRIBUTING.md', 'CHANGELOG.md', 'LICENSE', 'SKILL.md', '.gitignore', '.npmignore', 'package.json', 'package-lock.json', 'requirements.txt'];
 const DIRS = ['bin', 'scripts', 'test', 'references', 'examples', 'docs', 'assets', 'tools', 'benchmarks', '.github'];
 const EXTENSIONS = /\.(mjs|py|swift|md|json|rp1|svg|png|ya?ml)$/;
 

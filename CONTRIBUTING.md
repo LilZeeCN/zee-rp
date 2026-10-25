@@ -6,6 +6,7 @@ Install README dependencies and keep the Python environment activated when runni
 | --- | --- |
 | `npm test` | Node; no Axure/Python/private fixtures. Source syntax, registry, guards, examples and source packaging. |
 | `npm run test:styles` | Node; synthetic RP/RPLIB style fixtures, no Axure/Python/private files. |
+| `npm run test:polish` | Python + Pillow; real expansion/layout/Axvg alpha and alignment regressions, no Axure. |
 | `npm run test:language` | Python dependencies; included synthetic JSON/specifications. |
 | `npm run test:scopes` | Original panel fixture set; configure `AXURE_FIXTURE_ROOT`. |
 | `npm run test:runtime` | Python dependencies and Node; reference data/aggregates and native-record construction. |

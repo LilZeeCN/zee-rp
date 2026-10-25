@@ -38,7 +38,8 @@
     "test:quality": "python3 -B test/creation-quality-check.py && node test/creation-quality-check.mjs",
     "test:report": "python3 -B test/report-regressions-check.py && node test/report-mcp-check.mjs",
     "test:report-round3": "node test/report-round3-check.mjs",
-    "test:styles": "node test/custom-styles-check.mjs"
+    "test:styles": "node test/custom-styles-check.mjs",
+    "test:polish": "python3 -B test/visual-polish-check.py"
   },
   "optionalDependencies": {
     "@modelcontextprotocol/sdk": "1.32.1"
@@ -302,7 +303,17 @@
     "references/custom-styles.md",
     "assets/promo/README.md",
     "assets/promo/zee-rp-zhixu-cover.png",
-    "docs/release-checks-v0.2.1.json"
+    "docs/release-checks-v0.2.1.json",
+    "test/visual-polish-check.py",
+    "README.en.md",
+    "references/visual-authoring.md",
+    "examples/rp-language/tab-bar-styles.rp1",
+    "docs/authoring-feedback-20261025.md",
+    "assets/readme/hero.svg",
+    "assets/readme/qiyu-home.png",
+    "assets/readme/qiyu-species.png",
+    "assets/readme/qiyu-journal.png",
+    "assets/readme/README.md"
   ],
   "repository": {
     "type": "git",
