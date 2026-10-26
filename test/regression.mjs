@@ -25,8 +25,22 @@ function run(file, args = []) {
   return spawnSync(process.execPath, [file, ...args], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 }
 try {
+  // 设计质量层的套件以前只能手动跑，CI 看不到；这里聚合进来。
+  check('design quality suites (studio)', () => {
+    const suites = [
+      'test/studio-design-metrics-check.mjs',
+      'test/studio-anti-gaming-check.mjs',
+      'test/studio-consistency-check.mjs',
+      'test/studio-fix-plan-check.mjs',
+      'test/studio-content-plan-check.mjs',
+    ];
+    for (const file of suites) {
+      const result = run(file);
+      assert.equal(result.status, 0, `${file}: ${(result.stderr || result.stdout || '').slice(-400)}`);
+    }
+  });
   check('all public JavaScript sources parse', () => {
-    for (const dir of ['bin', 'scripts', 'test', 'examples']) {
+    for (const dir of ['bin', 'scripts', 'test', 'examples', 'studio']) {
       for (const file of readdirSync(join(root, dir)).filter(f => f.endsWith('.mjs'))) {
         const result = run('--check', [join(root, dir, file)]);
         assert.equal(result.status, 0, `${dir}/${file}: ${result.stderr}`);
@@ -54,6 +68,12 @@ try {
     const schema = listMcpTools().find(t => t.name === 'create_global_variable').inputSchema;
     validateInput(schema, { source: '/s.rp', output: '/o.rp', name: 'Counter', defaultValue: '7' });
     assert.throws(() => validateInput(schema, { source: '/s.rp', output: '/o.rp' }));
+  });
+  check('MCP generation schema exposes structured pages and restricts native target', () => {
+    const schema = listMcpTools().find(t => t.name === 'generate_prototype').inputSchema;
+    validateInput(schema, { spec: { pages: [{ id: 'home', root: { type: 'label', id: 'title', text: 'Hello' } }] }, output: '/new.rp' });
+    assert.throws(() => validateInput(schema, { spec: { pages: [] }, output: '/new.rp' }));
+    assert.throws(() => validateInput(schema, { spec: { target: 11, pages: [{ id: 'home' }] }, output: '/new.rp' }));
   });
   check('Axvg public example builds deterministically', () => {
     const spec = JSON.parse(readFileSync(join(root, 'assets/dashboard-example.spec.json')));
@@ -106,6 +126,10 @@ try {
     writeFileSync(join(probe, 'test/fixtures/private.json'), 'private');
     symlinkSync(join(probe, 'test/fixtures/private.json'), join(probe, 'scripts/link.json'));
     assert.deepEqual(releasePaths(probe), ['scripts/public.mjs']);
+    writeFileSync(join(probe, 'package.json'), JSON.stringify({ files: ['test/public-check.mjs'] }));
+    writeFileSync(join(probe, 'test/public-check.mjs'), 'export const publicCheck = true;');
+    writeFileSync(join(probe, 'test/local-research.mjs'), 'export const localOnly = true;');
+    assert.deepEqual(releasePaths(probe), ['package.json', 'scripts/public.mjs', 'test/public-check.mjs']);
   });
   check('release preserves all public implementations, tests, bilingual docs, and examples', () => {
     const output = join(work, 'release'); packRelease(output);
