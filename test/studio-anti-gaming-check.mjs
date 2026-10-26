@@ -326,6 +326,53 @@ console.log('[14] 不该红的别红（假阳性）');
   try { rmSync(dir, { recursive: true, force: true }); } catch {}
 }
 
+console.log('[15] 半透明层必须合成（fill.a × opacity）');
+{
+  const { dir, open } = await newProject('compose');
+  await studioHandlers.studio_apply_commands({
+    projectDir: dir, baseRevision: open.appliedRevision, idempotencyKey: 'cp-1',
+    commands: [
+      // 5% 白纱盖在深条上：真实约 8.9:1，绝不能报 1:1
+      { type: 'addNode', pageId: 'home', node: { id: 'wrap', type: 'box', layout: 'stack', x: 0, y: 0, w: 1280, h: 800, children: [
+        { id: 'bar', type: 'box', x: 40, y: 200, w: 800, h: 120, fill: '#334155' },
+        { id: 'veil', type: 'box', x: 40, y: 200, w: 800, h: 120, fill: '#FFFFFF', opacity: 0.05 },
+        { id: 'veil_t', type: 'label', text: '白字', x: 80, y: 240, w: 400, h: 40, fontSize: 22, color: '#FFFFFF' },
+      ] } },
+      { type: 'addNode', pageId: 'home', node: { id: 'p', type: 'paragraph', text: '说明。', x: 40, y: 400, w: 400, h: 24, fontSize: 14, color: '#374151' } },
+    ],
+  });
+  const m = await studioHandlers.studio_design_metrics({ projectDir: dir, pageId: 'home' });
+  check('5% 白纱不算不透明层', () => {
+    const worst = (m.metrics.contrast.worst || []).map(w => w.id);
+    assert.ok(!worst.includes('veil_t'), JSON.stringify(m.metrics.contrast.worst));
+    assert.ok(m.metrics.contrast.minRatio > 5, `minRatio=${m.metrics.contrast.minRatio}`);
+  });
+  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+}
+
+console.log('[16] 半透明遮罩不能虚报高对比度');
+{
+  const { dir, open } = await newProject('scrim50');
+  await studioHandlers.studio_apply_commands({
+    projectDir: dir, baseRevision: open.appliedRevision, idempotencyKey: 'sc-1',
+    commands: [
+      { type: 'addNode', pageId: 'home', node: { id: 'wrap', type: 'box', layout: 'stack', x: 0, y: 0, w: 1280, h: 800, children: [
+        { id: 'bg', type: 'box', x: 0, y: 0, w: 1280, h: 800, fill: '#FFFFFF' },
+        { id: 'scrim', type: 'box', x: 40, y: 40, w: 900, h: 400, fill: 'rgba(0,0,0,0.5)' },
+        { id: 'big', type: 'label', text: '白字大标题', x: 80, y: 160, w: 600, h: 60, fontSize: 36, color: '#FFFFFF' },
+        { id: 'small', type: 'label', text: '副标题文字', x: 80, y: 240, w: 500, h: 28, fontSize: 16, color: '#FFFFFF' },
+      ] } },
+    ],
+  });
+  const m = await studioHandlers.studio_design_metrics({ projectDir: dir, pageId: 'home' });
+  check('50% 遮罩后小字必须判失败', () => {
+    const worst = (m.metrics.contrast.worst || []).map(w => w.id);
+    assert.ok(worst.includes('small'), JSON.stringify(m.metrics.contrast.worst));
+    assert.ok(m.metrics.contrast.minRatio < 4.5, `minRatio=${m.metrics.contrast.minRatio}`);
+  });
+  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+}
+
 if (failures) { console.error(`\n${failures} 项失败`); process.exit(1); }
 console.log('\n全部通过');
 process.exit(0);

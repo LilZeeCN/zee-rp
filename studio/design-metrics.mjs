@@ -159,8 +159,9 @@ function resolveBackground(node, byId, fallback, allNodes = []) {
   const ownFill = parseColor(node.fill);
   if (ownFill && ownFill.a >= 0.6) return { color: ownFill, resolved: true };
 
-  // 按绘制顺序找"压在文字下面、且真的盖住它"的最近一层。
-  // 不能因为页面上有图就整体放弃同层底色——那会把白字压深色条误判成 1.1:1。
+  // 按绘制顺序找"压在文字下面、且真的盖住它"的层，自下而上合成。
+  // 关键：fill.a × opacity 才是这层的有效不透明度；a<1 必须与下面的层合成，
+  // 合不出来就老实说 unknown——不能把半透明遮罩当成纯色返回。
   const layers = (allNodes || [])
     .filter(other => other !== node
       && visibleLayer(other)
@@ -168,19 +169,30 @@ function resolveBackground(node, byId, fallback, allNodes = []) {
       && coverage(other) >= 0.3)
     .sort((a, b) => orderOf(b) - orderOf(a));
 
-  for (const layer of layers) {
+  const blend = (top, alpha, under) => ({
+    r: Math.round(top.r * alpha + under.r * (1 - alpha)),
+    g: Math.round(top.g * alpha + under.g * (1 - alpha)),
+    b: Math.round(top.b * alpha + under.b * (1 - alpha)),
+    a: 1,
+  });
+
+  // 自最上层往下递归：每层若不满不透明，就与下一层合成。
+  const compose = index => {
+    if (index >= layers.length) return { color: fallback }; // 画布默认白底
+    const layer = layers[index];
+    if (isMedia(layer)) return { unknown: true };
     const fill = parseColor(layer.fill);
-    if (isMedia(layer)) {
-      // 图片/渐变之上若还有一层够不透明的遮罩，遮罩就是实际底色（hero 常用做法）。
-      const overlay = layers.find(o => o !== layer && orderOf(o) > orderOf(layer)
-        && !isMedia(o) && coverage(o) >= 0.8
-        && (parseColor(o.fill)?.a ?? 0) >= 0.5);
-      if (overlay) return { color: parseColor(overlay.fill), resolved: true };
-      return { color: null, resolved: false, unknown: true };
-    }
-    if (fill && fill.a >= 0.6) return { color: fill, resolved: true };
-    if (fill && fill.a >= 0.5 && coverage(layer) >= 0.8) return { color: fill, resolved: true };
-  }
+    if (!fill) return compose(index + 1);
+    const alpha = Math.min(1, fill.a * (Number(layer.opacity ?? 1) || 1));
+    if (alpha >= 0.999) return { color: fill };
+    const beneath = compose(index + 1);
+    if (beneath.unknown) return { unknown: true };
+    return { color: blend(fill, alpha, beneath.color) };
+  };
+
+  const composed = compose(0);
+  if (composed.unknown) return { color: null, resolved: false, unknown: true };
+  if (composed.color) return { color: composed.color, resolved: true };
 
   // 没有覆盖层时沿父链找实体底色。
   let current = node;
