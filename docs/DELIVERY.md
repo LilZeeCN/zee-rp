@@ -60,3 +60,16 @@ npm run test:studio-consistency   # 三工具一致性
 2. **type-scale 的多数问题修不动**：只能调整最大正文那一级，真实阶梯问题属内容层级。
 3. **`hero-without-media` 仍是 warn**：它需要判断"该不该有图"，属设计意图。
 4. **渲染层未实现命中区**：`hitW/hitH` 会被度量忽略（宁可红着，不假绿），`fix_plan` 把它列为人工项。
+
+## 七、版本库状态（已入库）
+
+分支 `studio-design-quality`，提交 `6b3cd33`：
+
+- `studio/` 33 个文件（此前 `git ls-files studio` 为 0，CI 看不到被测代码）
+- `test/studio-*.mjs` 12 个套件 + `test/rp1-repeater-where-check.mjs`
+- `docs/`：能力边界、试用报告、缺陷台账、交付索引
+- `package.json`：studio 相关脚本（同时带上了此前未提交的脚本条目）
+
+提交后 `npm test` 仍 18/18。**工作区里剩下的 96 个改动属于你之前的未提交工作，未触碰。**
+
+合并回 main：`git checkout main && git merge studio-design-quality`。
