@@ -8,6 +8,8 @@ import { StudioPersistence } from './persistence.mjs';
 import { StudioRuntimeSession } from './runtime.mjs';
 import { exportStudioDocumentToRp } from './export-rp.mjs';
 import { launchChrome } from './cdp.mjs';
+import { collectRenderedText, contrastTextNodes, measurePixelContrast } from './pixel-truth.mjs';
+import { decodePng } from './png-decode.mjs';
 import { getComponentContracts } from './component-contracts.mjs';
 import { getDesignContext } from './design-context.mjs';
 import { prepareMedia } from './media.mjs';
@@ -304,44 +306,107 @@ export class StudioServer {
   }
 
 
-  // 截图取样：把"对比度"从公式猜测变成真实测量。
-  async capturePixelContrast(pageId) {
-    const { measurePixelContrast } = await import('./pixel-truth.mjs');
-    const target = this.scene.pages.find(p => p.id === pageId);
-    if (!target) throw Object.assign(new Error(`页面不存在：${pageId}`), { code: 'E_PAGE_NOT_FOUND' });
-    const page = await this.ensureManagedBrowserPage();
-    await this.waitForRenderedRevision(this.store.appliedRevision, { timeoutMs: 5000 });
-    await page.evaluate(`(async () => {
-      const pg = window.__STUDIO_STATE__?.scene?.pages?.find(p => p.id === ${JSON.stringify(pageId)});
-      if (window.__STUDIO_APP__ && pg) {
-        if (window.__STUDIO_APP__.state.mode !== 'design') document.querySelector('[data-mode="design"]')?.click();
-        window.__STUDIO_APP__.selectNodes([], ${JSON.stringify(pageId)});
-        window.__STUDIO_APP__.setPanZoom(40 - (pg._stageX ?? 60), 40 - (pg._stageY ?? 40), 1);
-      }
-      if (document.fonts && document.fonts.ready) await document.fonts.ready;
-      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-    })()`);
-    const rect = await page.evaluate(`(() => {
-      const el = document.querySelector('.artboard-wrapper[data-artboard-id=${JSON.stringify(pageId)}] .artboard-outer')
-        || document.getElementById('screen-root');
-      if (!el) return null;
-      const r = el.getBoundingClientRect();
-      return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
-    })()`);
-    if (!rect) throw Object.assign(new Error('找不到画板元素'), { code: 'E_NO_ARTBOARD' });
-    const png = await page.screenshot({
-      format: 'png',
-      clip: { x: rect.x, y: rect.y, w: rect.w, h: rect.h, scale: 1 },
-      captureBeyondViewport: true,
-    });
-    const boxes = (target.nodes || [])
-      .filter(n => typeof n.text === 'string' && n.text.trim() && n.visible !== false && Number(n.opacity ?? 1) >= 0.02)
-      .map(n => ({ id: n.id, x: n.x, y: n.y, w: n.w, h: n.h, color: n.color, fontSize: n.fontSize, fontWeight: n.fontWeight }));
-    const results = measurePixelContrast(png, boxes, { scale: 2 });
-    return { pageId, dpr: 2, board: { w: target.board?.screenW, h: target.board?.screenH }, results };
+  // All captures share one managed browser. Temporary paint changes must not overlap.
+  withCapture(action) {
+    const pending = (this.captureQueue || Promise.resolve()).then(action);
+    this.captureQueue = pending.catch(() => {});
+    return pending;
   }
 
-  async captureScreenshot({
+  capturePixelContrast(pageId, options = {}) {
+    return this.withCapture(() => this._capturePixelContrast(pageId, options));
+  }
+
+  async _capturePixelContrast(pageId, { dpr = 2 } = {}) {
+    if (!Number.isFinite(dpr) || dpr < 0.5 || dpr > 4) {
+      throw Object.assign(new Error('dpr 必须在 0.5–4 之间'), { code: 'E_PIXEL_DPR' });
+    }
+    const revision = this.store.appliedRevision, contentHash = this.store.doc.contentHash;
+    const target = this.scene.pages.find(p => p.id === pageId);
+    if (!target) throw Object.assign(new Error(`页面不存在：${pageId}`), { code: 'E_PAGE_NOT_FOUND' });
+    const candidates = contrastTextNodes(target);
+    const page = await this.ensureManagedBrowserPage();
+    let styleInstalled = false;
+    try {
+      await page.evaluate(`(() => {
+        const style = document.createElement('style');
+        style.id = 'studio-pixel-paint';
+        style.textContent = '.studio-node, .studio-node * { animation-play-state:paused!important; transition:none!important; caret-color:transparent!important; }';
+        document.head.append(style);
+      })()`);
+      styleInstalled = true;
+      await this._captureScreenshot({ revision, pageId, dpr });
+      await page.evaluate("document.body.classList.add('studio-capture')");
+      const geometry = await page.evaluate(`(${collectRenderedText.toString()})(${JSON.stringify(pageId)}, ${JSON.stringify(candidates.map(n => ({ id: n.id, fontSize: n.fontSize, fontWeight: n.fontWeight })))})`);
+      const { clip, boxes } = geometry;
+      const screenshot = () => page.screenshot({ clip: { ...clip, scale: 1 }, captureBeyondViewport: true });
+      const png = await screenshot();
+      await page.evaluate(`(() => {
+        document.getElementById('studio-pixel-paint').textContent +=
+          '[data-studio-hide-glyphs], [data-studio-hide-glyphs] > .studio-text-span { -webkit-text-fill-color:transparent!important; -webkit-text-stroke-color:transparent!important; text-shadow:none!important; text-decoration-color:transparent!important; }';
+        for (const el of document.querySelectorAll('[data-studio-hide-glyphs], [data-studio-hide-glyphs] > .studio-text-span')) {
+          if (getComputedStyle(el).backgroundClip === 'text') {
+            el.setAttribute('data-studio-original-paint', el.getAttribute('style') || '');
+            el.style.setProperty('background-image', 'none', 'important');
+          }
+        }
+      })()`);
+      const backgroundPng = await screenshot();
+      // Render the same browser glyphs without scene paint or occluders. This
+      // reference mask exposes lost strokes inside a character, not just lost words.
+      await page.evaluate(`(() => {
+        document.getElementById('studio-pixel-paint').textContent +=
+          '.artboard-outer, .artboard-screen { background:#000!important; }' +
+          '.studio-node, .studio-node * { background:none!important; border-color:transparent!important; box-shadow:none!important; text-shadow:none!important; text-decoration:none!important; color:transparent!important; -webkit-text-fill-color:transparent!important; -webkit-text-stroke:0!important; opacity:1!important; filter:none!important; backdrop-filter:none!important; mix-blend-mode:normal!important; mask:none!important; clip-path:none!important; overflow:visible!important; }' +
+          '.studio-node img, .studio-node svg, .artboard-island, .artboard-home-indicator { visibility:hidden!important; }' +
+          '[data-studio-hide-glyphs], [data-studio-hide-glyphs] > .studio-text-span { color:#fff!important; -webkit-text-fill-color:#fff!important; }';
+      })()`);
+      const inkPng = await screenshot();
+      if (revision !== this.store.appliedRevision || contentHash !== this.store.doc.contentHash) {
+        throw Object.assign(new Error('像素测量期间文档版本已变化，请重试'), { code: 'E_PIXEL_REVISION_CHANGED' });
+      }
+      // Missing source images must not be certified from their placeholder paint.
+      for (const box of boxes) {
+        const node = candidates.find(n => n.id === box.id);
+        if (target.nodes.some(n => (n.assetMissing || (n.type === 'image' && n.src?.startsWith('assets/') && !existsSync(join(this.projectDir, n.src)))) && n.x < node.x + node.w && n.x + n.w > node.x && n.y < node.y + node.h && n.y + n.h > node.y)) box.reason = 'missing-image-resource';
+      }
+      const image = decodePng(png);
+      const results = measurePixelContrast(png, boxes, { backgroundPng, inkPng, scale: image.width / clip.w, scaleY: image.height / clip.h });
+      return { pageId, source: 'pixel', method: 'glyph-difference', dpr: geometry.dpr, revision, contentHash,
+        board: { w: target.board.screenW, h: target.board.screenH }, results };
+    } finally {
+      if (styleInstalled) await page.evaluate(`(() => {
+        document.getElementById('studio-pixel-paint')?.remove();
+        document.querySelectorAll('[data-studio-hide-glyphs]').forEach(el => el.removeAttribute('data-studio-hide-glyphs'));
+        document.body.classList.remove('studio-capture');
+        document.querySelectorAll('[data-studio-original-paint]').forEach(el => {
+          el.setAttribute('style', el.getAttribute('data-studio-original-paint'));
+          el.removeAttribute('data-studio-original-paint');
+        });
+      })()`);
+    }
+  }
+
+  async measureDesignMetrics(pageId, { thresholds, pixelTruth = true } = {}) {
+    const { computeDesignMetrics } = await import('./design-metrics.mjs');
+    let pixelContrast = null, fallbackReason = null;
+    if (!this.scene.pages.some(p => p.id === pageId)) throw Object.assign(new Error(`页面不存在：${pageId}`), { code: 'E_PAGE_NOT_FOUND' });
+    if (pixelTruth) {
+      try { pixelContrast = (await this.capturePixelContrast(pageId)).results; }
+      catch (err) { fallbackReason = `${err.code || 'E_PIXEL_CAPTURE'}: ${err.message}`; }
+    }
+    const result = computeDesignMetrics(this.scene.pages.find(p => p.id === pageId), {
+      thresholds, doc: this.store.doc, pixelContrast,
+    });
+    if (fallbackReason) result.metrics.contrast.fallbackReason = fallbackReason;
+    return { ...result, baseRevision: this.store.appliedRevision, contentHash: this.store.doc.contentHash };
+  }
+
+  captureScreenshot(options = {}) {
+    return this.withCapture(() => this._captureScreenshot(options));
+  }
+
+  async _captureScreenshot({
     revision = this.store.appliedRevision,
     pageId = null,
     nodeId = null,
@@ -349,6 +414,7 @@ export class StudioServer {
     timeoutMs = 5000,
     simulateHang = false,
     includeImage = false,
+    dpr = 2,
   } = {}) {
     if (revision > this.store.appliedRevision) {
       throw Object.assign(
@@ -372,7 +438,7 @@ export class StudioServer {
       await page.send('Emulation.setDeviceMetricsOverride', {
         width: Math.max(1440, Math.ceil(board.totalW + 850)),
         height: Math.max(900, Math.ceil(board.totalH + 240)),
-        deviceScaleFactor: 2,
+        deviceScaleFactor: dpr,
         mobile: false,
       });
     }
@@ -464,8 +530,8 @@ export class StudioServer {
       rendererVersion: RENDERER_VERSION,
       pageId: targetPageId,
       nodeId: nodeId || null,
-      width: renderCheck.rect.w * 2,
-      height: renderCheck.rect.h * 2,
+      width: renderCheck.rect.w * dpr,
+      height: renderCheck.rect.h * dpr,
       sha256: imageSha,
       outPath: savedPath,
       base64: outPath ? undefined : buf.toString('base64'),
@@ -730,22 +796,8 @@ export class StudioServer {
         const pageId = body.pageId || this.scene.pages[0]?.id;
         const page = this.scene.pages.find(p => p.id === pageId);
         if (!page) return sendJson(res, 404, { ok: false, code: 'E_PAGE_NOT_FOUND', message: `页面不存在：${pageId}` });
-        const { computeDesignMetrics, summarizeMetrics } = await import('./design-metrics.mjs');
-        // 像素真值优先：截图取样比几何模拟可靠（遮罩/滤镜/图片底一次覆盖）。
-        let pixelContrast = null;
-        if (body.pixelTruth) {
-          try {
-            const shot = await this.capturePixelContrast(pageId);
-            pixelContrast = shot.results;
-          } catch (err) {
-            pixelContrast = null;
-          }
-        }
-        const result = computeDesignMetrics(page, {
-          thresholds: body.thresholds || undefined,
-          doc: this.store.doc,
-          pixelContrast,
-        });
+        const { summarizeMetrics } = await import('./design-metrics.mjs');
+        const result = await this.measureDesignMetrics(pageId, { thresholds: body.thresholds || undefined, pixelTruth: body.pixelTruth !== false });
         return sendJson(res, 200, { ok: true, ...result, summary: summarizeMetrics(result) });
       }
       if (req.method === 'POST' && pathname === '/api/design/anchors') {
@@ -804,49 +856,12 @@ export class StudioServer {
         const pageId = body.pageId || this.store.doc.pages[0]?.id || 'home';
         const target = this.scene.pages.find(p => p.id === pageId);
         if (!target) return sendJson(res, 404, { ok: false, code: 'E_PAGE_NOT_FOUND', message: `页面不存在：${pageId}` });
-        const { measurePixelContrast } = await import('./pixel-truth.mjs');
-        const page = await this.ensureManagedBrowserPage();
-        await this.waitForRenderedRevision(this.store.appliedRevision, { timeoutMs: 5000 });
-        // 让画板以 1:1 落在视口内，再按画板矩形裁剪截图——坐标才能和 scene 对上。
-        await page.evaluate(`(async () => {
-          const pg = window.__STUDIO_STATE__?.scene?.pages?.find(p => p.id === ${JSON.stringify(pageId)});
-          if (window.__STUDIO_APP__ && pg) {
-            if (window.__STUDIO_APP__.state.mode !== 'design') document.querySelector('[data-mode="design"]')?.click();
-            window.__STUDIO_APP__.selectNodes([], ${JSON.stringify(pageId)});
-            window.__STUDIO_APP__.setPanZoom(40 - (pg._stageX ?? 60), 40 - (pg._stageY ?? 40), 1);
-          }
-          if (document.fonts && document.fonts.ready) await document.fonts.ready;
-          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
-        })()`);
-        const rect = await page.evaluate(`(() => {
-          const el = document.querySelector('.artboard-wrapper[data-artboard-id=${JSON.stringify(pageId)}] .artboard-outer')
-            || document.getElementById('screen-root');
-          if (!el) return null;
-          const r = el.getBoundingClientRect();
-          return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
-        })()`);
-        if (!rect) return sendJson(res, 503, { ok: false, code: 'E_NO_ARTBOARD', message: '找不到画板元素' });
-        const dpr = 2;
-        const png = await page.screenshot({
-          format: 'png',
-          clip: { x: rect.x, y: rect.y, w: rect.w, h: rect.h, scale: 1 },
-          captureBeyondViewport: true,
-        });
-        const boxes = (target.nodes || [])
-          .filter(n => typeof n.text === 'string' && n.text.trim() && n.visible !== false && Number(n.opacity ?? 1) >= 0.02)
-          .map(n => ({ id: n.id, x: n.x, y: n.y, w: n.w, h: n.h, color: n.color, fontSize: n.fontSize, fontWeight: n.fontWeight }));
-        const results = measurePixelContrast(png, boxes, { scale: dpr });
+        const shot = await this.capturePixelContrast(pageId, { dpr: body.dpr ?? 2 });
         return sendJson(res, 200, {
-          ok: true,
-          pageId,
-          source: 'pixel',
-          dpr,
-          board: { w: target.board?.screenW || rect.w, h: target.board?.screenH || rect.h },
-          measured: results.length,
-          failing: results.filter(r => !r.passes).length,
-          worst: results.filter(r => !r.passes).slice(0, 5),
-          results,
-          baseRevision: this.store.appliedRevision,
+          ok: true, ...shot, measured: shot.results.filter(r => r.status === 'measured').length,
+          unknown: shot.results.filter(r => r.status === 'unknown').length,
+          failing: shot.results.filter(r => r.status === 'measured' && !r.passes).length,
+          worst: shot.results.filter(r => !r.passes).slice(0, 5), baseRevision: shot.revision,
         });
       }
       if (req.method === 'POST' && pathname === '/api/design/content-plan') {
@@ -863,19 +878,10 @@ export class StudioServer {
         const page = this.scene.pages.find(p => p.id === pageId);
         if (!page) return sendJson(res, 404, { ok: false, code: 'E_PAGE_NOT_FOUND', message: `页面不存在：${pageId}` });
         const { computeDesignMetrics } = await import('./design-metrics.mjs');
-        let pixelContrast = null;
-        if (body.pixelTruth) {
-          try {
-            const shot = await this.capturePixelContrast(pageId);
-            pixelContrast = shot.results;
-          } catch (err) {
-            pixelContrast = null;
-          }
-        }
         const { buildFixPlan } = await import('./fix-plan.mjs');
         const { resolveDocumentScene } = await import('./scene-resolver.mjs');
         const { applySingleCommand } = await import('./commands.mjs');
-        const metrics = computeDesignMetrics(page, { doc: this.store.doc, pixelContrast });
+        const metrics = computeDesignMetrics(page, { doc: this.store.doc });
         const plan = buildFixPlan(page, metrics, this.store.doc);
 
         // 自证：在文档副本上真跑一遍自己的命令，逐条判断"是否真的让某个检查转正"。
@@ -974,6 +980,7 @@ export class StudioServer {
             after: { verdict: simulated.l1.verdict, blocking: simulated.l1.blocking.map(b => b.check) },
           },
           verified: true,
+          verificationBasis: 'geometry',
         });
       }
       if (req.method === 'POST' && pathname === '/api/design/explore') {

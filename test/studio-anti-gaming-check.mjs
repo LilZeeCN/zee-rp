@@ -13,16 +13,25 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { studioHandlers } from '../studio/mcp-adapter.mjs';
+import { startStudioServer } from '../studio/server.mjs';
 
 let failures = 0;
 const check = (name, fn) => {
   try { fn(); console.log(`  ok   ${name}`); } catch (err) { failures++; console.error(`  FAIL ${name}\n       ${err.message}`); }
 };
-let port = 4980;
+const servers = new Map();
 const newProject = async (tag) => {
   const dir = mkdtempSync(join(tmpdir(), `zee-anti-${tag}-`));
-  const open = await studioHandlers.studio_open_project({ projectDir: dir, name: tag, domain: 'web', port: port++ });
+  const { studio } = await startStudioServer({ projectDir: dir, name: tag, domain: 'web', port: 0 });
+  servers.set(dir, studio);
+  const open = studio.buildContextPayload();
   return { dir, open };
+};
+
+const closeProject = async dir => {
+  await servers.get(dir)?.close();
+  servers.delete(dir);
+  rmSync(dir, { recursive: true, force: true });
 };
 
 console.log('[1] 幽灵盒子');
@@ -42,7 +51,7 @@ console.log('[1] 幽灵盒子');
     const hierarchy = m.metrics.visualHierarchy;
     assert.ok(!hierarchy || hierarchy.dominantId !== 'ghost', JSON.stringify(hierarchy));
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[2] 零宽字符与空白 src');
@@ -60,7 +69,7 @@ console.log('[2] 零宽字符与空白 src');
     const c = m.checks.find(x => x.key === 'empty-state-coverage');
     assert.ok(c && c.ok === false, JSON.stringify(c));
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[3] label + on.click 也算可点');
@@ -78,7 +87,7 @@ console.log('[3] label + on.click 也算可点');
     const c = m.checks.find(x => x.key === 'tap-target');
     assert.ok(c && c.ok === false, JSON.stringify(c));
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[4] wrapper 拆分不能绕过主操作并列');
@@ -101,7 +110,7 @@ console.log('[4] wrapper 拆分不能绕过主操作并列');
     const c = m.checks.find(x => x.key === 'primary-action-unique');
     assert.ok(c && c.ok === false, JSON.stringify(c));
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[5] 导出预算认得 customFilter');
@@ -118,7 +127,7 @@ console.log('[5] 导出预算认得 customFilter');
   check('customFilter 计入栅格装饰层', () => {
     assert.ok((m.metrics.exportBudget?.rasterized || 0) >= 1, JSON.stringify(m.metrics.exportBudget));
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[6] 修复计划严格性与原因');
@@ -145,7 +154,7 @@ console.log('[6] 修复计划严格性与原因');
   check('被拒命令必须说明原因', () => {
     for (const item of plan.rejected || []) assert.ok(item.reason && item.reason.length > 4);
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[7] 有效不透明度（alpha 1/255 与 opacity:0）');
@@ -166,7 +175,7 @@ console.log('[7] 有效不透明度（alpha 1/255 与 opacity:0）');
     if (!hierarchy) return; // 块不足 → 已被判 not-assessable
     assert.ok(!['ghost1px', 'ghostOpacity'].includes(hierarchy.dominantId), JSON.stringify(hierarchy));
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[8] 软连字符（Cf 类）');
@@ -185,7 +194,7 @@ console.log('[8] 软连字符（Cf 类）');
     const c = m.checks.find(x => x.key === 'empty-state-coverage');
     assert.ok(c && c.ok === false, JSON.stringify(c));
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[9] 缺失检查不得蒸发');
@@ -210,7 +219,7 @@ console.log('[9] 缺失检查不得蒸发');
     assert.equal(c.notAssessable, true, JSON.stringify(c));
   });
   check('未评估项在 l1 里可查', () => assert.ok(m.l1.notAssessed.includes('visual-hierarchy'), JSON.stringify(m.l1.notAssessed)));
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[10] 对比度 1:1 不得判合格');
@@ -232,7 +241,7 @@ console.log('[10] 对比度 1:1 不得判合格');
     assert.ok(c && c.ok === false, JSON.stringify(c));
     assert.ok(m.l1.blocking.some(b => b.check === 'contrast'), JSON.stringify(m.l1.blocking));
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[11] 不可评估分支也要完整清单');
@@ -249,7 +258,7 @@ console.log('[11] 不可评估分支也要完整清单');
     assert.equal(m.l1.counted + m.l1.skipped.length, 11);
   });
   check('未评估项逐个点名', () => assert.ok(m.l1.notAssessed.length >= 5, JSON.stringify(m.l1.notAssessed)));
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[12] 不可见文字不能当主视觉');
@@ -271,7 +280,7 @@ console.log('[12] 不可见文字不能当主视觉');
     if (!hierarchy) return;
     assert.ok(!['ghostInvisible', 'ghostOpacity'].includes(hierarchy.dominantId), JSON.stringify(hierarchy));
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[13] 文字压图不能靠"不可知"放行');
@@ -294,7 +303,7 @@ console.log('[13] 文字压图不能靠"不可知"放行');
     assert.ok((m.metrics.contrast.unknown || 0) >= 1, `unknown=${m.metrics.contrast.unknown}`);
     assert.equal(m.l1.verdict, 'below-l1-bar', JSON.stringify(m.l1));
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[14] 不该红的别红（假阳性）');
@@ -323,7 +332,7 @@ console.log('[14] 不该红的别红（假阳性）');
     const unknown = m.metrics.contrast.unknownNodes || [];
     assert.ok(!unknown.includes('onWhite'), JSON.stringify(unknown));
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[15] 半透明层必须合成（fill.a × opacity）');
@@ -342,12 +351,15 @@ console.log('[15] 半透明层必须合成（fill.a × opacity）');
     ],
   });
   const m = await studioHandlers.studio_design_metrics({ projectDir: dir, pageId: 'home' });
+  check('本机真实截图路径已使用', () => {
+    if (process.env.CI !== 'true') assert.equal(m.metrics.contrast.source, 'pixel', JSON.stringify(m.metrics.contrast));
+  });
   check('5% 白纱不算不透明层', () => {
     const worst = (m.metrics.contrast.worst || []).map(w => w.id);
     assert.ok(!worst.includes('veil_t'), JSON.stringify(m.metrics.contrast.worst));
     assert.ok(m.metrics.contrast.minRatio > 5, `minRatio=${m.metrics.contrast.minRatio}`);
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 console.log('[16] 半透明遮罩不能虚报高对比度');
@@ -365,12 +377,15 @@ console.log('[16] 半透明遮罩不能虚报高对比度');
     ],
   });
   const m = await studioHandlers.studio_design_metrics({ projectDir: dir, pageId: 'home' });
+  check('本机真实截图路径已使用', () => {
+    if (process.env.CI !== 'true') assert.equal(m.metrics.contrast.source, 'pixel', JSON.stringify(m.metrics.contrast));
+  });
   check('50% 遮罩后小字必须判失败', () => {
     const worst = (m.metrics.contrast.worst || []).map(w => w.id);
     assert.ok(worst.includes('small'), JSON.stringify(m.metrics.contrast.worst));
     assert.ok(m.metrics.contrast.minRatio < 4.5, `minRatio=${m.metrics.contrast.minRatio}`);
   });
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  await closeProject(dir);
 }
 
 if (failures) { console.error(`\n${failures} 项失败`); process.exit(1); }

@@ -1,3 +1,4 @@
+import { contrastTextNodes } from './pixel-truth.mjs';
 /**
  * 设计度量层（L1 视觉完成度的可计算代理指标 + 反 AI-slop 负样本规则）
  *
@@ -6,7 +7,7 @@
  *  2. 只给可复现的结构性判断：字阶比、间距栅格、留白占比、对比度、色相数。
  *  3. 反 slop 规则命中即报，附 nodeId 与具体改法。
  *
- * 全部输入来自 ResolvedScene（浏览器解析后的真实几何），不依赖渲染图。
+ * 几何来自 ResolvedScene；像素对比度由服务端真实浏览器测量，离线调用明确标为 geometry。
  */
 
 const TRANSPARENT = /^(transparent|none|#FFFFFF00|#00000000|rgba\(\s*0\s*,\s*0\s*,\s*0\s*,\s*0\s*\))$/i;
@@ -915,20 +916,20 @@ export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc =
   const space = whitespaceRatio(nodes, scenePage.board);
   // 像素真值优先：截图取样比几何模拟可靠，尤其在有遮罩/滤镜/图片时。
   const heuristicContrast = contrastReport(nodes, byId);
-  const contrast = pixelContrast
+  const expectedText = contrastTextNodes(scenePage);
+  const measured = pixelContrast?.filter(r => r.status !== 'unknown' && Number.isFinite(r.ratio)) || [];
+  const missingPixels = pixelContrast === null ? [] : expectedText.filter(n => !measured.some(r => r.id === n.id));
+  const contrast = pixelContrast !== null
     ? {
-      checked: pixelContrast.length,
-      total: pixelContrast.length,
-      unknown: 0,
-      unknownNodes: [],
-      failing: pixelContrast.filter(r => !r.passes).length,
-      minRatio: pixelContrast.length ? Math.min(...pixelContrast.map(r => r.ratio)) : null,
-      worst: pixelContrast.filter(r => !r.passes).slice(0, 5).map(r => ({ id: r.id, ratio: r.ratio, required: r.required })),
-      source: 'pixel',
-      skippedUnknownBackground: false,
-      source: 'pixel',
+      checked: measured.length, total: expectedText.length,
+      unknown: missingPixels.length, unknownNodes: missingPixels.map(n => n.id),
+      unknownReasons: missingPixels.map(n => ({ id: n.id, reason: pixelContrast.find(r => r.id === n.id)?.reason || 'missing-pixel-measurement' })),
+      failing: measured.filter(r => !r.passes).length,
+      minRatio: measured.length ? Math.min(...measured.map(r => r.ratio)) : null,
+      worst: measured.filter(r => !r.passes).slice(0, 5).map(r => ({ id: r.id, ratio: r.ratio, required: r.required })),
+      source: 'pixel', skippedUnknownBackground: missingPixels.length > 0,
     }
-    : heuristicContrast;
+    : { ...heuristicContrast, source: 'geometry' };
   const hues = huePalette(nodes);
   const containment = containmentReport(scenePage, nodes, byId);
   const exportBudget = exportProjection(scenePage);
@@ -991,7 +992,7 @@ export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc =
         ? `${contrast.checked} 处文本对比度均达标（最低 ${contrast.minRatio}）`
         : [
           contrast.failing ? `${contrast.failing}/${contrast.checked} 处对比度不足（最低 ${contrast.minRatio}）` : '',
-          contrast.unknown ? `${contrast.unknown} 处文字压在图片/渐变上，无法确认对比度（${(contrast.unknownNodes || []).slice(0, 3).join('，')}）` : '',
+          contrast.unknown ? `${contrast.unknown} 处文字无法确认对比度（${(contrast.unknownNodes || []).slice(0, 3).join('，')}）` : '',
         ].filter(Boolean).join('；'));
   } else {
     // 底色不可知不等于没问题：白字压在照片上就是这类。

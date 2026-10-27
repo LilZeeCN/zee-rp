@@ -1,112 +1,122 @@
 /**
- * 像素真值对比度：不再用几何去"猜"浏览器合成结果，而是截图画布后直接取样。
- *
- * 为什么需要它：
- *  - 规则模拟永远追不上 CSS 合成（遮罩、滤镜、混合模式、渐变、阴影）。
- *  - 每补一条规则，攻击面就换一条路径。取像素则一次覆盖全部。
- *
- * 取样策略：围绕文字盒子取一圈内缩边框（避开字形本身），取出现最多的颜色作为底色。
- * 文字颜色来自场景（已解析 token），半透明文字按场景 alpha 处理。
+ * Pair the rendered page with the same page with glyph paint suppressed.
+ * DOM grapheme rectangles locate actual text, including spans and transforms.
+ * A browser-rendered ink mask locates core strokes, avoiding antialiased edges;
+ * the weakest core stroke decides the node, including partially hidden glyphs. Missing glyph evidence stays unknown.
  */
 import { decodePng, pixelAt } from './png-decode.mjs';
 
 function toHex({ r, g, b }) {
   return `#${[r, g, b].map(v => Math.round(v).toString(16).padStart(2, '0')).join('')}`.toUpperCase();
 }
-
 function luminance({ r, g, b }) {
   const channel = value => {
     const v = value / 255;
-    return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
+    return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
   };
   return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
 }
-
 export function contrastRatio(a, b) {
-  const la = luminance(a);
-  const lb = luminance(b);
-  return Math.round(((Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05)) * 100) / 100;
+  const la = luminance(a), lb = luminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+}
+export function contrastTextNodes(scenePage) {
+  return (scenePage.nodes || []).filter(n => typeof n.text === 'string'
+    && n.text.replace(/[\p{Cf}\s]/gu, '') && n.visible !== false && Number(n.opacity ?? 1) >= 0.02);
 }
 
-function parseColor(value) {
-  if (typeof value !== 'string') return null;
-  const raw = value.trim();
-  const hex = /^#([0-9a-f]{3,8})$/i.exec(raw);
-  if (hex) {
-    let h = hex[1];
-    if (h.length === 3) h = h.split('').map(c => c + c).join('');
-    if (h.length === 4) h = h.slice(0, 3).split('').map(c => c + c).join('');
-    return {
-      r: parseInt(h.slice(0, 2), 16),
-      g: parseInt(h.slice(2, 4), 16),
-      b: parseInt(h.slice(4, 6), 16),
-      a: h.length >= 8 ? parseInt(h.slice(6, 8), 16) / 255 : 1,
-    };
-  }
-  const rgb = /^rgba?\(([^)]+)\)$/i.exec(raw);
-  if (rgb) {
-    const parts = rgb[1].split(/[,\s/]+/).filter(Boolean).map(Number);
-    if (parts.length >= 3) return { r: parts[0], g: parts[1], b: parts[2], a: parts.length > 3 ? parts[3] : 1 };
-  }
-  return null;
-}
-
-const quantize = c => `${Math.round(c.r / 8) * 8},${Math.round(c.g / 8) * 8},${Math.round(c.b / 8) * 8}`;
-
-/**
- * @param {Buffer} png 画板截图
- * @param {Array<{id:string,x:number,y:number,w:number,h:number,color:string,fontSize:number,fontWeight:number}>} boxes
- *        使用画布坐标（CSS px）
- * @param {{scale?:number}} options scale = 截图像素 / CSS 像素
- */
-export function measurePixelContrast(png, boxes, { scale = 1 } = {}) {
+/** Rectangles are screenshot-relative CSS pixels; scale comes from decoded PNG. */
+export function measurePixelContrast(png, boxes, { backgroundPng = null, inkPng = null, scale = 1, scaleY = scale } = {}) {
   const image = decodePng(png);
-  const results = [];
-  for (const box of boxes) {
-    const fg = parseColor(box.color);
-    if (!fg) continue;
-    const x0 = box.x * scale;
-    const y0 = box.y * scale;
-    const x1 = (box.x + box.w) * scale;
-    const y1 = (box.y + box.h) * scale;
-    if (x1 - x0 < 3 || y1 - y0 < 3) continue;
-
-    // 取内缩 1~2px 的边框环：字形几乎不会贴到边缘，这里基本都是底色。
-    const inset = Math.max(1, Math.round(2 * scale));
-    const counts = new Map();
-    const addPixel = (px, py) => {
-      const c = pixelAt(image, px, py);
-      if (c.a === 0) return;
-      const key = quantize(c);
-      const entry = counts.get(key) || { r: 0, g: 0, b: 0, n: 0 };
-      entry.r += c.r; entry.g += c.g; entry.b += c.b; entry.n += 1;
-      counts.set(key, entry);
-    };
-    for (let px = x0 + inset; px < x1 - inset; px += 1) {
-      addPixel(px, y0 + inset);
-      addPixel(px, y1 - inset - 1);
-    }
-    for (let py = y0 + inset; py < y1 - inset; py += 1) {
-      addPixel(x0 + inset, py);
-      addPixel(x1 - inset - 1, py);
-    }
-    if (!counts.size) continue;
-    const [bestKey, best] = [...counts.entries()].sort((a, b) => b[1].n - a[1].n)[0];
-    const bg = { r: best.r / best.n, g: best.g / best.n, b: best.b / best.n };
-    const size = Number(box.fontSize) || 14;
-    const weight = Number(box.fontWeight) || 400;
-    const large = size >= 24 || (size >= 18.66 && weight >= 700);
-    const required = large ? 3 : 4.5;
-    const ratio = contrastRatio(fg, bg);
-    results.push({
-      id: box.id,
-      ratio,
-      required,
-      passes: ratio >= required,
-      background: toHex(bg),
-      sampleCount: best.n,
-      dominantBucket: bestKey,
-    });
+  const background = backgroundPng ? decodePng(backgroundPng) : null;
+  const ink = inkPng ? decodePng(inkPng) : null;
+  if ([background, ink].some(frame => frame && (frame.width !== image.width || frame.height !== image.height))) {
+    throw new Error('Foreground/background screenshot dimensions differ');
   }
-  return results;
+  return boxes.map(box => {
+    const size = Number(box.fontSize) || 14, weight = Number(box.fontWeight) || 400;
+    const required = size >= 24 || (size >= 18.66 && weight >= 700) ? 3 : 4.5;
+    const base = { id: box.id, required, passes: false, status: 'unknown', ratio: null };
+    if (!background || !ink || !box.glyphs?.length || box.reason) {
+      return { ...base, reason: box.reason || 'missing-glyph-evidence' };
+    }
+    let worst = null, sampleCount = 0, missing = 0;
+    for (const glyph of box.glyphs) {
+      const x0 = Math.max(0, Math.ceil(glyph.x * scale));
+      const y0 = Math.max(0, Math.ceil(glyph.y * scaleY));
+      const x1 = Math.min(image.width, Math.floor((glyph.x + glyph.w) * scale));
+      const y1 = Math.min(image.height, Math.floor((glyph.y + glyph.h) * scaleY));
+      let peak = 0;
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+        peak = Math.max(peak, pixelAt(ink, x, y).r);
+      }
+      if (peak < 32) { missing++; continue; }
+      for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
+        if (pixelAt(ink, x, y).r < Math.max(32, peak * .99)) continue;
+        const fg = pixelAt(image, x, y), bg = pixelAt(background, x, y);
+        const ratio = contrastRatio(fg, bg);
+        sampleCount++;
+        if (!worst || ratio < worst.ratio) worst = { ratio, foreground: toHex(fg), background: toHex(bg) };
+      }
+    }
+    if (!worst || missing) return { ...base, reason: 'glyph-not-distinguishable-or-occluded', missingGlyphs: missing, sampleCount };
+    return { ...base, ...worst, ratio: Math.round(worst.ratio * 100) / 100,
+      status: 'measured', passes: worst.ratio >= required, sampleCount, glyphCount: box.glyphs.length };
+  });
+}
+
+// Executed only in the dedicated browser capture page, never the human editor.
+export function collectRenderedText(pageId, candidates) {
+  const board = [...document.querySelectorAll('.artboard-wrapper')].find(el => el.dataset.artboardId === pageId)?.querySelector('.artboard-outer');
+  if (!board) throw new Error('找不到画板元素');
+  const r = board.getBoundingClientRect();
+  const clip = { x: Math.floor(r.left + scrollX), y: Math.floor(r.top + scrollY), w: Math.ceil(r.width), h: Math.ceil(r.height) };
+  const elements = [...board.querySelectorAll('.studio-node')];
+  const segmenter = new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  const boxes = candidates.map(node => {
+    const el = elements.find(e => e.dataset.nodeId === node.id);
+    const box = { id: node.id, fontSize: node.fontSize, fontWeight: node.fontWeight, glyphs: [] };
+    if (!el) return { ...box, reason: 'text-dom-missing' };
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let text;
+    while ((text = walker.nextNode())) {
+      if (text.parentElement.closest('.studio-node') !== el) continue;
+      const style = getComputedStyle(text.parentElement);
+      let textScale = 1;
+      for (let ancestor = text.parentElement; ancestor && ancestor !== board.parentElement; ancestor = ancestor.parentElement) {
+        const transform = getComputedStyle(ancestor).transform;
+        if (transform === 'none') continue;
+        const m = new DOMMatrix(transform);
+        if (!m.is2D) { textScale = 0; break; }
+        const trace = m.a ** 2 + m.b ** 2 + m.c ** 2 + m.d ** 2;
+        const determinant = (m.a * m.d - m.b * m.c) ** 2;
+        textScale *= Math.sqrt(Math.max(0, (trace - Math.sqrt(Math.max(0, trace ** 2 - 4 * determinant))) / 2));
+      }
+      if (parseFloat(style.webkitTextStrokeWidth) > 0) box.reason = 'text-outline-not-assessable';
+      for (const { segment, index } of segmenter.segment(text.textContent)) {
+        if (!segment.replace(/[\p{Cf}\s]/gu, '')) continue;
+        const range = document.createRange();
+        range.setStart(text, index); range.setEnd(text, index + segment.length);
+        for (const rect of range.getClientRects()) {
+          if (!rect.width || !rect.height) continue;
+          box.glyphs.push({ x: rect.left + scrollX - clip.x, y: rect.top + scrollY - clip.y, w: rect.width, h: rect.height });
+        }
+        // The strictest span threshold applies; base node size must not hide small text.
+        const size = parseFloat(style.fontSize) * textScale, weight = parseFloat(style.fontWeight) || 400;
+        if (size < 24 && !(size >= 18.66 && weight >= 700)) { box.fontSize = 14; box.fontWeight = 400; }
+      }
+    }
+    if (box.glyphs.some(g => g.x < 0 || g.y < 0 || g.x + g.w > clip.w || g.y + g.h > clip.h)) box.reason = 'text-outside-capture';
+    el.setAttribute('data-studio-hide-glyphs', '');
+    return box;
+  });
+  // Simultaneous glyph suppression cannot attribute intersecting text layers.
+  // Keep those nodes unknown rather than borrow another node's visible ink.
+  const intersects = (a, b) => a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+  for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+    if (boxes[i].glyphs.some(a => boxes[j].glyphs.some(b => intersects(a, b)))) {
+      boxes[i].reason = boxes[j].reason = 'overlapping-text-layers';
+    }
+  }
+  return { clip, boxes, dpr: devicePixelRatio };
 }

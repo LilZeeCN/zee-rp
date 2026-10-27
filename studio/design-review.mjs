@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { computeDesignMetrics, summarizeMetrics } from './design-metrics.mjs';
+import { summarizeMetrics } from './design-metrics.mjs';
 
 const checkList = ['主任务和主操作是否足够明确', '图像主体、图文比例和留白是否服务内容', '标题、正文、辅助信息的层级是否清楚', '空态、错误态、长文本及连续操作是否可用', '与所选参考相比，哪些决定需要改，为什么'];
 export async function reviewDesign(studio, { pageId, baseRevision, reviewId = null, observations = null } = {}) {
@@ -35,7 +35,8 @@ export async function reviewDesign(studio, { pageId, baseRevision, reviewId = nu
     const r = asset.media?.recipe;
     if (r?.fadeToToken && studio.store.doc.tokens?.colors?.[r.fadeToToken] !== r.fadeColor) findings.push({ code: 'W_MEDIA_TOKEN_STALE', src: asset.relativePath, token: r.fadeToToken });
   }
-  const metrics = computeDesignMetrics(page, { doc: studio.store.doc });
+  const metrics = await studio.measureDesignMetrics(pageId);
+  if (metrics.baseRevision !== baseRevision) throw Object.assign(new Error('测量期间画布已变化，请重新评审'), { code: 'E_STALE_REVIEW' });
   // 越界以度量层为唯一来源，避免两套阈值（0.5px vs 1px）打出相反结论。
   for (const item of metrics.metrics.containment?.outside || []) {
     const sides = Object.entries(item.over).filter(([, value]) => value > 0).map(([key, value]) => `${key}+${Math.round(value)}`);
@@ -58,7 +59,7 @@ export async function reviewDesign(studio, { pageId, baseRevision, reviewId = nu
       code: 'W_CONTRAST_UNKNOWN',
       severity: 'error',
       nodeId,
-      detail: '文字压在图片/渐变上，底色不可计算——请确认可读性或加遮罩',
+      detail: `文字像素无法确认：${metrics.metrics.contrast.unknownReasons?.find(r => r.id === nodeId)?.reason || '底色不可解析'}，需要进一步检查可读性`,
     });
   }
 

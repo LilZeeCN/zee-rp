@@ -275,13 +275,14 @@ export const studioHandlers = {
     return callServerJson(baseUrl, '/api/design/metrics', 'POST', {
       pageId: args.pageId || null,
       thresholds: args.thresholds || null,
+      pixelTruth: args.pixelTruth,
     });
   },
   async studio_design_pixel_contrast(args = {}) {
     const baseUrl = await resolveServerUrl(args);
     return callServerJson(baseUrl, '/api/design/pixel-contrast', 'POST', {
       pageId: args.pageId || null,
-      dpr: args.dpr || 2,
+      dpr: args.dpr ?? 2,
     });
   },
   async studio_design_content_plan(args = {}) {
@@ -551,6 +552,7 @@ export const studioTools = [
         projectDir: { type: 'string' },
         pageId: { type: 'string' },
         thresholds: { type: 'object' },
+        pixelTruth: { type: 'boolean', description: '默认真实浏览器像素测量；false 显式使用几何估算。失败回落时标注原因。' },
       },
       additionalProperties: false,
     },
@@ -558,7 +560,7 @@ export const studioTools = [
   },
   {
     name: 'studio_design_pixel_contrast',
-    description: '像素真值对比度：截图后用真实像素取样计算，不再用几何猜 CSS 合成结果（遮罩、滤镜、混合模式、图片底一次覆盖）。返回每处文字的底色、比值、是否达标。',
+    description: '像素对比度：用真实浏览器原图、隐藏字形底图和字形掩膜，逐笔画测量对比度；支持非整数DPR。描边、重叠文本和缺失证据显式unknown且不通过。',
     readOnly: true,
     inputSchema: {
       type: 'object',
@@ -567,7 +569,7 @@ export const studioTools = [
         port: { type: 'integer' },
         projectDir: { type: 'string' },
         pageId: { type: 'string' },
-        dpr: { type: 'integer' },
+        dpr: { type: 'number', minimum: 0.5, maximum: 4 },
       },
       additionalProperties: false,
     },

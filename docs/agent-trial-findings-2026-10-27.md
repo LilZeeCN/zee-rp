@@ -1212,3 +1212,31 @@ after : type-scale（唯一剩下的，属内容层问题）
 ### 回归
 
 `npm test 18/18`；新增工具与端点在 `anti-gaming` 之外单独验证（见本节实测表）。
+
+
+## 2026-10-27 续接P0–P2：像素默认与字形核心测量
+
+接手基线：本目录 `studio-design-quality`，HEAD `b655050`；96项既有未提交工作。开发对象是用户指定的正式Skill目录，不将 `/Users/lilzee/axure-exp/zee-rp` 的旧分支覆盖过来。
+
+### 失败与修复
+
+1. 旧版MCP未传pixelTruth，默认是几何；像素HTTP端点重复代码、硬编码DPR2，UI浮层污染截图。统一捕获/度量方法，默认像素，显式false才跳过；失败回落带source和原因。
+2. 边框众数把alpha=.2、opacity=.2、全遮挡、跨字渐变均判21绿。最初改为逐字符原图/底图差分，仍被单个M内部的渐变和半字遮挡打穿。
+3. 改为第三份浏览器字形掩膜，保留字体/spans/变换，去除场景绘制、遮挡和裁切，取每个字形掩膜峰值99%的核心笔画，逐像素测原图/底图最低对比度；不将抗锯齿边缘当正文颜色。
+4. 第三mask初稿保留overflow，半字仍可绿；现掩膜去除容器overflow，画板外Range显式unknown。抑制glyph不再改color，避免破坏currentColor背景。描边及叠字无法可靠归属时unknown，不凭空算值。
+5. 大字缩到小字时，按祖先2D变换最小奇异值计算保守有效字号；3D尺度不确定时采用小字阈值。
+6. 度量按预期文字总表对账；缺失采样有nodeId/reason，不按空数组刷绿。截图与像素捕获共用串行队列，测量结束校验revision/hash，任何异常恢复临时样式。看图评审同样默认像素，修复计划自证明确为geometry，避免把离线候选称为像素实测。
+
+### 验证与证据
+
+- `npm run test:studio-pixels`：14/14（含失败清理、并发捕获和测量期间改稿的版本拒收）。该套件已接入npm test；无Chrome或无WebSocket的运行时明确skip，不把skip当浏览器验证。
+- `test:studio-anti-gaming`：原16组均通过，其中半透明层两组明确核对本机source=pixel；测试实例逐个关闭。
+- 核心：18/18；真实stdio：7/7；CSS：9/9；真实MCP参考/素材/评审工作流：3/3。
+- 独立只读子代理：6个真实Chrome/HTTP脚本，70个节点判定检查（包含DPR/滚动重复，并非70种攻击）全部符合预期。主代理重新执行归档的assert-final.py核对70/70。
+- 实像素控制约20.47–20.65，未伪称理论21；20%白字黑底约1.64–1.66；字内消失/currentColor同色底/半字裁切为1并拒绝；40px×scale(.25)按4.5阈值拒绝约3.54。
+- 本地Node24.15.0在最终重复回归时曾卡于process.exit；macOS sample显示V8 Maglev后台编译等待GC而主线程Shutdown join。保留失败日志与sample，用项目CI覆盖的Node22.23.1完成最终核心回归。未修改系统Node或用户配置。
+- 原始失败、当前源码SHA、最终raw、截图和复现脚本归档：`outputs/design-quality-20261027/independent-audit/`；运行 `python3 outputs/design-quality-20261027/independent-audit/assert-final.py` 可离线核对。普通日志同在本轮outputs目录。
+
+### 交付边界
+
+只证明列举的本机Chrome样本；描边、叠字、画板外返回unknown且不通过。几何fallback及离线fix/explore明确标注来源，不是像素门禁。没有新增Axure加载/原生预览/GUI编辑保存重开结论。P3内容判断、层级重构、更多布局轴、区域语义尚未实现。本目录本地main快进质量分支；未push/发布，未改原4326工程，未合入96项原有工作。

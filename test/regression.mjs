@@ -29,6 +29,7 @@ try {
   check('design quality suites (studio)', () => {
     const suites = [
       'test/studio-design-metrics-check.mjs',
+      'test/studio-pixel-contrast-check.mjs',
       'test/studio-anti-gaming-check.mjs',
       'test/studio-consistency-check.mjs',
       'test/studio-fix-plan-check.mjs',
