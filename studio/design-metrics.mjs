@@ -901,7 +901,7 @@ const THRESHOLDS = {
   slopViolations: 0,
 };
 
-export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc = null } = {}) {
+export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc = null, pixelContrast = null } = {}) {
   // 页面自己的 domain 优先：一个 mobile 工程里可以有 web 页，反过来同样成立。
   const domain = scenePage.domain || doc?.domain || 'mobile';
   const budget = {
@@ -913,7 +913,22 @@ export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc =
   const scale = typeScale(nodes);
   const grid = gridAlignment(nodes);
   const space = whitespaceRatio(nodes, scenePage.board);
-  const contrast = contrastReport(nodes, byId);
+  // 像素真值优先：截图取样比几何模拟可靠，尤其在有遮罩/滤镜/图片时。
+  const heuristicContrast = contrastReport(nodes, byId);
+  const contrast = pixelContrast
+    ? {
+      checked: pixelContrast.length,
+      total: pixelContrast.length,
+      unknown: 0,
+      unknownNodes: [],
+      failing: pixelContrast.filter(r => !r.passes).length,
+      minRatio: pixelContrast.length ? Math.min(...pixelContrast.map(r => r.ratio)) : null,
+      worst: pixelContrast.filter(r => !r.passes).slice(0, 5).map(r => ({ id: r.id, ratio: r.ratio, required: r.required })),
+      source: 'pixel',
+      skippedUnknownBackground: false,
+      source: 'pixel',
+    }
+    : heuristicContrast;
   const hues = huePalette(nodes);
   const containment = containmentReport(scenePage, nodes, byId);
   const exportBudget = exportProjection(scenePage);

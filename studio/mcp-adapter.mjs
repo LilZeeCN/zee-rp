@@ -277,6 +277,13 @@ export const studioHandlers = {
       thresholds: args.thresholds || null,
     });
   },
+  async studio_design_pixel_contrast(args = {}) {
+    const baseUrl = await resolveServerUrl(args);
+    return callServerJson(baseUrl, '/api/design/pixel-contrast', 'POST', {
+      pageId: args.pageId || null,
+      dpr: args.dpr || 2,
+    });
+  },
   async studio_design_content_plan(args = {}) {
     const baseUrl = await resolveServerUrl(args);
     return callServerJson(baseUrl, '/api/design/content-plan', 'POST', { pageId: args.pageId || null });
@@ -548,6 +555,23 @@ export const studioTools = [
       additionalProperties: false,
     },
     handler: studioHandlers.studio_design_metrics,
+  },
+  {
+    name: 'studio_design_pixel_contrast',
+    description: '像素真值对比度：截图后用真实像素取样计算，不再用几何猜 CSS 合成结果（遮罩、滤镜、混合模式、图片底一次覆盖）。返回每处文字的底色、比值、是否达标。',
+    readOnly: true,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        port: { type: 'integer' },
+        projectDir: { type: 'string' },
+        pageId: { type: 'string' },
+        dpr: { type: 'integer' },
+      },
+      additionalProperties: false,
+    },
+    handler: studioHandlers.studio_design_pixel_contrast,
   },
   {
     name: 'studio_design_content_plan',

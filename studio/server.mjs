@@ -303,6 +303,44 @@ export class StudioServer {
     return waitPromise;
   }
 
+
+  // 截图取样：把"对比度"从公式猜测变成真实测量。
+  async capturePixelContrast(pageId) {
+    const { measurePixelContrast } = await import('./pixel-truth.mjs');
+    const target = this.scene.pages.find(p => p.id === pageId);
+    if (!target) throw Object.assign(new Error(`页面不存在：${pageId}`), { code: 'E_PAGE_NOT_FOUND' });
+    const page = await this.ensureManagedBrowserPage();
+    await this.waitForRenderedRevision(this.store.appliedRevision, { timeoutMs: 5000 });
+    await page.evaluate(`(async () => {
+      const pg = window.__STUDIO_STATE__?.scene?.pages?.find(p => p.id === ${JSON.stringify(pageId)});
+      if (window.__STUDIO_APP__ && pg) {
+        if (window.__STUDIO_APP__.state.mode !== 'design') document.querySelector('[data-mode="design"]')?.click();
+        window.__STUDIO_APP__.selectNodes([], ${JSON.stringify(pageId)});
+        window.__STUDIO_APP__.setPanZoom(40 - (pg._stageX ?? 60), 40 - (pg._stageY ?? 40), 1);
+      }
+      if (document.fonts && document.fonts.ready) await document.fonts.ready;
+      await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+    })()`);
+    const rect = await page.evaluate(`(() => {
+      const el = document.querySelector('.artboard-wrapper[data-artboard-id=${JSON.stringify(pageId)}] .artboard-outer')
+        || document.getElementById('screen-root');
+      if (!el) return null;
+      const r = el.getBoundingClientRect();
+      return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+    })()`);
+    if (!rect) throw Object.assign(new Error('找不到画板元素'), { code: 'E_NO_ARTBOARD' });
+    const png = await page.screenshot({
+      format: 'png',
+      clip: { x: rect.x, y: rect.y, w: rect.w, h: rect.h, scale: 1 },
+      captureBeyondViewport: true,
+    });
+    const boxes = (target.nodes || [])
+      .filter(n => typeof n.text === 'string' && n.text.trim() && n.visible !== false && Number(n.opacity ?? 1) >= 0.02)
+      .map(n => ({ id: n.id, x: n.x, y: n.y, w: n.w, h: n.h, color: n.color, fontSize: n.fontSize, fontWeight: n.fontWeight }));
+    const results = measurePixelContrast(png, boxes, { scale: 2 });
+    return { pageId, dpr: 2, board: { w: target.board?.screenW, h: target.board?.screenH }, results };
+  }
+
   async captureScreenshot({
     revision = this.store.appliedRevision,
     pageId = null,
@@ -693,7 +731,21 @@ export class StudioServer {
         const page = this.scene.pages.find(p => p.id === pageId);
         if (!page) return sendJson(res, 404, { ok: false, code: 'E_PAGE_NOT_FOUND', message: `页面不存在：${pageId}` });
         const { computeDesignMetrics, summarizeMetrics } = await import('./design-metrics.mjs');
-        const result = computeDesignMetrics(page, { thresholds: body.thresholds || undefined, doc: this.store.doc });
+        // 像素真值优先：截图取样比几何模拟可靠（遮罩/滤镜/图片底一次覆盖）。
+        let pixelContrast = null;
+        if (body.pixelTruth) {
+          try {
+            const shot = await this.capturePixelContrast(pageId);
+            pixelContrast = shot.results;
+          } catch (err) {
+            pixelContrast = null;
+          }
+        }
+        const result = computeDesignMetrics(page, {
+          thresholds: body.thresholds || undefined,
+          doc: this.store.doc,
+          pixelContrast,
+        });
         return sendJson(res, 200, { ok: true, ...result, summary: summarizeMetrics(result) });
       }
       if (req.method === 'POST' && pathname === '/api/design/anchors') {
@@ -747,6 +799,56 @@ export class StudioServer {
           return sendJson(res, 400, { ok: false, code: err.code || 'E_ANCHORS', message: err.message });
         }
       }
+      if (req.method === 'POST' && pathname === '/api/design/pixel-contrast') {
+        const body = await readJsonBody(req);
+        const pageId = body.pageId || this.store.doc.pages[0]?.id || 'home';
+        const target = this.scene.pages.find(p => p.id === pageId);
+        if (!target) return sendJson(res, 404, { ok: false, code: 'E_PAGE_NOT_FOUND', message: `页面不存在：${pageId}` });
+        const { measurePixelContrast } = await import('./pixel-truth.mjs');
+        const page = await this.ensureManagedBrowserPage();
+        await this.waitForRenderedRevision(this.store.appliedRevision, { timeoutMs: 5000 });
+        // 让画板以 1:1 落在视口内，再按画板矩形裁剪截图——坐标才能和 scene 对上。
+        await page.evaluate(`(async () => {
+          const pg = window.__STUDIO_STATE__?.scene?.pages?.find(p => p.id === ${JSON.stringify(pageId)});
+          if (window.__STUDIO_APP__ && pg) {
+            if (window.__STUDIO_APP__.state.mode !== 'design') document.querySelector('[data-mode="design"]')?.click();
+            window.__STUDIO_APP__.selectNodes([], ${JSON.stringify(pageId)});
+            window.__STUDIO_APP__.setPanZoom(40 - (pg._stageX ?? 60), 40 - (pg._stageY ?? 40), 1);
+          }
+          if (document.fonts && document.fonts.ready) await document.fonts.ready;
+          await new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)));
+        })()`);
+        const rect = await page.evaluate(`(() => {
+          const el = document.querySelector('.artboard-wrapper[data-artboard-id=${JSON.stringify(pageId)}] .artboard-outer')
+            || document.getElementById('screen-root');
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return { x: Math.round(r.left), y: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height) };
+        })()`);
+        if (!rect) return sendJson(res, 503, { ok: false, code: 'E_NO_ARTBOARD', message: '找不到画板元素' });
+        const dpr = 2;
+        const png = await page.screenshot({
+          format: 'png',
+          clip: { x: rect.x, y: rect.y, w: rect.w, h: rect.h, scale: 1 },
+          captureBeyondViewport: true,
+        });
+        const boxes = (target.nodes || [])
+          .filter(n => typeof n.text === 'string' && n.text.trim() && n.visible !== false && Number(n.opacity ?? 1) >= 0.02)
+          .map(n => ({ id: n.id, x: n.x, y: n.y, w: n.w, h: n.h, color: n.color, fontSize: n.fontSize, fontWeight: n.fontWeight }));
+        const results = measurePixelContrast(png, boxes, { scale: dpr });
+        return sendJson(res, 200, {
+          ok: true,
+          pageId,
+          source: 'pixel',
+          dpr,
+          board: { w: target.board?.screenW || rect.w, h: target.board?.screenH || rect.h },
+          measured: results.length,
+          failing: results.filter(r => !r.passes).length,
+          worst: results.filter(r => !r.passes).slice(0, 5),
+          results,
+          baseRevision: this.store.appliedRevision,
+        });
+      }
       if (req.method === 'POST' && pathname === '/api/design/content-plan') {
         const body = await readJsonBody(req);
         const pageId = body.pageId || this.scene.pages[0]?.id;
@@ -761,10 +863,19 @@ export class StudioServer {
         const page = this.scene.pages.find(p => p.id === pageId);
         if (!page) return sendJson(res, 404, { ok: false, code: 'E_PAGE_NOT_FOUND', message: `页面不存在：${pageId}` });
         const { computeDesignMetrics } = await import('./design-metrics.mjs');
+        let pixelContrast = null;
+        if (body.pixelTruth) {
+          try {
+            const shot = await this.capturePixelContrast(pageId);
+            pixelContrast = shot.results;
+          } catch (err) {
+            pixelContrast = null;
+          }
+        }
         const { buildFixPlan } = await import('./fix-plan.mjs');
         const { resolveDocumentScene } = await import('./scene-resolver.mjs');
         const { applySingleCommand } = await import('./commands.mjs');
-        const metrics = computeDesignMetrics(page, { doc: this.store.doc });
+        const metrics = computeDesignMetrics(page, { doc: this.store.doc, pixelContrast });
         const plan = buildFixPlan(page, metrics, this.store.doc);
 
         // 自证：在文档副本上真跑一遍自己的命令，逐条判断"是否真的让某个检查转正"。
