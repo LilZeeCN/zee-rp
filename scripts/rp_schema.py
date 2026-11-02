@@ -5,7 +5,9 @@ references, row scope, dataset columns and target-specific behavior support.
 """
 from rp_language import (
     NODE_PROPS, ACTION_PROPS, GEOMETRY, THEMES, EVENTS, EVENT_SHORTHANDS,
-    MACRO_PROPS, MACRO_ITEM_PROPS,
+    MACRO_PROPS, MACRO_ITEM_PROPS, DEVICE_CANVAS_PRESETS, MAX_FONT_SIZE,
+    OPTION_KINDS, STATE_STYLE_KEYS,
+    CARD_CONTENT_KEYS, CARD_CONTENT_OPTIONS, BOX_TEXT_STYLE_KEYS, BOX_TEXT_CONTAINER_KEYS, NODE_SOURCE_ALIASES,
 )
 
 
@@ -40,9 +42,12 @@ def language_schema():
         obj({"variable": ident}, ["variable"]), obj({"widget": ref("reference")}, ["widget"]),
         obj({"item": ident}, ["item"]), obj({"caller": ident}, ["caller"]),
         obj({"op": {"enum": ["+", "-", "*", "/", "==", "!=", ">", "<", ">=", "<=", "&&", "||"]}, "left": ref("value"), "right": ref("value")}, ["op", "left", "right"]),
-        obj({"fn": {"enum": ["text", "number", "not", "lower", "upper", "length", "concat"]}, "args": array(ref("value"), 1)}, ["fn", "args"])]}
+        obj({"fn": {"enum": ["text", "number", "not", "lower", "upper", "length", "concat", "contains", "remove"]}, "args": array(ref("value"), 1)}, ["fn", "args"])]}
     defs["value"] = either(ref("runtime"), ref("compileExpression"))
-    numeric = either({"type": "number", "minimum": 0}, ref("compileExpression"))
+    runtime_object = {"allOf": [ref("runtime"), {"type": "object"}]}
+    defs["booleanValue"] = either({"type": "boolean"}, {"type": "string", "pattern": "^(?:=(?!=)|\\[\\[)"}, ref("compileExpression"), runtime_object)
+    defs["textValue"] = either(text, ref("compileExpression"), runtime_object)
+    numeric = either({"type": "number", "minimum": 0}, {"type": "string", "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"}, ref("compileExpression"))
     string_expr = either(text, ref("compileExpression"))
     def enum_expr(choices):
         return either({"enum": choices}, ref("compileExpression"))
@@ -51,17 +56,44 @@ def language_schema():
         "x": number, "y": number, "w": {"type": "number", "minimum": 0}, "h": {"type": "number", "minimum": 0}})}
     event_value = ref("eventValue")
     common = {"id": ident, "name": text, "on": ref("events"), "font": nonempty, "when": ref("value"), "adaptive": adaptive,
+              "goto": ident, "link": ident, "navigate": ident,
               "size": {"type": "array", "items": ref("size"), "minItems": 2, "maxItems": 2},
               **{k: event_value for k in EVENT_SHORTHANDS},
               **{k: ref("size") if k in {"w", "h"} else string_expr if k == "anchor" else either(number, ref("compileExpression")) if k in {"x", "y", "right", "bottom"} else numeric for k in GEOMETRY}}
+    panel_state = {
+        "type": "object",
+        "properties": {
+            "id": ident, "state": ident, "name": text, "title": text, "label": text,
+            "root": ref("node"), "children": array(ref("node")),
+            "layout": enum_expr(["row", "column", "stack", "grid"]),
+            "w": ref("size"), "h": ref("size"), "gap": numeric, "padding": padding,
+            "align": enum_expr(["start", "center", "end", "stretch"]),
+            "justify": enum_expr(["start", "center", "end", "space-between", "space-around", "space-evenly", "around", "evenly"]),
+            "fill": string_expr, "bg": string_expr, "background": string_expr,
+            "stroke": string_expr, "borderColor": string_expr,
+            "strokeWidth": numeric, "borderWidth": numeric,
+            "radius": numeric, "rounded": numeric, "borderRadius": numeric,
+            "columns": positive_int, "equalHeight": {"type": "boolean"},
+        },
+        "anyOf": [
+            {"required": ["id", "root"]},
+            {"required": ["id", "children"]},
+            {"required": ["state", "root"]},
+            {"required": ["state", "children"]},
+        ],
+        "additionalProperties": False,
+    }
     special = {
-        "children": array(ref("node")), "states": array(obj({"id": ident, "root": ref("node")}, ["id", "root"]), 1),
+        "activeIndicator": enum_expr(["none", "underline", "dot"]),
+        "activeVariant": enum_expr(["primary", "brand", "secondary", "outline", "ghost", "soft", "danger", "success", "warning", "error"]),
+        "itemFlex": numeric,
+        "children": array(ref("node")), "states": array(panel_state, 1),
         "template": ref("node"), "master": ref("node"), "detail": ref("node"), "dataset": ident, "key": ident, "as": ident,
         "slots": {"type": "object", "additionalProperties": either(ref("node"), array(ref("node")))},
         "rowHeight": positive_int, "pageSize": positive_int, "rowGap": nonnegative_int,
         "layout": enum_expr(["row", "column", "stack", "grid"]), "justify": enum_expr(["start", "center", "end", "space-between", "space-around", "space-evenly", "around", "evenly"]),
         "native": {"const": True}, "equalHeight": {"type": "boolean"}, "columns": positive_int, "padding": padding,
-        "variant": enum_expr(["primary", "secondary", "outline", "soft", "danger", "glass"]),
+        "variant": enum_expr(["primary", "secondary", "outline", "soft", "danger", "glass", "ghost"]),
         "wrap": {"type": "boolean"}, "smooth": {"type": "boolean"},
         "italic": {"type": "boolean"}, "underline": {"type": "boolean"}, "strikethrough": {"type": "boolean"},
         "aurora": either({"type": "boolean"}, array(text), ref("compileExpression")),
@@ -72,12 +104,40 @@ def language_schema():
     numeric_fields = {"x", "y", "flex", "gap", "columnGap", "fontSize", "fontWeight", "lineGap", "lineHeight", "radius", "headerHeight", "headerRadius", "rowRadius", "tableGap", "inputHeight", "inputRadius", "titleFontSize", "submitHeight", "labelWidth", "headerFontSize", "headerFontWeight", "width", "listWidth", "masterWidth", "bodyHeight"}
 
     def property_shape(name):
+        if name in {"fontSize", "titleFontSize", "headerFontSize", "valueFontSize"}:
+            return either({"type": "number", "exclusiveMinimum": 0, "maximum": MAX_FONT_SIZE},
+                          {"type": "string", "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"}, ref("compileExpression"))
+        if name in {"alignX", "pin"}:
+            return enum_expr(["left", "center", "right"] if name == "alignX" else ["top", "bottom", "left", "right"])
+        if name in {"afterGap", "pinGap"}:
+            return numeric
         if name == "adaptive":
             return adaptive
         if name == "size":
             return either(common["size"], numeric)
-        if name in {"weight", "textPaddingX", "letterSpacing", "opacity", "strokeWidth", "backdropBlur", "noise", "innerGlow"}:
+        if name in {"weight", "textPaddingX", "letterSpacing", "opacity", "strokeWidth", "backdropBlur", "noise", "innerGlow", "max", "barHeight", "trackHeight", "rotation"}:
             return numeric
+        if name in {"visible", "hidden", "showValue", "darkIsland", "showHomeIndicator"}:
+            return {"type": "boolean"}
+        if name in {"checked", "selected", "disabled", "multiple"}:
+            return {"type": "boolean"}
+        if name == "options":
+            return array(nonempty, 1)
+        if name == "selectedIndex":
+            return nonnegative_int
+        if name == "selectedIndices":
+            return {**array(nonnegative_int), "uniqueItems": True}
+        if name in {"group", "selectionGroup"}:
+            return text
+        if name == "styles":
+            style = obj({key: property_shape(key) for key in sorted(STATE_STYLE_KEYS)})
+            return obj({state: style for state in ("hover", "selected", "disabled", "focused")})
+        if name == "percent":
+            return ref("value")
+        if name in {"tabBar", "navBar"}:
+            return either({"type": "object"}, {"const": False})
+        if name in {"onBack", "onRight"}:
+            return event_value
         if name in {"w", "h", "repeaterHeight"}:
             return ref("size")
         if name in special:
@@ -89,6 +149,8 @@ def language_schema():
         return string_expr
 
     def node_variants(kind, props, required=()):
+        props = {**props, "visible": {"type": "boolean"}, "hidden": {"type": "boolean"}}
+        props.update({alias: props[canonical] for alias, canonical in NODE_SOURCE_ALIASES.items() if canonical in props})
         standard = obj({"type": {"const": kind}, **props}, ["type", "id", *required])
         shorthand_props = {k: v for k, v in props.items() if k != "type"}
         shorthand_props[kind] = ident
@@ -104,13 +166,37 @@ def language_schema():
             props["align"] = enum_expr(["start", "center", "end", "stretch"])
         elif "align" in fields:
             props["align"] = enum_expr(["left", "center", "right"])
-        required = ["dataset", "template"] if kind == "repeater" else ["states"] if kind == "dynamic-panel" else ["src"] if kind == "image" else []
+        required = ["dataset", "template"] if kind == "repeater" else ["states"] if kind == "dynamic-panel" else ["src"] if kind == "image" else ["options"] if kind in OPTION_KINDS else []
         nodes.extend(node_variants(kind, props, required))
+    base_props = {shape["properties"]["type"]["const"]: {key: value for key, value in shape["properties"].items() if key != "type"}
+                  for shape in nodes if "type" in shape["properties"]}
+    canonical_box_fields = set(base_props["box"])
+    # These source shapes are consumed by the same normalizer that handles
+    # content sugar before canonical AST validation.
+    for shape in node_variants("box", base_props["label"], ["text"]):
+        shape["not"] = {"anyOf": [{"required": [key]} for key in ("children",) + BOX_TEXT_CONTAINER_KEYS]}
+        nodes.append(shape)
+    text_box_props = {**base_props["box"], "text": base_props["label"]["text"],
+                      **{key: base_props["label"][key] for key in BOX_TEXT_STYLE_KEYS}}
+    for shape in node_variants("box", text_box_props, ["text"]):
+        shape["not"] = {"required": ["children"]}
+        shape["anyOf"] = [{"required": [key]} for key in BOX_TEXT_CONTAINER_KEYS]
+        nodes.append(shape)
+    card_content_props = {**base_props["card"], **{key: property_shape(key) for key in CARD_CONTENT_KEYS + CARD_CONTENT_OPTIONS}}
+    for shape in node_variants("card", card_content_props):
+        shape["anyOf"] = [{"required": [key]} for key in CARD_CONTENT_KEYS]
+        nodes.append(shape)
+    droplist_props = {**common, **{key: property_shape(key) for key in NODE_PROPS["combobox"]}}
+    droplist_props["align"] = enum_expr(["left", "center", "right"])
+    nodes.extend(node_variants("droplist", droplist_props, ["options"]))
     for alias in ("row", "column", "grid", "stack"):
         props = {**common, **{k: property_shape(k) for k in NODE_PROPS["box"]}}
         props.pop("font")
         props["align"] = enum_expr(["start", "center", "end", "stretch"])
         nodes.extend(node_variants(alias, props))
+    panel_alias_props = {**common, **{k: property_shape(k) for k in NODE_PROPS["dynamic-panel"]}}
+    panel_alias_props.pop("font", None)
+    nodes.extend(node_variants("panel", panel_alias_props, ["states"]))
     repeat_props = {k: common[k] for k in {"id", "size"} | GEOMETRY}
     repeat_props.update({k: special[k] for k in ("dataset", "as", "key", "template")})
     nodes.extend(node_variants("repeat", repeat_props, ["dataset", "template"]))
@@ -168,7 +254,7 @@ def language_schema():
                 props[list_name] = array(item, 1)
         if kind in ("kv-list", "detail-card"):
             props["rowHeight"] = {"type": "number", "minimum": 4}
-        nodes.extend(node_variants(kind, props, macro_required[kind]))
+        nodes.extend(node_variants(kind, props, macro_required.get(kind, [])))
     defs["node"] = {"anyOf": nodes}
 
     actions = []
@@ -176,7 +262,16 @@ def language_schema():
         props = {"type": {"const": kind}}
         for name in fields:
             props[name] = ref("reference") if name == "target" else ref("value") if name in {"text", "value", "where"} else array({"type": "object", "additionalProperties": ref("value")}, 1) if name == "rows" else {"type": "object", "minProperties": 1, "additionalProperties": ref("value")} if name == "set" else nonnegative_int if name == "ms" else either({"enum": ["next", "previous", "first", "last"]}, positive_int) if name == "page" and kind == "data-page" else text
+        if kind in {"set-check", "set-selected"}:
+            props["checked" if kind == "set-check" else "selected"] = ref("booleanValue")
+        if kind == "set-option":
+            props["value"] = ref("textValue")
         optional = {"direction"} if kind == "data-sort" else {"name"} if kind == "data-filter" else set()
+        if kind == "set-size":
+            props["width"] = ref("value")
+            props["height"] = ref("value")
+            props["duration"] = {"type": "number", "minimum": 0}
+            optional = {"duration", "easing", "anchor"}
         if kind == "data-sort":
             props["direction"] = {"enum": ["ascending", "descending", "asc", "desc"]}
         if kind == "data-add":
@@ -229,7 +324,10 @@ def language_schema():
         "page": ident, "fields": {"type": "object", "additionalProperties": text}, "targets": {"type": "object", "additionalProperties": text}})
     selection_views = either(array(selection_view), {"type": "object", "propertyNames": ident, "additionalProperties": selection_view})
     master_ref = either(ident, obj({"master": ident, "id": ident, "x": number, "y": number}))
-    page = obj({"id": ident, "name": text, "canvas": either(obj({"w": {"type": "number", "exclusiveMinimum": 0}, "h": {"type": "number", "exclusiveMinimum": 0}}, ["w", "h"]), {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 2, "maxItems": 2}),
+    palette_spec = {"type": "object", "additionalProperties": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"}}
+    page = obj({"id": ident, "name": text, "device": {"enum": sorted(DEVICE_CANVAS_PRESETS)}, "shell": {"enum": sorted(DEVICE_CANVAS_PRESETS)},
+                "domain": {"enum": ["web", "mobile", "doc", "test"]},
+                "canvas": either(obj({"w": {"type": "number", "exclusiveMinimum": 0}, "h": {"type": "number", "exclusiveMinimum": 0}}, ["w", "h"]), {"type": "array", "items": {"type": "number", "exclusiveMinimum": 0}, "minItems": 2, "maxItems": 2}),
                 "root": ref("node"), "on": ref("events"), "onLoad": event_value,
                 "layout": either(ref("node"), array(ref("node"))), "slot": special["slots"], "views": selection_views,
                 "master": master_ref, "masters": either(ident, array(master_ref)),
@@ -349,7 +447,9 @@ def language_schema():
         "views": array(product_view_spec, 1),
     }, ["entities"])
     result = obj({"$schema": text, "language": {"const": "rp/1"}, "target": {"const": 9}, "name": text, "theme": {"enum": sorted(THEMES)},
-        "domain": {"enum": ["web", "mobile", "doc", "test"]}, "shell": {"enum": ["mobile-stack", "tablet-split", "web-console"]},
+        "palette": palette_spec, "tokens": {"type": "object", "additionalProperties": ref("dataValue")},
+        "device": {"enum": sorted(DEVICE_CANVAS_PRESETS)}, "devMode": {"type": "boolean"},
+        "domain": {"enum": ["web", "mobile", "doc", "test"]}, "shell": {"enum": sorted(DEVICE_CANVAS_PRESETS) + ["mobile-stack", "tablet-split", "web-console"]},
         "static": {"type": "boolean"}, "strictAudit": {"type": "boolean"},
         "product": ref("product"),
         "models": {"type": "object", "propertyNames": ident, "additionalProperties": model},
@@ -366,4 +466,29 @@ def language_schema():
         "components": {"type": "object", "additionalProperties": obj({"params": {"type": "object", "propertyNames": ident, "additionalProperties": ident}, "root": ref("node")}, ["root"])},
         "pages": array(page, 1)}, ["language"])
     result["anyOf"] = [{"required": ["pages"]}, {"required": ["product"]}]
-    return {"$schema": "https://json-schema.org/draft/2020-12/schema", "title": "RP/1 prototype language", "description": "RP/1 standard AST, sugar and macro source shapes. Run check for expression types, dynamic component argument names, references, row scope, dataset columns and target support.", **result, "$defs": defs}
+    source_properties = {}
+    for shape in nodes:
+        kind = shape.get("properties", {}).get("type", {}).get("const")
+        if kind:
+            source_properties.setdefault(kind, set()).update(shape["properties"])
+    box_label_fields = source_properties.get("label", set()) - canonical_box_fields
+    for kind, fields in source_properties.items():
+        fields.update({"visible", "hidden"})
+        if kind == "card":
+            fields.update(CARD_CONTENT_KEYS + CARD_CONTENT_OPTIONS)
+        if kind == "box":
+            fields.update(box_label_fields)
+            fields.update(("text",) + BOX_TEXT_STYLE_KEYS)
+        fields.update(alias for alias, canonical in NODE_SOURCE_ALIASES.items() if canonical in fields)
+    conditions = {
+        "box": {
+            **{field: f"仅在 box 声明 text、没有 children 且没有 {'/'.join(BOX_TEXT_CONTAINER_KEYS)} 时消费：正规化为 label，使用 label 的字段语义" for field in box_label_fields},
+            **{field: "仅在 box 声明 text 且没有 children 时消费：正规化为 label 或实际文字子节点" for field in ("text",) + BOX_TEXT_STYLE_KEYS},
+        },
+        "card": {field: "仅在 card 同时声明 title/body/tag/actionText 等内容简写时消费；展开后修改实际子节点" for field in CARD_CONTENT_OPTIONS},
+    }
+    for fields in conditions.values():
+        fields.update({alias: fields[canonical] for alias, canonical in NODE_SOURCE_ALIASES.items() if canonical in fields})
+    return {"$schema": "https://json-schema.org/draft/2020-12/schema", "title": "RP/1 prototype language", "description": "RP/1 standard AST, sugar and macro source shapes. Run check for expression types, dynamic component argument names, references, row scope, dataset columns and target support.", **result, "$defs": defs,
+            "x-source-properties-by-type": {kind: sorted(fields) for kind, fields in sorted(source_properties.items())},
+            "x-source-property-conditions": conditions}

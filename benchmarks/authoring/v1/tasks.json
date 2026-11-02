@@ -1,0 +1,12 @@
+{
+  "version": 1,
+  "scope": "scripted-scenarios; independent-agent authoring requires a separate run",
+  "tasks": [
+    {"id":"habit-cards","brief":"制作微习惯学习应用，三页，保留掌握与重置流程；主题改为青绿色。","recipe":"mobile-cards","acceptance":["三页可编辑","标题与主题应用","重复掌握不重复计数","返回页面刷新进度"]},
+    {"id":"equipment-list","brief":"将列表详情用于校园设备借用，显示投影仪和录音笔两项，选择后进入对应详情，并可切换空状态。","recipe":"list-detail","acceptance":["数据与共享卡片复用","两个条目详情一致","空状态与恢复","收藏切换"]},
+    {"id":"volunteer-form","brief":"制作志愿活动报名两步表单，填写姓名和服务时段，必填校验，返回保留输入，提交页展示填写结果。","recipe":"step-form","acceptance":["空输入拦截","返回保留输入","结果显示两个字段","重置后输入为空"]},
+    {"id":"shared-revision","brief":"一次调整学习应用主题色与共享卡片标题字号，保留全部交互及已有源码注释。","acceptance":["一次改稿调用","多页影响明确","同步状态无漂移","注释保留"]},
+    {"id":"native-source-merge","brief":"原生侧修改首页标题，源码侧修改说明；一次合并保留两边，然后制造同字段冲突验证拒绝覆盖。","acceptance":["两边独立修改均保留","冲突有具体对象","原文件不变","失败不生成成功基线"]},
+    {"id":"image-reconstruction","brief":"将项目截图转换为可编辑原型，检查文本和形状为独立元件，素材与基线保留。","acceptance":["二进制原型可读取","文字与形状独立","素材持久化","不冒充完整业务还原"]}
+  ]
+}

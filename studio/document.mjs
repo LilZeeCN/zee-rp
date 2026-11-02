@@ -1,3 +1,4 @@
+import { BoundedCache, textWeight } from './bounded-cache.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -5,6 +6,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path
 import { fileURLToPath } from 'node:url';
 import { assertNotProtected } from '../scripts/engine.mjs';
 import { ensureCoreComponentsRegistered } from './component-contracts.mjs';
+import { normalizeInteractionSpec } from './interactions.mjs';
 export { assertNotProtected };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -114,35 +116,145 @@ export function sha256(input) {
   return createHash('sha256').update(input).digest('hex');
 }
 
-const pageCanonicalCache = new Map();
+const pageCanonicalCache = new BoundedCache({maxEntries:64,maxWeight:32*1024*1024,weight:textWeight});
+const nodeCanonicalWeakCache = new WeakMap();
+let useWeakCanonicalCache = false;
 
 export function canonicalJson(value) {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
   if (Array.isArray(value)) return '[' + value.map(v => canonicalJson(v === undefined ? null : v)).join(',') + ']';
+  if (useWeakCanonicalCache && nodeCanonicalWeakCache.has(value)) {
+    return nodeCanonicalWeakCache.get(value);
+  }
   const keys = Object.keys(value).filter(k => value[k] !== undefined).sort();
-  return '{' + keys.map(k => JSON.stringify(k) + ':' + canonicalJson(value[k])).join(',') + '}';
+  const out = '{' + keys.map(k => JSON.stringify(k) + ':' + canonicalJson(value[k])).join(',') + '}';
+  if (useWeakCanonicalCache && (typeof value.id === 'string' || Array.isArray(value.pages))) {
+    nodeCanonicalWeakCache.set(value, out);
+  }
+  return out;
 }
 
-export function computeContentHash(doc) {
-  const excluded = new Set(['revision', 'createdAt', 'updatedAt', 'contentHash', 'sessionState', 'historyMeta']);
-  const keys = Object.keys(doc).filter(k => doc[k] !== undefined && !excluded.has(k)).sort();
-  const parts = keys.map(k => {
-    if (k === 'pages' && Array.isArray(doc.pages)) {
-      const pageStrs = doc.pages.map(pg => {
-        const fastKey = JSON.stringify(pg);
-        let cached = pageCanonicalCache.get(fastKey);
-        if (!cached) {
-          cached = canonicalJson(pg);
-          if (pageCanonicalCache.size > 250) pageCanonicalCache.clear();
-          pageCanonicalCache.set(fastKey, cached);
+export function getCachedNodeCanonical(node) {
+  return (node && typeof node === 'object') ? (nodeCanonicalWeakCache.get(node) || null) : null;
+}
+
+export function inheritCleanCanonicalCache(beforeDoc, afterDoc, dirtyNodeIds = null) {
+  if (!beforeDoc || !afterDoc || !Array.isArray(beforeDoc.pages) || !Array.isArray(afterDoc.pages)) return;
+  const dirtySet = dirtyNodeIds ? new Set(dirtyNodeIds) : null;
+  const dirtyBareIds = new Set();
+  const dirtyPageIds = new Set();
+  if (dirtySet) {
+    for (const id of dirtySet) {
+      const s = String(id);
+      if (s.startsWith('component:') || s.startsWith('token:') || s.startsWith('variable:') || s.startsWith('dataset:') || s === 'fonts') {
+        return;
+      }
+      const parts = s.split('/');
+      if (parts.length > 1) {
+        dirtyPageIds.add(parts[0]);
+        for (let i = 1; i < parts.length; i++) {
+          const seg = parts[i].split('__')[0];
+          if (seg) dirtyBareIds.add(seg);
         }
-        return cached;
-      });
-      return `"pages":[${pageStrs.join(',')}]`;
+      } else {
+        dirtyBareIds.add(s.split('__')[0]);
+      }
     }
-    return JSON.stringify(k) + ':' + canonicalJson(doc[k]);
-  });
-  return sha256(`{${parts.join(',')}}`);
+  }
+  const beforePagesById = new Map(beforeDoc.pages.map(p => [p.id, p]));
+  function syncNode(bNode, aNode) {
+    if (!bNode || !aNode || typeof bNode !== 'object' || typeof aNode !== 'object' || bNode.id !== aNode.id) return false;
+    let selfDirty = !dirtySet || dirtyBareIds.has(aNode.id);
+    if (Array.isArray(aNode.children) || Array.isArray(bNode.children)) {
+      const bCh = bNode.children || [];
+      const aCh = aNode.children || [];
+      if (bCh.length !== aCh.length) {
+        selfDirty = true;
+      }
+      const bById = bCh.length === aCh.length ? null : new Map(bCh.map(c => [c?.id, c]));
+      for (let i = 0; i < aCh.length; i++) {
+        const ac = aCh[i];
+        const bc = bById ? bById.get(ac?.id) : (bCh[i]?.id === ac?.id ? bCh[i] : null);
+        if (!bc || !syncNode(bc, ac)) {
+          selfDirty = true;
+        }
+      }
+    }
+    if (Array.isArray(aNode.states) || Array.isArray(bNode.states)) {
+      selfDirty = true;
+    }
+    if (aNode.template || bNode.template) {
+      selfDirty = true;
+    }
+    if (!selfDirty) {
+      const cached = nodeCanonicalWeakCache.get(bNode);
+      if (cached) {
+        nodeCanonicalWeakCache.set(aNode, cached);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  for (const aPg of afterDoc.pages) {
+    const bPg = beforePagesById.get(aPg.id);
+    if (!bPg) continue;
+    if (dirtySet && dirtyPageIds.size > 0 && !dirtyPageIds.has(aPg.id)) {
+      const cachedPg = nodeCanonicalWeakCache.get(bPg);
+      if (cachedPg) {
+        nodeCanonicalWeakCache.set(aPg, cachedPg);
+        continue;
+      }
+      if (bPg.root && aPg.root) syncNode(bPg.root, aPg.root);
+      continue;
+    }
+    if (bPg.root && aPg.root) {
+      syncNode(bPg.root, aPg.root);
+    }
+  }
+}
+
+export function computeContentHash(doc, { cacheNodes = false } = {}) {
+  const excluded = new Set(['revision', 'createdAt', 'updatedAt', 'contentHash', 'portableContentHash', 'sessionState', 'historyMeta']);
+  const keys = Object.keys(doc).filter(k => doc[k] !== undefined && !excluded.has(k)).sort();
+  const prevFlag = useWeakCanonicalCache;
+  if (cacheNodes) useWeakCanonicalCache = true;
+  try {
+    let approxBytes = 64;
+    const parts = keys.map(k => {
+      if (k === 'pages' && Array.isArray(doc.pages)) {
+        const pageStrs = doc.pages.map(pg => {
+          if (useWeakCanonicalCache && nodeCanonicalWeakCache.has(pg)) {
+            const hit = nodeCanonicalWeakCache.get(pg);
+            approxBytes += hit.length;
+            return hit;
+          }
+          if (useWeakCanonicalCache) {
+            const computed = canonicalJson(pg);
+            nodeCanonicalWeakCache.set(pg, computed);
+            approxBytes += computed.length;
+            return computed;
+          }
+          const fastKey = JSON.stringify(pg);
+          let cached = pageCanonicalCache.get(fastKey);
+          if (!cached) {
+            cached = canonicalJson(pg);
+            pageCanonicalCache.set(fastKey, cached);
+          }
+          approxBytes += cached.length;
+          return cached;
+        });
+        return `"pages":[${pageStrs.join(',')}]`;
+      }
+      const part = JSON.stringify(k) + ':' + canonicalJson(doc[k]);
+      approxBytes += part.length;
+      return part;
+    });
+    Object.defineProperty(doc, '_approxBytes', { value: approxBytes, enumerable: false, configurable: true, writable: true });
+    return sha256(`{${parts.join(',')}}`);
+  } finally {
+    useWeakCanonicalCache = prevFlag;
+  }
 }
 
 function readImageDimensions(buf) {
@@ -170,7 +282,7 @@ function readImageDimensions(buf) {
 
 export function parseSourceSpec(sourcePathOrObject) {
   if (typeof sourcePathOrObject === 'object' && sourcePathOrObject !== null) {
-    return { spec: structuredClone(sourcePathOrObject), baseDir: process.cwd(), sourcePath: null };
+    return { spec: normalizeSpecShorthand(structuredClone(sourcePathOrObject)), baseDir: process.cwd(), sourcePath: null };
   }
   const absPath = resolve(String(sourcePathOrObject));
   assertNotProtected(absPath);
@@ -239,18 +351,34 @@ const SHORTHAND_KINDS = {
   'progress-bar': { type: 'progress-bar' },
   'tab-bar': { type: 'tab-bar' },
   tabs: { type: 'tabs' },
+  path: { type: 'path' },
+  sparkline: { type: 'path' },
 };
 
 function normalizeDslShorthand(node) {
   if (!node || typeof node !== 'object' || Array.isArray(node)) return node;
   const copy = { ...node };
+  if (['row', 'column', 'stack', 'grid'].includes(copy.type)) {
+    copy.layout = copy.layout || copy.type;
+    copy.type = 'box';
+  } else if (copy.type === 'svg' || copy.type === 'sparkline') {
+    copy.type = 'path';
+  }
   if (!copy.type) {
     for (const [kind, mapped] of Object.entries(SHORTHAND_KINDS)) {
       const raw = copy[kind];
       if (raw === undefined) continue;
       copy.type = mapped.type;
       if (mapped.layout) copy.layout = copy.layout || mapped.layout;
-      if (typeof raw === 'string' && raw) copy.id = copy.id || raw;
+      if ((kind === 'path' || kind === 'sparkline') && copy.id) {
+        if (Array.isArray(raw)) copy.points = copy.points ?? raw;
+        else if (typeof raw === 'string' && raw) {
+          if (raw.trim().startsWith('<') || /^[Mm]/.test(raw.trim())) copy.content = copy.content ?? raw;
+          else copy.points = copy.points ?? raw;
+        }
+      } else if (typeof raw === 'string' && raw) {
+        copy.id = copy.id || raw;
+      }
       delete copy[kind];
       break;
     }
@@ -268,7 +396,7 @@ function normalizeDslShorthand(node) {
   return copy;
 }
 
-function normalizeSpecShorthand(spec) {
+export function normalizeSpecShorthand(spec) {
   if (!spec || typeof spec !== 'object') return spec;
   const out = { ...spec };
   if (Array.isArray(out.pages)) {
@@ -293,9 +421,50 @@ function normalizeSpecShorthand(spec) {
   return out;
 }
 
+const supportsGotoSugar = node => !node.type || ['box', 'label', 'paragraph', 'button', 'badge', 'image', 'icon', 'input', 'path'].includes(node.type);
+
+export function nodeEvents(node) {
+  const on = Object.fromEntries(Object.entries(node.on || {}).map(([event, spec]) => [event, normalizeInteractionSpec(spec)]));
+  for (const spec of [node.onClick, node.interactions?.click]) {
+    if (spec === undefined) continue;
+    const normalizedSpec = normalizeInteractionSpec(spec);
+    if (on.click !== undefined && canonicalJson(on.click) !== canonicalJson(normalizedSpec)) {
+      throw Object.assign(new Error(`节点 ${node.id} 的 on.click 与点击别名冲突，请只保留一种写法`), { code: 'E_INTERACTION_ALIAS_CONFLICT', nodeId: node.id });
+    }
+    if (normalizedSpec !== null && (typeof normalizedSpec !== 'object' || Array.isArray(normalizedSpec) && !normalizedSpec.every(a => a && typeof a === 'object'))) {
+      throw Object.assign(new Error('点击事件需要动作对象、动作数组或 cases 对象'), { code: 'E_INTERACTION_SHAPE', nodeId: node.id });
+    }
+    on.click = normalizedSpec;
+  }
+  if (node.goto !== undefined && supportsGotoSugar(node)) {
+    if (typeof node.goto !== 'string' || !node.goto) throw Object.assign(new Error('goto 需要非空目标页面ID'), { code: 'E_INTERACTION_SHAPE', nodeId: node.id });
+    const action = [{ type: 'link', page: node.goto }];
+    if (on.click !== undefined && canonicalJson(on.click) !== canonicalJson(action)) throw Object.assign(new Error(`节点 ${node.id} 的 goto 与显式点击行为冲突，请合并成一个 on.click`), { code: 'E_INTERACTION_ALIAS_CONFLICT', nodeId: node.id });
+    on.click = action;
+  }
+  return Object.keys(on).length ? on : null;
+}
+
+export function normalizeNodeInteractions(node) {
+  if (!node || typeof node !== 'object') return;
+  if (node.on || node.onClick !== undefined || node.interactions?.click !== undefined || node.goto !== undefined && supportsGotoSugar(node)) {
+    node.on = nodeEvents(node);
+    delete node.onClick;
+    if (supportsGotoSugar(node)) delete node.goto;
+    if (node.interactions?.click !== undefined) {
+      delete node.interactions.click;
+      if (!Object.keys(node.interactions).length) delete node.interactions;
+    }
+  }
+  for (const child of node.children || []) normalizeNodeInteractions(child);
+  for (const state of node.states || []) normalizeNodeInteractions(state.root);
+  normalizeNodeInteractions(node.template);
+}
+
 function normalizeNode(node, pageId, seenIds, pathPtr, assetCollector) {
   if (!node || typeof node !== 'object') return node;
   const copy = structuredClone(node);
+  normalizeNodeInteractions(copy);
   const rawId = String(copy.id || copy.name || `node_${seenIds.size + 1}`);
   let nodeId = rawId;
   if (seenIds.has(nodeId)) {
@@ -307,6 +476,9 @@ function normalizeNode(node, pageId, seenIds, pathPtr, assetCollector) {
   copy.id = nodeId;
   if (!copy.name) copy.name = rawId;
   copy.type = copy.type || 'box';
+  if (copy.type === 'svg' || copy.type === 'sparkline') {
+    copy.type = 'path';
+  }
   copy.sourcePointer = copy.sourcePointer || pathPtr;
 
   if (MACRO_TYPES.has(copy.type) && !copy.macroSource) {
@@ -383,8 +555,7 @@ export function importToStudioDocument(sourcePathOrObject, { projectDir = null, 
   if (raw.schemaVersion === STUDIO_SCHEMA_VERSION && raw.documentId && Array.isArray(raw.pages)) {
     const doc = structuredClone(raw);
     if (projectDir) localizeAssets(doc, resolvedBaseDir, projectDir);
-    doc.contentHash = computeContentHash(doc);
-    return doc;
+    return normalizeStudioDocument(doc);
   }
 
   const themeName = raw.theme || 'mobile-hifi';
@@ -461,8 +632,9 @@ export function importToStudioDocument(sourcePathOrObject, { projectDir = null, 
     const pageName = String(pg.name || pageId);
     const device = pg.device || raw.device || null;
     const preset = device ? (DEVICE_PRESETS[device] || DEVICE_PRESETS['iphone-17-pro']) : null;
-    const canvasW = Number(pg.canvas?.w || preset?.w || 402);
-    const canvasH = Number(pg.canvas?.h || preset?.h || 874);
+    const webRootSize = axis => (pg.domain || raw.domain) === 'web' && Number.isFinite(pg.root?.[axis]) && pg.root[axis] > 0 ? pg.root[axis] : null;
+    const canvasW = Number(pg.canvas?.w || preset?.w || webRootSize('w') || 402);
+    const canvasH = Number(pg.canvas?.h || preset?.h || webRootSize('h') || 874);
     const boardX = Number.isFinite(pg.canvas?.x) ? Number(pg.canvas.x) : boardCursorX;
     const boardY = Number.isFinite(pg.canvas?.y) ? Number(pg.canvas.y) : 80;
     boardCursorX = boardX + canvasW + (preset ? preset.shellPad * 2 : 0) + 80;
@@ -558,8 +730,7 @@ export function importToStudioDocument(sourcePathOrObject, { projectDir = null, 
     },
   };
 
-  doc.contentHash = computeContentHash(doc);
-  return doc;
+  return normalizeStudioDocument(doc);
 }
 
 export function localizeAssets(doc, baseDir, projectDir) {
@@ -714,7 +885,14 @@ export function buildNodeIndex(doc) {
         }
       }
       const idCandidates = byId.get(target) || [];
-      if (idCandidates.length === 1) return idCandidates[0];
+      if (idCandidates.length === 1) {
+        const only = idCandidates[0];
+        // A command with an explicit page is a scoped edit. Never let an
+        // unresolved generated-child ID silently escape into a component or
+        // another page and mutate a shared definition.
+        if (preferredPageId && only.pageId !== preferredPageId) return null;
+        return only;
+      }
       if (idCandidates.length > 1 && preferredPageId) {
         const onPage = idCandidates.filter(c => c.pageId === preferredPageId);
         if (onPage.length === 1) return onPage[0];
@@ -722,6 +900,7 @@ export function buildNodeIndex(doc) {
           const onActive = onPage.filter(c => c.activeInPanel);
           return onActive[0] || onPage[0];
         }
+        return null;
       }
       if (idCandidates.length > 1) {
         throw Object.assign(
@@ -730,7 +909,11 @@ export function buildNodeIndex(doc) {
         );
       }
       const nameCandidates = byName.get(target) || [];
-      if (nameCandidates.length === 1) return nameCandidates[0];
+      if (nameCandidates.length === 1) {
+        const only = nameCandidates[0];
+        if (preferredPageId && only.pageId !== preferredPageId) return null;
+        return only;
+      }
       if (nameCandidates.length > 1 && preferredPageId) {
         const onPage = nameCandidates.filter(c => c.pageId === preferredPageId);
         if (onPage.length === 1) return onPage[0];
@@ -738,6 +921,7 @@ export function buildNodeIndex(doc) {
           const onActive = onPage.filter(c => c.activeInPanel);
           return onActive[0] || onPage[0];
         }
+        return null;
       }
       if (nameCandidates.length > 1) {
         throw Object.assign(
@@ -813,10 +997,10 @@ export function createEmptyStudioDocument({ name = 'Untitled Project', documentI
             root: {
               type: 'box',
               id: 'home_root',
-              layout: 'column',
+              layout: 'stack',
               w: width,
               h: height,
-              padding: 32,
+              padding: 0,
               gap: 16,
               fill: '$bg',
               children: [],
@@ -867,6 +1051,53 @@ export function createEmptyStudioDocument({ name = 'Untitled Project', documentI
   return doc;
 }
 
+// Layout warnings describe the current document, not past commands.
+export function currentDocumentDiagnostics(doc) {
+  const diagnostics = (doc.diagnostics || []).filter(d => d.code !== 'W_LAYOUT_IGNORES_POSITION');
+  function visit(node, parent, pageId, scope) {
+    if (!node || typeof node !== 'object') return;
+    if (
+      parent &&
+      (parent.layout === 'row' || parent.layout === 'column' || parent.layout === 'grid') &&
+      (node.x !== undefined || node.y !== undefined)
+    ) {
+      const scopedId = `${scope}/${node.id}`;
+      diagnostics.push({
+        code: 'W_LAYOUT_IGNORES_POSITION',
+        severity: 'warning',
+        nodeId: node.id,
+        pageId,
+        scopedId,
+        parentId: parent.id,
+        parentLayout: parent.layout,
+        requested: { x: node.x ?? null, y: node.y ?? null },
+        message: `节点 "${node.id}" 的父容器 "${parent.id}" 是 ${parent.layout} 流式布局；请用顺序和 gap 定位，或显式切换为 stack。`,
+      });
+    }
+    if (Array.isArray(node.children)) {
+      for (let i = 0; i < node.children.length; i++) {
+        visit(node.children[i], node, pageId, scope);
+      }
+    }
+    if (Array.isArray(node.states)) {
+      for (let i = 0; i < node.states.length; i++) {
+        const st = node.states[i];
+        if (st?.root) visit(st.root, node, pageId, `${scope}/${node.id}/${st.id}`);
+      }
+    }
+    if (node.template) {
+      visit(node.template, node, pageId, `${scope}/${node.id}/template`);
+    }
+  }
+  for (const pg of doc.pages || []) {
+    if (pg?.root) visit(pg.root, null, pg.id, pg.id);
+  }
+  for (const [compId, comp] of Object.entries(doc.components || {})) {
+    if (comp?.root) visit(comp.root, null, `component:${compId}`, `component/${compId}`);
+  }
+  return diagnostics;
+}
+
 export function normalizeStudioDocument(doc, projectDir = null) {
   if (!doc || typeof doc !== 'object') return doc;
   doc.schemaVersion = doc.schemaVersion || STUDIO_SCHEMA_VERSION;
@@ -878,7 +1109,9 @@ export function normalizeStudioDocument(doc, projectDir = null) {
   doc.datasets = doc.datasets || {};
   doc.explorations = doc.explorations || [];
   doc.assetsManifest = doc.assetsManifest || {};
-  doc.diagnostics = doc.diagnostics || [];
+  for (const page of doc.pages || []) normalizeNodeInteractions(page.root);
+  for (const component of Object.values(doc.components || {})) normalizeNodeInteractions(component.root);
+  doc.diagnostics = currentDocumentDiagnostics(doc);
   if (projectDir) {
     localizeAssets(doc, projectDir, projectDir);
   }

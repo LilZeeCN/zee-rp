@@ -1,0 +1,303 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "MCP 三页复习原型",
+  "theme": "enterprise-light",
+  "palette": {
+    "accent": "#385DE3"
+  },
+  "variables": {
+    "topic": {
+      "type": "text",
+      "value": "尚未选择"
+    },
+    "plan": {
+      "type": "text",
+      "value": ""
+    }
+  },
+  "components": {
+    "StudyItem": {
+      "params": {
+        "title": "text"
+      },
+      "root": {
+        "type": "card",
+        "id": "card",
+        "name": "复习条目",
+        "layout": "column",
+        "w": "fill",
+        "h": 132,
+        "padding": 16,
+        "gap": 12,
+        "radius": 12,
+        "fill": "$surface",
+        "stroke": "$border",
+        "children": [
+          {
+            "type": "label",
+            "id": "subject",
+            "name": "科目标题",
+            "text": {
+              "$": "title"
+            },
+            "w": "fill",
+            "h": 30,
+            "fontSize": 18
+          },
+          {
+            "type": "button",
+            "id": "view",
+            "name": "查看详情按钮",
+            "text": "查看详情",
+            "w": 170,
+            "h": 40,
+            "onClick": [
+              {
+                "type": "set-variable",
+                "variable": "topic",
+                "value": {
+                  "$": "title"
+                }
+              },
+              {
+                "type": "set-variable",
+                "variable": "plan",
+                "value": ""
+              },
+              {
+                "type": "link",
+                "page": "detail"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "pages": [
+    {
+      "id": "list",
+      "name": "复习列表",
+      "canvas": {
+        "w": 420,
+        "h": 500
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "name": "复习列表内容",
+        "layout": "column",
+        "w": 420,
+        "h": 500,
+        "padding": 24,
+        "gap": 16,
+        "fill": "$bg",
+        "children": [
+          {
+            "type": "label",
+            "id": "title",
+            "name": "列表标题",
+            "text": "选择今天的复习科目",
+            "w": "fill",
+            "h": 40,
+            "fontSize": 20
+          },
+          {
+            "type": "paragraph",
+            "id": "hint",
+            "name": "列表说明",
+            "text": "点击条目，查看详情并提交你的复习计划。",
+            "w": "fill",
+            "h": 48
+          },
+          {
+            "type": "use",
+            "id": "math",
+            "component": "StudyItem",
+            "args": {
+              "title": "高等数学"
+            }
+          },
+          {
+            "type": "use",
+            "id": "english",
+            "component": "StudyItem",
+            "args": {
+              "title": "考研英语"
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail",
+      "name": "复习详情",
+      "canvas": {
+        "w": 420,
+        "h": 650
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "name": "复习详情内容",
+        "layout": "column",
+        "w": 420,
+        "h": 650,
+        "padding": 24,
+        "gap": 16,
+        "fill": "$bg",
+        "children": [
+          {
+            "type": "label",
+            "id": "title",
+            "name": "详情标题",
+            "text": {
+              "fn": "concat",
+              "args": [
+                "当前科目：",
+                {
+                  "variable": "topic"
+                }
+              ]
+            },
+            "w": "fill",
+            "h": 40,
+            "fontSize": 20
+          },
+          {
+            "type": "paragraph",
+            "id": "hint",
+            "name": "详情说明",
+            "text": "输入今天的复习计划，提交后在结果页确认。",
+            "w": "fill",
+            "h": 48
+          },
+          {
+            "type": "input",
+            "id": "note",
+            "name": "复习计划输入框",
+            "value": "每天复习30分钟",
+            "w": "fill",
+            "h": 44
+          },
+          {
+            "type": "button",
+            "id": "submit",
+            "name": "提交计划按钮",
+            "text": "提交计划",
+            "w": "fill",
+            "h": 44,
+            "onClick": [
+              {
+                "type": "set-variable",
+                "variable": "plan",
+                "value": {
+                  "widget": {
+                    "ref": "note"
+                  }
+                }
+              },
+              {
+                "type": "link",
+                "page": "result"
+              }
+            ]
+          },
+          {
+            "type": "button",
+            "id": "back",
+            "name": "返回列表按钮",
+            "text": "返回列表",
+            "w": "fill",
+            "h": 40,
+            "variant": "outline",
+            "onClick": [
+              {
+                "type": "link",
+                "page": "list"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "result",
+      "name": "提交结果",
+      "canvas": {
+        "w": 420,
+        "h": 650
+      },
+      "root": {
+        "type": "box",
+        "id": "root",
+        "name": "提交结果内容",
+        "layout": "column",
+        "w": 420,
+        "h": 650,
+        "padding": 24,
+        "gap": 16,
+        "fill": "$bg",
+        "children": [
+          {
+            "type": "label",
+            "id": "title",
+            "name": "结果标题",
+            "text": "计划提交成功",
+            "w": "fill",
+            "h": 40,
+            "fontSize": 20
+          },
+          {
+            "type": "label",
+            "id": "topic",
+            "name": "结果科目",
+            "text": {
+              "fn": "concat",
+              "args": [
+                "复习科目：",
+                {
+                  "variable": "topic"
+                }
+              ]
+            },
+            "w": "fill",
+            "h": 50,
+            "fontSize": 20
+          },
+          {
+            "type": "label",
+            "id": "summary",
+            "name": "结果计划",
+            "text": {
+              "fn": "concat",
+              "args": [
+                "今日计划：",
+                {
+                  "variable": "plan"
+                }
+              ]
+            },
+            "w": "fill",
+            "h": 100
+          },
+          {
+            "type": "button",
+            "id": "restart",
+            "name": "重新选择按钮",
+            "text": "重新选择科目",
+            "w": "fill",
+            "h": 44,
+            "onClick": [
+              {
+                "type": "link",
+                "page": "list"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

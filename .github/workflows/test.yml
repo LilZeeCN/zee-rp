@@ -13,4 +13,24 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci --ignore-scripts
+      - run: python -m pip install pillow numpy jsonschema
+      - name: Check browser runtime
+        run: test -x /usr/bin/google-chrome
       - run: npm test
+      - run: npm run test:styles
+      - run: npm run test:sync
+      - run: npm run test:studio-ai
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+      - run: npm run test:studio-editing
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+      - run: npm run test:studio-finish
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
+      - run: npm run test:studio-baselines
+      - run: python test/rp-source-contract-check.py

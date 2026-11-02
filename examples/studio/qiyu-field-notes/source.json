@@ -1,0 +1,2569 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "栖羽 QIYU · 观鸟手记",
+  "domain": "mobile",
+  "theme": "mobile-hifi",
+  "device": "iphone-17-pro",
+  "palette": {
+    "bg": "#F3EDE1",
+    "surface": "#FBF8F2",
+    "surface-2": "#EAE2D2",
+    "ink": "#1E2A24",
+    "ink-2": "#5F665D",
+    "brand": "#1C3328",
+    "brand-soft": "#EAE2D2",
+    "line": "#D8CFBE"
+  },
+  "variables": {
+    "entries": {
+      "type": "number",
+      "value": 0
+    },
+    "lastLocation": {
+      "type": "text",
+      "value": ""
+    },
+    "lastNote": {
+      "type": "text",
+      "value": ""
+    }
+  },
+  "pages": [
+    {
+      "id": "home",
+      "name": "01 发现",
+      "device": "iphone-17-pro",
+      "root": {
+        "type": "phone-shell",
+        "id": "home_shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#F3EDE1",
+        "darkIsland": true,
+        "children": [
+          {
+            "type": "box",
+            "id": "home_screen",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "radius": 0,
+            "fill": "#F3EDE1",
+            "children": [
+              {
+                "type": "box",
+                "id": "home_bg",
+                "layout": "stack",
+                "x": 0,
+                "y": 0,
+                "w": 402,
+                "h": 874,
+                "fill": "#F3EDE1",
+                "radius": 0
+              },
+              {
+                "type": "image",
+                "id": "home_photo",
+                "name": "首页主图-普通翠鸟",
+                "src": "assets/home_photo.jpg",
+                "x": 0,
+                "y": 0,
+                "w": 402,
+                "h": 640
+              },
+              {
+                "type": "label",
+                "id": "home_time",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 22,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "color": "#1E2A24",
+                "lineHeight": 22,
+                "fontFamily": "Inter"
+              },
+              {
+                "type": "box",
+                "id": "home_sig0",
+                "layout": "stack",
+                "x": 300,
+                "y": 26,
+                "w": 3,
+                "h": 3,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "home_sig1",
+                "layout": "stack",
+                "x": 305,
+                "y": 23,
+                "w": 3,
+                "h": 6,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "home_sig2",
+                "layout": "stack",
+                "x": 310,
+                "y": 20,
+                "w": 3,
+                "h": 9,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "home_sig3",
+                "layout": "stack",
+                "x": 315,
+                "y": 17,
+                "w": 3,
+                "h": 12,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "home_batt",
+                "layout": "stack",
+                "x": 328,
+                "y": 17,
+                "w": 24,
+                "h": 12,
+                "fill": "#FFFFFF00",
+                "radius": 4,
+                "stroke": "#1E2A24",
+                "strokeWidth": 1,
+                "opacity": 0.9
+              },
+              {
+                "type": "box",
+                "id": "home_battfill",
+                "layout": "stack",
+                "x": 330,
+                "y": 19,
+                "w": 17,
+                "h": 8,
+                "fill": "#1E2A24",
+                "radius": 2
+              },
+              {
+                "type": "box",
+                "id": "home_battcap",
+                "layout": "stack",
+                "x": 353,
+                "y": 21,
+                "w": 2,
+                "h": 4,
+                "fill": "#1E2A24",
+                "radius": 1,
+                "opacity": 0.6
+              },
+              {
+                "type": "label",
+                "id": "home_brand",
+                "text": "栖羽",
+                "x": 24,
+                "y": 64,
+                "w": 48,
+                "h": 28,
+                "fontSize": 20,
+                "fontWeight": 700,
+                "color": "#1E2A24",
+                "lineHeight": 28,
+                "fontFamily": "Songti SC"
+              },
+              {
+                "type": "label",
+                "id": "home_brand_en",
+                "text": "QIYU",
+                "x": 72,
+                "y": 71,
+                "w": 60,
+                "h": 16,
+                "fontSize": 11,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 16,
+                "fontFamily": "Georgia",
+                "letterSpacing": 3
+              },
+              {
+                "type": "label",
+                "id": "home_date",
+                "text": "十月廿六 · 晨",
+                "x": 238,
+                "y": 67,
+                "w": 140,
+                "h": 22,
+                "fontSize": 15,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 22,
+                "fontFamily": "Kaiti SC",
+                "align": "right"
+              },
+              {
+                "type": "label",
+                "id": "home_plate_no",
+                "text": "No.01",
+                "x": 278,
+                "y": 150,
+                "w": 100,
+                "h": 18,
+                "fontSize": 12,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 18,
+                "fontFamily": "Georgia",
+                "align": "right"
+              },
+              {
+                "type": "label",
+                "id": "home_plate_latin",
+                "text": "Alcedo atthis",
+                "x": 238,
+                "y": 168,
+                "w": 140,
+                "h": 20,
+                "fontSize": 14,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 20,
+                "fontFamily": "Georgia",
+                "italic": true,
+                "align": "right"
+              },
+              {
+                "type": "box",
+                "id": "home_plate_rule",
+                "layout": "stack",
+                "x": 358,
+                "y": 194,
+                "w": 20,
+                "h": 1,
+                "fill": "#5F665D",
+                "radius": 0,
+                "opacity": 0.6
+              },
+              {
+                "type": "box",
+                "id": "home_photo_hit",
+                "layout": "stack",
+                "x": 0,
+                "y": 110,
+                "w": 402,
+                "h": 440,
+                "fill": "#FFFFFF00",
+                "radius": 0,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "species"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "label",
+                "id": "home_kicker",
+                "text": "这几天常在水边",
+                "x": 24,
+                "y": 570,
+                "w": 240,
+                "h": 20,
+                "fontSize": 13,
+                "fontWeight": 600,
+                "color": "#C2602B",
+                "lineHeight": 20,
+                "letterSpacing": 1
+              },
+              {
+                "type": "label",
+                "id": "home_title",
+                "text": "水边那一道蓝光",
+                "x": 24,
+                "y": 596,
+                "w": 354,
+                "h": 48,
+                "fontSize": 36,
+                "fontWeight": 700,
+                "color": "#1E2A24",
+                "lineHeight": 48,
+                "fontFamily": "Songti SC"
+              },
+              {
+                "type": "label",
+                "id": "home_sub",
+                "text": "普通翠鸟常停在低枝上，盯着水面，一动不动。",
+                "x": 24,
+                "y": 650,
+                "w": 354,
+                "h": 24,
+                "fontSize": 15,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 24
+              },
+              {
+                "type": "button",
+                "id": "home_cta",
+                "text": "认识普通翠鸟  →",
+                "x": 24,
+                "y": 694,
+                "w": 176,
+                "h": 48,
+                "fill": "#1C3328",
+                "color": "#F3EDE1",
+                "fontSize": 15,
+                "fontWeight": 600,
+                "radius": 24,
+                "stroke": "#FFFFFF00",
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "species"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "box",
+                "id": "home_tab_edge",
+                "layout": "stack",
+                "x": 111,
+                "y": 771,
+                "w": 180,
+                "h": 54,
+                "fill": "#E1D7C5",
+                "radius": 27
+              },
+              {
+                "type": "box",
+                "id": "home_tab_bg",
+                "layout": "stack",
+                "x": 111,
+                "y": 768,
+                "w": 180,
+                "h": 54,
+                "fill": "#FBF8F2",
+                "radius": 27,
+                "stroke": "#E6DDCC",
+                "strokeWidth": 1
+              },
+              {
+                "type": "label",
+                "id": "home_tab_discover",
+                "text": "发现",
+                "x": 116,
+                "y": 780,
+                "w": 85,
+                "h": 24,
+                "fontSize": 15,
+                "fontWeight": 700,
+                "color": "#1C3328",
+                "lineHeight": 24,
+                "align": "center"
+              },
+              {
+                "type": "box",
+                "id": "home_tab_on",
+                "layout": "stack",
+                "x": 155,
+                "y": 807,
+                "w": 6,
+                "h": 6,
+                "fill": "#C2602B",
+                "radius": 3
+              },
+              {
+                "type": "label",
+                "id": "home_tab_journal",
+                "text": "手记",
+                "x": 201,
+                "y": 780,
+                "w": 85,
+                "h": 24,
+                "fontSize": 15,
+                "fontWeight": 500,
+                "color": "#8D9087",
+                "lineHeight": 24,
+                "align": "center"
+              },
+              {
+                "type": "box",
+                "id": "home_tab_discover_hit",
+                "layout": "stack",
+                "x": 116,
+                "y": 773,
+                "w": 85,
+                "h": 44,
+                "fill": "#FFFFFF00",
+                "radius": 0,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "home"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "box",
+                "id": "home_tab_journal_hit",
+                "layout": "stack",
+                "x": 201,
+                "y": 773,
+                "w": 85,
+                "h": 44,
+                "fill": "#FFFFFF00",
+                "radius": 0,
+                "on": {
+                  "click": {
+                    "cases": [
+                      {
+                        "when": "=var.entries == 0",
+                        "actions": [
+                          {
+                            "type": "link",
+                            "page": "journal_empty"
+                          }
+                        ]
+                      },
+                      {
+                        "else": true,
+                        "actions": [
+                          {
+                            "type": "link",
+                            "page": "journal"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "species",
+      "name": "02 普通翠鸟",
+      "device": "iphone-17-pro",
+      "root": {
+        "type": "phone-shell",
+        "id": "species_shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#F3EDE1",
+        "darkIsland": true,
+        "children": [
+          {
+            "type": "box",
+            "id": "species_screen",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "radius": 0,
+            "fill": "#F3EDE1",
+            "children": [
+              {
+                "type": "box",
+                "id": "species_bg",
+                "layout": "stack",
+                "x": 0,
+                "y": 0,
+                "w": 402,
+                "h": 874,
+                "fill": "#F3EDE1",
+                "radius": 0
+              },
+              {
+                "type": "image",
+                "id": "sp_photo",
+                "name": "详情主图-普通翠鸟",
+                "src": "assets/sp_photo.jpg",
+                "x": 0,
+                "y": 0,
+                "w": 402,
+                "h": 420
+              },
+              {
+                "type": "label",
+                "id": "sp_time",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 22,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "color": "#1E2A24",
+                "lineHeight": 22,
+                "fontFamily": "Inter"
+              },
+              {
+                "type": "box",
+                "id": "sp_sig0",
+                "layout": "stack",
+                "x": 300,
+                "y": 26,
+                "w": 3,
+                "h": 3,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "sp_sig1",
+                "layout": "stack",
+                "x": 305,
+                "y": 23,
+                "w": 3,
+                "h": 6,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "sp_sig2",
+                "layout": "stack",
+                "x": 310,
+                "y": 20,
+                "w": 3,
+                "h": 9,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "sp_sig3",
+                "layout": "stack",
+                "x": 315,
+                "y": 17,
+                "w": 3,
+                "h": 12,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "sp_batt",
+                "layout": "stack",
+                "x": 328,
+                "y": 17,
+                "w": 24,
+                "h": 12,
+                "fill": "#FFFFFF00",
+                "radius": 4,
+                "stroke": "#1E2A24",
+                "strokeWidth": 1,
+                "opacity": 0.9
+              },
+              {
+                "type": "box",
+                "id": "sp_battfill",
+                "layout": "stack",
+                "x": 330,
+                "y": 19,
+                "w": 17,
+                "h": 8,
+                "fill": "#1E2A24",
+                "radius": 2
+              },
+              {
+                "type": "box",
+                "id": "sp_battcap",
+                "layout": "stack",
+                "x": 353,
+                "y": 21,
+                "w": 2,
+                "h": 4,
+                "fill": "#1E2A24",
+                "radius": 1,
+                "opacity": 0.6
+              },
+              {
+                "type": "button",
+                "id": "sp_back",
+                "text": "←",
+                "x": 20,
+                "y": 60,
+                "w": 44,
+                "h": 44,
+                "fill": "#F3EDE1",
+                "color": "#1E2A24",
+                "fontSize": 20,
+                "fontWeight": 500,
+                "radius": 22,
+                "stroke": "#FFFFFF00",
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "home"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "label",
+                "id": "sp_title",
+                "text": "普通翠鸟",
+                "x": 24,
+                "y": 394,
+                "w": 220,
+                "h": 48,
+                "fontSize": 36,
+                "fontWeight": 700,
+                "color": "#1E2A24",
+                "lineHeight": 48,
+                "fontFamily": "Songti SC"
+              },
+              {
+                "type": "label",
+                "id": "sp_latin",
+                "text": "Alcedo atthis  ·  Common Kingfisher",
+                "x": 24,
+                "y": 444,
+                "w": 354,
+                "h": 22,
+                "fontSize": 14,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 22,
+                "fontFamily": "Georgia",
+                "italic": true
+              },
+              {
+                "type": "label",
+                "id": "sp_habitat",
+                "text": "清澈或缓流的河湖边，常停在低枝上等鱼。",
+                "x": 24,
+                "y": 474,
+                "w": 354,
+                "h": 22,
+                "fontSize": 14,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 22
+              },
+              {
+                "type": "box",
+                "id": "sp_rule",
+                "layout": "stack",
+                "x": 24,
+                "y": 512,
+                "w": 354,
+                "h": 1,
+                "fill": "#D8CFBE",
+                "radius": 0
+              },
+              {
+                "type": "label",
+                "id": "sp_marks_title",
+                "text": "认出它的三个地方",
+                "x": 24,
+                "y": 528,
+                "w": 240,
+                "h": 26,
+                "fontSize": 18,
+                "fontWeight": 700,
+                "color": "#1E2A24",
+                "lineHeight": 26,
+                "fontFamily": "Songti SC"
+              },
+              {
+                "type": "image",
+                "id": "sp_mark_back",
+                "name": "辨认特征-亮蓝背羽",
+                "src": "assets/sp_mark_back.jpg",
+                "x": 24,
+                "y": 568,
+                "w": 96,
+                "h": 96,
+                "radius": 48
+              },
+              {
+                "type": "label",
+                "id": "sp_mark_back_no",
+                "text": "1",
+                "x": 98,
+                "y": 568,
+                "w": 22,
+                "h": 22,
+                "fontSize": 12,
+                "fontWeight": 700,
+                "color": "#F3EDE1",
+                "lineHeight": 22,
+                "align": "center",
+                "fill": "#C2602B",
+                "radius": 11
+              },
+              {
+                "type": "label",
+                "id": "sp_mark_back_title",
+                "text": "亮蓝背羽",
+                "x": 24,
+                "y": 674,
+                "w": 110,
+                "h": 22,
+                "fontSize": 15,
+                "fontWeight": 600,
+                "color": "#1E2A24",
+                "lineHeight": 22
+              },
+              {
+                "type": "paragraph",
+                "id": "sp_mark_back_desc",
+                "text": "头和背是亮蓝色，\n飞过水面像一道光",
+                "x": 24,
+                "y": 698,
+                "w": 112,
+                "h": 36,
+                "fontSize": 12,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 18
+              },
+              {
+                "type": "image",
+                "id": "sp_mark_belly",
+                "name": "辨认特征-橙色胸腹",
+                "src": "assets/sp_mark_belly.jpg",
+                "x": 147,
+                "y": 568,
+                "w": 96,
+                "h": 96,
+                "radius": 48
+              },
+              {
+                "type": "label",
+                "id": "sp_mark_belly_no",
+                "text": "2",
+                "x": 221,
+                "y": 568,
+                "w": 22,
+                "h": 22,
+                "fontSize": 12,
+                "fontWeight": 700,
+                "color": "#F3EDE1",
+                "lineHeight": 22,
+                "align": "center",
+                "fill": "#C2602B",
+                "radius": 11
+              },
+              {
+                "type": "label",
+                "id": "sp_mark_belly_title",
+                "text": "橙色胸腹",
+                "x": 147,
+                "y": 674,
+                "w": 110,
+                "h": 22,
+                "fontSize": 15,
+                "fontWeight": 600,
+                "color": "#1E2A24",
+                "lineHeight": 22
+              },
+              {
+                "type": "paragraph",
+                "id": "sp_mark_belly_desc",
+                "text": "胸腹橙栗色，\n喉部和颈侧有白斑",
+                "x": 147,
+                "y": 698,
+                "w": 112,
+                "h": 36,
+                "fontSize": 12,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 18
+              },
+              {
+                "type": "image",
+                "id": "sp_mark_bill",
+                "name": "辨认特征-匕首状长喙",
+                "src": "assets/sp_mark_bill.jpg",
+                "x": 270,
+                "y": 568,
+                "w": 96,
+                "h": 96,
+                "radius": 48
+              },
+              {
+                "type": "label",
+                "id": "sp_mark_bill_no",
+                "text": "3",
+                "x": 344,
+                "y": 568,
+                "w": 22,
+                "h": 22,
+                "fontSize": 12,
+                "fontWeight": 700,
+                "color": "#F3EDE1",
+                "lineHeight": 22,
+                "align": "center",
+                "fill": "#C2602B",
+                "radius": 11
+              },
+              {
+                "type": "label",
+                "id": "sp_mark_bill_title",
+                "text": "匕首状长喙",
+                "x": 270,
+                "y": 674,
+                "w": 110,
+                "h": 22,
+                "fontSize": 15,
+                "fontWeight": 600,
+                "color": "#1E2A24",
+                "lineHeight": 22
+              },
+              {
+                "type": "paragraph",
+                "id": "sp_mark_bill_desc",
+                "text": "雄鸟喙全黑，\n雌鸟下喙橙红",
+                "x": 270,
+                "y": 698,
+                "w": 112,
+                "h": 36,
+                "fontSize": 12,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 18
+              },
+              {
+                "type": "button",
+                "id": "sp_record",
+                "text": "记录这次相遇",
+                "x": 24,
+                "y": 764,
+                "w": 354,
+                "h": 54,
+                "fill": "#1C3328",
+                "color": "#F3EDE1",
+                "fontSize": 16,
+                "fontWeight": 600,
+                "radius": 27,
+                "stroke": "#FFFFFF00",
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "record"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "record",
+      "name": "03 记一次相遇",
+      "device": "iphone-17-pro",
+      "root": {
+        "type": "phone-shell",
+        "id": "record_shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#F3EDE1",
+        "darkIsland": true,
+        "children": [
+          {
+            "type": "box",
+            "id": "record_screen",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "radius": 0,
+            "fill": "#F3EDE1",
+            "children": [
+              {
+                "type": "box",
+                "id": "record_bg",
+                "layout": "stack",
+                "x": 0,
+                "y": 0,
+                "w": 402,
+                "h": 874,
+                "fill": "#F3EDE1",
+                "radius": 0
+              },
+              {
+                "type": "label",
+                "id": "rec_time",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 22,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "color": "#1E2A24",
+                "lineHeight": 22,
+                "fontFamily": "Inter"
+              },
+              {
+                "type": "box",
+                "id": "rec_sig0",
+                "layout": "stack",
+                "x": 300,
+                "y": 26,
+                "w": 3,
+                "h": 3,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "rec_sig1",
+                "layout": "stack",
+                "x": 305,
+                "y": 23,
+                "w": 3,
+                "h": 6,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "rec_sig2",
+                "layout": "stack",
+                "x": 310,
+                "y": 20,
+                "w": 3,
+                "h": 9,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "rec_sig3",
+                "layout": "stack",
+                "x": 315,
+                "y": 17,
+                "w": 3,
+                "h": 12,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "rec_batt",
+                "layout": "stack",
+                "x": 328,
+                "y": 17,
+                "w": 24,
+                "h": 12,
+                "fill": "#FFFFFF00",
+                "radius": 4,
+                "stroke": "#1E2A24",
+                "strokeWidth": 1,
+                "opacity": 0.9
+              },
+              {
+                "type": "box",
+                "id": "rec_battfill",
+                "layout": "stack",
+                "x": 330,
+                "y": 19,
+                "w": 17,
+                "h": 8,
+                "fill": "#1E2A24",
+                "radius": 2
+              },
+              {
+                "type": "box",
+                "id": "rec_battcap",
+                "layout": "stack",
+                "x": 353,
+                "y": 21,
+                "w": 2,
+                "h": 4,
+                "fill": "#1E2A24",
+                "radius": 1,
+                "opacity": 0.6
+              },
+              {
+                "type": "box",
+                "id": "rec_sheet_edge",
+                "layout": "stack",
+                "x": 16,
+                "y": 121,
+                "w": 370,
+                "h": 588,
+                "fill": "#E3D9C7",
+                "radius": 6
+              },
+              {
+                "type": "box",
+                "id": "rec_sheet",
+                "layout": "stack",
+                "x": 16,
+                "y": 116,
+                "w": 370,
+                "h": 588,
+                "fill": "#FBF8F2",
+                "radius": 6,
+                "stroke": "#E6DDCC",
+                "strokeWidth": 1
+              },
+              {
+                "type": "box",
+                "id": "rec_mount_edge",
+                "layout": "stack",
+                "x": 32,
+                "y": 137,
+                "w": 338,
+                "h": 214,
+                "fill": "#E6DDCC",
+                "radius": 0
+              },
+              {
+                "type": "box",
+                "id": "rec_mount",
+                "layout": "stack",
+                "x": 32,
+                "y": 134,
+                "w": 338,
+                "h": 214,
+                "fill": "#FFFFFF",
+                "radius": 0,
+                "stroke": "#ECE5D7",
+                "strokeWidth": 1
+              },
+              {
+                "type": "image",
+                "id": "rec_photo",
+                "name": "手记照片-普通翠鸟",
+                "src": "assets/rec_photo.jpg",
+                "x": 40,
+                "y": 142,
+                "w": 322,
+                "h": 198
+              },
+              {
+                "type": "box",
+                "id": "rec_tape",
+                "layout": "stack",
+                "x": 170,
+                "y": 124,
+                "w": 62,
+                "h": 20,
+                "fill": "#E6D3AE",
+                "radius": 0,
+                "opacity": 0.85
+              },
+              {
+                "type": "button",
+                "id": "rec_back",
+                "text": "←",
+                "x": 20,
+                "y": 60,
+                "w": 44,
+                "h": 44,
+                "fill": "#EAE2D2",
+                "color": "#1E2A24",
+                "fontSize": 20,
+                "fontWeight": 500,
+                "radius": 22,
+                "stroke": "#FFFFFF00",
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "species"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "label",
+                "id": "rec_heading",
+                "text": "记一次相遇",
+                "x": 76,
+                "y": 69,
+                "w": 200,
+                "h": 26,
+                "fontSize": 18,
+                "fontWeight": 700,
+                "color": "#1E2A24",
+                "lineHeight": 26,
+                "fontFamily": "Songti SC"
+              },
+              {
+                "type": "label",
+                "id": "rec_bird",
+                "text": "普通翠鸟",
+                "x": 40,
+                "y": 368,
+                "w": 180,
+                "h": 40,
+                "fontSize": 28,
+                "fontWeight": 700,
+                "color": "#1E2A24",
+                "lineHeight": 40,
+                "fontFamily": "Songti SC"
+              },
+              {
+                "type": "label",
+                "id": "rec_when",
+                "text": "十月廿六 · 07:42",
+                "x": 212,
+                "y": 376,
+                "w": 150,
+                "h": 24,
+                "fontSize": 16,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 24,
+                "fontFamily": "Kaiti SC",
+                "align": "right"
+              },
+              {
+                "type": "label",
+                "id": "rec_latin",
+                "text": "Alcedo atthis",
+                "x": 40,
+                "y": 408,
+                "w": 200,
+                "h": 20,
+                "fontSize": 13,
+                "fontWeight": 400,
+                "color": "#8D9087",
+                "lineHeight": 20,
+                "fontFamily": "Georgia",
+                "italic": true
+              },
+              {
+                "type": "label",
+                "id": "rec_location_label",
+                "text": "在哪里遇见",
+                "x": 40,
+                "y": 452,
+                "w": 200,
+                "h": 20,
+                "fontSize": 13,
+                "fontWeight": 600,
+                "color": "#C2602B",
+                "lineHeight": 20,
+                "letterSpacing": 1
+              },
+              {
+                "type": "input",
+                "id": "rec_location",
+                "value": "城西湿地 · 北岸栈道",
+                "x": 28,
+                "y": 474,
+                "w": 334,
+                "h": 48,
+                "fill": "#FBF8F2",
+                "stroke": "#FBF8F2",
+                "strokeWidth": 1,
+                "fontSize": 17,
+                "color": "#1E2A24",
+                "textPaddingX": 12,
+                "radius": 0
+              },
+              {
+                "type": "box",
+                "id": "rec_location_line",
+                "layout": "stack",
+                "x": 40,
+                "y": 522,
+                "w": 322,
+                "h": 1,
+                "fill": "#1E2A24",
+                "radius": 0,
+                "opacity": 0.7
+              },
+              {
+                "type": "label",
+                "id": "rec_location_help",
+                "text": "默认是当前位置，可以改",
+                "x": 40,
+                "y": 530,
+                "w": 322,
+                "h": 20,
+                "fontSize": 12,
+                "fontWeight": 400,
+                "color": "#8D9087",
+                "lineHeight": 20
+              },
+              {
+                "type": "label",
+                "id": "rec_location_err",
+                "text": "还没写地点：写下你在哪里遇见它",
+                "x": 40,
+                "y": 530,
+                "w": 322,
+                "h": 20,
+                "fontSize": 12,
+                "fontWeight": 600,
+                "color": "#B5452A",
+                "lineHeight": 20,
+                "visible": false
+              },
+              {
+                "type": "label",
+                "id": "rec_note_label",
+                "text": "它当时的样子",
+                "x": 40,
+                "y": 574,
+                "w": 200,
+                "h": 20,
+                "fontSize": 13,
+                "fontWeight": 600,
+                "color": "#C2602B",
+                "lineHeight": 20,
+                "letterSpacing": 1
+              },
+              {
+                "type": "input",
+                "id": "rec_note",
+                "value": "",
+                "x": 28,
+                "y": 596,
+                "w": 334,
+                "h": 48,
+                "fill": "#FBF8F2",
+                "stroke": "#FBF8F2",
+                "strokeWidth": 1,
+                "fontSize": 17,
+                "color": "#1E2A24",
+                "textPaddingX": 12,
+                "radius": 0
+              },
+              {
+                "type": "box",
+                "id": "rec_note_line",
+                "layout": "stack",
+                "x": 40,
+                "y": 644,
+                "w": 322,
+                "h": 1,
+                "fill": "#1E2A24",
+                "radius": 0,
+                "opacity": 0.7
+              },
+              {
+                "type": "label",
+                "id": "rec_note_help",
+                "text": "一句话就好：它停在哪里，在做什么",
+                "x": 40,
+                "y": 652,
+                "w": 322,
+                "h": 20,
+                "fontSize": 12,
+                "fontWeight": 400,
+                "color": "#8D9087",
+                "lineHeight": 20
+              },
+              {
+                "type": "label",
+                "id": "rec_note_err",
+                "text": "还差一句：写下它当时的样子",
+                "x": 40,
+                "y": 652,
+                "w": 322,
+                "h": 20,
+                "fontSize": 12,
+                "fontWeight": 600,
+                "color": "#B5452A",
+                "lineHeight": 20,
+                "visible": false
+              },
+              {
+                "type": "button",
+                "id": "rec_save",
+                "text": "收进手记",
+                "x": 24,
+                "y": 764,
+                "w": 354,
+                "h": 54,
+                "fill": "#1C3328",
+                "color": "#F3EDE1",
+                "fontSize": 16,
+                "fontWeight": 600,
+                "radius": 27,
+                "stroke": "#FFFFFF00",
+                "on": {
+                  "click": {
+                    "cases": [
+                      {
+                        "when": "=@rec_location == '' && @rec_note == ''",
+                        "actions": [
+                          {
+                            "type": "hide",
+                            "target": "rec_location_help"
+                          },
+                          {
+                            "type": "show",
+                            "target": "rec_location_err"
+                          },
+                          {
+                            "type": "hide",
+                            "target": "rec_note_help"
+                          },
+                          {
+                            "type": "show",
+                            "target": "rec_note_err"
+                          }
+                        ]
+                      },
+                      {
+                        "when": "=@rec_location == ''",
+                        "actions": [
+                          {
+                            "type": "hide",
+                            "target": "rec_location_help"
+                          },
+                          {
+                            "type": "show",
+                            "target": "rec_location_err"
+                          },
+                          {
+                            "type": "show",
+                            "target": "rec_note_help"
+                          },
+                          {
+                            "type": "hide",
+                            "target": "rec_note_err"
+                          }
+                        ]
+                      },
+                      {
+                        "when": "=@rec_note == ''",
+                        "actions": [
+                          {
+                            "type": "show",
+                            "target": "rec_location_help"
+                          },
+                          {
+                            "type": "hide",
+                            "target": "rec_location_err"
+                          },
+                          {
+                            "type": "hide",
+                            "target": "rec_note_help"
+                          },
+                          {
+                            "type": "show",
+                            "target": "rec_note_err"
+                          }
+                        ]
+                      },
+                      {
+                        "else": true,
+                        "actions": [
+                          {
+                            "type": "set-variable",
+                            "variable": "lastLocation",
+                            "value": "=@rec_location"
+                          },
+                          {
+                            "type": "set-variable",
+                            "variable": "lastNote",
+                            "value": "=@rec_note"
+                          },
+                          {
+                            "type": "set-variable",
+                            "variable": "entries",
+                            "value": 1
+                          },
+                          {
+                            "type": "link",
+                            "page": "saved"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "saved",
+      "name": "04 已收进手记",
+      "device": "iphone-17-pro",
+      "root": {
+        "type": "phone-shell",
+        "id": "saved_shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#1C3328",
+        "darkIsland": true,
+        "children": [
+          {
+            "type": "box",
+            "id": "saved_screen",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "radius": 0,
+            "fill": "#1C3328",
+            "children": [
+              {
+                "type": "box",
+                "id": "saved_bg",
+                "layout": "stack",
+                "x": 0,
+                "y": 0,
+                "w": 402,
+                "h": 874,
+                "fill": "#1C3328",
+                "radius": 0
+              },
+              {
+                "type": "label",
+                "id": "ok_time",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 22,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "color": "#FFFFFF",
+                "lineHeight": 22,
+                "fontFamily": "Inter"
+              },
+              {
+                "type": "box",
+                "id": "ok_sig0",
+                "layout": "stack",
+                "x": 300,
+                "y": 26,
+                "w": 3,
+                "h": 3,
+                "fill": "#FFFFFF",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "ok_sig1",
+                "layout": "stack",
+                "x": 305,
+                "y": 23,
+                "w": 3,
+                "h": 6,
+                "fill": "#FFFFFF",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "ok_sig2",
+                "layout": "stack",
+                "x": 310,
+                "y": 20,
+                "w": 3,
+                "h": 9,
+                "fill": "#FFFFFF",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "ok_sig3",
+                "layout": "stack",
+                "x": 315,
+                "y": 17,
+                "w": 3,
+                "h": 12,
+                "fill": "#FFFFFF",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "ok_batt",
+                "layout": "stack",
+                "x": 328,
+                "y": 17,
+                "w": 24,
+                "h": 12,
+                "fill": "#FFFFFF00",
+                "radius": 4,
+                "stroke": "#FFFFFF",
+                "strokeWidth": 1,
+                "opacity": 0.9
+              },
+              {
+                "type": "box",
+                "id": "ok_battfill",
+                "layout": "stack",
+                "x": 330,
+                "y": 19,
+                "w": 17,
+                "h": 8,
+                "fill": "#FFFFFF",
+                "radius": 2
+              },
+              {
+                "type": "box",
+                "id": "ok_battcap",
+                "layout": "stack",
+                "x": 353,
+                "y": 21,
+                "w": 2,
+                "h": 4,
+                "fill": "#FFFFFF",
+                "radius": 1,
+                "opacity": 0.6
+              },
+              {
+                "type": "image",
+                "id": "ok_photo",
+                "name": "完成页-普通翠鸟",
+                "src": "assets/ok_photo.jpg",
+                "x": 86,
+                "y": 100,
+                "w": 230,
+                "h": 310,
+                "radius": 115
+              },
+              {
+                "type": "label",
+                "id": "ok_kicker",
+                "text": "第一页",
+                "x": 0,
+                "y": 432,
+                "w": 402,
+                "h": 20,
+                "fontSize": 13,
+                "fontWeight": 600,
+                "color": "#E58A4E",
+                "lineHeight": 20,
+                "letterSpacing": 2,
+                "align": "center"
+              },
+              {
+                "type": "label",
+                "id": "ok_title",
+                "text": "已收进手记",
+                "x": 0,
+                "y": 456,
+                "w": 402,
+                "h": 44,
+                "fontSize": 32,
+                "fontWeight": 700,
+                "color": "#F3EDE1",
+                "lineHeight": 44,
+                "fontFamily": "Songti SC",
+                "align": "center"
+              },
+              {
+                "type": "label",
+                "id": "ok_location",
+                "text": "=var.lastLocation",
+                "x": 40,
+                "y": 512,
+                "w": 322,
+                "h": 22,
+                "fontSize": 14,
+                "fontWeight": 400,
+                "color": "#C9D2C4",
+                "lineHeight": 22,
+                "align": "center"
+              },
+              {
+                "type": "paragraph",
+                "id": "ok_note",
+                "text": "=var.lastNote",
+                "x": 40,
+                "y": 544,
+                "w": 322,
+                "h": 56,
+                "fontSize": 18,
+                "fontWeight": 400,
+                "color": "#F3EDE1",
+                "lineHeight": 28,
+                "fontFamily": "Kaiti SC",
+                "align": "center"
+              },
+              {
+                "type": "button",
+                "id": "ok_open",
+                "text": "翻开手记",
+                "x": 24,
+                "y": 700,
+                "w": 354,
+                "h": 54,
+                "fill": "#F3EDE1",
+                "color": "#1C3328",
+                "fontSize": 16,
+                "fontWeight": 600,
+                "radius": 27,
+                "stroke": "#FFFFFF00",
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "journal"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "button",
+                "id": "ok_home",
+                "text": "回到发现",
+                "x": 24,
+                "y": 764,
+                "w": 354,
+                "h": 44,
+                "fill": "#FFFFFF00",
+                "color": "#C9D2C4",
+                "fontSize": 15,
+                "fontWeight": 500,
+                "radius": 22,
+                "stroke": "#FFFFFF00",
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "home"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "journal",
+      "name": "05 我的手记",
+      "device": "iphone-17-pro",
+      "root": {
+        "type": "phone-shell",
+        "id": "journal_shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#F3EDE1",
+        "darkIsland": true,
+        "children": [
+          {
+            "type": "box",
+            "id": "journal_screen",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "radius": 0,
+            "fill": "#F3EDE1",
+            "children": [
+              {
+                "type": "box",
+                "id": "journal_bg",
+                "layout": "stack",
+                "x": 0,
+                "y": 0,
+                "w": 402,
+                "h": 874,
+                "fill": "#F3EDE1",
+                "radius": 0
+              },
+              {
+                "type": "label",
+                "id": "jr_time",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 22,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "color": "#1E2A24",
+                "lineHeight": 22,
+                "fontFamily": "Inter"
+              },
+              {
+                "type": "box",
+                "id": "jr_sig0",
+                "layout": "stack",
+                "x": 300,
+                "y": 26,
+                "w": 3,
+                "h": 3,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "jr_sig1",
+                "layout": "stack",
+                "x": 305,
+                "y": 23,
+                "w": 3,
+                "h": 6,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "jr_sig2",
+                "layout": "stack",
+                "x": 310,
+                "y": 20,
+                "w": 3,
+                "h": 9,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "jr_sig3",
+                "layout": "stack",
+                "x": 315,
+                "y": 17,
+                "w": 3,
+                "h": 12,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "jr_batt",
+                "layout": "stack",
+                "x": 328,
+                "y": 17,
+                "w": 24,
+                "h": 12,
+                "fill": "#FFFFFF00",
+                "radius": 4,
+                "stroke": "#1E2A24",
+                "strokeWidth": 1,
+                "opacity": 0.9
+              },
+              {
+                "type": "box",
+                "id": "jr_battfill",
+                "layout": "stack",
+                "x": 330,
+                "y": 19,
+                "w": 17,
+                "h": 8,
+                "fill": "#1E2A24",
+                "radius": 2
+              },
+              {
+                "type": "box",
+                "id": "jr_battcap",
+                "layout": "stack",
+                "x": 353,
+                "y": 21,
+                "w": 2,
+                "h": 4,
+                "fill": "#1E2A24",
+                "radius": 1,
+                "opacity": 0.6
+              },
+              {
+                "type": "label",
+                "id": "jr_title",
+                "text": "我的手记",
+                "x": 24,
+                "y": 66,
+                "w": 200,
+                "h": 42,
+                "fontSize": 30,
+                "fontWeight": 700,
+                "color": "#1E2A24",
+                "lineHeight": 42,
+                "fontFamily": "Songti SC"
+              },
+              {
+                "type": "label",
+                "id": "jr_sub",
+                "text": "秋 · 第一页",
+                "x": 24,
+                "y": 112,
+                "w": 200,
+                "h": 20,
+                "fontSize": 14,
+                "fontWeight": 400,
+                "color": "#8D9087",
+                "lineHeight": 20
+              },
+              {
+                "type": "box",
+                "id": "jr_rule",
+                "layout": "stack",
+                "x": 24,
+                "y": 150,
+                "w": 354,
+                "h": 1,
+                "fill": "#D8CFBE",
+                "radius": 0
+              },
+              {
+                "type": "label",
+                "id": "jr_day",
+                "text": "26",
+                "x": 24,
+                "y": 172,
+                "w": 60,
+                "h": 48,
+                "fontSize": 40,
+                "fontWeight": 400,
+                "color": "#1E2A24",
+                "lineHeight": 48,
+                "fontFamily": "Georgia"
+              },
+              {
+                "type": "label",
+                "id": "jr_month",
+                "text": "十月 · 周一",
+                "x": 24,
+                "y": 222,
+                "w": 70,
+                "h": 18,
+                "fontSize": 12,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 18
+              },
+              {
+                "type": "label",
+                "id": "jr_clock",
+                "text": "07:42",
+                "x": 24,
+                "y": 240,
+                "w": 60,
+                "h": 18,
+                "fontSize": 12,
+                "fontWeight": 400,
+                "color": "#8D9087",
+                "lineHeight": 18,
+                "fontFamily": "Georgia"
+              },
+              {
+                "type": "box",
+                "id": "jr_thread",
+                "layout": "stack",
+                "x": 40,
+                "y": 270,
+                "w": 1,
+                "h": 260,
+                "fill": "#D8CFBE",
+                "radius": 0
+              },
+              {
+                "type": "image",
+                "id": "jr_photo",
+                "name": "手记照片-普通翠鸟",
+                "src": "assets/jr_photo.jpg",
+                "x": 96,
+                "y": 178,
+                "w": 282,
+                "h": 186
+              },
+              {
+                "type": "label",
+                "id": "jr_bird",
+                "text": "普通翠鸟",
+                "x": 96,
+                "y": 382,
+                "w": 200,
+                "h": 32,
+                "fontSize": 22,
+                "fontWeight": 700,
+                "color": "#1E2A24",
+                "lineHeight": 32,
+                "fontFamily": "Songti SC"
+              },
+              {
+                "type": "box",
+                "id": "jr_pin",
+                "layout": "stack",
+                "x": 96,
+                "y": 428,
+                "w": 6,
+                "h": 6,
+                "fill": "#C2602B",
+                "radius": 3
+              },
+              {
+                "type": "label",
+                "id": "jr_location",
+                "text": "=var.lastLocation",
+                "x": 110,
+                "y": 420,
+                "w": 268,
+                "h": 22,
+                "fontSize": 14,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 22
+              },
+              {
+                "type": "paragraph",
+                "id": "jr_note",
+                "text": "=var.lastNote",
+                "x": 96,
+                "y": 452,
+                "w": 282,
+                "h": 84,
+                "fontSize": 18,
+                "fontWeight": 400,
+                "color": "#1E2A24",
+                "lineHeight": 28,
+                "fontFamily": "Kaiti SC"
+              },
+              {
+                "type": "box",
+                "id": "jr_rule2",
+                "layout": "stack",
+                "x": 24,
+                "y": 568,
+                "w": 354,
+                "h": 1,
+                "fill": "#D8CFBE",
+                "radius": 0
+              },
+              {
+                "type": "label",
+                "id": "jr_met_label",
+                "text": "遇见过的鸟",
+                "x": 24,
+                "y": 586,
+                "w": 200,
+                "h": 20,
+                "fontSize": 13,
+                "fontWeight": 600,
+                "color": "#C2602B",
+                "lineHeight": 20,
+                "letterSpacing": 1
+              },
+              {
+                "type": "image",
+                "id": "jr_met_photo",
+                "name": "已遇见-普通翠鸟",
+                "src": "assets/jr_met_photo.jpg",
+                "x": 24,
+                "y": 618,
+                "w": 52,
+                "h": 52,
+                "radius": 26
+              },
+              {
+                "type": "label",
+                "id": "jr_met_name",
+                "text": "普通翠鸟",
+                "x": 88,
+                "y": 624,
+                "w": 160,
+                "h": 22,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "color": "#1E2A24",
+                "lineHeight": 22
+              },
+              {
+                "type": "label",
+                "id": "jr_met_more",
+                "text": "再看看它怎么认  →",
+                "x": 88,
+                "y": 648,
+                "w": 200,
+                "h": 18,
+                "fontSize": 12,
+                "fontWeight": 400,
+                "color": "#8D9087",
+                "lineHeight": 18
+              },
+              {
+                "type": "box",
+                "id": "jr_met_hit",
+                "layout": "stack",
+                "x": 24,
+                "y": 612,
+                "w": 260,
+                "h": 64,
+                "fill": "#FFFFFF00",
+                "radius": 0,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "species"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "box",
+                "id": "jr_tab_edge",
+                "layout": "stack",
+                "x": 111,
+                "y": 771,
+                "w": 180,
+                "h": 54,
+                "fill": "#E1D7C5",
+                "radius": 27
+              },
+              {
+                "type": "box",
+                "id": "jr_tab_bg",
+                "layout": "stack",
+                "x": 111,
+                "y": 768,
+                "w": 180,
+                "h": 54,
+                "fill": "#FBF8F2",
+                "radius": 27,
+                "stroke": "#E6DDCC",
+                "strokeWidth": 1
+              },
+              {
+                "type": "label",
+                "id": "jr_tab_discover",
+                "text": "发现",
+                "x": 116,
+                "y": 780,
+                "w": 85,
+                "h": 24,
+                "fontSize": 15,
+                "fontWeight": 500,
+                "color": "#8D9087",
+                "lineHeight": 24,
+                "align": "center"
+              },
+              {
+                "type": "label",
+                "id": "jr_tab_journal",
+                "text": "手记",
+                "x": 201,
+                "y": 780,
+                "w": 85,
+                "h": 24,
+                "fontSize": 15,
+                "fontWeight": 700,
+                "color": "#1C3328",
+                "lineHeight": 24,
+                "align": "center"
+              },
+              {
+                "type": "box",
+                "id": "jr_tab_on",
+                "layout": "stack",
+                "x": 240,
+                "y": 807,
+                "w": 6,
+                "h": 6,
+                "fill": "#C2602B",
+                "radius": 3
+              },
+              {
+                "type": "box",
+                "id": "jr_tab_discover_hit",
+                "layout": "stack",
+                "x": 116,
+                "y": 773,
+                "w": 85,
+                "h": 44,
+                "fill": "#FFFFFF00",
+                "radius": 0,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "home"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "box",
+                "id": "jr_tab_journal_hit",
+                "layout": "stack",
+                "x": 201,
+                "y": 773,
+                "w": 85,
+                "h": 44,
+                "fill": "#FFFFFF00",
+                "radius": 0,
+                "on": {
+                  "click": {
+                    "cases": [
+                      {
+                        "when": "=var.entries == 0",
+                        "actions": [
+                          {
+                            "type": "link",
+                            "page": "journal_empty"
+                          }
+                        ]
+                      },
+                      {
+                        "else": true,
+                        "actions": [
+                          {
+                            "type": "link",
+                            "page": "journal"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "journal_empty",
+      "name": "05 我的手记 · 还没有记录",
+      "device": "iphone-17-pro",
+      "root": {
+        "type": "phone-shell",
+        "id": "journal_empty_shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#F3EDE1",
+        "darkIsland": true,
+        "children": [
+          {
+            "type": "box",
+            "id": "journal_empty_screen",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "radius": 0,
+            "fill": "#F3EDE1",
+            "children": [
+              {
+                "type": "box",
+                "id": "journal_empty_bg",
+                "layout": "stack",
+                "x": 0,
+                "y": 0,
+                "w": 402,
+                "h": 874,
+                "fill": "#F3EDE1",
+                "radius": 0
+              },
+              {
+                "type": "label",
+                "id": "je_time",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 22,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "color": "#1E2A24",
+                "lineHeight": 22,
+                "fontFamily": "Inter"
+              },
+              {
+                "type": "box",
+                "id": "je_sig0",
+                "layout": "stack",
+                "x": 300,
+                "y": 26,
+                "w": 3,
+                "h": 3,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "je_sig1",
+                "layout": "stack",
+                "x": 305,
+                "y": 23,
+                "w": 3,
+                "h": 6,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "je_sig2",
+                "layout": "stack",
+                "x": 310,
+                "y": 20,
+                "w": 3,
+                "h": 9,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "je_sig3",
+                "layout": "stack",
+                "x": 315,
+                "y": 17,
+                "w": 3,
+                "h": 12,
+                "fill": "#1E2A24",
+                "radius": 1
+              },
+              {
+                "type": "box",
+                "id": "je_batt",
+                "layout": "stack",
+                "x": 328,
+                "y": 17,
+                "w": 24,
+                "h": 12,
+                "fill": "#FFFFFF00",
+                "radius": 4,
+                "stroke": "#1E2A24",
+                "strokeWidth": 1,
+                "opacity": 0.9
+              },
+              {
+                "type": "box",
+                "id": "je_battfill",
+                "layout": "stack",
+                "x": 330,
+                "y": 19,
+                "w": 17,
+                "h": 8,
+                "fill": "#1E2A24",
+                "radius": 2
+              },
+              {
+                "type": "box",
+                "id": "je_battcap",
+                "layout": "stack",
+                "x": 353,
+                "y": 21,
+                "w": 2,
+                "h": 4,
+                "fill": "#1E2A24",
+                "radius": 1,
+                "opacity": 0.6
+              },
+              {
+                "type": "label",
+                "id": "je_title",
+                "text": "我的手记",
+                "x": 24,
+                "y": 66,
+                "w": 200,
+                "h": 42,
+                "fontSize": 30,
+                "fontWeight": 700,
+                "color": "#1E2A24",
+                "lineHeight": 42,
+                "fontFamily": "Songti SC"
+              },
+              {
+                "type": "label",
+                "id": "je_sub",
+                "text": "还是一本空白的本子",
+                "x": 24,
+                "y": 112,
+                "w": 200,
+                "h": 20,
+                "fontSize": 14,
+                "fontWeight": 400,
+                "color": "#8D9087",
+                "lineHeight": 20
+              },
+              {
+                "type": "box",
+                "id": "je_rule",
+                "layout": "stack",
+                "x": 24,
+                "y": 150,
+                "w": 354,
+                "h": 1,
+                "fill": "#D8CFBE",
+                "radius": 0
+              },
+              {
+                "type": "box",
+                "id": "je_sheet_back",
+                "layout": "stack",
+                "x": 117,
+                "y": 226,
+                "w": 180,
+                "h": 230,
+                "fill": "#EFE7D8",
+                "radius": 4
+              },
+              {
+                "type": "box",
+                "id": "je_sheet",
+                "layout": "stack",
+                "x": 105,
+                "y": 214,
+                "w": 180,
+                "h": 230,
+                "fill": "#FBF8F2",
+                "radius": 4,
+                "stroke": "#D8CFBE",
+                "strokeWidth": 1
+              },
+              {
+                "type": "box",
+                "id": "je_frame",
+                "layout": "stack",
+                "x": 129,
+                "y": 240,
+                "w": 132,
+                "h": 76,
+                "fill": "#FFFFFF00",
+                "radius": 2,
+                "stroke": "#D8CFBE",
+                "strokeWidth": 1
+              },
+              {
+                "type": "box",
+                "id": "je_line0",
+                "layout": "stack",
+                "x": 129,
+                "y": 340,
+                "w": 132,
+                "h": 1,
+                "fill": "#D8CFBE",
+                "radius": 0
+              },
+              {
+                "type": "box",
+                "id": "je_line1",
+                "layout": "stack",
+                "x": 129,
+                "y": 368,
+                "w": 132,
+                "h": 1,
+                "fill": "#D8CFBE",
+                "radius": 0
+              },
+              {
+                "type": "box",
+                "id": "je_line2",
+                "layout": "stack",
+                "x": 129,
+                "y": 396,
+                "w": 80,
+                "h": 1,
+                "fill": "#D8CFBE",
+                "radius": 0
+              },
+              {
+                "type": "label",
+                "id": "je_head",
+                "text": "还没有写下第一页",
+                "x": 0,
+                "y": 492,
+                "w": 402,
+                "h": 32,
+                "fontSize": 22,
+                "fontWeight": 700,
+                "color": "#1E2A24",
+                "lineHeight": 32,
+                "fontFamily": "Songti SC",
+                "align": "center"
+              },
+              {
+                "type": "label",
+                "id": "je_body",
+                "text": "在水边停一会儿，遇见了，就把它记下来。",
+                "x": 0,
+                "y": 530,
+                "w": 402,
+                "h": 22,
+                "fontSize": 15,
+                "fontWeight": 400,
+                "color": "#5F665D",
+                "lineHeight": 22,
+                "align": "center"
+              },
+              {
+                "type": "button",
+                "id": "je_go",
+                "text": "去发现",
+                "x": 141,
+                "y": 580,
+                "w": 120,
+                "h": 46,
+                "fill": "#1C3328",
+                "color": "#F3EDE1",
+                "fontSize": 15,
+                "fontWeight": 600,
+                "radius": 23,
+                "stroke": "#FFFFFF00",
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "home"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "box",
+                "id": "je_tab_edge",
+                "layout": "stack",
+                "x": 111,
+                "y": 771,
+                "w": 180,
+                "h": 54,
+                "fill": "#E1D7C5",
+                "radius": 27
+              },
+              {
+                "type": "box",
+                "id": "je_tab_bg",
+                "layout": "stack",
+                "x": 111,
+                "y": 768,
+                "w": 180,
+                "h": 54,
+                "fill": "#FBF8F2",
+                "radius": 27,
+                "stroke": "#E6DDCC",
+                "strokeWidth": 1
+              },
+              {
+                "type": "label",
+                "id": "je_tab_discover",
+                "text": "发现",
+                "x": 116,
+                "y": 780,
+                "w": 85,
+                "h": 24,
+                "fontSize": 15,
+                "fontWeight": 500,
+                "color": "#8D9087",
+                "lineHeight": 24,
+                "align": "center"
+              },
+              {
+                "type": "label",
+                "id": "je_tab_journal",
+                "text": "手记",
+                "x": 201,
+                "y": 780,
+                "w": 85,
+                "h": 24,
+                "fontSize": 15,
+                "fontWeight": 700,
+                "color": "#1C3328",
+                "lineHeight": 24,
+                "align": "center"
+              },
+              {
+                "type": "box",
+                "id": "je_tab_on",
+                "layout": "stack",
+                "x": 240,
+                "y": 807,
+                "w": 6,
+                "h": 6,
+                "fill": "#C2602B",
+                "radius": 3
+              },
+              {
+                "type": "box",
+                "id": "je_tab_discover_hit",
+                "layout": "stack",
+                "x": 116,
+                "y": 773,
+                "w": 85,
+                "h": 44,
+                "fill": "#FFFFFF00",
+                "radius": 0,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "home"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "box",
+                "id": "je_tab_journal_hit",
+                "layout": "stack",
+                "x": 201,
+                "y": 773,
+                "w": 85,
+                "h": 44,
+                "fill": "#FFFFFF00",
+                "radius": 0,
+                "on": {
+                  "click": {
+                    "cases": [
+                      {
+                        "when": "=var.entries == 0",
+                        "actions": [
+                          {
+                            "type": "link",
+                            "page": "journal_empty"
+                          }
+                        ]
+                      },
+                      {
+                        "else": true,
+                        "actions": [
+                          {
+                            "type": "link",
+                            "page": "journal"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

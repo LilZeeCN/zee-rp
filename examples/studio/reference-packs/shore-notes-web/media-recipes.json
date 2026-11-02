@@ -1,0 +1,80 @@
+[
+  {
+    "name": "cover",
+    "src": "assets/media-35d58bc6f9aa5f4e180b4d7b46ae4e589ac818d388d03bb6aefdec8e4b74c561.jpg",
+    "asset": {
+      "relativePath": "assets/media-35d58bc6f9aa5f4e180b4d7b46ae4e589ac818d388d03bb6aefdec8e4b74c561.jpg",
+      "sha256": "a11fa61ccc4df45f66a1047f59e7730b329de742a082d41c5b646edb4f97094e",
+      "width": 1496,
+      "height": 1240,
+      "media": {
+        "recipeHash": "35d58bc6f9aa5f4e180b4d7b46ae4e589ac818d388d03bb6aefdec8e4b74c561",
+        "sourceSha256": "99e26f98213f836b79c0202ca134d571a75c3245ee05284f507025553253611a",
+        "originalPath": "assets/original-99e26f98213f836b79c0202ca134d571a75c3245ee05284f507025553253611a.jpg",
+        "recipe": {
+          "w": 748,
+          "h": 620,
+          "fx": 0.48,
+          "fy": 0.5,
+          "fh": 1,
+          "scale": 2
+        },
+        "credit": "Frank-2.0 / Wikimedia Commons / CC0 1.0; https://commons.wikimedia.org/wiki/File:Eisvogel_kingfisher_less_saturated.jpg"
+      }
+    },
+    "geometry": {
+      "ok": true,
+      "crop": [
+        397,
+        0,
+        4334,
+        3264
+      ],
+      "originalSize": [
+        4928,
+        3264
+      ],
+      "width": 1496,
+      "height": 1240
+    }
+  },
+  {
+    "name": "aside",
+    "src": "assets/media-8f14c0ecc494fa30e3cee582c6044bc224497d487af1afa1f402f7b02d07a78c.jpg",
+    "asset": {
+      "relativePath": "assets/media-8f14c0ecc494fa30e3cee582c6044bc224497d487af1afa1f402f7b02d07a78c.jpg",
+      "sha256": "15142038e7581b44a46df713f717da15138167054daf06497e8cae5887840c8a",
+      "width": 636,
+      "height": 900,
+      "media": {
+        "recipeHash": "8f14c0ecc494fa30e3cee582c6044bc224497d487af1afa1f402f7b02d07a78c",
+        "sourceSha256": "99e26f98213f836b79c0202ca134d571a75c3245ee05284f507025553253611a",
+        "originalPath": "assets/original-99e26f98213f836b79c0202ca134d571a75c3245ee05284f507025553253611a.jpg",
+        "recipe": {
+          "w": 318,
+          "h": 450,
+          "fx": 0.385,
+          "fy": 0.55,
+          "fh": 0.9,
+          "scale": 2
+        },
+        "credit": "Frank-2.0 / Wikimedia Commons / CC0 1.0; https://commons.wikimedia.org/wiki/File:Eisvogel_kingfisher_less_saturated.jpg"
+      }
+    },
+    "geometry": {
+      "ok": true,
+      "crop": [
+        859,
+        326,
+        2935,
+        3264
+      ],
+      "originalSize": [
+        4928,
+        3264
+      ],
+      "width": 636,
+      "height": 900
+    }
+  }
+]

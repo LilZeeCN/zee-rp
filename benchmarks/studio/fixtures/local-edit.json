@@ -1,0 +1,140 @@
+{
+  "name": "局部改稿基准源",
+  "domain": "web",
+  "palette": {
+    "brand": "#2457BD",
+    "ink": "#1C2B42"
+  },
+  "variables": {
+    "visited": 0
+  },
+  "components": {
+    "Caption": {
+      "root": {
+        "id": "caption_root",
+        "type": "box",
+        "layout": "column",
+        "w": 240,
+        "h": "hug",
+        "children": [
+          {
+            "id": "caption",
+            "type": "label",
+            "text": "原实例文字",
+            "w": "fill",
+            "h": "hug"
+          }
+        ]
+      }
+    }
+  },
+  "pages": [
+    {
+      "id": "home",
+      "name": "首页",
+      "domain": "web",
+      "root": {
+        "id": "root",
+        "type": "box",
+        "layout": "stack",
+        "w": 960,
+        "h": 720,
+        "padding": [
+          24,
+          32,
+          24,
+          32
+        ],
+        "children": [
+          {
+            "id": "title",
+            "type": "label",
+            "text": "原页面标题",
+            "x": 0,
+            "y": 0,
+            "w": 400,
+            "h": 48,
+            "fontSize": 28
+          },
+          {
+            "id": "card",
+            "type": "card",
+            "title": "原宏标题",
+            "body": "原宏正文不得改动",
+            "x": 0,
+            "y": 80,
+            "w": 360,
+            "h": 180
+          },
+          {
+            "id": "instanceA",
+            "type": "instance",
+            "component": "Caption",
+            "x": 0,
+            "y": 300
+          },
+          {
+            "id": "instanceB",
+            "type": "instance",
+            "component": "Caption",
+            "x": 400,
+            "y": 300
+          },
+          {
+            "id": "next",
+            "type": "button",
+            "text": "前往详情",
+            "x": 0,
+            "y": 420,
+            "w": 180,
+            "h": 48,
+            "on": {
+              "click": [
+                {
+                  "type": "navigate",
+                  "target": "detail"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    },
+    {
+      "id": "detail",
+      "name": "详情",
+      "domain": "web",
+      "root": {
+        "id": "detail_root",
+        "type": "box",
+        "layout": "column",
+        "w": 960,
+        "h": 720,
+        "children": [
+          {
+            "id": "title",
+            "type": "label",
+            "text": "详情页原文不得改动",
+            "w": 480,
+            "h": 48
+          },
+          {
+            "id": "back",
+            "type": "button",
+            "text": "返回首页",
+            "w": 160,
+            "h": 48,
+            "on": {
+              "click": [
+                {
+                  "type": "navigate",
+                  "target": "home"
+                }
+              ]
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

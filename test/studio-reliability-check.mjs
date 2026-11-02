@@ -1,0 +1,116 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import http from 'node:http';
+import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { StudioPersistence } from '../studio/persistence.mjs';
+import { StudioDocumentStore } from '../studio/commands.mjs';
+import { createEmptyStudioDocument, buildNodeIndex } from '../studio/document.mjs';
+import { studioHandlers } from '../studio/mcp-adapter.mjs';
+
+function fixture(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-reliable-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const persistence = new StudioPersistence(dir);
+  const { store } = persistence.initOrLoad();
+  const apply = commands => {
+    const result = store.applyTransaction({ baseRevision: store.appliedRevision, idempotencyKey: `edit-${store.appliedRevision}`, commands });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    persistence.persistTransaction(store, store.history.at(-1));
+  };
+  apply([{ type: 'addNode', node: { id: 'title', type: 'label', text: 'A', w: 160, h: 36 } }]);
+  apply([{ type: 'setText', nodeId: 'title', text: 'B' }]);
+  apply([{ type: 'setText', nodeId: 'title', text: 'C' }]);
+  return { dir, persistence, store };
+}
+const title = store => [...buildNodeIndex(store.doc).byScopedId.values()].find(entry => entry.node.id === 'title')?.node.text;
+
+test('restart restores undo/redo identity, then a new branch invalidates redo', t => {
+  const { dir } = fixture(t);
+  const records = readFileSync(join(dir, 'history', 'transactions.jsonl'), 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(records.length, 3);
+  let persistence = new StudioPersistence(dir), { store } = persistence.initOrLoad();
+  assert.equal(title(store), 'C');
+  assert.equal(store.undo().ok, true);
+  assert.equal(title(store), 'B');
+  persistence.persistTransaction(store, store.lastHistoryRecord);
+  persistence = new StudioPersistence(dir); ({ store } = persistence.initOrLoad());
+  assert.equal(store.redo().ok, true);
+  assert.equal(title(store), 'C');
+  persistence.persistTransaction(store, store.lastHistoryRecord);
+  ({ store } = new StudioPersistence(dir).initOrLoad());
+  assert.equal(store.undo().ok, true);
+  assert.equal(title(store), 'B');
+  persistence.persistTransaction(store, store.lastHistoryRecord);
+  const edit = store.applyTransaction({ baseRevision: store.appliedRevision, idempotencyKey: 'branch', commands: [{ type: 'setText', nodeId: 'title', text: 'D' }] });
+  assert.equal(edit.ok, true); persistence.persistTransaction(store, store.history.at(-1));
+  ({ store } = new StudioPersistence(dir).initOrLoad());
+  assert.equal(title(store), 'D');
+  assert.equal(store.redo().code, 'E_NOTHING_TO_REDO');
+  assert.equal(store.undo().ok, true); assert.equal(title(store), 'B');
+});
+
+test('WAL recovery after an undo commit restores content and the redo stack', t => {
+  const { dir, persistence, store } = fixture(t);
+  assert.equal(store.undo().ok, true);
+  assert.throws(() => persistence.persistTransaction(store, store.lastHistoryRecord, { simulateCrashStage: 'after_wal_before_doc' }), /SIMULATED_CRASH/);
+  const recovered = new StudioPersistence(dir).initOrLoad();
+  assert.equal(recovered.recoveryReport.replayedTransactions, 1);
+  assert.equal(title(recovered.store), 'B');
+  assert.equal(recovered.store.redo().ok, true);
+  assert.equal(title(recovered.store), 'C');
+});
+
+test('an old unlogged undo or missing snapshot cannot silently restore the wrong document', t => {
+  const { dir, persistence, store } = fixture(t);
+  assert.equal(store.undo().ok, true);
+  persistence.saveFullSnapshot(store.doc); // Legacy release did not log this undo.
+  const recovered = new StudioPersistence(dir).initOrLoad().store;
+  assert.equal(title(recovered), 'B');
+  assert.equal(recovered.undo().code, 'E_NOTHING_TO_UNDO');
+  const isolated = new StudioDocumentStore(createEmptyStudioDocument());
+  isolated.history.push({ txId: 'legacy-no-snapshot' });
+  const before = JSON.stringify(isolated.doc);
+  assert.equal(isolated.undo().code, 'E_HISTORY_SNAPSHOT_UNAVAILABLE');
+  assert.equal(isolated.history.length, 1); assert.equal(JSON.stringify(isolated.doc), before);
+});
+
+test('a lost undo response is sent once and returns an explicit uncertain outcome', async t => {
+  const { store } = fixture(t); let requests = 0;
+  const server = http.createServer(async (req, res) => {
+    let raw = ''; for await (const chunk of req) raw += chunk;
+    requests++; store.undo(JSON.parse(raw)); res.destroy();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  try {
+    await assert.rejects(studioHandlers.studio_undo({ url: `http://127.0.0.1:${server.address().port}` }), error => error.code === 'E_WRITE_OUTCOME_UNKNOWN');
+    assert.equal(requests, 1); assert.equal(title(store), 'B');
+  } finally { await new Promise(resolve => server.close(resolve)); }
+});
+
+test('unknown properties reject the whole edit with an actionable correction', () => {
+  const store = new StudioDocumentStore(createEmptyStudioDocument());
+  assert.equal(store.applyTransaction({ commands: [{ type: 'addNode', node: { id: 'title', type: 'label', text: 'A', w: 160, h: 36 } }] }).ok, true);
+  const before = JSON.stringify(store.doc);
+  const invalid = store.applyTransaction({ commands: [{ type: 'setText', nodeId: 'title', text: 'PARTIAL' }, { type: 'setProperties', nodeId: 'title', properties: { fontSzie: 44 } }] });
+  assert.equal(invalid.code, 'E_UNKNOWN_PROPERTY'); assert.ok(invalid.candidates.includes('fontSize'));
+  assert.equal(JSON.stringify(store.doc), before);
+  const created = store.applyTransaction({ commands: [{ type: 'addNode', node: { id: 'typo', type: 'label', fontSzie: 44 } }] });
+  assert.equal(created.code, 'E_UNKNOWN_PROPERTY'); assert.equal(JSON.stringify(store.doc), before);
+  const supported = store.applyTransaction({ commands: [{ type: 'setProperties', nodeId: 'title', properties: { fontFamily: 'Georgia', role: 'headline', css: { background: 'linear-gradient(red,blue)' } } }] });
+  assert.equal(supported.ok, true, JSON.stringify(supported));
+});
+
+test('crash replay retains the transaction page rather than editing the first page', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-reliable-page-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const persistence = new StudioPersistence(dir), { store } = persistence.initOrLoad();
+  const added = store.applyTransaction({ commands: [{ type: 'addPage', pageId: 'second', name: 'Second', domain: 'web' }] });
+  assert.equal(added.ok, true, JSON.stringify(added)); persistence.persistTransaction(store, store.history.at(-1));
+  const result = store.applyTransaction({ pageId: 'second', commands: [{ type: 'addNode', node: { id: 'second-only', type: 'label', text: 'Second' } }] });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.throws(() => persistence.persistTransaction(store, store.history.at(-1), { simulateCrashStage: 'after_wal_before_doc' }), /SIMULATED_CRASH/);
+  const recovered = new StudioPersistence(dir).initOrLoad().store;
+  const node = [...buildNodeIndex(recovered.doc).byScopedId.values()].find(entry => entry.node.id === 'second-only');
+  assert.equal(node.pageId, 'second');
+});

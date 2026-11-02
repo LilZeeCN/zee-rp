@@ -1239,6 +1239,15 @@ export const CORE_COMPONENT_CONTRACTS = {
   },
 };
 
+function getComponentContractReadOnly(componentId, doc = null) {
+  if (!componentId) return null;
+  const core = CORE_COMPONENT_CONTRACTS[componentId] || null;
+  const custom = doc?.components?.[componentId]?.contract || null;
+  if (!core && !custom) return null;
+  if (core && custom) return { ...core, ...custom };
+  return core || custom;
+}
+
 export function getComponentContracts(componentIdOrDoc = null, docOrOptions = null) {
   let componentId = null;
   let doc = null;
@@ -1251,6 +1260,23 @@ export function getComponentContracts(componentIdOrDoc = null, docOrOptions = nu
   } else {
     componentId = componentIdOrDoc;
     doc = docOrOptions;
+  }
+
+  if (componentId) {
+    const core = CORE_COMPONENT_CONTRACTS[componentId];
+    const customContract = doc?.components?.[componentId]?.contract;
+    const single = core
+      ? (customContract ? { ...structuredClone(core), ...structuredClone(customContract) } : structuredClone(core))
+      : (customContract ? structuredClone(customContract) : null);
+    if (returnEnvelope) {
+      return {
+        count: single ? 1 : 0,
+        componentId,
+        contract: single,
+        contracts: single ? { [componentId]: single } : {},
+      };
+    }
+    return single;
   }
 
   const merged = {};
@@ -1268,22 +1294,10 @@ export function getComponentContracts(componentIdOrDoc = null, docOrOptions = nu
     }
   }
   if (returnEnvelope) {
-    if (componentId) {
-      const c = merged[componentId] || null;
-      return {
-        count: c ? 1 : 0,
-        componentId,
-        contract: c,
-        contracts: c ? { [componentId]: c } : {},
-      };
-    }
     return {
       count: Object.keys(merged).length,
       contracts: merged,
     };
-  }
-  if (componentId) {
-    return merged[componentId] || null;
   }
   return merged;
 }
@@ -1323,7 +1337,7 @@ export function ensureCoreComponentsRegistered(doc, componentIds = null) {
 
 export function validateComponentInstanceAgainstContract(instanceNode, doc, { strict = true } = {}) {
   const compId = instanceNode?.component || instanceNode?.componentId;
-  const contract = getComponentContracts(compId, doc);
+  const contract = getComponentContractReadOnly(compId, doc);
   if (!contract) {
     return { valid: true, errors: [], warnings: [], staleOverrides: [] };
   }
@@ -1566,7 +1580,7 @@ export function validateComponentInstanceAgainstContract(instanceNode, doc, { st
 
 export function resolveContractPropsAndStateOverrides(instanceNode, compDef, doc = null) {
   const compId = instanceNode?.component || instanceNode?.componentId || compDef?.id;
-  const contract = getComponentContracts(compId, doc);
+  const contract = getComponentContractReadOnly(compId, doc);
   if (!contract) return { mappedOverrides: {}, stateInteractive: true };
 
   const parameters = contract.parameters || {};

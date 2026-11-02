@@ -1,5 +1,7 @@
 # 从认可的作品到可重复的 AI 创作流程
 
+2026-10-28：AI局部创作入口、语义查询和按需帮助见 [RP/1画布创作](studio-ai-authoring.md)。`studio_run_scenario` 是隔离语义执行（`hitTest:true` 可加真实指针遮挡校验，被遮挡返回 `E_SCENARIO_OCCLUDED`）；`studio_design_explore` 的 states 是单独的浏览器指针证据。
+
 本流程适用于包含 Studio 的 zee-rp 程序。它让当前调用工具的模型读取参考、准备素材、看图、记录问题和改稿；服务端不会暗中调用另一个模型，也不产生审美分数。
 
 ## 启动与连接
@@ -27,6 +29,10 @@
 每页在动手前写清：用户要做什么、必须看到什么、主操作是什么、完成/空/错误状态如何出现。保留品牌和内容事实。可以从基础节点自由构图，不强制选三种模板。
 
 栖羽包位于 `examples/studio/qiyu-field-notes/`。`manifest.json` 冻结源、截图、配方和素材字节；变化会触发 `E_BENCHMARK_DRIFT`，需要重新审查并更新冻结记录。原图授权见包内 `CREDITS.md`。该包不是通用布局模板，也不证明多条持久手记或任意长文本可用。
+
+## 比较自由构图
+
+起稿后，使用 `studio_design_explore` 的 candidates 模式对同一任务提出不同的信息组织方式，在隔离副本中看回忆、揭示、完成等状态。AI 自写任意命令，工具返回实际浏览器联系图；选稿后才提交一个事务。完整参数、行为保留与证据边界见 [自由构图与多状态预演](studio-candidates-20261027.md)。
 
 ## 2. 准备摄影素材
 
@@ -56,6 +62,8 @@
 上例 `asset` 的占位说明需要替换为实际对象，不能把字符串直接提交。服务验证资源字节的 SHA；修改与资源登记共同进入历史，可一起撤销。撤销不会删除缓存和原图，便于重放与 redo。
 
 ## 3. 用真实截图评审与改稿
+
+批量样式优先绑定设计 token，精细位置优先用 `editNodes` 的 align/place/move/distribute 表达关系。它编译为现有原子命令，失败时整批回滚，不隐式切换流式布局。修改后可在 `studio_review_design` 中传 `compareWithReviewId`，一次查看前后真实截图、变化图层范围和检查项变化；编辑器顶栏「对照」提供同一能力。示例和限制见 [关系编辑与画面对照](studio-editing-20261027.md)。
 
 1. `studio_review_design({pageId:"home",baseRevision:8})` 创建版本截图及机器检查，状态为 `awaiting-visual-review`。工具返回真正的 MCP 图片块，供当前模型直接看图。
 2. 检查主次、构图、图片主体、图文比例、阅读层级和状态。每个问题给出节点 ID、问题和下一步决定。不能只写“更加高级”。

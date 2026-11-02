@@ -63,9 +63,19 @@ export function visualCss(node) {
   }
   if (backgrounds.length) css['background-image'] = backgrounds.join(',');
   if (node.backdropBlur) css['backdrop-filter'] = `blur(${Number(node.backdropBlur) || 12}px)`;
-  if (node.shadow) css['box-shadow'] = typeof node.shadow === 'string' ? node.shadow : '0 8px 24px #14231D1A';
-  if (typeof node.customFilter === 'string') css.filter = node.customFilter;
-  if (typeof node.threeDTransform === 'string') css.transform = node.threeDTransform;
+  const shadows = [];
+  if (node.shadow) shadows.push(typeof node.shadow === 'string' ? node.shadow : '0 8px 24px #14231D1A');
+  if (node.innerGlow) {
+    const glow = typeof node.innerGlow === 'string' ? node.innerGlow : '#FFFFFF66';
+    shadows.push(glow.includes('inset') ? glow : `inset 0 0 12px ${glow}`);
+  }
+  if (shadows.length) css['box-shadow'] = shadows.join(',');
+  if (typeof node.customFilter === 'string' && node.customFilter.trim()) css.filter = node.customFilter;
+  const parts = [];
+  if (typeof node.threeDTransform === 'string' && node.threeDTransform.trim()) parts.push(node.threeDTransform.trim());
+  // 2D 旋转是原生可编辑属性（.rp MyStyle DOA 3221225522），画布/运行态与原生导出共用 node.rotation。
+  if (typeof node.rotation === 'number' && Number.isFinite(node.rotation) && node.rotation % 360 !== 0) parts.push(`rotate(${node.rotation}deg)`);
+  if (parts.length) css.transform = parts.join(' ');
   return { ...css, ...normalizeVisualCss(node.css) };
 }
 
@@ -75,6 +85,10 @@ const PAINT_CSS = /^(?:--.+|background(?:-.+)?|border(?:-.+)?|outline(?:-.+)?|bo
 
 export function exportCssPlan(node) {
   const declarations = visualCss(node);
+  // 纯 2D 旋转走原生 .rp MyStyle DOA 3221225522（可编辑），不算 unsupported/rasterized；
+  // threeDTransform 或复合 transform 维持旧的光栅化路径。
+  const hasThreeD = typeof node.threeDTransform === 'string' && node.threeDTransform.trim();
+  if (!hasThreeD && typeof node.rotation === 'number' && Number.isFinite(node.rotation)) delete declarations.transform;
   const paint = {};
   const unsupported = [];
   const textClip = [declarations['background-clip'], declarations['-webkit-background-clip']].includes('text');

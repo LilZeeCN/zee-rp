@@ -42,6 +42,8 @@
         <div class="history-tools">
           <button id="btn-undo" title="撤销 (⌘Z)" aria-label="撤销 (⌘Z)" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-undo"></use></svg></button>
           <button id="btn-redo" title="重做 (⌘⇧Z)" aria-label="重做 (⌘⇧Z)" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-redo"></use></svg></button>
+          <button id="btn-versions" title="命名版本与恢复">版本</button>
+          <button id="btn-operations" title="查看导出与其他操作">操作</button>
           <button id="btn-history" title="最近修改与版本" aria-label="最近修改与版本" aria-pressed="false"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-history"></use></svg></button>
         </div>
       </div>
@@ -52,6 +54,8 @@
       </div>
       <div class="topbar-group delivery-group">
         <div class="status-pill" id="status-pill" role="status"><span class="status-dot" id="conn-dot"></span><span id="save-status">正在连接</span><span id="rev-readout" class="visually-hidden">rev 0 / dur 0 / ren 0</span></div>
+        <button id="btn-review-compare" title="记录当前画面，并与上次记录对照" aria-label="画面对照"><svg class="ui-icon" aria-hidden="true"><use href="#ui-eye"></use></svg>对照</button>
+        <button id="btn-export-code" title="导出独立可运行 HTML/CSS/JS 代码包" aria-label="导出代码">导出代码</button>
         <button id="btn-export-rp" class="primary"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-export"></use></svg>导出 .rp</button>
       </div>
     </header>

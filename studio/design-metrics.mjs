@@ -292,13 +292,19 @@ function typeScale(nodes) {
 
 const GEOMETRY_TYPES = new Set(['box', 'image', 'input', 'button', 'badge', 'repeater', 'dynamic-panel', 'phone-shell', 'card', 'divider', 'icon']);
 
-function gridAlignment(nodes, grid = 4) {
+function gridAlignment(nodes, grid = 4, board = null) {
   const values = [];
   const offenders = [];
+  const pageArea = board ? (board.screenW || 0) * (board.screenH || 0) : 0;
   for (const node of nodes) {
     // 文本节点的坐标与尺寸都是排版结果，不属于"间距决策"；混进来会让失败数
     // 和可修复清单对不上（试用者实测：失败 3 条、清单 6 条）。
     if (node.type === 'label' || node.type === 'paragraph') continue;
+    // 设备画板/root 容器是画布本身，不是间距决策：402×874 的手机屏改不成 404，
+    // 计入采样只会拖垮对齐率并产出"把屏幕放大到 404"的无效处方。
+    // 豁免口径与留白/构图对整页底色的处理一致（根容器 + 覆盖 ≥90% 画板的背景层）。
+    if (!node.parentId) continue;
+    if (pageArea && (node.w || 0) * (node.h || 0) >= pageArea * 0.9) continue;
     const geometric = GEOMETRY_TYPES.has(node.type) || (node.childrenIds || []).length > 0;
     const pushValue = value => { if (Number.isFinite(value) && value >= grid) values.push(value); };
     for (const key of ['x', 'y']) pushValue(node[key]);
@@ -874,6 +880,18 @@ function detectSlop(scenePage, nodes, byId, alignmentMap = new Map(), { hasDomin
   return violations;
 }
 
+// T-E-1：每条规则的触发阈值随度量结果自述。未命中≠规则失效——低于阈值的样本
+// （如 w<120 的三卡、无 icon 子节点的圆角方块）本就不在检测范围，消费方据此判断
+// 「干净」还是「样本不达标」，不必试错逆向阈值。
+export const SLOP_RULES = [
+  { rule: 'equal-card-grid', thresholds: '同一父容器下 ≥3 个 box 尺寸相同且 w≥120、h≥90，水平间距等距（各间距差 ≤2px）；页面已有主视觉时降级为 warn' },
+  { rule: 'purple-gradient', thresholds: 'css.background 含 gradient，且 ≥60% 的色站色相落在 250–300、饱和度 >0.25' },
+  { rule: 'vague-centered-hero', thresholds: '标题 ≤18 字、fontSize≥28 且居中，命中空洞开头词/万能尾缀（≤14字）/感叹结尾' },
+  { rule: 'icon-in-rounded-square', thresholds: '≥3 个 radius 8–20、短边 32–64 的 box，且内部挂有 icon/image 子节点（空方块不计）' },
+  { rule: 'hero-without-media', thresholds: '首屏上 45% 区域有 ≥半屏宽节点，但无 src 素材、无表单/交互节点（提示级 warn）' },
+  { rule: 'over-rounded', thresholds: '≥3 个 w>200 的容器 radius>24' },
+];
+
 // 固定清单：缺一项就必须显式报 not-assessable，不能从 checks 里蒸发。
 const CHECK_MANIFEST = [
   'content-presence',
@@ -912,7 +930,7 @@ export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc =
   const { nodes, byId, childOf } = collectNodes(scenePage);
   const alignmentMap = collectAlignments(doc);
   const scale = typeScale(nodes);
-  const grid = gridAlignment(nodes);
+  const grid = gridAlignment(nodes, 4, scenePage.board);
   const space = whitespaceRatio(nodes, scenePage.board);
   // 像素真值优先：截图取样比几何模拟可靠，尤其在有遮罩/滤镜/图片时。
   const heuristicContrast = contrastReport(nodes, byId);
@@ -929,7 +947,11 @@ export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc =
       worst: measured.filter(r => !r.passes).slice(0, 5).map(r => ({ id: r.id, ratio: r.ratio, required: r.required })),
       source: 'pixel', skippedUnknownBackground: missingPixels.length > 0,
     }
-    : { ...heuristicContrast, source: 'geometry' };
+    : { ...heuristicContrast, source: 'geometry',
+        // 跨模式口径差异（T-E-7）：几何模式按层叠解析底色，对重叠文本是乐观判定；
+        // pixel 模式对重叠文本层标 unknown（unknown>0 即不通过）。同一页两种模式可能结论相反。
+        modeNote: 'geometry 口径：底色按几何层叠解析，重叠文本按可见底色乐观判定；'
+          + 'pixel 口径下重叠文本层标 unknown（unknown>0 计为不通过），两种模式结论可能不同。' };
   const hues = huePalette(nodes);
   const containment = containmentReport(scenePage, nodes, byId);
   const exportBudget = exportProjection(scenePage);
@@ -1045,10 +1067,12 @@ export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc =
   }
 
   add('anti-slop', slopErrors.length === 0,
-    slopErrors.length ? `命中 ${slopErrors.length} 条反 slop 规则`
-      : (slop.length
-        ? (hierarchy ? `仅有 ${slop.length} 条提示级样式（已确认主次，不判不合格）` : `仅有 ${slop.length} 条提示级样式（页面块数不足，无法确认主次）`)
-        : '未命中反 slop 规则'));
+    // 计数与 slop 数组对账：headline 数必须等于数组长度，error/warn 只做拆分，
+    // 否则"命中 1 条"对着 2 条数组让人对不上账（T-ER-1）。
+    slop.length === 0 ? '未命中反 slop 规则'
+      : slopErrors.length
+        ? `命中 ${slop.length} 条反 slop 规则（error ${slopErrors.length} / warn ${slop.length - slopErrors.length}）`
+        : (hierarchy ? `仅有 ${slop.length} 条提示级样式（已确认主次，不判不合格）` : `仅有 ${slop.length} 条提示级样式（页面块数不足，无法确认主次）`));
   if (!hierarchy) {
     add('visual-hierarchy', false, '可见内容块不足 3 个——无法判断主次，按未评估处理', { notAssessable: true });
   } else {
@@ -1089,6 +1113,7 @@ export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc =
         : [],
       violations: [{ check: 'content-presence', detail: '空页面没有可评估的设计；先放内容再谈指标' }],
       slop: [],
+      slopRules: SLOP_RULES,
       l1: {
         ok: false,
         verdict: 'not-assessable',
@@ -1124,6 +1149,7 @@ export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc =
     warnings: contrastWarnings,
     violations: checks.filter(c => !c.ok).map(c => ({ check: c.key, detail: c.detail })),
     slop,
+    slopRules: SLOP_RULES,
     l1: {
       // 不输出 passed/total：把它拆成可逐个优化的格子，正是 reward hacking 的理想形状。
       // 只给状态与"必须处理的具体证据"。

@@ -45,8 +45,8 @@ try {
   await client.connect(transport);
   await check('stdio 初始化与注册表 30 命令', async () => {
     const { tools } = await client.listTools();
-    // 会话层 8 个意图工具加入 listMcpTools 后，本断言的排除集同步扩展；30 命令工具数本身不变。
-    const sessionNames = new Set(['axure_open', 'axure_state', 'axure_save', 'locate', 'inspect', 'read_interactions', 'edit_text', 'verify']);
+    // 会话层意图工具加入 listMcpTools 后，本断言的排除集同步扩展；命令工具数本身不变。
+    const sessionNames = new Set(['axure_open', 'axure_state', 'axure_save', 'locate', 'inspect', 'read_interactions', 'edit_text', 'set_widget_geometry', 'set_widget_style', 'verify', 'sync_prototype', 'generate_from_image']);
     assert.equal(tools.filter(t => !t.name.startsWith('jobs_') && t.name !== 'gui_roundtrip' && !sessionNames.has(t.name)).length, 31);
     for (const name of ['rp_read', 'add_interaction', 'fill_panel_state', 'set_widget_text']) {
       const schema = tools.find(t => t.name === name).inputSchema;

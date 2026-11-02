@@ -1421,6 +1421,8 @@ def apply_text_replacements(spec, replacements=None):
 
     replaced_count = 0
 
+    dummy_draw = ImageDraw.Draw(Image.new("RGB", (16, 16)))
+
     def walk(nodes):
         nonlocal replaced_count
         for node in nodes or []:
@@ -1433,6 +1435,16 @@ def apply_text_replacements(spec, replacements=None):
                             updated = updated.replace(old_s, new_s)
                     if updated != orig:
                         node[field] = updated
+                        if "\n" not in updated and isinstance(node.get("w"), (int, float)):
+                            try:
+                                sz = int(round(float(node.get("size", 14))))
+                                wt = int(node.get("weight", 400))
+                                b = dummy_draw.textbbox((0, 0), updated, font=load_font(sz, wt))
+                                new_tw = b[2] - b[0]
+                                if new_tw + 12 > float(node["w"]):
+                                    node["w"] = round(new_tw + 12, 1)
+                            except Exception:
+                                pass
                         replaced_count += 1
             if isinstance(node.get("children"), list):
                 walk(node["children"])
@@ -1585,7 +1597,7 @@ def recover_uncovered_icons_and_badges(
         px0 = int(round(pw["x"] * scale))
         py0 = int(round(pw["y"] * scale))
         px1 = int(round((pw["x"] + pw["w"]) * scale))
-        py1 = int(round((pw["y"] + pw["h"]) * scale))
+        py1 = int(round((pw["y"] + pw.get("h", pw.get("thickness", 1))) * scale))
         pad = max(3, int(round(3 * scale)))
         occupied[max(0, py0 - pad):min(H, py1 + pad), max(0, px0 - pad):min(W, px1 + pad)] = True
 
@@ -2793,7 +2805,7 @@ def render_spec(spec, scale=2.0, mode="full"):
     frame = frames[0]
     W = max(1, int(round(float(frame["w"]) * scale)))
     H = max(1, int(round(float(frame["h"]) * scale)))
-    bg_rgba = (0, 0, 0, 0) if mode in ("wireframe", "underlay") else hex_to_rgba(frame.get("bg", "#FFFFFF"), 255)
+    bg_rgba = (0, 0, 0, 0) if mode in ("wireframe", "underlay", "transparent") else hex_to_rgba(frame.get("bg", "#FFFFFF"), 255)
     canvas = Image.new("RGBA", (W, H), bg_rgba)
     draw = ImageDraw.Draw(canvas)
     img_map = spec.get("images", {})
@@ -2813,7 +2825,7 @@ def render_spec(spec, scale=2.0, mode="full"):
             y = int(round(float(child["y"]) * scale))
             w = max(1, int(round(float(child["w"]) * scale)))
             h = max(1, int(round(float(child["h"]) * scale)))
-            if mode == "full":
+            if mode in ("full", "transparent"):
                 ikey = child.get("imageKey", "")
                 b64 = img_map.get(ikey)
                 if not b64:
@@ -3448,8 +3460,144 @@ def cmd_selftest():
         shutil.rmtree(tmp, ignore_errors=True)
 
 
+def cmd_rp9_spec(spec_path, out_spec_path=None, assets_dir=None):
+    import copy
+    with open(spec_path, "r", encoding="utf-8") as f:
+        spec = json.load(f)
+    rp9_spec = copy.deepcopy(spec)
+    frames = rp9_spec.get("frames") or []
+    if not frames:
+        raise ValueError("spec.json 缺少 frames 数组")
+    frame = frames[0]
+    W = max(1, int(round(float(frame["w"]))))
+    H = max(1, int(round(float(frame["h"]))))
+    img_map = rp9_spec.setdefault("images", {})
+
+    media_regions = []
+    rasterized_vectors = []
+    review_texts = []
+
+    children = frame.get("children") or []
+    for idx, child in enumerate(children):
+        kind = child.get("kind")
+        w_name = child.get("name") or child.get("id") or f"{kind}-{idx+1}"
+        needs_raster = (
+            kind in ("pie", "shape", "line")
+            or isinstance(child.get("fill"), dict)
+            or bool(child.get("shadows"))
+        )
+        if needs_raster:
+            if kind == "pie":
+                cx, cy, r = float(child["cx"]), float(child["cy"]), float(child["r"])
+                bx = max(0, int(math.floor(cx - r)))
+                by = max(0, int(math.floor(cy - r)))
+                bw = max(1, min(W - bx, int(math.ceil(2 * r))))
+                bh = max(1, min(H - by, int(math.ceil(2 * r))))
+            elif kind == "line":
+                x1, y1 = float(child["x1"]), float(child["y1"])
+                x2, y2 = float(child["x2"]), float(child["y2"])
+                pad = int(math.ceil(float(child.get("thickness", 2)))) + 2
+                bx = max(0, int(math.floor(min(x1, x2) - pad)))
+                by = max(0, int(math.floor(min(y1, y2) - pad)))
+                bw = max(4, min(W - bx, int(math.ceil(abs(x2 - x1) + 2 * pad))))
+                bh = max(4, min(H - by, int(math.ceil(abs(y2 - y1) + 2 * pad))))
+            else:
+                bx = max(0, int(round(float(child.get("x", 0)))))
+                by = max(0, int(round(float(child.get("y", 0)))))
+                bw = max(1, min(W - bx, int(round(float(child.get("w") or child.get("d") or 10)))))
+                bh = max(1, min(H - by, int(round(float(child.get("h") or child.get("d") or 10)))))
+
+            single_canvas = render_spec(
+                {"frames": [{"x": 0, "y": 0, "w": W, "h": H, "bg": "#FFFFFF", "children": [child]}], "images": img_map},
+                scale=1.0,
+                mode="transparent",
+            )
+            cropped = single_canvas.crop((bx, by, bx + bw, by + bh))
+            buf = io.BytesIO()
+            cropped.save(buf, format="PNG")
+            png_bytes = buf.getvalue()
+            ikey = hashlib.md5(png_bytes).hexdigest()
+            img_map[ikey] = base64.b64encode(png_bytes).decode("ascii")
+            children[idx] = {
+                "kind": "image",
+                "name": w_name,
+                "x": bx,
+                "y": by,
+                "w": bw,
+                "h": bh,
+                "imageKey": ikey,
+            }
+            rasterized_vectors.append({
+                "index": idx,
+                "name": w_name,
+                "originalKind": kind,
+                "x": bx,
+                "y": by,
+                "w": bw,
+                "h": bh,
+                "imageKey": ikey,
+                "reason": "complex_vector_or_chart_rasterized_for_rp9",
+            })
+        elif kind == "image":
+            media_regions.append({
+                "index": idx,
+                "name": w_name,
+                "x": child.get("x"),
+                "y": child.get("y"),
+                "w": child.get("w"),
+                "h": child.get("h"),
+                "imageKey": child.get("imageKey"),
+                "reason": "cropped_media_or_icon",
+            })
+        elif kind == "text":
+            sz = float(child.get("size", 14))
+            tw = float(child.get("w", 30))
+            if sz <= 11 or tw < 24:
+                review_texts.append({
+                    "index": idx,
+                    "name": w_name,
+                    "content": child.get("content", ""),
+                    "x": child.get("x"),
+                    "y": child.get("y"),
+                    "w": child.get("w"),
+                    "h": child.get("h"),
+                    "size": sz,
+                    "reason": "small_text_or_short_token_review_recommended",
+                })
+
+    saved_assets = []
+    if assets_dir:
+        os.makedirs(assets_dir, exist_ok=True)
+        for ikey, b64 in img_map.items():
+            asset_path = os.path.join(assets_dir, f"{ikey}.png")
+            with open(asset_path, "wb") as af:
+                af.write(base64.b64decode(b64))
+            saved_assets.append(os.path.abspath(asset_path))
+
+    target_out = out_spec_path or spec_path
+    with open(target_out, "w", encoding="utf-8") as f:
+        json.dump(rp9_spec, f, ensure_ascii=False, indent=2)
+
+    return {
+        "rp9SpecPath": os.path.abspath(target_out),
+        "assetsDir": os.path.abspath(assets_dir) if assets_dir else None,
+        "savedAssets": saved_assets,
+        "widgetCounts": {
+            "total": len(children),
+            "texts": sum(1 for c in children if c.get("kind") == "text"),
+            "shapes": sum(1 for c in children if c.get("kind") in ("rect", "card", "circle", "ellipse", "hline")),
+            "images": sum(1 for c in children if c.get("kind") == "image"),
+        },
+        "reviewRegions": {
+            "mediaRegions": media_regions,
+            "rasterizedVectors": rasterized_vectors,
+            "smallOrReviewTexts": review_texts,
+        },
+    }
+
+
 def main():
-    parser = argparse.ArgumentParser(description="zee-axure 截图临摹工具链 v3 (scan / draft / crop / normalize-lines / verify / selftest)")
+    parser = argparse.ArgumentParser(description="zee-axure 截图临摹工具链 v3 (scan / draft / crop / normalize-lines / verify / rp9-spec / selftest)")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
     p_scan = sub.add_parser("scan", help="扫描截图生成结构化 trace-scan.json (含 cards/pills/lines/pies/polylines/media_blocks/texts)")
@@ -3488,6 +3636,11 @@ def main():
     p_ver.add_argument("--scale", type=float, default=2.0, help="物理像素与逻辑像素比例 (默认 2.0)")
     p_ver.add_argument("--preview", help="可选：真实 Axure 预览截图路径（支持整窗截图自动定位裁切与 Proxy vs Host 异常检测）")
 
+    p_rp9 = sub.add_parser("rp9-spec", help="将复杂矢量/饼图/折线转储为独立透明 PNG 图元并导出 RP9 原生兼容 spec 与待校对区域")
+    p_rp9.add_argument("spec", help="输入 spec.json 路径")
+    p_rp9.add_argument("-o", "--output", help="输出 rp9.spec.json 路径")
+    p_rp9.add_argument("--assets-dir", help="可选：独立 PNG 素材落盘目录")
+
     sub.add_parser("selftest", help="运行合成图像全链路自检")
 
     args = parser.parse_args()
@@ -3517,6 +3670,9 @@ def main():
             print(json.dumps(res, ensure_ascii=False, indent=2))
         elif args.cmd == "verify":
             res = cmd_verify(args.spec, args.source, args.out_dir, scale=args.scale, preview_path=args.preview)
+            print(json.dumps(res, ensure_ascii=False, indent=2))
+        elif args.cmd == "rp9-spec":
+            res = cmd_rp9_spec(args.spec, out_spec_path=args.output, assets_dir=args.assets_dir)
             print(json.dumps(res, ensure_ascii=False, indent=2))
         elif args.cmd == "selftest":
             sys.exit(cmd_selftest())

@@ -1,3 +1,4 @@
+import { BoundedCache, textWeight } from './bounded-cache.mjs';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs';
@@ -5,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const cache = new Map();
+const cache = new BoundedCache({maxEntries:8192,maxWeight:8*1024*1024,weight:textWeight});
 let binary;
 let unavailable;
 

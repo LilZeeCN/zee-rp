@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, dirname } from 'node:path';
+import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -41,8 +41,18 @@ test('nine media recipes replay the approved crops and preserve the original', a
     assert.equal(sha256(readFileSync(sourcePath)), sourceSha);
     const changed = await prepareMedia({ ...input, crops: [crops[0]], tokens: { colors: { bg: '#FFFFFF' } } });
     assert.notEqual(changed.results[0].src, result.results[0].src);
-    await assert.rejects(() => prepareMedia({ ...input, crops: [{ w: 50, h: 200, protectedRegion: { x: 0, y: 0, w: 1, h: 1 } }] }), { code: 'E_MEDIA_SUBJECT_CROP' });
-    await assert.rejects(() => prepareMedia({ ...input, crops: [{ w: 0, h: 200 }] }), { code: 'E_MEDIA_RECIPE' });
+    // T-F-5：多裁切改为逐项隔离——坏配方进 failures 并清理未登记孤儿，不再整单 rejects。
+    // 旧断言 assert.rejects(E_MEDIA_SUBJECT_CROP / E_MEDIA_RECIPE) 与该语义矛盾，随发现一并更正。
+    const subjectFail = await prepareMedia({ ...input, crops: [{ w: 50, h: 200, protectedRegion: { x: 0, y: 0, w: 1, h: 1 } }] });
+    assert.equal(subjectFail.ok, false);
+    assert.equal(subjectFail.failures[0].code, 'E_MEDIA_SUBJECT_CROP');
+    const recipeFail = await prepareMedia({ ...input, crops: [{ w: 0, h: 200 }] });
+    assert.equal(recipeFail.ok, false);
+    assert.equal(recipeFail.failures[0].code, 'E_MEDIA_RECIPE');
+    // 失败单不得留下未登记孤儿：assets/ 目录对成功响应登记列表（9 配方 + 改令牌重制 1 张）的补集为空。
+    const registered = new Set([...result.results, ...changed.results].map(item => basename(item.src)));
+    const orphans = readdirSync(join(dir, 'assets')).filter(f => f.startsWith('media-') && !registered.has(f));
+    assert.deepEqual(orphans, [], `失败单留下未登记孤儿：${orphans.join(', ')}`);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -101,8 +111,9 @@ test('fresh MCP transport delivers images, atomic media history and revision-bou
     assert.equal(review.raw.content.filter(c => c.type === 'image').length, 1, JSON.stringify(review.value));
     assert.equal(review.value.status, 'awaiting-visual-review');
     const recorded = (await call('studio_review_design', { baseRevision: rev, pageId: 'home', reviewId: review.value.reviewId,
-      observations: [{ nodeIds: ['title'], issue: '标题语气过于通用', decision: '改成具体的观察邀请' }] })).value;
+      observations: [{ nodeIds: ['title'], issue: '标题语气过于通用', consequence:'读者看不出下一步观察什么',decision: '改成具体的观察邀请',preserve:'保留正文和照片焦点' }] })).value;
     assert.equal(recorded.status, 'agent-reviewed'); assert.equal(recorded.userAccepted, false);
+    assert.equal(recorded.observations[0].consequence,'读者看不出下一步观察什么');assert.equal(JSON.parse(readFileSync(recorded.reportPath)).observations[0].preserve,'保留正文和照片焦点');
     const change = (await call('studio_apply_commands', { baseRevision: rev, idempotencyKey: 'repaint-screen', pageId: 'home', commands: [
       { type: 'setProperties', nodeId: 'home_screen', properties: { fill: '#112233' } },
       { type: 'setProperties', nodeId: 'photo', properties: { x: 30 } },

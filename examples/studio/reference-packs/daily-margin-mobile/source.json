@@ -1,0 +1,337 @@
+{
+  "language": "RP/1",
+  "target": 9,
+  "name": "一页词记 · Daily Margin",
+  "domain": "mobile",
+  "pages": [
+    {
+      "id": "margin",
+      "name": "一页词记",
+      "device": "iphone-17-pro",
+      "root": {
+        "type": "phone-shell",
+        "id": "margin_shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#F4EFE5",
+        "children": [
+          {
+            "type": "box",
+            "id": "margin_screen",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "layout": "stack",
+            "fill": "#F4EFE5",
+            "children": [
+              {
+                "type": "label",
+                "id": "margin_brand",
+                "text": "daily / margin",
+                "x": 28,
+                "y": 76,
+                "w": 280,
+                "h": 34,
+                "fontFamily": "Georgia",
+                "fontSize": 23,
+                "color": "#594B3E"
+              },
+              {
+                "type": "label",
+                "id": "margin_date",
+                "text": "THU · 29",
+                "x": 292,
+                "y": 82,
+                "w": 90,
+                "h": 24,
+                "fontFamily": "Menlo",
+                "fontSize": 11,
+                "color": "#A28871"
+              },
+              {
+                "type": "box",
+                "id": "margin_rule",
+                "x": 28,
+                "y": 126,
+                "w": 346,
+                "h": 1,
+                "layout": "stack",
+                "fill": "#D7C7B5",
+                "children": []
+              },
+              {
+                "type": "label",
+                "id": "margin_kicker",
+                "text": "给今天，留一个新词。",
+                "x": 28,
+                "y": 157,
+                "w": 346,
+                "h": 28,
+                "fontFamily": "Arial",
+                "fontSize": 14,
+                "color": "#8F7861"
+              },
+              {
+                "type": "label",
+                "id": "margin_word",
+                "text": "linger",
+                "x": 28,
+                "y": 204,
+                "w": 346,
+                "h": 86,
+                "fontFamily": "Georgia",
+                "fontSize": 66,
+                "color": "#5B4737"
+              },
+              {
+                "type": "label",
+                "id": "margin_sound",
+                "text": "/ˈlɪŋɡə(r)/   v.",
+                "x": 30,
+                "y": 298,
+                "w": 340,
+                "h": 30,
+                "fontFamily": "Arial",
+                "fontSize": 14,
+                "color": "#A27F64"
+              },
+              {
+                "type": "box",
+                "id": "margin_quote",
+                "x": 28,
+                "y": 356,
+                "w": 346,
+                "h": 220,
+                "layout": "stack",
+                "fill": "#E8DECA",
+                "children": [
+                  {
+                    "type": "label",
+                    "id": "quote_index",
+                    "text": "01 / 在句子里遇见它",
+                    "x": 20,
+                    "y": 20,
+                    "w": 306,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 11,
+                    "color": "#927C61"
+                  },
+                  {
+                    "type": "label",
+                    "id": "quote_sentence",
+                    "text": "The scent of tea\nlingered in the room.",
+                    "x": 20,
+                    "y": 70,
+                    "w": 306,
+                    "h": 98,
+                    "fontFamily": "Georgia",
+                    "fontSize": 25,
+                    "color": "#5A4C37",
+                    "lineHeight": 38
+                  },
+                  {
+                    "type": "label",
+                    "id": "quote_hint",
+                    "text": "试着想象：茶香离开了吗？",
+                    "x": 20,
+                    "y": 180,
+                    "w": 306,
+                    "h": 26,
+                    "fontFamily": "Arial",
+                    "fontSize": 12,
+                    "color": "#927C61"
+                  }
+                ]
+              },
+              {
+                "type": "box",
+                "id": "margin_answer",
+                "x": 28,
+                "y": 604,
+                "w": 346,
+                "h": 126,
+                "layout": "stack",
+                "fill": "#F4EFE5",
+                "children": [
+                  {
+                    "type": "label",
+                    "id": "margin_meaning",
+                    "text": "停留；迟迟不消散",
+                    "x": 0,
+                    "y": 0,
+                    "w": 346,
+                    "h": 36,
+                    "fontFamily": "Arial",
+                    "fontSize": 23,
+                    "color": "#9C503F"
+                  },
+                  {
+                    "type": "label",
+                    "id": "margin_explain",
+                    "text": "有些时刻结束了，感觉还留在原地。",
+                    "x": 0,
+                    "y": 52,
+                    "w": 346,
+                    "h": 52,
+                    "fontFamily": "Arial",
+                    "fontSize": 14,
+                    "color": "#8C7763",
+                    "lineHeight": 25
+                  }
+                ],
+                "visible": false
+              },
+              {
+                "type": "label",
+                "id": "margin_prompt",
+                "text": "不急着翻页，先在心里说出它的意思。",
+                "x": 28,
+                "y": 632,
+                "w": 346,
+                "h": 62,
+                "fontFamily": "Arial",
+                "fontSize": 14,
+                "color": "#927A63",
+                "lineHeight": 25
+              },
+              {
+                "type": "button",
+                "id": "margin_reveal",
+                "text": "翻开词记   ↗",
+                "x": 28,
+                "y": 756,
+                "w": 346,
+                "h": 56,
+                "fontFamily": "Arial",
+                "fontSize": 16,
+                "fill": "#9C503F",
+                "color": "#FFF7EA",
+                "radius": 28,
+                "on": {
+                  "click": [
+                    {
+                      "type": "hide",
+                      "target": "margin_prompt"
+                    },
+                    {
+                      "type": "show",
+                      "target": "margin_answer"
+                    },
+                    {
+                      "type": "hide",
+                      "target": "margin_reveal"
+                    },
+                    {
+                      "type": "show",
+                      "target": "margin_done"
+                    }
+                  ]
+                }
+              },
+              {
+                "type": "button",
+                "id": "margin_done",
+                "text": "记住这个片刻   ✓",
+                "x": 28,
+                "y": 756,
+                "w": 346,
+                "h": 56,
+                "fontFamily": "Arial",
+                "fontSize": 16,
+                "fill": "#9C503F",
+                "color": "#FFF7EA",
+                "radius": 28,
+                "on": {
+                  "click": [
+                    {
+                      "type": "hide",
+                      "target": "margin_answer"
+                    },
+                    {
+                      "type": "show",
+                      "target": "margin_feedback"
+                    },
+                    {
+                      "type": "hide",
+                      "target": "margin_done"
+                    },
+                    {
+                      "type": "show",
+                      "target": "margin_restart"
+                    }
+                  ]
+                },
+                "visible": false
+              },
+              {
+                "type": "label",
+                "id": "margin_feedback",
+                "text": "今日的一页，收好了。",
+                "x": 28,
+                "y": 632,
+                "w": 346,
+                "h": 66,
+                "fontFamily": "Georgia",
+                "fontSize": 25,
+                "color": "#9C503F",
+                "visible": false
+              },
+              {
+                "type": "button",
+                "id": "margin_restart",
+                "text": "再读一遍",
+                "x": 28,
+                "y": 756,
+                "w": 346,
+                "h": 56,
+                "fontFamily": "Arial",
+                "fontSize": 16,
+                "fill": "#E2D4BD",
+                "color": "#6B523C",
+                "radius": 28,
+                "on": {
+                  "click": [
+                    {
+                      "type": "hide",
+                      "target": "margin_feedback"
+                    },
+                    {
+                      "type": "show",
+                      "target": "margin_prompt"
+                    },
+                    {
+                      "type": "show",
+                      "target": "margin_reveal"
+                    },
+                    {
+                      "type": "hide",
+                      "target": "margin_restart"
+                    }
+                  ]
+                },
+                "visible": false
+              },
+              {
+                "type": "label",
+                "id": "margin_footer",
+                "text": "A SMALL WORD, A LITTLE MORE WORLD.",
+                "x": 28,
+                "y": 830,
+                "w": 346,
+                "h": 20,
+                "fontFamily": "Arial",
+                "fontSize": 9,
+                "color": "#AE9982",
+                "letterSpacing": 0.5
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -136,6 +136,7 @@ const overflowPage = await studioHandlers.studio_apply_commands({
   idempotencyKey: 'metrics-overflow-1',
   commands: [
     { type: 'addPage', pageId: 'ovf', name: '越界页', domain: 'web', w: 800, h: 600 },
+    { type: 'setLayout', nodeId: 'ovf/ovf_root', layout: 'column' },
     { type: 'addNode', pageId: 'ovf', node: { id: 'tall', type: 'box', w: 300, h: 500, fill: '#E5E7EB' } },
     { type: 'addNode', pageId: 'ovf', node: { id: 'far', type: 'box', w: 300, h: 200, fill: '#E5E7EB' } },
   ],

@@ -1,0 +1,171 @@
+{
+  "id": "field-ledger-web",
+  "version": "1.0.0",
+  "source": "source.json",
+  "name": "材料档案 · 密集目录",
+  "intent": "task",
+  "platform": "web",
+  "scenarios": [
+    {
+      "id": "filter-detail-reset",
+      "startPageId": "ledger",
+      "steps": [
+        {
+          "expect": {
+            "visible": {
+              "all_records": true,
+              "available_records": false,
+              "record_detail": false
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "filter_available",
+          "expect": {
+            "visible": {
+              "all_records": false,
+              "available_records": true
+            },
+            "text": {
+              "count_label": "4 RECORDS / 在库"
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "available_records_view_1",
+          "expect": {
+            "visible": {
+              "record_detail": true
+            },
+            "text": {
+              "detail_title": "白蜡木",
+              "detail_eyebrow": "MATERIAL / W-018"
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "close_record",
+          "expect": {
+            "visible": {
+              "record_detail": false
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "reset_filter",
+          "expect": {
+            "visible": {
+              "all_records": true,
+              "available_records": false
+            },
+            "text": {
+              "count_label": "8 RECORDS"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "design": {
+    "protagonist": "可扫描的记录与稳定列对齐",
+    "readOrder": [
+      "标题与范围",
+      "馆藏/可用/借阅概览",
+      "筛选与列头",
+      "逐条记录",
+      "当前记录详情"
+    ],
+    "typography": {
+      "families": [
+        "Arial",
+        "Georgia",
+        "Menlo"
+      ],
+      "display": 32,
+      "metric": 48,
+      "body": 13,
+      "lineHeight": 24
+    },
+    "palette": {
+      "background": "#F4F5EF",
+      "ink": "#303C28",
+      "rail": "#252C25",
+      "accent": "#E3E8D7"
+    },
+    "spacing": {
+      "column": 24,
+      "row": 58,
+      "tableHeader": 42
+    },
+    "materials": "薄线与浅表格层级，深色窄导航条固定定位",
+    "directions": [
+      {
+        "name": "密集目录",
+        "structure": "固定列与侧边详情",
+        "rhythm": "58px行节奏"
+      },
+      {
+        "name": "材料图谱",
+        "structure": "按类别的自由图像网格",
+        "rhythm": "图像大小建立层级"
+      },
+      {
+        "name": "研究日志",
+        "structure": "时间线纵向阅读",
+        "rhythm": "留白与手记式字体"
+      }
+    ],
+    "limitations": [
+      "固定八条示例数据；筛选是公开显隐状态，不宣称实时数据库",
+      "详情不提供真实借阅提交",
+      "五方向并非所有任务的模板"
+    ]
+  },
+  "pages": [
+    {
+      "id": "ledger",
+      "name": "材料档案"
+    }
+  ],
+  "initialPageId": "ledger",
+  "provenance": {
+    "source": "agent",
+    "status": "agent-reviewed",
+    "userAccepted": false,
+    "created": "2026-10-29",
+    "note": "虚构内容用于原型参考；未代表真实运营数据或用户认可"
+  },
+  "files": {
+    "previews/detail.png": "d23d51a25056a90fb9e20d77615a3858720d87585f2609ea37abe2df4a206d21",
+    "previews/filtered.png": "25dabf90d51acb715e2931deb2219dd4525bcd22a9992437d388e85ba6e5123a",
+    "previews/ledger-initial.png": "945a333f11c81e53a872049fd4b7f2d7dc6e1694f75561457c7cde06ce2e0712",
+    "source.json": "f85d68811ccf07e03641bce88e34d81253a033887b1a9b0d33b52d7e9c6a6e1b"
+  },
+  "validation": {
+    "sourceSha256": "f85d68811ccf07e03641bce88e34d81253a033887b1a9b0d33b52d7e9c6a6e1b",
+    "revision": 1,
+    "contentHash": "f0c972b90376742a1a7f46c969dec0edc39e79ef828a7b75039a9873d430a0ce",
+    "semanticPassed": true,
+    "browserPointerPassed": true,
+    "assertionCount": 13,
+    "nativeStructure": {
+      "pageCount": 1,
+      "widgetCount": 150,
+      "unparseable": 0,
+      "danglingRefs": 0,
+      "problems": 0,
+      "threeZerosPassed": true
+    },
+    "negativeControl": {
+      "semanticRejected": true,
+      "browserRejected": true
+    },
+    "hostSavedClosedReopened": true,
+    "nativePreviewPassed": true,
+    "userAccepted": false
+  }
+}

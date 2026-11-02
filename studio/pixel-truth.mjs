@@ -40,7 +40,7 @@ export function measurePixelContrast(png, boxes, { backgroundPng = null, inkPng 
     if (!background || !ink || !box.glyphs?.length || box.reason) {
       return { ...base, reason: box.reason || 'missing-glyph-evidence' };
     }
-    let worst = null, sampleCount = 0, missing = 0;
+    let worst = null, sampleCount = 0, missing = 0, clipped = 0;
     for (const glyph of box.glyphs) {
       const x0 = Math.max(0, Math.ceil(glyph.x * scale));
       const y0 = Math.max(0, Math.ceil(glyph.y * scaleY));
@@ -53,12 +53,16 @@ export function measurePixelContrast(png, boxes, { backgroundPng = null, inkPng 
       if (peak < 32) { missing++; continue; }
       for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) {
         if (pixelAt(ink, x, y).r < Math.max(32, peak * .99)) continue;
+        const clip = box.textClip;
+        if (clip && ((clip.x !== null && (x / scale < clip.x || x / scale >= clip.x + clip.w))
+          || (clip.y !== null && (y / scaleY < clip.y || y / scaleY >= clip.y + clip.h)))) { clipped++; continue; }
         const fg = pixelAt(image, x, y), bg = pixelAt(background, x, y);
         const ratio = contrastRatio(fg, bg);
         sampleCount++;
         if (!worst || ratio < worst.ratio) worst = { ratio, foreground: toHex(fg), background: toHex(bg) };
       }
     }
+    if (clipped) return { ...base, reason: 'glyph-clipped-by-text-box', clippedPixels: clipped, sampleCount };
     if (!worst || missing) return { ...base, reason: 'glyph-not-distinguishable-or-occluded', missingGlyphs: missing, sampleCount };
     return { ...base, ...worst, ratio: Math.round(worst.ratio * 100) / 100,
       status: 'measured', passes: worst.ratio >= required, sampleCount, glyphCount: box.glyphs.length };
@@ -77,6 +81,9 @@ export function collectRenderedText(pageId, candidates) {
     const el = elements.find(e => e.dataset.nodeId === node.id);
     const box = { id: node.id, fontSize: node.fontSize, fontWeight: node.fontWeight, glyphs: [] };
     if (!el) return { ...box, reason: 'text-dom-missing' };
+    const ownStyle = getComputedStyle(el), ownRect = el.getBoundingClientRect();
+    box.textClip = { x: ownStyle.overflowX === 'visible' ? null : ownRect.left + scrollX - clip.x,
+      y: ownStyle.overflowY === 'visible' ? null : ownRect.top + scrollY - clip.y, w: ownRect.width, h: ownRect.height };
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
     let text;
     while ((text = walker.nextNode())) {

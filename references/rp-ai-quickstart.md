@@ -1,6 +1,8 @@
 # RP/1：AI 生成原型速查
 
 先表达页面、数据和交互，用 `check` 确认，再生成原型。`rp/1` 默认输出可编辑的原生 RP9 工程；生成不需要启动 GUI，原生行为验收才需要 Axure。
+手机创作先读 [手机布局速查](mobile-layout.md)：设备壳自动添加、坐标按屏幕原点、`[fillx180]` 为宽 fill/高 180。
+可直接生成 [mobile-layout.rp1](../examples/rp-language/mobile-layout.rp1)，无需手画机身。
 
 ## 从哪里开始
 

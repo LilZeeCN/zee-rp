@@ -1,0 +1,53 @@
+# 研途 · 资料清单
+# 收藏按稳定记录 ID 保存；增加记录无需增加变量。ID 使用字母、数字、下划线或连字符，不含 |。
+rp/1 target=9 name="研途 · 资料清单" domain=mobile theme=enterprise-light
+palette:
+  $brand = #6D5CE7
+  $brand-soft = #EEEAFB
+  $bg = #F6F5FA
+model Resource id=text title=text body=text
+dataset resources model=Resource
+  - id=a title="高数极限速查" body="先掌握定义，再完成三道典型题。"
+  - id=b title="英语长难句训练" body="圈出主干，划分从句，再做完整翻译。"
+var $selectedTitle = "高数极限速查"
+var $selectedBody = "先掌握定义，再完成三道典型题。"
+var $selectedId = a
+var $favoriteIds = ""
+component ResourceCard ()
+  box #cardFrame [fillx192] layout=column
+    card #card [fillx176] padding=16 gap=12
+      label #title [fillx32] text={"item":"title"} fontSize=20 fontWeight=600
+      paragraph #body [fillx48] text={"item":"body"} fontSize=16 lineHeight=24
+      button #open [fillx44] "查看资料"
+        +onClick [{"type":"set-variable","variable":"selectedId","value":{"item":"id"}},{"type":"set-variable","variable":"selectedTitle","value":{"item":"title"}},{"type":"set-variable","variable":"selectedBody","value":{"item":"body"}},{"type":"link","page":"detail"}]
+page #list name="复习资料" device=iphone-17
+  phone-shell #shell title="复习资料" gap=16
+    label #headline [fillx40] "资料少一点，记得牢一点。" fontSize=22 fontWeight=700
+    dynamic-panel #resourcesPanel [fillx460]
+      :state ready
+        box #resourcesArea [fillx460] layout=column gap=16
+          repeater #resources dataset=resources key=id w=fill h=400 rowHeight=192 pageSize=2
+            :template
+              use #entry component=ResourceCard
+          box #pager [fillx44] layout=row gap=12
+            button #previous [fillx44] "上一页" variant=secondary
+              +onClick [{"type":"data-page","target":"resources","page":"previous"}]
+            button #next [fillx44] "下一页" variant=secondary
+              +onClick [{"type":"data-page","target":"resources","page":"next"}]
+      :state empty
+        card #emptyState [fillx160] padding=20 gap=12
+          label #emptyTitle [fillx40] "还没有复习资料" fontSize=20
+          paragraph #emptyHint [fillx72] "点击“恢复示例资料”重新开始。" fontSize=16 lineHeight=24
+    button #clear [fillx44] "查看空状态" variant=secondary
+      +onClick [{"type":"set-panel-state","target":"resourcesPanel","state":"empty"}]
+    button #restore [fillx44] "恢复示例资料" variant=secondary
+      +onClick [{"type":"set-panel-state","target":"resourcesPanel","state":"ready"}]
+page #detail name="资料详情" device=iphone-17
+  phone-shell #shell title="资料详情" gap=16
+    label #headline [fillx56] text={"variable":"selectedTitle"} fontSize=24 fontWeight=700
+    paragraph #description [fillx120] text={"variable":"selectedBody"} fontSize=16 lineHeight=24
+    label #status [fillx32] "='收藏状态：' + text(contains(var.favoriteIds, concat('|', var.selectedId, '|')))"
+    button #favorite [fillx44] "切换收藏"
+      +onClick {"cases":[{"when":"=contains(var.favoriteIds, concat('|', var.selectedId, '|'))","actions":[{"type":"set-variable","variable":"favoriteIds","value":"=remove(var.favoriteIds, concat('|', var.selectedId, '|'))"}]},{"else":true,"actions":[{"type":"set-variable","variable":"favoriteIds","value":"=concat(var.favoriteIds, '|', var.selectedId, '|')"}]}]}
+    button #back [fillx44] "返回列表" variant=secondary
+      +onClick [{"type":"link","page":"list"}]

@@ -5,6 +5,9 @@ function sha256Json(value) {
 }
 
 export function computePageContentHash(rawPage, resolvedPage = null) {
+  if (resolvedPage && Object.hasOwn(resolvedPage, '_cachedContentHash') && resolvedPage._cachedRawId === rawPage?.id) {
+    return resolvedPage._cachedContentHash;
+  }
   const payload = {
     id: rawPage?.id,
     name: rawPage?.name,
@@ -35,10 +38,23 @@ export function computePageContentHash(rawPage, resolvedPage = null) {
       activeStateId: n.activeStateId,
     })),
   };
-  return sha256Json(payload);
+  const hash = sha256Json(payload);
+  if (resolvedPage && typeof resolvedPage === 'object') {
+    Object.defineProperty(resolvedPage, '_cachedContentHash', { value: hash, enumerable: false, configurable: true });
+    Object.defineProperty(resolvedPage, '_cachedRawId', { value: rawPage?.id, enumerable: false, configurable: true });
+  }
+  return hash;
 }
 
 export function computePageInteractionHash(rawPage, resolvedPage = null) {
+  const rawIxKey = rawPage?.interactions?.length ? JSON.stringify(rawPage.interactions) : '[]';
+  if (
+    resolvedPage &&
+    Object.hasOwn(resolvedPage, '_cachedInteractionHash') &&
+    resolvedPage._cachedInteractionIxKey === rawIxKey
+  ) {
+    return resolvedPage._cachedInteractionHash;
+  }
   const payload = {
     pageId: rawPage?.id,
     pageInteractions: rawPage?.interactions || [],
@@ -53,7 +69,12 @@ export function computePageInteractionHash(rawPage, resolvedPage = null) {
         on: n.on || null,
       })),
   };
-  return sha256Json(payload);
+  const hash = sha256Json(payload);
+  if (resolvedPage && typeof resolvedPage === 'object') {
+    Object.defineProperty(resolvedPage, '_cachedInteractionHash', { value: hash, enumerable: false, configurable: true });
+    Object.defineProperty(resolvedPage, '_cachedInteractionIxKey', { value: rawIxKey, enumerable: false, configurable: true });
+  }
+  return hash;
 }
 
 function collectComponentsReferencedInTree(node, outSet = new Set()) {
@@ -118,6 +139,7 @@ export function computeCommandImpactAndDiff({
   directAffectedIds = [],
   contractEvolutionResults = [],
   scenarioVerificationResult = null,
+  extraDiagnostics = [],
 }) {
   const directTargetNodeIds = new Set();
   const changedComponentIds = new Set();
@@ -193,6 +215,7 @@ export function computeCommandImpactAndDiff({
   const componentDefinitionChanges = [];
   const tokenChanges = [];
   const variableAndEventChanges = [];
+  const vectorChanges = [];
 
   // 1. Token diff
   const beforeColors = { ...(beforeDoc?.palette || {}), ...(beforeDoc?.tokens?.colors || {}) };
@@ -279,6 +302,16 @@ export function computeCommandImpactAndDiff({
       structureChanges.push({ kind: 'page-removed', pageId, name: bPage.name });
       continue;
     }
+    const hasDirectTargetOnPage = [...directTargetNodeIds].some(id => String(id).startsWith(`${pageId}/`) || id === pageId);
+    if (
+      bPage === aPage &&
+      !hasDirectTargetOnPage &&
+      componentClosure.size === 0 &&
+      changedTokenKeys.size === 0 &&
+      changedVariableOrDatasetNames.size === 0
+    ) {
+      continue;
+    }
 
     const bNodes = new Map((bPage?.nodes || []).map(n => [n.scopedId, n]));
     const aNodes = new Map((aPage?.nodes || []).map(n => [n.scopedId, n]));
@@ -312,11 +345,15 @@ export function computeCommandImpactAndDiff({
 
     // Track which nodes on this page had direct or component/token changes
     const pageSeedChangedIds = new Set();
+    const hasGlobalWatch = componentClosure.size > 0 || changedTokenKeys.size > 0 || changedVariableOrDatasetNames.size > 0;
     for (const [scopedId, aNode] of aNodes.entries()) {
+      const bSeedNode = bNodes.get(scopedId);
+      if (bSeedNode === aNode && !directTargetNodeIds.has(scopedId) && !hasGlobalWatch) {
+        continue;
+      }
       if (directTargetNodeIds.has(scopedId)) {
         pageSeedChangedIds.add(scopedId);
       }
-      const bSeedNode = bNodes.get(scopedId);
       if (bSeedNode && (bSeedNode.text !== aNode.text || bSeedNode.lineCount !== aNode.lineCount)) {
         pageSeedChangedIds.add(scopedId);
       }
@@ -377,7 +414,7 @@ export function computeCommandImpactAndDiff({
     // Compare every existing node before vs after
     for (const [scopedId, aNode] of aNodes.entries()) {
       const bNode = bNodes.get(scopedId);
-      if (!bNode) continue;
+      if (!bNode || bNode === aNode) continue;
 
       // Text diff
       if (
@@ -407,15 +444,22 @@ export function computeCommandImpactAndDiff({
         bNode.color !== aNode.color ||
         bNode.radius !== aNode.radius ||
         bNode.opacity !== aNode.opacity ||
+        bNode.rotation !== aNode.rotation ||
         JSON.stringify(bNode.css) !== JSON.stringify(aNode.css)
       ) {
         styleChanges.push({
           pageId,
           scopedId,
           nodeId: aNode.id,
-          before: { fill: bNode.fill, stroke: bNode.stroke, color: bNode.color, radius: bNode.radius, opacity: bNode.opacity },
-          after: { fill: aNode.fill, stroke: aNode.stroke, color: aNode.color, radius: aNode.radius, opacity: aNode.opacity },
+          before: { fill: bNode.fill, stroke: bNode.stroke, color: bNode.color, radius: bNode.radius, opacity: bNode.opacity, rotation: bNode.rotation },
+          after: { fill: aNode.fill, stroke: aNode.stroke, color: aNode.color, radius: aNode.radius, opacity: aNode.opacity, rotation: aNode.rotation },
         });
+      }
+
+      // 矢量路径内容 diff：editPath/import-svg 只替换 points/svgD、外接盒不变时，
+      // 不计入任何现有类别会落进「无实质视觉或结构变更」（T-HR-1 摘要不敏感）。
+      if (bNode.svgD !== aNode.svgD) {
+        vectorChanges.push({ pageId, scopedId, nodeId: aNode.id, beforeD: bNode.svgD ?? null, afterD: aNode.svgD ?? null });
       }
 
       // State / interaction diff
@@ -562,6 +606,11 @@ export function computeCommandImpactAndDiff({
   if (styleChanges.length > 0) {
     summaryParts.push(`视觉样式变更 ${styleChanges.length} 处`);
   }
+  if (vectorChanges.length > 0) {
+    // T-HR-1：给矢量内容替换（import-svg / set-subpaths / 布尔产物）一个正确的摘要标签。
+    const hasImportSvg = (commands || []).some(cmd => cmd?.type === 'editPath' && (cmd.operation === 'import-svg' || (cmd.svg !== undefined && cmd.operation === undefined)));
+    summaryParts.push(`矢量路径变更 ${vectorChanges.length} 处${hasImportSvg ? '（含 import-svg 导入，路径数据被替换）' : ''}`);
+  }
   if (structureChanges.length > 0) {
     summaryParts.push(`结构与几何位置变更 ${structureChanges.length} 处（含祖先增高 ${affectedAncestorIds.size} 个、兄弟/子节点位移 ${shiftedSiblingAndDescendantIds.size} 个）`);
   }
@@ -575,15 +624,46 @@ export function computeCommandImpactAndDiff({
     summaryParts.push(`状态与交互变更 ${variableAndEventChanges.length} 处`);
   }
 
+  // T-E-3：属性写入但零视觉/结构变化时显式说明，避免「无实质变更」被误读为成功对齐；
+  // 同值写入（ensure 模式）与"存了但当前上下文不消费"分开措辞，不做硬拒绝。
+  if (summaryParts.length === 0) {
+    const writtenKeys = new Set();
+    for (const cmd of commands || []) {
+      if (!cmd || typeof cmd !== 'object') continue;
+      if (cmd.type === 'setProperties' || cmd.type === 'set-props') for (const key of Object.keys(cmd.properties || cmd.props || {})) writtenKeys.add(key);
+      if (cmd.type === 'editNodes' && cmd.operation === 'set') for (const key of Object.keys(cmd.properties || {})) writtenKeys.add(key);
+    }
+    if (writtenKeys.size > 0) {
+      const pureNoop = beforeDoc?.contentHash && beforeDoc.contentHash === afterDoc?.contentHash;
+      summaryParts.push(pureNoop
+        ? `属性 ${[...writtenKeys].join(', ')} 与当前值相同，本次写入未产生任何变更（no-op）`
+        : `属性 ${[...writtenKeys].join(', ')} 已写入但对当前节点/布局无视觉效果（已忽略属性；对齐请确认节点类型与容器布局）`);
+    }
+  }
+
   const whatChanged = summaryParts.length > 0 ? summaryParts.join('；') : '无实质视觉或结构变更';
   const affectedScope = affectedPageIds.length > 0
     ? `影响页面 [${affectedPageIds.join(', ')}]，共波及 ${allAffectedNodeIds.length} 个节点；其余 ${unaffectedPagesVerification.length} 个未受影响页面经哈希核验 100% 保持不变`
     : `未影响任何页面节点（全部 ${unaffectedPagesVerification.length} 个页面哈希核验不变）`;
 
-  const diagParts = [];
-  if (clipIssues.length > 0) diagParts.push(`发现文字截断/溢出风险 ${clipIssues.length} 处`);
-  if (staleOverrideIssues.length > 0) diagParts.push(`发现失效组件覆盖 (E_STALE_OVERRIDE) ${staleOverrideIssues.length} 处`);
-  if (assetIssues.length > 0) diagParts.push(`发现缺失资源 ${assetIssues.length} 处`);
+  // 摘要与 diagnostics 数组保持一致：按 code 聚合全部事务诊断（文档级 + 场景截断 + 事务生成），
+  // 已知三族沿用原文案，其余诊断不再被静默折叠成「无」。
+  const txDiagnosticList = [
+    ...(afterDoc?.diagnostics || []),
+    ...(afterScene?.clipDiagnostics || []).map(d => ({ ...d, code: d.code || 'E_TEXT_CLIP' })),
+    ...(extraDiagnostics || []),
+  ];
+  const diagByCode = new Map();
+  for (const d of txDiagnosticList) {
+    const code = d.code || (d.missing ? 'E_MISSING_ASSET' : 'DIAG');
+    diagByCode.set(code, (diagByCode.get(code) || 0) + 1);
+  }
+  const diagLabels = {
+    E_TEXT_CLIP: count => `发现文字截断/溢出风险 ${count} 处`,
+    E_STALE_OVERRIDE: count => `发现失效组件覆盖 (E_STALE_OVERRIDE) ${count} 处`,
+    E_MISSING_ASSET: count => `发现缺失资源 ${count} 处`,
+  };
+  const diagParts = [...diagByCode.entries()].map(([code, count]) => diagLabels[code]?.(count) ?? `发现 ${code} 诊断 ${count} 处`);
   const diagnosticsSummary = diagParts.length > 0
     ? diagParts.join('；')
     : '无文字截断、布局溢出或引用失效';

@@ -125,7 +125,8 @@ export function compareToAnchors(doc, pageId, anchorSet) {
   const allAnchors = (anchorSet.anchors || []).filter(a => a.pageId !== pageId);
   // 参照系卫生：不可评估页（空页）与低于达标线的页不能参与求均值，
   // 否则会给出"留白加到 86%""字阶合并到 0.5 级"这种物理上不存在的建议。
-  const anchors = allAnchors.filter(a => a.l1Verdict === 'meets-l1-bar' || a.approvedBy === 'human');
+  // approvedBy 记录的是调用方（mcp-ai / human / …），有标记即代表经过显式认可。
+  const anchors = allAnchors.filter(a => a.l1Verdict === 'meets-l1-bar' || Boolean(a.approvedBy));
   const droppedAnchors = allAnchors.filter(a => !anchors.includes(a))
     .map(a => ({ pageId: a.pageId, reason: a.l1Verdict || 'unknown' }));
   const pool = anchors.length ? anchors : (anchorSet.anchors || []);
@@ -134,7 +135,7 @@ export function compareToAnchors(doc, pageId, anchorSet) {
       ok: true, pageId, current, anchors: 0, deviations: [],
       droppedAnchors,
       note: droppedAnchors.length
-        ? `锚点里没有可用参照（${droppedAnchors.map(d => `${d.pageId}:${d.reason}`).join('，')}）；先用 approve 人工认可一页，或修好后再 extract。`
+        ? `锚点里没有可用参照（${droppedAnchors.map(d => `${d.pageId}:${d.reason}`).join('，')}）；先用 approve 显式认可一页，或修好后再 extract。`
         : '还没有锚点：先对已认可的页面执行 extract。',
     };
   }
@@ -188,7 +189,9 @@ export function mergeAnchorSets(existing, incoming, { mode = 'append' } = {}) {
   const base = mode === 'replace' ? [] : [...(existing?.anchors || [])];
   const byPage = new Map(base.map(anchor => [anchor.pageId, anchor]));
   for (const anchor of incoming.anchors || []) {
-    byPage.set(anchor.pageId, anchor);
+    const prev = byPage.get(anchor.pageId);
+    // 同页覆盖时保留既有认可标记：extract 刷新配方，不该顺手抹掉 approve 的审计记录。
+    byPage.set(anchor.pageId, prev?.approvedBy && !anchor.approvedBy ? { ...anchor, approvedBy: prev.approvedBy } : anchor);
   }
   return {
     schemaVersion: 1,

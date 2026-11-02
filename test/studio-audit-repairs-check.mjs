@@ -135,7 +135,9 @@ test('contract upgrades migrate slot content', () => {
 });
 
 test('unsupported assertions do not produce passing browser results', async () => {
-  const result = await runInteractionSteps(null, {}, [{ action: 'expect', expect: { datasetCount: { records: 3 } } }], { layer: 'browser' });
+  // datasetCount/panelState 等已纳入浏览器层 SCENARIO_STEP_SCHEMA 并由真实渲染器求值，
+  // 不再属于 unsupported；此处改用 schema 之外的断言键验证同一守卫。
+  const result = await runInteractionSteps(null, {}, [{ action: 'expect', expect: { pixelPerfect: { hero: true } } }], { layer: 'browser' });
   assert.equal(result.passed, false);
   assert.equal(result.status, 'unsupported');
 });

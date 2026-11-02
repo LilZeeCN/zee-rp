@@ -4,6 +4,9 @@ Generated from the shipped registry. Evidence tags refer to bounded samples, not
 
 | 命令 | 脚本 | 用途 | 证据层级 |
 | --- | --- | --- | --- |
+| list-custom-styles | custom-styles.mjs | 列出文件已有原生自定义样式及 GUID（不创建样式） | structure |
+| rename-custom-style | rename-custom-style.mjs | 按样式身份级联改名，更新所有记录的 MatchInfo 与 StyleCache 名称 | gui-roundtrip |
+| rebind-widgets | rebind-widgets.mjs | 筛选元件并批量绑定文件中已有原生样式；可显式清除局部样式覆盖 | gui-roundtrip |
 | create-blank-project | create-blank-project.mjs | 复制用户本机的 RP 9 / RP 11 原生空白模板生成单页空白 .rp 工程（模板按目标版本绑定） | loaded |
 | create-global-variable | create-global-variable.mjs | 创建具名全局变量及字符串默认值（离线结构级） | structure |
 | create-blank-page | create-blank-page.mjs | 把与输入文件同版本的空白模板 Page 记录追加到已有 .rp 生成新空白页（跨版本模板会拒绝） | gui-roundtrip |
@@ -40,6 +43,10 @@ Generated from the shipped registry. Evidence tags refer to bounded samples, not
 
 | 脚本 | 用途 | 证据层级 |
 | --- | --- | --- |
+| prototype-worker.mjs | 异步原型生成子进程；返回结构化生成结果并保持 MCP 可响应 | internal |
+| image-structure.mjs | 图片重建分组、重复模式、共享样式和编辑边界的只读审阅 | structure |
+| preview-runtime.mjs | 真实 Axure 浏览器预览操作、运行变量观测及源码映射诊断 | preview |
+| authoring-workflow.mjs | 创作范例、只读诊断、绑定解释、活动版本指纹与受保护改稿闭环 | structure |
 | version.mjs | Axure 版本边界：文件头识别（RP9 acef0900 / RP11 acef0b00）、目标版本解析、宿主与模板按版本绑定 | structure |
 | version-adapt.mjs | 按目标版本裁剪/改写新建对象的共享适配器（所有 writer 复用，避免独立实现漏适配） | structure |
 | fix-panel-registry.mjs | 补齐 RP 9 的面板注册链（DynamicPanelInfo/PanelDiagramInfo）；缺失时 RP 9 不渲染面板状态内容 | gui-roundtrip |

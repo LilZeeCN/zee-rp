@@ -1,0 +1,46 @@
+# 知序 · 学习卡片
+# 修改共享组件、palette 和数据；保留逻辑 ID 以便后续改稿。
+rp/1 target=9 name="知序 · 学习卡片" domain=mobile theme=enterprise-light
+palette:
+  $brand = #6D5CE7
+  $brand-soft = #EEEAFB
+  $bg = #F6F5FA
+var $done type=number value=0
+component StudyCard (title=text body=text)
+  card #card [fillx200] padding=20 gap=12
+    label #eyebrow [fillx24] "今日关键知识" fontSize=12 color=$ink-2
+    label #title [fillx40] text={"$":"title"} fontSize=24 fontWeight=700
+    paragraph #body [fillx80] text={"$":"body"} fontSize=16 lineHeight=24
+page #today name="今日复习" device=iphone-17
+  phone-shell #shell title="今日复习" gap=16
+    label #headline [fillx44] "把今天，稳稳学扎实。" fontSize=24 fontWeight=700
+    paragraph #intro [fillx72] "一张卡片，一个明确进步。先独立回忆，再核对答案。" fontSize=16 lineHeight=24
+    use #study component=StudyCard args={"title":"先回忆，再看答案","body":"解释一下：操作系统为什么需要虚拟内存？"}
+    progress-bar #progress label="今日掌握" value={"variable":"done"} max=1 w=370
+    button #start [fillx44] "开始回忆"
+      +onClick [{"type":"link","page":"review"}]
+    button #stats [fillx44] "查看学习进度" variant=secondary
+      +onClick [{"type":"link","page":"stats"}]
+page #review name="卡片自测" device=iphone-17
+  phone-shell #shell title="卡片自测" gap=16
+    label #headline [fillx40] "给自己一点思考时间" fontSize=22 fontWeight=700
+    use #study component=StudyCard args={"title":"虚拟内存","body":"先说出你的理解，再点击下面的答案。"}
+    paragraph #answer [fillx120] "答案尚未展开。" fontSize=16 lineHeight=24
+    button #reveal [fillx44] "展开答案"
+      +onClick [{"type":"set-text","target":"answer","text":"虚拟内存为进程提供独立的地址空间。\n通过地址映射和按需调页，提高内存利用率并实现进程隔离。"}]
+    button #master [fillx44] "已掌握，记录进度"
+      +onClick [{"type":"set-variable","variable":"done","value":1},{"type":"link","page":"stats"}]
+    button #back [fillx44] "返回今日" variant=secondary
+      +onClick [{"type":"link","page":"today"}]
+page #stats name="学习进度" device=iphone-17
+  phone-shell #shell title="学习进度" gap=16
+    label #headline [fillx40] "每次回忆，都有积累" fontSize=22 fontWeight=700
+    label #count [fillx40] "='已掌握 ' + text(var.done) + ' / 1'" fontSize=20
+    progress-bar #progress label="今日掌握" value={"variable":"done"} max=1 w=370
+    paragraph #note [fillx96] "掌握按钮对同一张卡片重复点击，进度仍然只记一次。进入和返回此页都会刷新。" fontSize=16 lineHeight=24
+    button #again [fillx44] "再复习一次"
+      +onClick [{"type":"link","page":"review"}]
+    button #reset [fillx44] "重置学习记录" variant=secondary
+      +onClick [{"type":"set-variable","variable":"done","value":0}]
+    button #home [fillx44] "返回今日" variant=secondary
+      +onClick [{"type":"link","page":"today"}]

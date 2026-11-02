@@ -21,7 +21,7 @@ const check = (name, action) => {
   catch (error) { results.push({ name, passed: false, detail: error.message }); console.log(`FAIL  ${name} — ${error.message}`); }
 };
 const run = (command, args, path) => spawnSync(process.execPath, [join(skill, 'bin/axure.mjs'), command, ...args], {
-  encoding: 'utf8', env: { ...process.env, AXURE_WRITE_ROOT: work, AXURE_BLANK_TEMPLATE: path }
+  encoding: 'utf8', env: { ...process.env, AXURE_WRITE_ROOT: work, AXURE_BLANK_TEMPLATE: path, AXURE_PROTECTED_PATH: process.env.AXURE_PROTECTED_PATH || '/zee-rp-test-protected/final.rp' }
 });
 try {
   check('显式本机模板产物逐字节一致', () => {

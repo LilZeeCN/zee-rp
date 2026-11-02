@@ -46,6 +46,17 @@ check('A 返回自身 projectDir', () => assert.equal(openA.projectDir, dirA));
 check('B 返回自身 projectDir', () => assert.equal(openB.projectDir, dirB));
 check('两个实例端口不同', () => assert.notEqual(openA.url, openB.url));
 check('openInstances 同时看到两个工程', () => assert.ok(openB.openInstances.length >= 2, `got ${openB.openInstances?.length}`));
+let portMismatch = null;
+try {
+  await studioHandlers.studio_open_project({ projectDir: dirA, port: 4452 });
+} catch (error) {
+  portMismatch = error;
+}
+check('复用工程时显式端口不一致会明确拒绝', () => {
+  assert.equal(portMismatch?.code, 'E_INSTANCE_PORT_MISMATCH');
+  assert.equal(portMismatch?.currentPort, 4451);
+  assert.equal(portMismatch?.requestedPort, 4452);
+});
 
 console.log('[2] 切回 A 不应被 B 顶掉');
 const ctxA = await studioHandlers.studio_get_context({ projectDir: dirA });
@@ -81,13 +92,21 @@ const webPage = await studioHandlers.studio_apply_commands({
   idempotencyKey: 'test-addpage-web-1',
   commands: [{ type: 'addPage', pageId: 'desk', name: '桌面页', domain: 'web' }],
 });
+// T-C-2 修复：事务回包不再重复携带 palette/tokens/全部页面，doc 只留身份桩；
+// 页面事实改用 studio_get_context 回读（同一 projectPayload 的 compactDoc 路径）。
+check('apply 默认 doc 为身份桩，不重复传全量文档', () => {
+  assert.equal(webPage.doc?.fullDocument, false);
+  assert.equal(webPage.doc?.palette, undefined);
+  assert.match(String(webPage.doc?.note), /includeDoc/);
+});
+const deskCtx = await studioHandlers.studio_get_context({ projectDir: dirA });
 check('addPage 写入 domain=web', () => {
-  const page = webPage.doc.pages.find(p => p.id === 'desk');
+  const page = deskCtx.doc.pages.find(p => p.id === 'desk');
   assert.ok(page, 'page missing');
   assert.equal(page.domain, 'web');
 });
 check('桌面页默认画布 1280x800', () => {
-  const page = webPage.doc.pages.find(p => p.id === 'desk');
+  const page = deskCtx.doc.pages.find(p => p.id === 'desk');
   assert.equal(page.canvas.w, 1280);
   assert.equal(page.canvas.h, 800);
 });
@@ -118,6 +137,18 @@ check('未知 type 报错并给出可用类型', () => {
   assert.ok(/addPage/.test(invalidText), '错误应列出 addPage');
   assert.ok(/addNode/.test(invalidText), '错误应列出 addNode');
   assert.ok(/addPagez|未知命令类型|E_INVALID_COMMAND/.test(invalidText));
+});
+
+const withDoc = await studioHandlers.studio_apply_commands({
+  projectDir: dirA,
+  baseRevision: aliasRes.appliedRevision,
+  idempotencyKey: 'test-includedoc-1',
+  includeDoc: true,
+  commands: [{ type: 'addNode', pageId: 'desk', node: { type: 'box', id: 'docopt', w: 10, h: 10 } }],
+});
+check('includeDoc:true 仍可显式拿回完整 doc', () => {
+  assert.ok(withDoc.doc?.palette, '应含 palette');
+  assert.ok(Array.isArray(withDoc.doc.pages) && withDoc.doc.pages.length >= 1);
 });
 
 console.log('[6] repeater 行过滤');

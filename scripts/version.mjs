@@ -7,7 +7,7 @@
 // 也不能只改文件头当降级器——两版的字段类型与值语义都不同（见 version-fields.mjs）。
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 export const DEFAULT_VERSION = 11;
@@ -77,6 +77,8 @@ export function templateCandidates(version) {
   const out = [];
   if (process.env[s.templateEnv]) out.push({ path: process.env[s.templateEnv], from: s.templateEnv });
   out.push({ path: s.defaultTemplate, from: 'default' });
+  out.push({ path: join(tmpdir(), `axure-rp${s.version}-blank.rp`), from: 'tmp-fallback' });
+  if (tmpdir() !== '/tmp') out.push({ path: `/tmp/axure-rp${s.version}-blank.rp`, from: 'tmp-fallback' });
   return out;
 }
 

@@ -4,7 +4,16 @@ import sys
 from PIL import Image, ImageOps
 
 job = json.load(sys.stdin)
-im = ImageOps.exif_transpose(Image.open(job['sourcePath'])).convert('RGB')
+src = Image.open(job['sourcePath'])
+# 有损转换必须自首（T-F-1）：透明通道与多帧动画在转 JPG 时会无声丢失。
+warnings = []
+frames = getattr(src, 'n_frames', 1)
+if frames > 1:
+    warnings.append({'code': 'W_MEDIA_ANIMATION_DROPPED', 'message': f'源图为动图（{frames} 帧），只取第 1 帧，动画信息丢失'})
+has_alpha = src.mode in ('RGBA', 'LA', 'PA') or (src.mode == 'P' and 'transparency' in src.info)
+if has_alpha and src.convert('RGBA').getchannel('A').getextrema()[0] < 255:
+    warnings.append({'code': 'W_MEDIA_ALPHA_DROPPED', 'message': '源图含透明通道，转 JPG 后透明被填实，透明信息丢失'})
+im = ImageOps.exif_transpose(src).convert('RGB')
 W, H = im.size
 c = job['recipe']
 aspect = c['w'] / c['h']
@@ -31,4 +40,5 @@ if 'fadeColor' in c:
         mask.paste(round(255 * t * t * (3 - 2 * t)), (0, y, out.width, y + 1))
     out = Image.composite(paper, out, mask)
 out.save(job['outputPath'], 'JPEG', quality=86, optimize=True, progressive=True)
-print(json.dumps({'ok': True, 'crop': box, 'originalSize': [W, H], 'width': out.width, 'height': out.height}))
+print(json.dumps({'ok': True, 'crop': box, 'originalSize': [W, H], 'width': out.width, 'height': out.height,
+                  'sourceFormat': src.format or None, 'warnings': warnings}))

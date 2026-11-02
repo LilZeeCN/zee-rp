@@ -1,8 +1,9 @@
+import { StudioSelections } from './selection.mjs';
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { computeContentHash, sha256 } from './document.mjs';
+import { canonicalJson, computeContentHash, sha256 } from './document.mjs';
 import { resolveDocumentScene, RENDERER_VERSION } from './scene-resolver.mjs';
 import { StudioPersistence } from './persistence.mjs';
 import { StudioRuntimeSession } from './runtime.mjs';
@@ -12,8 +13,13 @@ import { collectRenderedText, contrastTextNodes, measurePixelContrast } from './
 import { decodePng } from './png-decode.mjs';
 import { getComponentContracts } from './component-contracts.mjs';
 import { getDesignContext } from './design-context.mjs';
+import { queryAuthoringNodes } from './authoring-query.mjs';
+import { prepareRp1Commands } from './rp1-authoring.mjs';
 import { prepareMedia } from './media.mjs';
 import { reviewDesign } from './design-review.mjs';
+import { StudioVersions } from './versions.mjs';
+import { StudioOperations } from './operations.mjs';
+import {errorDiagnostic} from './diagnostics.mjs';
 import {
   SCENARIO_TEMPLATES_12,
   DOMAIN_PRESETS,
@@ -108,6 +114,8 @@ export class StudioServer {
     domain = 'mobile',
     host = '127.0.0.1',
     port = 4310,
+    sharedChrome = null,
+    sharedPage = null,
   } = {}) {
     this.host = host;
     this.requestedPort = port;
@@ -118,8 +126,9 @@ export class StudioServer {
     this.renderWaiters = [];
     this.renderedRevision = 0;
     this.lastRenderConfirm = null;
-    this.managedChrome = null;
-    this.managedPage = null;
+    this.managedChrome = sharedChrome;
+    this.managedPage = sharedPage;
+    this.ownsManagedChrome = !sharedChrome && !sharedPage;
     this.server = null;
 
     this.openProject({ projectDir, sourcePath, name, domain });
@@ -127,11 +136,15 @@ export class StudioServer {
 
   openProject({ projectDir, sourcePath = null, name = 'Studio Project', domain = 'mobile' }) {
     this.projectDir = resolve(projectDir);
+    this.operations = new StudioOperations(this.projectDir);
     this.persistence = new StudioPersistence(this.projectDir);
+    this.versions = new StudioVersions(this.persistence);
     const { store, recoveryReport } = this.persistence.initOrLoad({ sourcePath, name, domain });
     this.store = store;
+    this.selections = new StudioSelections();
     this.recoveryReport = recoveryReport;
-    this.scene = resolveDocumentScene(this.store.doc);
+    this.scene = resolveDocumentScene(this.store.doc, { projectDir: this.projectDir });
+    this.store.lastScene = this.scene;
     this.runtimeSession = null;
     this.renderedRevision = 0;
     this.lastRenderConfirm = null;
@@ -159,7 +172,11 @@ export class StudioServer {
       renderedRevision: this.renderedRevision,
       contentHash: this.store.doc.contentHash,
       rendererVersion: RENDERER_VERSION,
-      recoveryReport: this.recoveryReport,
+      // T-J-2：recoveryReport.durableRevision 是恢复/启动时的持久化基线，不随编辑推进；
+      // 未发生恢复时直接对齐顶层 durableRevision，避免被当成过期残留误读。
+      recoveryReport: this.recoveryReport
+        ? { ...this.recoveryReport, ...(this.recoveryReport.recovered ? {} : { durableRevision: this.store.durableRevision }), durableRevisionNote: this.recoveryReport.recovered ? '恢复完成时的持久化基线版本；当前持久化进度看顶层 durableRevision' : '未发生恢复，与顶层 durableRevision 一致' }
+        : null,
       recentHistory: (this.store.history || []).slice(-10).reverse().map(tx => ({
         txId: tx.txId,
         revision: tx.revision,
@@ -175,12 +192,14 @@ export class StudioServer {
         tokenConsumerCount: tx.transitiveImpact?.affectedTokenConsumerIds?.length || 0,
         humanReadableSummary: tx.humanReadableSummary || null,
       })),
+      selections: this.selections.summary(this.store.doc),
       doc: this.store.doc,
       scene: this.scene,
     };
   }
 
   broadcastSse(eventObj) {
+    if (this.sseClients.size === 0) return;
     const data = `data: ${JSON.stringify(eventObj)}\n\n`;
     for (const res of this.sseClients) {
       try {
@@ -191,7 +210,7 @@ export class StudioServer {
     }
   }
 
-  recordRenderConfirm({ renderedRevision, contentHash, clientId, sessionId }) {
+  recordRenderConfirm({ renderedRevision, contentHash, clientId, sessionId, fontErrors = [] }) {
     if (sessionId && sessionId !== this.sessionId) {
       return;
     }
@@ -205,6 +224,7 @@ export class StudioServer {
         renderedRevision: rev,
         contentHash,
         clientId: clientId || 'browser',
+        fontErrors,
         confirmedAt: new Date().toISOString(),
       };
     }
@@ -222,11 +242,22 @@ export class StudioServer {
 
   async ensureManagedBrowserPage() {
     if (this.managedChrome && this.managedPage) {
+      const currentHref = await this.managedPage.evaluate('location.href').catch(() => '');
+      if (currentHref.startsWith(this.url)) {
+        return this.managedPage;
+      }
+      await this.managedPage.navigate(`${this.url}/?clientId=managed_renderer`);
+      await this.managedPage.waitForFunction('Boolean(window.__STUDIO_APP__ && window.__STUDIO_RENDERED_REVISION__ >= 1)', 10000);
       return this.managedPage;
     }
     this.managedChrome = await launchChrome({ headless: true, width: 1440, height: 1050, dpr: 2 });
     this.managedPage = await this.managedChrome.openPage(`${this.url}/?clientId=managed_renderer`);
-    await this.managedPage.waitForFunction('Boolean(window.__STUDIO_APP__ && window.__STUDIO_RENDERED_REVISION__ >= 1)', 10000);
+    try {
+      await this.managedPage.waitForFunction('Boolean(window.__STUDIO_APP__ && window.__STUDIO_RENDERED_REVISION__ >= 1)', 10000);
+    } catch (error) {
+      const state = await this.managedPage.evaluate('({url:location.href,ready:document.readyState,app:!!window.__STUDIO_APP__,revision:window.__STUDIO_RENDERED_REVISION__})').catch(()=>null);
+      throw Object.assign(new Error(`画布初始化未完成：${JSON.stringify({state,errors:this.managedPage.scriptErrors})}`),{code:'E_RENDERER_STARTUP',stage:'browser-initialization',cause:error});
+    }
     return this.managedPage;
   }
 
@@ -339,6 +370,21 @@ export class StudioServer {
       await page.evaluate("document.body.classList.add('studio-capture')");
       const geometry = await page.evaluate(`(${collectRenderedText.toString()})(${JSON.stringify(pageId)}, ${JSON.stringify(candidates.map(n => ({ id: n.id, fontSize: n.fontSize, fontWeight: n.fontWeight })))})`);
       const { clip, boxes } = geometry;
+      const missingIds = target.nodes.filter(n => n.assetMissing || (n.type === 'image' && n.src?.startsWith('assets/') && !existsSync(join(this.projectDir, n.src)))).map(n => n.id);
+      // Measure visibility before the reference-mask pass forces opacity to 1.
+      const missingPaint = await page.evaluate(`(() => {
+        const ids = new Set(${JSON.stringify(missingIds)}), clip = ${JSON.stringify(geometry.clip)};
+        const board = [...document.querySelectorAll('.artboard-wrapper')].find(el => el.dataset.artboardId === ${JSON.stringify(pageId)});
+        return [...(board?.querySelectorAll('.studio-node') || [])].filter(el => ids.has(el.dataset.nodeId)).flatMap(el => {
+          for (let p = el; p; p = p.parentElement) {
+            const style = getComputedStyle(p);
+            if (Number(style.opacity) === 0 || style.display === 'none' || style.visibility === 'hidden') return [];
+          }
+          const r = el.getBoundingClientRect();
+          return [{ x: r.x + scrollX - clip.x, y: r.y + scrollY - clip.y, w: r.width, h: r.height }];
+        });
+      })()`);
+
       const screenshot = () => page.screenshot({ clip: { ...clip, scale: 1 }, captureBeyondViewport: true });
       const png = await screenshot();
       await page.evaluate(`(() => {
@@ -367,8 +413,7 @@ export class StudioServer {
       }
       // Missing source images must not be certified from their placeholder paint.
       for (const box of boxes) {
-        const node = candidates.find(n => n.id === box.id);
-        if (target.nodes.some(n => (n.assetMissing || (n.type === 'image' && n.src?.startsWith('assets/') && !existsSync(join(this.projectDir, n.src)))) && n.x < node.x + node.w && n.x + n.w > node.x && n.y < node.y + node.h && n.y + n.h > node.y)) box.reason = 'missing-image-resource';
+        if (missingPaint.some(n => box.glyphs.some(g => n.x < g.x + g.w && n.x + n.w > g.x && n.y < g.y + g.h && n.y + n.h > g.y))) box.reason = 'missing-image-resource';
       }
       const image = decodePng(png);
       const results = measurePixelContrast(png, boxes, { backgroundPng, inkPng, scale: image.width / clip.w, scaleY: image.height / clip.h });
@@ -468,6 +513,9 @@ export class StudioServer {
       }
     })()`);
 
+    // Device viewport changes and SSE renders commit asynchronously in Chromium.
+    // Wait for compositor frames even when the document revision did not change.
+    await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
     const renderCheck = await page.evaluate(`(() => {
       const targetEl = ${
         nodeId
@@ -499,6 +547,7 @@ export class StudioServer {
     let buf;
     try {
       buf = await page.screenshot({
+        captureBeyondViewport: true,
         clip: {
           x: renderCheck.rect.x,
           y: renderCheck.rect.y,
@@ -545,9 +594,9 @@ export class StudioServer {
       const pathname = parsedUrl.pathname;
 
       // Static Web UI files
-      if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html' || pathname === '/styles.css' || pathname === '/app.js' || pathname === '/visual-style.mjs')) {
+      if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html' || pathname === '/styles.css' || pathname === '/app.js' || pathname === '/visual-style.mjs' || pathname === '/clipboard.mjs')) {
         const relFile = pathname === '/' ? 'index.html' : pathname.slice(1);
-        const fullPath = join(pathname === '/visual-style.mjs' ? HERE : WEB_DIR, relFile);
+        const fullPath = join(['/visual-style.mjs', '/clipboard.mjs'].includes(pathname) ? HERE : WEB_DIR, relFile);
         const content = readFileSync(fullPath);
         res.writeHead(200, {
           'Content-Type': MIME_TYPES[extname(fullPath)] || 'application/octet-stream',
@@ -575,6 +624,24 @@ export class StudioServer {
         return;
       }
 
+      // Project localized fonts
+      if (req.method === 'GET' && pathname.startsWith('/fonts/')) {
+        const fontRel = decodeURIComponent(pathname.slice('/fonts/'.length));
+        const fontPath = join(this.projectDir, 'fonts', fontRel);
+        if (!existsSync(fontPath)) {
+          res.writeHead(404);
+          res.end('Not found');
+          return;
+        }
+        const buf = readFileSync(fontPath);
+        res.writeHead(200, {
+          'Content-Type': MIME_TYPES[extname(fontPath).toLowerCase()] || 'font/ttf',
+          'Cache-Control': 'no-cache',
+        });
+        res.end(buf);
+        return;
+      }
+
       // SSE Stream
       if (req.method === 'GET' && pathname === '/api/events') {
         res.writeHead(200, {
@@ -582,10 +649,12 @@ export class StudioServer {
           'Cache-Control': 'no-cache',
           Connection: 'keep-alive',
         });
+        res.studioClientId=parsedUrl.searchParams.get('clientId');
         this.sseClients.add(res);
         res.write(`data: ${JSON.stringify({ type: 'snapshot', ...this.buildContextPayload() })}\n\n`);
         req.on('close', () => {
           this.sseClients.delete(res);
+          if(res.studioClientId&&![...this.sseClients].some(client=>client.studioClientId===res.studioClientId))this.selections.clients.delete(res.studioClientId);
         });
         return;
       }
@@ -596,9 +665,17 @@ export class StudioServer {
         return;
       }
 
+      if(req.method==='POST'&&pathname==='/api/selection'){
+        const body=await readJsonBody(req);const selection=this.selections.publish(this.store.doc,this.scene,body);return sendJson(res,200,{ok:true,selectionId:selection.selectionId});
+      }
       // Query nodes, components, tokens, fonts
       if (req.method === 'POST' && pathname === '/api/query') {
         const body = await readJsonBody(req);
+        if (body.view || body.cursor || body.role || body.within || body.fields || body.nodeIds || body.limit || body.offset !== undefined) {
+          sendJson(res, 200, { ...queryAuthoringNodes({ doc: this.store.doc, scene: this.scene, args: body }),
+            appliedRevision: this.store.appliedRevision, durableRevision: this.store.durableRevision, renderedRevision: this.renderedRevision });
+          return;
+        }
         const targetPageId = body.pageId || this.store.doc.pages[0]?.id;
         const pgScene = this.scene.pages.find(p => p.id === targetPageId) || this.scene.pages[0];
         let nodes = pgScene ? pgScene.nodes : [];
@@ -643,9 +720,28 @@ export class StudioServer {
             durableRevision: this.store.durableRevision,
           });
         }
+        let sourcePreparation = null, sourceIdentity = null, replay = null;
+        const rp1Payload = body.rp1 !== undefined
+          ? body.rp1
+          : (body.sourceMode && body.commands === undefined && typeof body.source === 'string' ? body.source : undefined);
+        if (rp1Payload !== undefined) {
+          if (!body.idempotencyKey || typeof body.idempotencyKey !== 'string') throw Object.assign(new Error('RP/1 写入需要唯一 idempotencyKey'), { code: 'E_IDEMPOTENCY_REQUIRED' });
+          if (body.documentId && body.documentId !== this.store.doc.documentId) throw Object.assign(new Error('documentId 与当前工程不匹配，未修改文档'), { code: 'E_DOCUMENT_ID_MISMATCH' });
+          if (body.commands !== undefined) throw Object.assign(new Error('rp1 与 commands 必须二选一'), { code: 'E_RP1_INPUT' });
+          sourceIdentity = { rp1: rp1Payload, mode: body.sourceMode, pageId: body.pageId, parentId: body.parentId || null, index: body.index ?? null };
+          replay = this.store.getIdempotentResult({ idempotencyKey: body.idempotencyKey, sourceIdentity, selectionId:body.selectionId });
+          if (!replay) {
+            if (body.baseRevision !== this.store.appliedRevision) throw Object.assign(new Error(`文档已推进至 r${this.store.appliedRevision}，请刷新再提交片段`), { code: 'E_STALE_REVISION' });
+            sourcePreparation = prepareRp1Commands({ doc: this.store.doc, source: rp1Payload, pageId: body.pageId,
+              parentId: body.parentId, mode: body.sourceMode, index: body.index });
+          }
+        }
+        const commands = sourcePreparation?.commands || body.commands || [];
         // Asset bytes are prepared outside the document transaction; reject a
         // stale or invented registration before changing nodes or history.
-        for (const command of body.commands || []) {
+        if(!replay&&rp1Payload===undefined)replay=this.store.getIdempotentResult({idempotencyKey:body.idempotencyKey,commands,selectionId:body.selectionId});
+        for (const command of replay?[]:commands) {
+          if(command.type==='restoreDocument' && this.versions.read(command.versionId).sha256!==sha256(canonicalJson(command.document)))throw Object.assign(new Error('恢复源与命名版本不一致'),{code:'E_VERSION_CORRUPT'});
           if (command.type !== 'registerAsset') continue;
           const asset = command.asset;
           if (!/^assets\/[a-zA-Z0-9_.-]+$/.test(asset?.relativePath || '')
@@ -654,7 +750,10 @@ export class StudioServer {
             throw Object.assign(new Error('资源不存在或 SHA 已变化，请重新准备素材'), { code: 'E_ASSET_BYTES_MISMATCH' });
           }
         }
-        const txResult = this.store.applyTransaction({
+        if(!replay&&body.selectionId)replay=this.store.getIdempotentResult({idempotencyKey:body.idempotencyKey,commands,sourceIdentity,selectionId:body.selectionId});
+        const selectionGuard=!replay&&body.selectionId?this.selections.guard(this.store.doc,this.scene,body.selectionId):null;
+        const txResult = replay || this.store.applyTransaction({
+          selectionId: body.selectionId || null, selectionGuard,
           baseRevision: body.baseRevision,
           idempotencyKey: body.idempotencyKey,
           source: body.source || 'client',
@@ -663,13 +762,15 @@ export class StudioServer {
           documentId: body.documentId || null,
           label: body.label || null,
           actor: body.actor || null,
-          commands: body.commands || [],
+          commands,
+          sourceIdentity,
         });
 
         if (!txResult.ok) {
           const status = txResult.code === 'E_STALE_REVISION' || txResult.code === 'E_IDEMPOTENCY_CONFLICT' ? 409 : 400;
           sendJson(res, status, {
             ...txResult,
+            diagnostic:errorDiagnostic(txResult,this),
             appliedRevision: this.store.appliedRevision,
             durableRevision: this.store.durableRevision,
             renderedRevision: this.renderedRevision,
@@ -677,23 +778,96 @@ export class StudioServer {
           return;
         }
 
+        let scenePatch = null;
         if (!txResult.idempotentReplay) {
           const latestTx = this.store.transactions[this.store.transactions.length - 1];
           this.persistence.persistTransaction(this.store, latestTx, {
             simulateCrashStage: body.simulateCrashStage || null,
           });
-          this.scene = txResult.scene || resolveDocumentScene(this.store.doc);
+          this.scene = txResult.scene || resolveDocumentScene(this.store.doc, { projectDir: this.projectDir });
+          this.store.lastScene = this.scene;
           this.runtimeSession = null;
-          this.broadcastSse({
-            type: 'revision',
-            affectedNodeIds: txResult.affectedNodeIds || [],
-            directAffectedNodeIds: txResult.directAffectedNodeIds || [],
-            transitiveImpact: txResult.transitiveImpact || null,
-            semanticDiff: txResult.semanticDiff || null,
-            humanReadableSummary: txResult.humanReadableSummary || null,
-            diagnostics: txResult.diagnostics || [],
-            ...this.buildContextPayload(),
+
+          const totalSceneNodes = (this.scene?.pages || []).reduce((acc, p) => acc + (p.nodes?.length || 0), 0);
+          const canSendScenePatch =
+            totalSceneNodes > 500 &&
+            Array.isArray(txResult.affectedNodeIds) &&
+            txResult.affectedNodeIds.length > 0 &&
+            txResult.affectedNodeIds.length <= 120 &&
+            (txResult.semanticDiff?.structureChanges || []).every(c => c.kind === 'geometry-changed') &&
+            (txResult.semanticDiff?.componentDefinitionChanges || []).length === 0 &&
+            (txResult.semanticDiff?.tokenChanges || []).length === 0 &&
+            !commands.some(c => ['addPage', 'removePage', 'deletePage', 'renamePage', 'setPageShell', 'restoreDocument'].includes(c?.type));
+
+          if (canSendScenePatch) {
+            const affectedSet = new Set(txResult.affectedNodeIds || []);
+            const patchedNodesByPage = {};
+            for (const pg of this.scene.pages) {
+              const patched = pg.nodes.filter(n => affectedSet.has(n.scopedId) || affectedSet.has(n.id));
+              if (patched.length > 0) patchedNodesByPage[pg.id] = patched;
+            }
+            scenePatch = {
+              baseRevision: txResult.baseRevision,
+              appliedRevision: this.store.appliedRevision,
+              contentHash: this.store.doc.contentHash,
+              patchedNodesByPage,
+              fontDiagnostics: this.scene.fontDiagnostics,
+              clipDiagnostics: this.scene.clipDiagnostics,
+              assetDiagnostics: this.scene.assetDiagnostics,
+            };
+            this.broadcastSse({
+              type: 'revision',
+              instanceId: this.instanceId,
+              sessionId: this.sessionId,
+              appliedRevision: this.store.appliedRevision,
+              durableRevision: this.store.durableRevision,
+              renderedRevision: this.renderedRevision,
+              contentHash: this.store.doc.contentHash,
+              rendererVersion: RENDERER_VERSION,
+              affectedNodeIds: txResult.affectedNodeIds || [],
+              directAffectedNodeIds: txResult.directAffectedNodeIds || [],
+              transitiveImpact: txResult.transitiveImpact || null,
+              semanticDiff: txResult.semanticDiff || null,
+              humanReadableSummary: txResult.humanReadableSummary || null,
+              diagnostics: txResult.diagnostics || [],
+              txId: txResult.txId,
+              label: txResult.label,
+              scenePatch,
+            });
+          } else {
+            this.broadcastSse({
+              type: 'revision',
+              affectedNodeIds: txResult.affectedNodeIds || [],
+              directAffectedNodeIds: txResult.directAffectedNodeIds || [],
+              transitiveImpact: txResult.transitiveImpact || null,
+              semanticDiff: txResult.semanticDiff || null,
+              humanReadableSummary: txResult.humanReadableSummary || null,
+              diagnostics: txResult.diagnostics || [],
+              ...this.buildContextPayload(),
+            });
+          }
+        }
+
+        if (scenePatch && !body.includeDoc && !body.includeScene) {
+          sendJson(res, 200, {
+            ...txResult,
+            sessionId: this.sessionId,
+            durableRevision: this.store.durableRevision,
+            renderedRevision: this.renderedRevision,
+            scenePatch,
+            scene: {
+              ...this.scene,
+              pages: this.scene.pages.map(pg => ({
+                id: pg.id,
+                name: pg.name,
+                board: pg.board,
+                nodeCount: pg.nodes.length,
+                nodes: scenePatch.patchedNodesByPage[pg.id] || [],
+              })),
+            },
+            ...(sourcePreparation ? { authoring: { format: sourcePreparation.format, ...sourcePreparation.summary, sourceSpans: sourcePreparation.sourceSpans } } : {}),
           });
+          return;
         }
 
         sendJson(res, 200, {
@@ -703,6 +877,7 @@ export class StudioServer {
           renderedRevision: this.renderedRevision,
           doc: this.store.doc,
           scene: this.scene,
+          ...(sourcePreparation ? { authoring: { format: sourcePreparation.format, ...sourcePreparation.summary, sourceSpans: sourcePreparation.sourceSpans } } : {}),
         });
         return;
       }
@@ -710,13 +885,23 @@ export class StudioServer {
       // Undo / Redo
       if (req.method === 'POST' && (pathname === '/api/undo' || pathname === '/api/redo')) {
         const body = await readJsonBody(req);
+        // 预览运行态存在即视为只读：撤销/重做会回滚设计文档，直接拒绝以守住隔离承诺（T-D-1）。
+        // scenario 等设计态语义会话不带 preview 标记，不影响正常撤销。
+        if (this.runtimeSession?.preview) {
+          sendJson(res, 400, {
+            ok: false,
+            code: 'E_PREVIEW_MODE_UNDO',
+            message: `预览运行态为只读，${pathname === '/api/undo' ? '撤销' : '重做'}被拒绝；请退出预览或重置会话后再试`,
+            suggestion: '退出预览，或 POST /api/runtime/reset 重置运行态后重试',
+          });
+          return;
+        }
         const opRes = pathname === '/api/undo' ? this.store.undo(body) : this.store.redo(body);
         if (!opRes.ok) {
           sendJson(res, 400, opRes);
           return;
         }
-        this.persistence.saveFullSnapshot(this.store.doc);
-        this.store.markDurable(this.store.doc.revision);
+        this.persistence.persistTransaction(this.store, this.store.lastHistoryRecord);
         this.scene = opRes.scene;
         this.runtimeSession = null;
         const payload = {
@@ -779,15 +964,33 @@ export class StudioServer {
       }
 
       // Runtime Session Endpoints
+      if (req.method === 'POST' && pathname === '/api/versions') {
+        const body=await readJsonBody(req);
+        const unknown=Object.keys(body).filter(key=>!['action','name','versionId','baseRevision','previewHash','idempotencyKey','projectDir','url','port'].includes(key));
+        if(unknown.length) throw Object.assign(new Error(`版本操作不接受字段 ${unknown.join(', ')}`),{code:'E_VERSION_INPUT'});
+        if(body.action==='list' || body.action===undefined)return sendJson(res,200,{ok:true,versions:this.versions.list(),revision:this.store.appliedRevision});
+        if(body.action==='create')return sendJson(res,200,this.versions.create(this.store,body));
+        if(body.action==='preview')return sendJson(res,200,this.versions.preview(this.store,body));
+        if(body.action==='restore') {
+          const result=this.versions.restore(this.store,body);
+          if(result.ok&&!result.idempotentReplay){this.persistence.persistTransaction(this.store,this.store.history.at(-1));this.scene=result.scene;this.runtimeSession=null;this.broadcastSse({type:'revision',...this.buildContextPayload()});}
+          return sendJson(res,result.ok?200:409,{...result,durableRevision:this.store.durableRevision,doc:this.store.doc,scene:this.scene});
+        }
+        throw Object.assign(new Error('action应为list/create/preview/restore'),{code:'E_VERSION_INPUT'});
+      }
       if (req.method === 'POST' && pathname === '/api/design/context') {
         const body = await readJsonBody(req);
-        sendJson(res, 200, { ...getDesignContext(body), project: { revision: this.store.appliedRevision,
+        const context = getDesignContext(body, { doc: this.store.doc, scene: this.scene, selections: this.selections });
+        // Stage responses already contain a bounded, version-bound project selection.
+        if (context.binding) return sendJson(res, 200, context);
+        sendJson(res, 200, { ...context, project: { revision: this.store.appliedRevision,
           contentHash: this.store.doc.contentHash, tokens: this.store.doc.tokens,
           pages: this.scene.pages.map(p => ({ id: p.id, name: p.name, board: p.board })) } });
         return;
       }
       if (req.method === 'POST' && pathname === '/api/media/prepare') {
         const body = await readJsonBody(req);
+        if(body.async===true)return sendJson(res,200,await this.operations.start('media',body,this.store.doc));
         sendJson(res, 200, await prepareMedia({ ...body, projectDir: this.projectDir, tokens: this.store.doc.tokens }));
         return;
       }
@@ -810,16 +1013,20 @@ export class StudioServer {
         try {
           if (body.action === 'extract' || body.action === 'approve') {
             const manual = body.action === 'approve';
-            const pages = manual ? (body.pages || (body.pageId ? [body.pageId] : [])) : (body.pages || null);
-            if (manual && !pages.length) {
+            // 显式 pageId/pages 只处理点名的那几页；省略才做全量扫描（T-E-5）。
+            const pages = body.pages || (body.pageId ? [body.pageId] : null);
+            if (manual && (!pages || !pages.length)) {
               return sendJson(res, 400, { ok: false, code: 'E_APPROVE_TARGET', message: 'approve 需要 pageId 或 pages' });
             }
+            // 门槛统一（T-E-5）：显式点名是调用方的明确选择，extract 与 approve 同口径放行；
+            // 只有全量扫描才按 L1 达标线过滤，避免"度量自己判不合格的页面"批量混进锚点语料。
+            // approvedBy 如实记录调用方（T-E-6）：不再硬编码 "human"，MCP 调用默认记 mcp-ai。
             const incoming = extractAnchors(this.store.doc, {
               pages,
-              // 只有显式 includeBelowBar 或人工 approve 才允许低于达标线的页面进入锚点
-              includeBelowBar: manual || Boolean(body.includeBelowBar),
+              includeBelowBar: manual || Boolean(pages) || Boolean(body.includeBelowBar),
             });
-            if (manual) for (const anchor of incoming.anchors) anchor.approvedBy = 'human';
+            const approvedBy = body.approvedBy || 'mcp-ai';
+            if (manual) for (const anchor of incoming.anchors) anchor.approvedBy = approvedBy;
             const mode = body.mode === 'replace' ? 'replace' : 'append';
             const merged = mergeAnchorSets(readSet(), incoming, { mode });
             writeFileSync(anchorPath, JSON.stringify({ ...merged, summary: summarizeAnchors(merged) }, null, 2), 'utf8');
@@ -890,7 +1097,7 @@ export class StudioServer {
         const simulate = commands => {
           const doc = structuredClone(this.store.doc);
           commands.forEach((command, index) => applySingleCommand(doc, structuredClone(command), index, pageId));
-          const scene = resolveDocumentScene(doc);
+          const scene = resolveDocumentScene(doc, { projectDir: this.projectDir });
           const target = scene.pages.find(p => p.id === pageId);
           if (!target) return null;
           return computeDesignMetrics(target, { doc });
@@ -985,8 +1192,13 @@ export class StudioServer {
       }
       if (req.method === 'POST' && pathname === '/api/design/explore') {
         const body = await readJsonBody(req);
+        if(body.async===true)return sendJson(res,200,await this.operations.start('explore',{...body,pageId:body.pageId||this.scene.pages[0]?.id},this.store.doc));
         const { exploreVariants } = await import('./explore.mjs');
         try {
+          if (body.candidates) {
+            const { previewCandidates } = await import('./candidate-explorations.mjs');
+            return sendJson(res, 200, await previewCandidates(this, { ...body, pageId: body.pageId || this.scene.pages[0]?.id }));
+          }
           const result = exploreVariants(this.store.doc, {
             pageId: body.pageId || this.scene.pages[0]?.id,
             axes: body.axes || {},
@@ -997,6 +1209,24 @@ export class StudioServer {
           return sendJson(res, 400, { ok: false, code: err.code || 'E_EXPLORE', message: err.message });
         }
       }
+      if (req.method === 'GET' && pathname === '/api/design/reviews') {
+        const dir = join(this.projectDir, 'design-reviews');
+        const pageId = parsedUrl.searchParams.get('pageId');
+        const records = existsSync(dir) ? readdirSync(dir).filter(name => /^[a-f0-9-]{36}\.json$/.test(name))
+          .map(name => JSON.parse(readFileSync(join(dir, name))))
+          .filter(r => r.nodeSnapshots && (!pageId || r.pageId === pageId))
+          .sort((a, b) => b.revision - a.revision).slice(0, 20)
+          .map(r => ({ reviewId: r.reviewId, pageId: r.pageId, revision: r.revision, contentHash: r.contentHash })) : [];
+        return sendJson(res, 200, { ok: true, reviews: records });
+      }
+      const reviewImage = pathname.match(/^\/api\/design\/reviews\/([a-f0-9-]{36})\/image$/);
+      if (req.method === 'GET' && reviewImage) {
+        const path = join(this.projectDir, 'design-reviews', `${reviewImage[1]}.png`);
+        if (!existsSync(path)) return sendJson(res, 404, { ok: false, code: 'E_REVIEW_NOT_FOUND' });
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+        res.end(readFileSync(path)); return;
+      }
+
       if (req.method === 'POST' && pathname === '/api/design/review') {
         sendJson(res, 200, await reviewDesign(this, await readJsonBody(req)));
         return;
@@ -1004,11 +1234,20 @@ export class StudioServer {
       if (req.method === 'POST' && pathname.startsWith('/api/runtime/')) {
         const body = await readJsonBody(req);
         const sub = pathname.slice('/api/runtime/'.length);
-        if (!this.runtimeSession) {
-          this.runtimeSession = new StudioRuntimeSession(this.store.doc);
+        // 退出预览：清除预览运行态会话，恢复设计态撤销/重做（T-D-1 配套出口）。
+        if (sub === 'exit') {
+          this.runtimeSession = null;
+          sendJson(res, 200, { ok: true, designContentHash: this.store.doc.contentHash });
+          return;
         }
+        if (!this.runtimeSession) {
+          this.runtimeSession = new StudioRuntimeSession(this.store.doc, { projectDir: this.projectDir });
+        }
+        // scenario 是设计态语义工具，不进入预览只读态；其余子端点来自预览交互。
+        if (sub !== 'scenario') this.runtimeSession.preview = true;
         if (sub === 'reset') {
-          this.runtimeSession = new StudioRuntimeSession(this.store.doc);
+          this.runtimeSession = new StudioRuntimeSession(this.store.doc, { projectDir: this.projectDir });
+          if (sub !== 'scenario') this.runtimeSession.preview = true;
           const st = this.runtimeSession.reset(body.startPageId || null);
           sendJson(res, 200, { ok: true, state: st, designContentHash: this.store.doc.contentHash });
           return;
@@ -1037,8 +1276,82 @@ export class StudioServer {
         }
         if (sub === 'scenario') {
           if (body.reset !== false) {
-            this.runtimeSession = new StudioRuntimeSession(this.store.doc);
+            this.runtimeSession = new StudioRuntimeSession(this.store.doc, { projectDir: this.projectDir });
             this.runtimeSession.reset(body.startPageId || null);
+          }
+          // hitTest:true 用真实浏览器指针层先重放校验（遮挡/命中结论与语义层分开，不静默降级）。
+          // 指针重放会经 #mode-interact-btn 重置共享运行态并真实点击推进，所以：
+          // - 必须 reset:true（全新运行态起跑，续跑会话无法镜像）；
+          // - 指针层未通过时语义层不执行，避免“语义 ok / 真实浏览器 fail”的相反结论；
+          // - 结束后重建语义会话，保持 scenario 不带 preview 标记（不锁撤销/重做）。
+          if (body.hitTest === true) {
+            if (body.reset === false) {
+              sendJson(res, 200, { ok: false, code: 'E_SCENARIO_HITTEST_RESET_REQUIRED', message: 'hitTest:true 需要从全新运行态开始重放；reset:false 的续跑会话无法在真实浏览器中镜像，请去掉 reset:false 或去掉 hitTest', designContentHash: this.store.doc.contentHash });
+              return;
+            }
+            let page;
+            try {
+              page = await this.ensureManagedBrowserPage();
+            } catch (error) {
+              sendJson(res, 200, { ok: false, code: 'E_SCENARIO_HITTEST_UNAVAILABLE', message: '真实浏览器不可用，hitTest 指针校验未执行（不静默降级到语义层）', cause: error?.code || error?.message || String(error), designContentHash: this.store.doc.contentHash });
+              return;
+            }
+            const { runInteractionSteps } = await import('./scenario-executors.mjs');
+            const freshSemanticSession = () => {
+              this.runtimeSession = new StudioRuntimeSession(this.store.doc, { projectDir: this.projectDir });
+              return this.runtimeSession.reset(body.startPageId || null);
+            };
+            let browser;
+            try {
+              browser = await runInteractionSteps(page, this.store.doc, body.steps || [], { layer: 'browser', startPageId: body.startPageId || null });
+            } catch (error) {
+              freshSemanticSession();
+              sendJson(res, 200, { ok: false, code: 'E_SCENARIO_HITTEST_UNAVAILABLE', message: '真实浏览器指针重放异常，hitTest 未完成（不静默降级到语义层）', cause: error?.message || String(error), designContentHash: this.store.doc.contentHash });
+              return;
+            }
+            try {
+              // 把 managed 页恢复成干净的设计态渲染页，不把交互运行态留给后续渲染确认/截图
+              await page.navigate(`${this.url}/?clientId=managed_renderer`);
+              await page.waitForFunction('Boolean(window.__STUDIO_APP__ && window.__STUDIO_RENDERED_REVISION__ >= 1)', 10000);
+            } catch { /* best effort：恢复失败不掩盖场景结论 */ }
+            if (!browser.passed) {
+              freshSemanticSession(); // 指针层失败：语义不执行，共享会话复位回初始运行态
+              if (browser.status === 'unsupported') {
+                sendJson(res, 200, { ok: false, code: 'E_SCENARIO_HITTEST_UNSUPPORTED', message: '场景包含无法在真实浏览器指针层重放的步骤或字段（如 navigate/dataset 动作），hitTest 不能只对初始态做部分校验', browserLayer: browser, designContentHash: this.store.doc.contentHash });
+                return;
+              }
+              if (/不可见或被遮挡|未找到可见操作目标/.test(browser.message || '')) {
+                const steps = body.steps || [];
+                const stepIndex = Math.min(browser.history?.length ?? 0, Math.max(steps.length - 1, 0));
+                const failedStep = steps[stepIndex] || {};
+                const nodeId = failedStep.target || failedStep.id || failedStep.click || failedStep.fill || null;
+                const hitDetail = browser.hitDetail || null;
+                sendJson(res, 200, {
+                  ok: false,
+                  code: 'E_SCENARIO_OCCLUDED',
+                  message: `真实指针校验未命中：步骤 ${stepIndex} 的目标 ${nodeId ?? '(未知)'} 不可见或被遮挡，语义层未执行该步 click`,
+                  stepIndex,
+                  nodeId,
+                  occludedBy: hitDetail?.occludedBy ?? null,
+                  sampledPoints: hitDetail?.sampledPoints ?? [],
+                  hitReason: hitDetail?.reason ?? null,
+                  browserLayer: browser,
+                  designContentHash: this.store.doc.contentHash,
+                });
+                return;
+              }
+              sendJson(res, 200, { ok: false, code: 'E_SCENARIO_BROWSER_MISMATCH', message: '真实浏览器指针层未通过（非遮挡原因），语义层未执行，以真实浏览器结论为准', browserLayer: browser, designContentHash: this.store.doc.contentHash });
+              return;
+            }
+            // 指针层通过后重建语义会话（指针重放已重置/推进过共享会话）并照常执行语义层
+            freshSemanticSession();
+            const result = this.runtimeSession.runScenario(body.steps || []);
+            sendJson(res, 200, {
+              ...result,
+              hitTest: { layer: 'browser', passed: true, verification: 'real-browser-pointer', assertionCount: browser.assertionCount },
+              designContentHash: this.store.doc.contentHash,
+            });
+            return;
           }
           const result = this.runtimeSession.runScenario(body.steps || []);
           sendJson(res, 200, {
@@ -1050,13 +1363,58 @@ export class StudioServer {
       }
 
       // Export Native .rp
+      if(req.method==='POST'&&pathname==='/api/operations'){
+        const {action,...body}=await readJsonBody(req);
+        if(!['get','list','cancel'].includes(action))throw Object.assign(new Error('action需要get/list/cancel'),{code:'E_OPERATION_ACTION'});
+        return sendJson(res,200,await this.operations[action](body));
+      }
       if (req.method === 'POST' && pathname === '/api/export-rp') {
         const body = await readJsonBody(req);
+        if(body.async===true)return sendJson(res,200,await this.operations.start('export-rp',body,this.store.doc));
+        if(body.baseRevision!==undefined&&body.baseRevision!==this.store.appliedRevision)throw Object.assign(new Error('导出版本已变化，请重新确认'),{code:'E_OPERATION_STALE'});
         const expRes = await this.exportRp({
           outRpPath: body.outRpPath,
           outReportPath: body.outReportPath,
         });
         sendJson(res, 200, expRes);
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/export-code') {
+        const body = await readJsonBody(req);
+        if (body.async === true) {
+          return sendJson(res, 200, await this.operations.start('export-code', body, this.store.doc));
+        }
+        const codeRes = await this.exportCode({
+          outDir: body.outDir,
+          baseRevision: body.baseRevision,
+          resetRegistration: body.resetRegistration,
+        });
+        sendJson(res, 200, codeRes);
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/sync-native') {
+        const body = await readJsonBody(req);
+        if (body.async === true) {
+          return sendJson(res, 200, await this.operations.start('sync-native', body, this.store.doc));
+        }
+        const syncRes = await this.syncNative(body);
+        sendJson(res, syncRes.ok === false ? 409 : 200, syncRes);
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/project/bundle') {
+        const body = await readJsonBody(req);
+        const bundleRes = await this.projectBundle(body);
+        sendJson(res, bundleRes.ok === false ? 400 : 200, bundleRes);
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/project/merge') {
+        const body = await readJsonBody(req);
+        const mergeRes = await this.mergeDocument(body);
+        sendJson(res, mergeRes.ok === false ? 409 : 200, mergeRes);
         return;
       }
 
@@ -1156,6 +1514,8 @@ export class StudioServer {
         ok: false,
         code,
         message: err.message,
+        diagnostic:this.store&&this.scene?errorDiagnostic(err,this):null,
+        ...Object.fromEntries(['sourceSpan', 'line', 'column', 'snippet', 'nodeId', 'field', 'candidates', 'suggestion', 'currentRevision'].filter(key => err[key] !== undefined).map(key => [key, err[key]])),
         appliedRevision: this.store?.appliedRevision,
         durableRevision: this.store?.durableRevision,
         renderedRevision: this.renderedRevision,
@@ -1223,18 +1583,143 @@ export class StudioServer {
     });
   }
 
+  async exportCode({ outDir = null, baseRevision = undefined, resetRegistration = false } = {}) {
+    const { exportStudioDocumentToCode } = await import('./export-code.mjs');
+    const resolvedOutDir =
+      outDir ||
+      join(this.projectDir, 'exports', `${this.store.doc.documentId}-rev-${this.store.appliedRevision}-code`);
+    return exportStudioDocumentToCode(this.store.doc, {
+      outDir: resolvedOutDir,
+      projectDir: this.projectDir,
+      persistence: this.persistence,
+      baseRevision,
+      resetRegistration,
+    });
+  }
+
+  async syncNative(options = {}) {
+    const { syncNativeRpToStudio } = await import('./sync-native.mjs');
+    const result = await syncNativeRpToStudio({
+      ...options,
+      doc: this.store.doc,
+      store: this.store,
+      persistence: this.persistence,
+      projectDir: this.projectDir,
+    });
+    if (result.ok && result.mode === 'apply' && !result.noop) {
+      this.scene = resolveDocumentScene(this.store.doc, { projectDir: this.projectDir });
+      this.runtimeSession = null;
+      this.broadcastSse({
+        type: 'revision',
+        source: 'native-sync',
+        ...this.buildContextPayload(),
+      });
+    }
+    return {
+      ...result,
+      durableRevision: this.store.durableRevision,
+      renderedRevision: this.renderedRevision,
+    };
+  }
+
+  async projectBundle(options = {}) {
+    const {
+      exportProjectBundle,
+      importProjectBundle,
+      verifyProjectBundle,
+      compareProjectWithBundle,
+      buildBundleCompatibilityReport,
+    } = await import('./project-bundle.mjs');
+    const action = options.action || 'export';
+    if (action === 'report') {
+      return {
+        ok: true,
+        action: 'report',
+        ...buildBundleCompatibilityReport(this.store.doc, { projectDir: this.projectDir }),
+      };
+    }
+    if (action === 'export') {
+      return exportProjectBundle({
+        projectDir: this.projectDir,
+        bundleDir: options.bundleDir || options.outDir,
+        doc: this.store.doc,
+        includeVersions: options.includeVersions !== false,
+        includeThumbnails: options.includeThumbnails !== false,
+      });
+    }
+    if (action === 'verify') {
+      return verifyProjectBundle({ bundleDir: options.bundleDir || options.outDir });
+    }
+    if (action === 'compare') {
+      return compareProjectWithBundle({
+        doc: this.store.doc,
+        projectDir: this.projectDir,
+        bundleDir: options.bundleDir,
+      });
+    }
+    if (action === 'import') {
+      return importProjectBundle({
+        bundleDir: options.bundleDir,
+        targetProjectDir: options.targetProjectDir || this.projectDir,
+        allowNewerSchema: options.allowNewerSchema !== false,
+      });
+    }
+    throw Object.assign(new Error(`未知 bundle action: ${action}`), { code: 'E_BUNDLE_ACTION' });
+  }
+
+  async mergeDocument(options = {}) {
+    const { executeStudioMerge, checkExternalSourceChange } = await import('./document-merge.mjs');
+    if (options.mode === 'check-external') {
+      return checkExternalSourceChange({
+        store: this.store,
+        persistence: this.persistence,
+        projectDir: this.projectDir,
+        externalSourcePath: options.externalSourcePath,
+        baseRevision: options.baseRevision ?? 1,
+        theirsPageId: options.theirsPageId || null,
+        theirsSourceMode: options.theirsSourceMode || null,
+        theirsParentId: options.theirsParentId || null,
+      });
+    }
+    const result = executeStudioMerge({
+      ...options,
+      store: this.store,
+      persistence: this.persistence,
+      projectDir: this.projectDir,
+    });
+    if (result.ok && result.mode === 'apply') {
+      this.scene = resolveDocumentScene(this.store.doc, { projectDir: this.projectDir });
+      this.runtimeSession = null;
+      this.broadcastSse({
+        type: 'revision',
+        source: 'studio-merge',
+        ...this.buildContextPayload(),
+      });
+    }
+    return {
+      ...result,
+      durableRevision: this.store.durableRevision,
+      renderedRevision: this.renderedRevision,
+    };
+  }
+
   async stop() {
     return this.close();
   }
 
   async close() {
+    try { this.persistence?.flushPendingSnapshot?.(); } catch {}
     unregisterInstanceRecord(this.instanceId);
     for (const res of this.sseClients) {
       try { res.end(); } catch {}
     }
     this.sseClients.clear();
     if (this.managedChrome) {
-      try { await this.managedChrome.close(); } catch {}
+      if (this.ownsManagedChrome) {
+        try { await this.managedChrome.close(); } catch {}
+      } else if (this.managedPage) {
+        try { await this.managedPage.navigate('about:blank'); } catch {}
+      }
       this.managedChrome = null;
       this.managedPage = null;
     }

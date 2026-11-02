@@ -20,15 +20,23 @@ export function resolveBlankTemplate(version = DEFAULT_VERSION) {
   let versionMismatch = null;
   for (const c of candidates) {
     const path = resolve(c.path);
-    if (!existsSync(path)) { tried.push(`${c.from}: ${path}（不存在）`); continue; }
     assertNotProtected(path);
+    const isExplicitEnv = c.from !== 'default' && c.from !== 'tmp-fallback';
+    if (!existsSync(path)) {
+      if (isExplicitEnv) throw new Error(`${c.from} 指定的空白模板不存在：${path}`);
+      tried.push(`${c.from}: ${path}（不存在）`);
+      continue;
+    }
     let actual;
     try { actual = detectFileVersion(readFileSync(path)); }
-    catch (e) { tried.push(`${c.from}: ${path}（不是可识别的 Axure 容器：${e.message}）`); continue; }
+    catch (e) {
+      if (isExplicitEnv) throw new Error(`${c.from} 不是可识别的 Axure 容器（${path}）：${e.message}`);
+      tried.push(`${c.from}: ${path}（不是可识别的 Axure 容器：${e.message}）`);
+      continue;
+    }
     if (actual !== target) {
       const detail = `${c.from} 指向 ${versionLabel(actual)} 模板，但目标版本是 ${versionLabel(target)}：${path}`;
-      // AXURE_BLANK_TEMPLATE 是用户显式设置的值：版本不符时报错，不静默换别的模板。
-      if (c.from === 'AXURE_BLANK_TEMPLATE') {
+      if (isExplicitEnv) {
         throw new Error(`${detail}\n请改用 ${target === 9 ? 'AXURE_BLANK_TEMPLATE_RP9' : 'AXURE_BLANK_TEMPLATE_RP11'}，或清掉 AXURE_BLANK_TEMPLATE。`);
       }
       versionMismatch = detail;

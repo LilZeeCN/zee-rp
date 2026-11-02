@@ -34,8 +34,8 @@ await studioHandlers.studio_apply_commands({
   ],
 });
 
-// 这页在严格判定下可能未达标；用人工认可（approve）把它立为锚点——
-// approve 正是为"人工认可但未过 bar"的页面准备的。
+// 这页在严格判定下可能未达标；用显式认可（approve）把它立为锚点——
+// approve 正是为"认可但未过 bar"的页面准备的；approvedBy 记录真实调用方（T-E-6）。
 const extracted = await studioHandlers.studio_design_anchors({ projectDir: dir, action: 'approve', pages: ['home'] });
 check('提炼成功', () => assert.equal(extracted.ok, true));
 check('配方含字阶', () => assert.ok(extracted.anchors[0].recipe.typeScale.sizes.length >= 2));
@@ -68,18 +68,20 @@ check('主次比进入对比', () => {
   assert.ok(hierarchy, '缺少主次比对比');
 });
 
-console.log('[2] 低于达标线的页面不能靠 pages 参数硬塞进锚点');
+console.log('[2] 显式点名的页面由调用方负责（extract/approve 同口径），全量扫描仍按达标线过滤');
 const sneaky = await studioHandlers.studio_design_anchors({ projectDir: dir, action: 'extract', pages: ['home'] });
-check('显式 pages 仍按达标线过滤或保持原语料', () => {
+check('显式 pages 按点名处理并保持原语料', () => {
   const ids = (sneaky.anchors || []).map(a => a.pageId);
   assert.ok(ids.includes('home'), '原锚点应保留');
 });
 
 const approved = await studioHandlers.studio_design_anchors({ projectDir: dir, action: 'approve', pages: ['home'] });
-check('approve 可人工认可并标注来源', () => {
+// T-E-6：approvedBy 必须如实记录调用方——MCP 通道的默认调用方是 mcp-ai，
+// 只有真人经界面/显式传参认可才写 "human"。旧断言 approvedBy==='human' 与该口径矛盾，随发现一并更正。
+check('approve 标注真实调用方', () => {
   const anchor = (approved.anchors || []).find(a => a.pageId === 'home');
   assert.ok(anchor, 'approve 后应存在');
-  assert.equal(anchor.approvedBy, 'human');
+  assert.equal(anchor.approvedBy, 'mcp-ai');
 });
 check('approve 默认是追加而非替换', () => assert.equal(approved.mode, 'append'));
 

@@ -1,0 +1,252 @@
+{
+  "id": "deep-recall-mobile",
+  "version": "1.0.0",
+  "source": "source.json",
+  "name": "深海回忆 · 单词练习",
+  "intent": "learning",
+  "platform": "mobile",
+  "pages": [
+    {
+      "id": "recall",
+      "name": "单词回忆"
+    }
+  ],
+  "initialPageId": "recall",
+  "scenarios": [
+    {
+      "id": "recall-reveal-remember",
+      "startPageId": "recall",
+      "steps": [
+        {
+          "expect": {
+            "page": "recall",
+            "visible": {
+              "meaning": false,
+              "reveal": true
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "reveal",
+          "expect": {
+            "visible": {
+              "meaning": true,
+              "reveal": false
+            },
+            "text": {
+              "meaning": "能恢复的；有韧性的"
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "remember",
+          "expect": {
+            "visible": {
+              "remembered_title": true,
+              "meaning": false
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "practice_again",
+          "expect": {
+            "visible": {
+              "reveal": true,
+              "remembered_title": false
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "recall-retry",
+      "startPageId": "recall",
+      "steps": [
+        {
+          "action": "click",
+          "target": "reveal",
+          "expect": {
+            "visible": {
+              "meaning": true
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "try_again",
+          "expect": {
+            "visible": {
+              "retry_title": true,
+              "meaning": false
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "review_answer",
+          "expect": {
+            "visible": {
+              "meaning": true,
+              "retry_title": false
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "design": {
+    "protagonist": "英文词形与一次主动回忆，释义延后出现",
+    "readingOrder": [
+      "本轮位置",
+      "词形与读音",
+      "主动回忆问题",
+      "揭示释义",
+      "自我判断及反馈"
+    ],
+    "typography": {
+      "display": {
+        "family": "Avenir Next",
+        "size": 58,
+        "weight": 600,
+        "lineHeight": 82
+      },
+      "heading": {
+        "family": "PingFang SC",
+        "size": 25,
+        "weight": 600,
+        "lineHeight": 36
+      },
+      "body": {
+        "family": "PingFang SC",
+        "size": 16,
+        "lineHeight": 26
+      },
+      "numerals": {
+        "family": "Menlo",
+        "size": 14,
+        "lineHeight": 28
+      }
+    },
+    "palette": {
+      "canvas": "#102D3B",
+      "ink": "#F6F1DF",
+      "muted": "#AFC4CC",
+      "action": "#F6D94D",
+      "separator": "#3D5965"
+    },
+    "spacing": {
+      "pageInset": 28,
+      "section": 36,
+      "scale": [
+        8,
+        12,
+        18,
+        28,
+        36,
+        54
+      ]
+    },
+    "materials": "没有教学作用的照片被省略；用词形、日光黄色动作面和细分隔建立节奏。",
+    "directions": [
+      {
+        "id": "deep-focus",
+        "name": "深海聚焦：大词与序号建立停顿",
+        "preview": "directions/deep-focus/initial.png",
+        "commands": "directions/deep-focus/commands.json",
+        "sameBrief": true,
+        "contentAndInteractionsPreserved": true,
+        "checkedStates": [
+          "recall",
+          "meaning",
+          "remembered"
+        ],
+        "userAccepted": false
+      },
+      {
+        "id": "open-glossary",
+        "name": "开放词典：衬线字与边注并列阅读",
+        "preview": "directions/open-glossary/initial.png",
+        "commands": "directions/open-glossary/commands.json",
+        "sameBrief": true,
+        "contentAndInteractionsPreserved": true,
+        "checkedStates": [
+          "recall",
+          "meaning",
+          "remembered"
+        ],
+        "userAccepted": false
+      },
+      {
+        "id": "question-first",
+        "name": "提问优先：先看回忆任务，再在页脚核对单词",
+        "preview": "directions/question-first/initial.png",
+        "commands": "directions/question-first/commands.json",
+        "sameBrief": true,
+        "contentAndInteractionsPreserved": true,
+        "checkedStates": [
+          "recall",
+          "meaning",
+          "remembered"
+        ],
+        "userAccepted": false
+      }
+    ],
+    "limitations": [
+      "单词与进度为一轮固定教学示例，不含词库、音频或持久学习记录。",
+      "源稿包含长释义与两分支反馈；任意更长内容应改用自适应流式区域并重新看图。",
+      "手机壳与文字原生可编辑范围以本次兼容报告为准。"
+    ],
+    "directionReview": {
+      "source": "agent",
+      "preferred": "open-glossary",
+      "reason": "单词仍为主角，序号退为边注，释义态阅读连续；提问优先方案改变阅读顺序，可供比较。不是用户选择或独立盲评。"
+    }
+  },
+  "provenance": {
+    "type": "authored-reference",
+    "userAccepted": false,
+    "author": "agent",
+    "status": "agent-reviewed",
+    "note": "原创参考作品；视觉观察、机器检查、用户认可分别记录。"
+  },
+  "files": {
+    "README.md": "b9cf88480cf886e7240b32cf5b19599af49b88451532454c4bb25c5a9c6600de",
+    "directions/deep-focus/commands.json": "fcaf7db8706de22ba78a5cecce635cb90c7d5f70b7f86f20c695b7f39c060a76",
+    "directions/deep-focus/initial.png": "6f6ffbc28faa1625fd542480c91711016e13e82fb47b7cee1e20eadda0810d8d",
+    "directions/open-glossary/commands.json": "bc1efe1079b3ef28fbd88efc20b7b9469bc31af99c8f130445597c3e0a7eccd7",
+    "directions/open-glossary/initial.png": "8dd2a207b4e43306a622686cb89ba6e9f54050d2ccc699595cdc47f7c7f1db41",
+    "directions/question-first/commands.json": "bad09182a9aa55bf9df261ed95734f43b6ff8132c2d6994f0ab458c0850e18e7",
+    "directions/question-first/initial.png": "01fbb04197434706ead6ec768ec0af568e46c9b0b7a3b0133ea6e2664119d99a",
+    "previews/answer.png": "278d5265fb7ebf5d9d0e68b4ffa427c76f7c60c639c1c48278dcb2490c98a3e7",
+    "previews/recall-initial.png": "19cc5a6fbcdd27db9eaa7ae2de4aadba4672c45fe478964fcb14f7959bfe33c6",
+    "previews/remembered.png": "175a8ad27e0e873cbc3a9c9c9d2878765a0605ff53a3a65815b56c5c30709e50",
+    "previews/retry.png": "d4111f0c5961224edd8b994edf4cb2aa86bc63f863868bf9da012220516a3d1c",
+    "source.json": "66490f179b55ac11d07aab8f805612e4730d0612dd9b7500ca6213b53d50549c"
+  },
+  "validation": {
+    "sourceSha256": "66490f179b55ac11d07aab8f805612e4730d0612dd9b7500ca6213b53d50549c",
+    "revision": 1,
+    "contentHash": "25f185e4f2d8dc1fb594d5b3612f49c0b9ff18630c76460465fe54f4b65190b8",
+    "semanticPassed": true,
+    "browserPointerPassed": true,
+    "assertionCount": 15,
+    "nativeStructure": {
+      "pageCount": 1,
+      "widgetCount": 60,
+      "unparseable": 0,
+      "danglingRefs": 0,
+      "problems": 0,
+      "threeZerosPassed": true
+    },
+    "negativeControl": {
+      "semanticRejected": true,
+      "browserRejected": true
+    },
+    "hostSavedClosedReopened": true,
+    "nativePreviewPassed": true,
+    "userAccepted": false
+  }
+}

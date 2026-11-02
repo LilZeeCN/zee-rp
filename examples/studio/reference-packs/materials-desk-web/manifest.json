@@ -1,0 +1,223 @@
+{
+  "id": "materials-desk-web",
+  "version": "1.0.0",
+  "source": "source.json",
+  "name": "材间 · 预约观察席",
+  "intent": "task",
+  "platform": "web",
+  "pages": [
+    {
+      "id": "booking",
+      "name": "预约观察席"
+    }
+  ],
+  "initialPageId": "booking",
+  "scenarios": [
+    {
+      "id": "booking-errors-and-success",
+      "startPageId": "booking",
+      "steps": [
+        {
+          "expect": {
+            "page": "booking",
+            "visible": {
+              "booking_form": true,
+              "booking_success": false,
+              "form_error": false
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "submit_booking",
+          "expect": {
+            "visible": {
+              "form_error": true
+            },
+            "text": {
+              "form_error": "请填写姓名后再登记。"
+            }
+          }
+        },
+        {
+          "action": "input",
+          "target": "visitor_name",
+          "value": "林知夏",
+          "expect": {
+            "text": {
+              "visitor_name": "林知夏"
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "submit_booking",
+          "expect": {
+            "text": {
+              "form_error": "请填写使用目的，方便准备观察席。"
+            }
+          }
+        },
+        {
+          "action": "input",
+          "target": "visit_purpose",
+          "value": "观察纸张在侧光下的纤维纹理，并记录三种纸张的触感差异。",
+          "expect": {
+            "text": {
+              "visit_purpose": {
+                "includes": "纤维纹理"
+              }
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "submit_booking",
+          "expect": {
+            "visible": {
+              "booking_success": true,
+              "booking_form": false
+            },
+            "text": {
+              "confirmed_name": "林知夏",
+              "confirmed_purpose": {
+                "includes": "纤维纹理"
+              }
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "edit_booking",
+          "expect": {
+            "visible": {
+              "booking_form": true,
+              "booking_success": false
+            },
+            "text": {
+              "visitor_name": "林知夏"
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "design": {
+    "protagonist": "使用人、使用目的与确认登记动作；时段读数为右侧固定上下文",
+    "readingOrder": [
+      "预约目的",
+      "日期时段",
+      "必填字段",
+      "使用说明与错误",
+      "确认动作",
+      "登记结果与返回修改"
+    ],
+    "typography": {
+      "display": {
+        "family": "PingFang SC",
+        "size": 44,
+        "weight": 600,
+        "lineHeight": 64
+      },
+      "body": {
+        "family": "PingFang SC",
+        "size": 17,
+        "lineHeight": 28
+      },
+      "readouts": {
+        "family": "Menlo",
+        "size": 21,
+        "lineHeight": 32
+      },
+      "keyNumber": {
+        "family": "Menlo",
+        "size": 110,
+        "lineHeight": 154
+      }
+    },
+    "palette": {
+      "canvas": "#F3F0E9",
+      "ink": "#252A29",
+      "muted": "#686B63",
+      "action": "#87472E",
+      "navigation": "#2C3431",
+      "summary": "#E5DFD2"
+    },
+    "spacing": {
+      "railWidth": 236,
+      "mainInset": 48,
+      "fieldHeight": 54,
+      "section": 36,
+      "scale": [
+        8,
+        12,
+        20,
+        28,
+        36,
+        48,
+        64
+      ]
+    },
+    "materials": "暖灰底、铜色动作面、连续细分隔和等宽日期读数；不使用照片和同权重卡片网格。",
+    "directions": [
+      {
+        "name": "连续登记",
+        "structure": "左侧连续填写，右侧固定时段概览；错误出现在提交附近并保留字段。",
+        "difference": "同页完成与核对。"
+      },
+      {
+        "name": "逐步办理",
+        "structure": "第一屏先选日期，第二屏填写使用人，第三屏确认；允许返回前一步保留值。",
+        "difference": "将工作拆成有顺序的三步。"
+      },
+      {
+        "name": "时段工作台",
+        "structure": "以周历和时段列表为主区，选中时段后打开窄侧栏填写；成功后回到原周历。",
+        "difference": "从时间资源分配进入，表单成为次级区域。"
+      }
+    ],
+    "limitations": [
+      "这是本地交互参考，不连接真实预约服务，也不检测时段冲突。",
+      "验证两个必填字段为空的错误分支，不承诺姓名合法性或任意长度规则。",
+      "输入值在本次运行的返回修改中保留；持久业务记录需要另接数据源。",
+      "原生输入框字体受当前 RP 出口边界约束，见兼容报告。"
+    ]
+  },
+  "provenance": {
+    "type": "authored-reference",
+    "userAccepted": false,
+    "author": "agent",
+    "status": "agent-reviewed",
+    "note": "原创参考作品；视觉观察、机器检查、用户认可分别记录。"
+  },
+  "files": {
+    "README.md": "e10306d4c0a4a0bf6d7e5537d65905fabe19292fde9d14ae7f9333e9126d0ae3",
+    "previews/booking-initial.png": "065c712018e9add8f0a47413f00755eb2e632015d5cf8b2104314370a461307e",
+    "previews/error.png": "10baea3995d1172e389ecbbe04ff9d2e6740538f8f52dd1e32c6d8808c6bf55b",
+    "previews/success.png": "a709812f2a75907fef5cc246d088050083e42dad3e8ed3537304336fe93206d1",
+    "source.json": "cc4b7c3dde7504a9a8af7c5208fce9b15483bffa5ee1fbdb118619dd9dceff78"
+  },
+  "validation": {
+    "sourceSha256": "cc4b7c3dde7504a9a8af7c5208fce9b15483bffa5ee1fbdb118619dd9dceff78",
+    "revision": 1,
+    "contentHash": "cfd8b47011931816ca1e4467b5c36edaa209079c940df6428cc74e3fc9b0a914",
+    "semanticPassed": true,
+    "browserPointerPassed": true,
+    "assertionCount": 16,
+    "nativeStructure": {
+      "pageCount": 1,
+      "widgetCount": 60,
+      "unparseable": 0,
+      "danglingRefs": 0,
+      "problems": 0,
+      "threeZerosPassed": true
+    },
+    "negativeControl": {
+      "semanticRejected": true,
+      "browserRejected": true
+    },
+    "hostSavedClosedReopened": true,
+    "nativePreviewPassed": true,
+    "userAccepted": false
+  }
+}

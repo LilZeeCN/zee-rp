@@ -16,7 +16,7 @@ import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
 import { parsePayload, encodePayload, field } from './parse-payload.mjs';
 import { guidKey } from './duplicate-page.mjs';
 
-export function placeMaster(file, { masterName, pageIndex, x = 100, y = 100 }) {
+export function placeMaster(file, { masterName, pageIndex, x = 100, y = 100, behindContent = false }) {
   const records = readRecords(file);
   const doc = records.find(r => r.className === 'Axure:DesignDocument');
   const d = parsePayload(doc);
@@ -96,7 +96,22 @@ export function placeMaster(file, { masterName, pageIndex, x = 100, y = 100 }) {
 
   for (const o of [style, widget]) graph.objects.set(o.id, o);
   graph.roots.splice(graph.roots.length - 1, 0, style, widget);
-  field(diagram.body, 'diagram-objects').items.push(ref(wId));
+  const items = field(diagram.body, 'diagram-objects').items;
+  if (behindContent) {
+    const isBackground = item => {
+      const name = field(field(graph.objects.get(item.value)?.body ?? {}, 'name-block') ?? {}, 'text')?.text ?? '';
+      return name.includes('-bg-frame-') || name.endsWith('-img-device-screen-base');
+    };
+    items.splice(items.findLastIndex(isBackground) + 1, 0, ref(wId));
+    // Axure renders grouped children together; the reference must share the
+    // scene frame's group as well as its flat diagram ordering.
+    for (const layer of graph.objects.values()) {
+      if (layer.className !== 'Axure:DiagramObject:Layer') continue;
+      const children = field(layer.body, 'DiagramObjects')?.items;
+      const background = children?.findLastIndex(isBackground) ?? -1;
+      if (background >= 0) children.splice(background + 1, 0, ref(wId));
+    }
+  } else items.push(ref(wId));
 
   const out = replaceRecord(file, pageRec, encodeRecord(pageRec, strings, encodePayload(graph.roots)));
   return {

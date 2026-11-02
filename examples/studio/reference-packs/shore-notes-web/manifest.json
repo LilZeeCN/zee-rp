@@ -1,0 +1,224 @@
+{
+  "id": "shore-notes-web",
+  "version": "1.0.0",
+  "source": "source.json",
+  "name": "岸线 · 图文观察手记",
+  "intent": "editorial",
+  "platform": "web",
+  "pages": [
+    {
+      "id": "shore",
+      "name": "岸线 · 观察手记"
+    },
+    {
+      "id": "field_note",
+      "name": "一束蓝色的停顿"
+    }
+  ],
+  "initialPageId": "shore",
+  "scenarios": [
+    {
+      "id": "read-save-cancel-return",
+      "startPageId": "shore",
+      "steps": [
+        {
+          "expect": {
+            "page": "shore",
+            "visible": {
+              "cover_title": true
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "read_story",
+          "expect": {
+            "page": "field_note",
+            "visible": {
+              "body_paragraph_2": true,
+              "save_story": true,
+              "saved_note": false
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "save_story",
+          "expect": {
+            "visible": {
+              "unsave_story": true,
+              "save_story": false,
+              "saved_note": true
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "unsave_story",
+          "expect": {
+            "visible": {
+              "save_story": true,
+              "unsave_story": false,
+              "saved_note": false
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "back_bottom",
+          "expect": {
+            "page": "shore",
+            "visible": {
+              "cover_title": true
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "top-return",
+      "startPageId": "shore",
+      "steps": [
+        {
+          "action": "click",
+          "target": "read_story",
+          "expect": {
+            "page": "field_note"
+          }
+        },
+        {
+          "action": "click",
+          "target": "back_top",
+          "expect": {
+            "page": "shore"
+          }
+        }
+      ]
+    }
+  ],
+  "design": {
+    "protagonist": "首页由大幅翠鸟照片与两行标题共同领衔；详情页由连续阅读正文主导",
+    "readingOrder": [
+      "刊名与期号",
+      "主题线索与照片",
+      "阅读入口",
+      "文章标题和引言",
+      "连续正文",
+      "照片旁注",
+      "收藏和返回"
+    ],
+    "typography": {
+      "display": {
+        "family": "Songti SC",
+        "size": 56,
+        "weight": 600,
+        "lineHeight": 76
+      },
+      "articleTitle": {
+        "family": "Songti SC",
+        "size": 50,
+        "weight": 600,
+        "lineHeight": 70
+      },
+      "body": {
+        "family": "PingFang SC",
+        "size": 18,
+        "lineHeight": 32
+      },
+      "metadata": {
+        "family": "Menlo",
+        "size": 12,
+        "lineHeight": 28
+      }
+    },
+    "palette": {
+      "canvas": "#F1F2EA",
+      "ink": "#1F353E",
+      "muted": "#60706F",
+      "accent": "#97432E",
+      "aside": "#E0E6DD"
+    },
+    "spacing": {
+      "pageInset": 72,
+      "articleWidth": 620,
+      "photoWidth": 748,
+      "columnGap": 68,
+      "scale": [
+        12,
+        24,
+        32,
+        48,
+        68,
+        72
+      ]
+    },
+    "materials": "同一张 CC0 原图制作两个可重放裁切，保留原图、来源、裁切配方和字节哈希；照片作为观察内容，不作文字背景。",
+    "directions": [
+      {
+        "name": "图像开场",
+        "structure": "首页让照片占据右侧大区，左侧标题和引言引导进入正文；文章采用正文与旁注两列。",
+        "difference": "图像负责建立主题，正文接续解释。"
+      },
+      {
+        "name": "文字主导",
+        "structure": "首页先呈现一段大字观察记录，照片作为边栏证据；文章将图像放在相关段落之后。",
+        "difference": "阅读顺序从观点进入，图像不承担封面。"
+      },
+      {
+        "name": "沿岸长卷",
+        "structure": "把多段观察按行走顺序串成连续图文流，照片尺寸随内容变化，旁注贴近具体细节。",
+        "difference": "时间/空间序列取代首页加详情的组织。"
+      }
+    ],
+    "limitations": [
+      "手记为原创观察习作；照片并非文中场景的实地拍摄证据。",
+      "收藏仅保留在本次运行状态，不是跨设备收藏服务。",
+      "示例为 web 固定画板；窄屏需要重排与单独验收。",
+      "文字与结构保持可编辑；照片的裁切参数不是 Axure 原生图片编辑参数。"
+    ]
+  },
+  "provenance": {
+    "type": "authored-reference",
+    "userAccepted": false,
+    "author": "agent",
+    "status": "agent-reviewed",
+    "note": "原创参考作品；视觉观察、机器检查、用户认可分别记录。"
+  },
+  "files": {
+    "CREDITS.md": "705075fd37ef6fb7ec1ac91a444bab8e7cb1a8a312f3fbe1628103856b324794",
+    "README.md": "92164ca5b7212587e561cbf29eb5443d8df81720a63ca46312ac2c4982ab27cb",
+    "assets/media-35d58bc6f9aa5f4e180b4d7b46ae4e589ac818d388d03bb6aefdec8e4b74c561.jpg": "a11fa61ccc4df45f66a1047f59e7730b329de742a082d41c5b646edb4f97094e",
+    "assets/media-8f14c0ecc494fa30e3cee582c6044bc224497d487af1afa1f402f7b02d07a78c.jpg": "15142038e7581b44a46df713f717da15138167054daf06497e8cae5887840c8a",
+    "assets/original-99e26f98213f836b79c0202ca134d571a75c3245ee05284f507025553253611a.jpg": "99e26f98213f836b79c0202ca134d571a75c3245ee05284f507025553253611a",
+    "media/recipes/35d58bc6f9aa5f4e180b4d7b46ae4e589ac818d388d03bb6aefdec8e4b74c561.json": "73e08e569551f9125a02b8eb3ea030776c35147d432c367f01cba25938fd11e6",
+    "media/recipes/8f14c0ecc494fa30e3cee582c6044bc224497d487af1afa1f402f7b02d07a78c.json": "d5e0d93c8f6f3cc28460fab36d3d548cc58440dc3be1b66647bd1e9669373997",
+    "media-recipes.json": "1219549edc2828a967e34f4e809e276b216da13eb5ac42c98cdb258babcb0fd2",
+    "previews/field_note-initial.png": "30c8e5916ebcabe1d0ee288fa856f7c33b351af9c7d0bdd272e5bb6c55807bfa",
+    "previews/saved.png": "1e158a7982ac5a6f1c918473c5224d9b61094f5b125b1e1c07a72a82054ebbf6",
+    "previews/shore-initial.png": "ca19c2bb31bd06ec0b0cb2a3cfc2377076a8240fd3b0e6608592d3ed67d78e9c",
+    "source.json": "29cfaa3e8aca87ac936d169139198ed5a1b731762bfb663fe3abc8a76c3cbe7a"
+  },
+  "validation": {
+    "sourceSha256": "29cfaa3e8aca87ac936d169139198ed5a1b731762bfb663fe3abc8a76c3cbe7a",
+    "revision": 1,
+    "contentHash": "f9bce8156031b1b9803f32910f973491662cdd839ab54830c9d84a890fa8c420",
+    "semanticPassed": true,
+    "browserPointerPassed": true,
+    "assertionCount": 16,
+    "nativeStructure": {
+      "pageCount": 2,
+      "widgetCount": 47,
+      "unparseable": 0,
+      "danglingRefs": 0,
+      "problems": 0,
+      "threeZerosPassed": true
+    },
+    "negativeControl": {
+      "semanticRejected": true,
+      "browserRejected": true
+    },
+    "hostSavedClosedReopened": true,
+    "nativePreviewPassed": true,
+    "userAccepted": false
+  }
+}

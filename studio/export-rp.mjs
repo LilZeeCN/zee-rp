@@ -1,43 +1,212 @@
 import { spawn } from 'node:child_process';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertNotProtected, EXPORTER_VERSION } from './document.mjs';
+import { assertNotProtected, EXPORTER_VERSION, nodeEvents, sha256,canonicalJson } from './document.mjs';
 import { exportCssPlan } from './visual-style.mjs';
 import { rasterizeStudioPaint } from './css-raster.mjs';
 import { resolveDocumentScene } from './scene-resolver.mjs';
+import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
+import {nodePropertyCapability,STUDIO_SOURCE_ONLY_MACROS} from './node-capabilities.mjs';
+import { normalizeVectorNodeSpec, buildRp9ControlPointsForSubpaths } from './vector-paths.mjs';
 import { buildInteractiveRp } from '../scripts/proto.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 import { readRecords, encodeRecord, replaceRecord } from '../scripts/rp-records.mjs';
 import { parsePayload, encodePayload, field } from '../scripts/parse-payload.mjs';
+import { resolveFontDescriptor } from './typography.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(HERE, '..');
 
-function normalizeSingleExportAction(act) {
+// 让导出的 interactions/actions 计数可自证：列出 .rp 内被统计的每个交互来源，
+// 并区分「Studio 源稿作者交互」与「导出器为初始隐藏生成的页面 OnLoad hide」。
+export function summarizeInteractionSources(rpSummary = {}) {
+  const rows = [];
+  const actionTypesOf = ix => (ix.cases || []).flatMap(c => (c.actions || []).map(a => a.type || a.human || 'unknown'));
+  const add = (page, owner, ownerId, ix) => {
+    const actionTypes = actionTypesOf(ix);
+    rows.push({
+      page: page.name || page.id || null,
+      owner,
+      ownerId,
+      event: ix.event,
+      actionCount: actionTypes.length,
+      actionTypes,
+      origin: owner === 'page' && ix.event === 'OnLoad' && actionTypes.length > 0 && actionTypes.every(type => type === 'hide')
+        ? 'export-initial-hidden'
+        : 'authored',
+    });
+  };
+  for (const page of rpSummary.pages || []) {
+    for (const ix of page.interactions || []) add(page, 'page', null, ix);
+    (function walk(widgets) {
+      for (const widget of widgets || []) {
+        for (const ix of widget.interactions || []) add(page, 'widget', widget.name || widget.id || null, ix);
+        walk(widget.children);
+      }
+    })(page.widgets);
+  }
+  const summaryOf = list => ({ interactions: list.length, actions: list.reduce((n, row) => n + row.actionCount, 0) });
+  return {
+    sources: rows,
+    counts: {
+      total: summaryOf(rows),
+      authored: summaryOf(rows.filter(row => row.origin === 'authored')),
+      exportGenerated: {
+        ...summaryOf(rows.filter(row => row.origin === 'export-initial-hidden')),
+        reason: '导出器为保持初始隐藏节点在 Axure 运行态不可见，生成页面 OnLoad hide 动作',
+      },
+    },
+  };
+}
+
+function toRp1RuntimeValue(val) {
+  if (typeof val === 'string') {
+    const trimmed = val.trim();
+    if (trimmed.startsWith('=@') && /^[A-Za-z_][A-Za-z0-9_-]*$/.test(trimmed.slice(2).trim())) {
+      return { widget: trimmed.slice(2).trim() };
+    }
+    if (trimmed.startsWith('=$') && /^[A-Za-z_][A-Za-z0-9_-]*$/.test(trimmed.slice(2).trim())) {
+      return { variable: trimmed.slice(2).trim() };
+    }
+  }
+  return val;
+}
+
+function normalizeSingleExportAction(act, exportCtx = null) {
   if (!act || typeof act !== 'object') return act;
   const c = structuredClone(act);
-  if (c.type === 'set-variable' && c.target && !c.variable) {
-    c.variable = c.target;
-    delete c.target;
+  if (c.type === 'set-var') c.type = 'set-variable';
+  if (c.type === 'set-variable') {
+    if (c.name && !c.variable) {
+      c.variable = c.name;
+      delete c.name;
+    }
+    if (c.target && !c.variable) {
+      c.variable = c.target;
+      delete c.target;
+    }
+    if (c.expr !== undefined && c.value === undefined) {
+      c.value = c.expr;
+      delete c.expr;
+    }
+    c.value = toRp1RuntimeValue(c.value);
+    return c;
+  }
+  if (c.type === 'set-text') {
+    if (c.value !== undefined && c.text === undefined) {
+      c.text = c.value;
+      delete c.value;
+    }
+    c.text = toRp1RuntimeValue(c.text);
+    return c;
+  }
+  if (c.type === 'navigate') {
+    c.type = 'link';
+    if (c.to && !c.page) {
+      c.page = c.to;
+      delete c.to;
+    }
+    return c;
+  }
+  if (typeof c.type === 'string' && (c.type.startsWith('dataset-') || c.type.startsWith('repeater-'))) {
+    const op = c.type.replace(/^(?:dataset|repeater)-/, '');
+    const targetRepeater =
+      c.repeater ||
+      exportCtx?.datasetToRepeaterId?.get(c.dataset) ||
+      exportCtx?.defaultRepeaterId ||
+      null;
+    if (!targetRepeater) return null;
+    const keyField = exportCtx?.repeaterKeyById?.get(targetRepeater) || 'id';
+    if (op === 'filter') {
+      const rawVal = c.query !== undefined ? c.query : c.value;
+      if (rawVal === '' || rawVal === null || rawVal === undefined) {
+        return { type: 'data-clear-filter', target: targetRepeater };
+      }
+      const fieldName = c.field || 'title';
+      const valExpr = toRp1RuntimeValue(rawVal);
+      const where =
+        c.operator === 'includes' || c.operator === 'contains'
+          ? { fn: 'contains', args: [{ item: fieldName }, valExpr] }
+          : { op: '==', left: { item: fieldName }, right: valExpr };
+      const safeName = `filter_${String(fieldName).replace(/[^A-Za-z0-9_-]/g, '_')}`;
+      return { type: 'data-filter', target: targetRepeater, name: safeName, where };
+    }
+    if (op === 'sort') {
+      if (!c.field) {
+        return { type: 'data-clear-sort', target: targetRepeater };
+      }
+      const dir =
+        c.order === 'desc' || c.direction === 'desc' || c.direction === 'descending'
+          ? 'descending'
+          : 'ascending';
+      return { type: 'data-sort', target: targetRepeater, column: c.field, direction: dir };
+    }
+    if (op === 'add') {
+      const rows = Array.isArray(c.rows) ? c.rows : c.row ? [c.row] : [];
+      if (rows.length > 0) {
+        return { type: 'data-add', target: targetRepeater, rows };
+      }
+      return null;
+    }
+    if (op === 'update' && c.rowId && c.patch && typeof c.patch === 'object') {
+      return {
+        type: 'data-update',
+        target: targetRepeater,
+        where: { op: '==', left: { item: keyField }, right: c.rowId },
+        set: c.patch,
+      };
+    }
+    if (op === 'delete' && c.rowId) {
+      return {
+        type: 'data-delete',
+        target: targetRepeater,
+        where: { op: '==', left: { item: keyField }, right: c.rowId },
+      };
+    }
+    if (op === 'page' && c.page !== undefined) {
+      const pVal = c.page === 'prev' ? 'previous' : c.page;
+      if (['next', 'previous', 'first', 'last'].includes(pVal) || (Number.isInteger(pVal) && pVal >= 1)) {
+        return { type: 'data-page', target: targetRepeater, page: pVal };
+      }
+      return null;
+    }
+    return null;
   }
   return c;
 }
 
-function normalizeExportEventSpec(evSpec) {
-  if (Array.isArray(evSpec)) return evSpec.map(normalizeSingleExportAction);
+function normalizeExportEventSpec(evSpec, exportCtx = null) {
+  // Studio normalizes an event's conditional block into a one-item array;
+  // RP/1 expects cases at the event level, outside the action list.
+  if (Array.isArray(evSpec) && evSpec.length === 1 && Array.isArray(evSpec[0]?.cases)) {
+    return normalizeExportEventSpec(evSpec[0], exportCtx);
+  }
+  if (Array.isArray(evSpec)) {
+    const mapped = evSpec.map(item => normalizeSingleExportAction(item, exportCtx)).filter(Boolean);
+    return mapped.length > 0 ? mapped : null;
+  }
   if (!evSpec || typeof evSpec !== 'object') return evSpec;
   if (Array.isArray(evSpec.cases)) {
-    return {
-      ...structuredClone(evSpec),
-      cases: evSpec.cases.map(cs => ({
-        ...structuredClone(cs),
-        ...(Array.isArray(cs.actions) ? { actions: cs.actions.map(normalizeSingleExportAction) } : {}),
-      })),
-    };
+    const cases = evSpec.cases
+      .map(cs => {
+        const mappedActions = Array.isArray(cs.actions)
+          ? cs.actions.map(item => normalizeSingleExportAction(item, exportCtx)).filter(Boolean)
+          : [];
+        if (mappedActions.length === 0) return null;
+        return {
+          ...structuredClone(cs),
+          actions: mappedActions,
+        };
+      })
+      .filter(Boolean);
+    return cases.length > 0 ? { ...structuredClone(evSpec), cases } : null;
   }
-  if (evSpec.type) return [normalizeSingleExportAction(evSpec)];
+  if (evSpec.type) {
+    const single = normalizeSingleExportAction(evSpec, exportCtx);
+    return single ? [single] : null;
+  }
   const actions = [];
   if (evSpec.setPanelState && typeof evSpec.setPanelState === 'object') {
     const st = evSpec.setPanelState.state === 'flip' ? 'back' : evSpec.setPanelState.state;
@@ -54,13 +223,14 @@ function normalizeExportEventSpec(evSpec) {
   return actions.length > 0 ? actions : structuredClone(evSpec);
 }
 
-function normalizeExportOn(onObj) {
+function normalizeExportOn(onObj, exportCtx = null) {
   if (!onObj || typeof onObj !== 'object') return undefined;
   const out = {};
   for (const [ev, spec] of Object.entries(onObj)) {
-    out[ev] = normalizeExportEventSpec(spec);
+    const norm = normalizeExportEventSpec(spec, exportCtx);
+    if (norm) out[ev] = norm;
   }
-  return out;
+  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 export function findRpWidgetByNodeId(widgets, nodeId) {
@@ -203,6 +373,7 @@ function patchAndVerifyRpTypography(absOutRp, scene) {
         styleFamily === expectedFont;
       if (preserved) fontPreservedCount++;
       const isFallback = Boolean(resNode.isFontFallback || resNode.fontStatus === 'fallback' || resNode.fontStatus === 'delayed-loading' || (resNode.requestedFontFamily && resNode.requestedFontFamily !== expectedFont));
+      const requiresHostFontInstallation = !isFallback && resolveFontDescriptor(expectedFont).isFallback;
       verifiedItems.push({
         pageId: pgScene.id,
         nodeId: resNode.id,
@@ -215,15 +386,19 @@ function patchAndVerifyRpTypography(absOutRp, scene) {
         firstBaselineOffset: resNode.firstBaselineOffset,
         lastBaselineOffset: resNode.lastBaselineOffset,
         isFontFallback: isFallback,
+        requiresHostFontInstallation,
         hostSubstituteWarning: isFallback
           ? `字体 "${resNode.requestedFontFamily || resNode.requestedFont}" 未安装，导出及宿主预览使用替代字体 "${expectedFont}"`
-          : null,
+          : requiresHostFontInstallation ? `工程字体 "${expectedFont}" 未嵌入 .rp；Axure 宿主需另行安装该字体。本报告只验证字体族名写入，未验证宿主字形。` : null,
       });
     }
   }
 
   return {
     totalTextNodes: verifiedItems.length,
+    verification: 'stored-font-family-only',
+    fontsEmbedded: false,
+    requiresHostFontInstallationCount: verifiedItems.filter(item => item.requiresHostFontInstallation).length,
     fontPreservedCount,
     allFontsPreserved: verifiedItems.every(i => i.fontPreserved),
     missingFontSubstitutionsCount: verifiedItems.filter(i => i.isFontFallback).length,
@@ -232,7 +407,129 @@ function patchAndVerifyRpTypography(absOutRp, scene) {
   };
 }
 
-function classifyNodeCompatibility(node, pageId, entries) {
+function patchAndVerifyRpVectors(absOutRp, scene) {
+  let buf = readFileSync(absOutRp);
+  const rpInitial = readRp(buf, { path: absOutRp });
+  const targetsByRecord = new Map();
+
+  for (const pgScene of scene.pages) {
+    const rpPage =
+      (rpInitial.pages || []).find(p => p.name === pgScene.name || p.id === pgScene.id) ||
+      rpInitial.pages[scene.pages.indexOf(pgScene)];
+    if (!rpPage || rpPage.record === undefined) continue;
+
+    for (const resNode of pgScene.nodes) {
+      if (resNode.type !== 'path' || !Array.isArray(resNode.subpaths) || resNode.subpaths.length === 0) continue;
+      const esc = String(resNode.id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const primaryRe = new RegExp(`^(?:[a-z]+-)+${esc}-[0-9a-f]{8,16}$`);
+      const bgRe = new RegExp(`^bg-(?:[a-z]+-)+${esc}-[0-9a-f]{8,16}$`);
+      const allWidgets = [
+        ...(rpPage.widgets || []),
+        ...(rpInitial.containedWidgets || []).filter(cw => cw.record === rpPage.record),
+      ];
+      const vecWidget =
+        allWidgets.find(w => !bgRe.test(w.name) && (w.name === resNode.id || primaryRe.test(w.name) || w.name?.endsWith(`-${resNode.id}`))) ||
+        null;
+      if (!vecWidget) continue;
+      const recIdx = vecWidget.record ?? rpPage.record;
+      if (!targetsByRecord.has(recIdx)) targetsByRecord.set(recIdx, []);
+      targetsByRecord.get(recIdx).push({ pgScene, resNode, widgetId: vecWidget.id });
+    }
+  }
+
+  for (const [recIdx, items] of targetsByRecord.entries()) {
+    const record = readRecords(buf).find(r => r.index === recIdx);
+    if (!record) continue;
+    const graph = parsePayload(record);
+    const strings = [...record.strings];
+    const intern = text => {
+      let idx = strings.indexOf(text);
+      if (idx < 0) {
+        idx = strings.indexOf(text);
+        idx = strings.length;
+        strings.push(text);
+      }
+      return { tag: 8, value: idx + 1, text };
+    };
+    const int = value => ({ tag: 5, value });
+    const f64 = value => ({ tag: 6, value });
+    const bool = value => ({ tag: 25, value });
+    const list = arr => ({ tag: 2, items: arr });
+    const mapEntry = entries => ({
+      tag: 1,
+      entries: Object.entries(entries).map(([k, v]) => [intern(k), v]),
+    });
+    const xy = (x, y) => mapEntry({ X: f64(x), Y: f64(y) });
+
+    let modified = false;
+    for (const { resNode, widgetId } of items) {
+      const widget = graph.objects.get(Number(widgetId));
+      if (!widget?.body) continue;
+      const cpSubpaths = buildRp9ControlPointsForSubpaths(resNode.subpaths, resNode.w, resNode.h, {
+        fillRule: resNode.fillRule || 'nonzero',
+      });
+      const encodedSubpaths = list(
+        cpSubpaths.map(sp =>
+          list(
+            sp.map(cp =>
+              mapEntry({
+                Path: xy(cp.Path.X, cp.Path.Y),
+                LowerHandle: xy(cp.LowerHandle.X, cp.LowerHandle.Y),
+                HigherHandle: xy(cp.HigherHandle.X, cp.HigherHandle.Y),
+                HigherSegmentExists: bool(cp.HigherSegmentExists),
+              })
+            )
+          )
+        )
+      );
+      const setBodyField = (key, val) => {
+        const existing = widget.body.entries.findIndex(([k]) => k.text === key);
+        if (existing >= 0) widget.body.entries[existing][1] = val;
+        else widget.body.entries.push([intern(key), val]);
+      };
+      setBodyField('Shape', int(300));
+      setBodyField('ControlPoints', encodedSubpaths);
+      modified = true;
+    }
+
+    if (modified) {
+      buf = replaceRecord(buf, record, encodeRecord(record, strings, encodePayload(graph.roots)));
+    }
+  }
+
+  writeFileSync(absOutRp, buf);
+
+  const rpVerified = readRp(buf, { path: absOutRp, includeVectors: true });
+  const verifiedItems = [];
+  for (const [recIdx, items] of targetsByRecord.entries()) {
+    for (const { pgScene, resNode, widgetId } of items) {
+      const rpPage = (rpVerified.pages || []).find(p => p.record === recIdx);
+      const w =
+        (rpPage?.widgets || []).find(item => item.id === widgetId) ||
+        (rpVerified.containedWidgets || []).find(item => item.record === recIdx && item.id === widgetId) ||
+        null;
+      verifiedItems.push({
+        pageId: pgScene.id,
+        nodeId: resNode.id,
+        shape: w?.shape ?? 0,
+        subpathCount: w?.controlPoints?.length ?? 0,
+        expectedSubpathCount: resNode.subpaths.length,
+        preserved: w?.shape === 300 && (w?.controlPoints?.length ?? 0) === resNode.subpaths.length,
+        fillRule: resNode.fillRule || 'nonzero',
+        fallbackReasons: resNode.vectorFallbackReasons || [],
+      });
+    }
+  }
+
+  return {
+    totalVectorNodes: verifiedItems.length,
+    nativeShape300Count: verifiedItems.filter(i => i.preserved).length,
+    allVectorsPreserved: verifiedItems.every(i => i.preserved),
+    items: verifiedItems,
+  };
+}
+
+export function classifyNodeCompatibility(node, pageId, entries) {
   const baseInfo = {
     pageId,
     nodeId: node.id,
@@ -241,6 +538,27 @@ function classifyNodeCompatibility(node, pageId, entries) {
     name: node.name || node.id,
   };
   const cssPlan = exportCssPlan(node);
+  if (node.type === 'input' && node.rotation) entries.push({ ...baseInfo, classification: 'unsupported', feature: 'input.rotation', browserPreserved: true, reason: '原生输入控件旋转尚未验证并可能在导出时丢失', fallback: '在 Studio 或代码包保留旋转；原生 .rp 暂不保证输入控件旋转' });
+  if(node.type==='repeater')for(const key of ['filter','sort','pageSize','page','on']){
+    const value=key==='on'?nodeEvents(node):node[key];
+    const hasValue=value!==undefined&&value!==null&&(typeof value!=='object'||Object.keys(value).length>0);
+    const native=nodePropertyCapability('repeater',key).surfaces.native;
+    if(hasValue&&native.status==='unsupported')entries.push({...baseInfo,classification:'unsupported',feature:`repeater.${key}`,reason:native.reason,browserPreserved:key!=='on',declarations:{[key]:structuredClone(value)},fallback:'保留可编辑列表、原始数据与画布源；严格原生交付请使用完整RP/1数据动作流程'});
+  }
+  let vectorSpec = null;
+  if (node.type === 'path') {
+    vectorSpec = normalizeVectorNodeSpec(node);
+    for (const fb of vectorSpec.nativeCompatibility?.fallbackReasons || []) {
+      entries.push({
+        ...baseInfo,
+        classification: 'unsupported',
+        feature: fb.feature,
+        browserPreserved: true,
+        reason: fb.reason,
+        fallback: '保留可编辑画布矢量源与 RP9 Shape:300 ControlPoints 曲线轮廓，仅省略宿主不支持的扩展效果，不将页面或交互容器栅格化',
+      });
+    }
+  }
   if (cssPlan.unsupported.length) {
     entries.push({
       ...baseInfo,
@@ -284,6 +602,14 @@ function classifyNodeCompatibility(node, pageId, entries) {
     ...baseInfo,
     classification: 'native-editable',
     feature: node.type,
+    ...(vectorSpec
+      ? {
+          nativeVectorMode: 'rp9-custom-shape-300',
+          nativeShapeCode: 300,
+          subpathCount: vectorSpec.subpaths.length,
+          fillRule: vectorSpec.fillRule,
+        }
+      : {}),
     ...(node._fromComponentId
       ? {
           componentId: node._fromComponentId,
@@ -294,7 +620,9 @@ function classifyNodeCompatibility(node, pageId, entries) {
       : {}),
     reason: node._fromComponentId
       ? `组件实例 (${node._fromComponentId}) 展开为 Axure RP 9 原生可编辑节点树 (expanded-editable-instance)，保留全部子元件坐标、文本与交互`
-      : '映射为 Axure RP 9 原生可编辑元件（保留坐标、尺寸、文本、样式与交互事件）',
+      : vectorSpec
+        ? `映射为 Axure RP 9 原生可编辑自定义形状 (Axure:DiagramObject:VectorShape, Shape: 300, ControlPoints 子路径数=${vectorSpec.subpaths.length})`
+        : '映射为 Axure RP 9 原生可编辑元件（保留坐标、尺寸、文本、样式与交互事件）',
   });
 }
 
@@ -318,7 +646,8 @@ function decorateExportNode(out, node) {
   return { id: `${node.id}__css_layer`, type: 'box', x: x || 0, y: y || 0, w, h, layout: 'stack', fill: '#FFFFFF00', children: [image, { ...out, x: 0, y: 0 }] };
 }
 
-function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false } = {}) {
+function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false, exportCtx = null } = {}) {
+  if(STUDIO_SOURCE_ONLY_MACROS.has(node.type)&&!node.children?.length)throw Object.assign(new Error(`尚未展开的Studio节点 ${node.type} 不能按可见画布导出；请使用完整RP/1原生入口`),{code:'E_EXPORT_UNEXPANDED_MACRO',nodeId:`${pageId}/${node.id}`,field:'type'});
   classifyNodeCompatibility(node, pageId, compatEntries);
 
   if (node.type === 'phone-shell') {
@@ -340,7 +669,8 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
             _relY: 0,
           },
           pageId,
-          compatEntries
+          compatEntries,
+          { exportCtx }
         )
       ),
     };
@@ -348,18 +678,27 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
 
   const out = {
     id: node.id,
-    type: node.type === 'instance' ? 'box' : node.type,
+    // Studio already expanded these macros. Send their resolved editable tree,
+    // otherwise the native compiler would reject/expand it a second time.
+    type: ['instance', 'spacer', 'divider', 'stat-row', 'list-item', 'path'].includes(node.type) || STUDIO_SOURCE_ONLY_MACROS.has(node.type) ? 'box' : node.type,
     ...(omitRootXY
       ? {}
       : {
           x: Math.round(node._relX ?? node.x ?? 0),
           y: Math.round(node._relY ?? node.y ?? 0),
         }),
+    ...(typeof node.z === 'number' ? { z: node.z } : {}),
     w: Math.round(node._w ?? node.w ?? 100),
     h: Math.round(node._h ?? node.h ?? 40),
   };
   // Initially hidden nodes must stay hidden in Axure; show/hide actions reveal them at runtime.
   if (node.visible === false || node.hidden === true) out.visible = false;
+  if (node.type === 'spacer') { out.fill = '#FFFFFF00'; out.stroke = '#FFFFFF00'; }
+  if (['stat-row', 'list-item', 'path'].includes(node.type) && !node._resolvedFill && !node.fill) out.fill = '#FFFFFF00';
+  if (node.type === 'path' && !node._resolvedStroke && !node.stroke && !node._resolvedFill && !node.fill && (node._resolvedColor || node.color)) {
+    out.stroke = node._resolvedColor || node.color;
+    if (node.strokeWidth === undefined) out.strokeWidth = 2;
+  }
 
   // Layout is resolved to explicit stack coordinates so ResolvedScene is the single geometry authority
   if (out.type === 'box' && Array.isArray(node.children) && node.children.length > 0) {
@@ -372,8 +711,9 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
     out.src = node.src || 'assets/placeholder.png';
     if (node.radius !== undefined) out.radius = node.radius;
     if (node.opacity !== undefined) out.opacity = node.opacity;
+    if (node.rotation) out.rotation = node.rotation;
     if (node.shadow) out.shadow = node.shadow;
-    if (node.on && Object.keys(node.on).length > 0) out.on = structuredClone(node.on);
+    if (nodeEvents(node)) out.on = normalizeExportOn(nodeEvents(node), exportCtx);
     return decorateExportNode(out, node);
   }
 
@@ -395,16 +735,29 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
             },
             `${pageId}/${node.id}/${st.id}`,
             compatEntries,
-            { omitRootXY: true }
+            { omitRootXY: true, exportCtx }
           )
         : { type: 'box', id: `${st.id}_root`, layout: 'stack', w: out.w, h: out.h, children: [] },
     }));
-    if (node.on && Object.keys(node.on).length > 0) out.on = structuredClone(node.on);
+    if (nodeEvents(node)) out.on = normalizeExportOn(nodeEvents(node), exportCtx);
     return decorateExportNode(out, node);
   }
 
   if (out.type === 'repeater') {
-    out.dataset = node.dataset || node.source;
+    out.dataset = repeaterDatasetName(node);
+    if (node.key) out.key = node.key;
+    else {
+      // The native compiler requires the repeater identity column to be text,
+      // nonempty and unique across rows; fall back to the first such column.
+      const rows = (exportCtx?.datasetRowsByName?.get(out.dataset) || []).filter(r => r && typeof r === 'object');
+      const cols = Object.keys(rows[0] || {}).filter(k => !String(k).startsWith('_'));
+      const textCol = cols.find(k => {
+        const vals = rows.map(r => r[k]);
+        return vals.every(v => typeof v === 'string' && v !== '') && new Set(vals).size === vals.length;
+      });
+      if (textCol) out.key = textCol;
+    }
+    if (node.pageSize !== undefined) out.pageSize = node.pageSize;
     out.rowHeight = node.rowHeight || 56;
     out.rowGap = node.rowGap ?? node.gap ?? 8;
     if (node.template) {
@@ -416,7 +769,7 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
         },
         `${pageId}/${node.id}/template`,
         compatEntries,
-        { omitRootXY: true }
+        { omitRootXY: true, exportCtx }
       );
     } else {
       out.template = {
@@ -448,11 +801,16 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
     if (node.strokeWidth !== undefined) out.strokeWidth = node.strokeWidth;
     if (node.radius !== undefined) out.radius = node.radius;
     if (node.opacity !== undefined) out.opacity = node.opacity;
+    if (node.rotation) out.rotation = node.rotation; // 原生可编辑 2D 旋转（.rp DOA 3221225522）
     if (node.shadow) out.shadow = node.shadow;
+    if (node.innerGlow) out.innerGlow = node.innerGlow;
     if (node.gradient) out.gradient = node.gradient;
     if (node.backdropBlur) out.backdropBlur = node.backdropBlur;
     if (node.aurora) out.aurora = node.aurora;
     if (node.noise) out.noise = node.noise;
+    for (const bKey of ['borderSides', 'borderTop', 'borderRight', 'borderBottom', 'borderLeft', 'clip']) {
+      if (node[bKey] !== undefined) out[bKey] = node[bKey];
+    }
   }
 
   if (out.type === 'icon') {
@@ -481,12 +839,17 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
   }
 
   if (isTextLike) {
+    if (node._resolvedFontFamily || node.fontFamily) out.fontFamily = node._resolvedFontFamily || node.fontFamily;
     if (out.type === 'input') {
+      delete out.fontFamily; // Native input style family is not yet represented.
       if (node.placeholder !== undefined) out.placeholder = node.placeholder;
       if (node.value !== undefined) out.value = node.value;
       else if (node.text !== undefined) out.value = node.text;
+      if (typeof node.textPaddingX === 'number') out.textPaddingX = Number(node.textPaddingX);
     } else if (node._textMetrics?.truncated) {
       out.text = node._textMetrics.displayText;
+    } else if (typeof node.text === 'string' && /^=\s*(?:dataset\.|text\()/.test(node.text)) {
+      out.text = node._textMetrics?.displayText ?? node.text;
     } else if (node.text !== undefined) {
       out.text = node.text;
     } else if (Array.isArray(node.spans) && node.spans.length > 0) {
@@ -504,6 +867,10 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
       if (node.letterSpacing !== undefined) out.letterSpacing = Number(node.letterSpacing);
       if (node.italic) out.italic = true;
       if (node.underline) out.underline = true;
+      if (node.strikethrough) out.strikethrough = true;
+      if (out.type === 'paragraph' && typeof node.textPaddingX === 'number' && out.padding === undefined) {
+        out.padding = Number(node.textPaddingX);
+      }
     }
     if (['label', 'paragraph'].includes(out.type) && node.lineHeight !== undefined) {
       out.lineHeight = Number(node.lineHeight);
@@ -513,8 +880,8 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
     }
   }
 
-  if (node.on && Object.keys(node.on).length > 0) {
-    out.on = normalizeExportOn(node.on);
+  if (nodeEvents(node)) {
+    out.on = normalizeExportOn(nodeEvents(node), exportCtx);
   }
 
   if (Array.isArray(node.children) && node.children.length > 0) {
@@ -524,7 +891,7 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
         _relX: (ch._x ?? 0) - (node._x ?? 0),
         _relY: (ch._y ?? 0) - (node._y ?? 0),
       };
-      return resolvedTreeToRp1Node(childCopy, pageId, compatEntries);
+      return resolvedTreeToRp1Node(childCopy, pageId, compatEntries, { exportCtx });
     });
   }
 
@@ -541,21 +908,59 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
 
   // Lock snapshot of document at current revision
   const snapshotDoc = structuredClone(doc);
-  const scene = resolveDocumentScene(snapshotDoc);
+  const scene = resolveDocumentScene(snapshotDoc, { projectDir });
 
   const workDir = mkdtempSync(join(tmpdir(), 'zee-studio-export-'));
   try {
     const exportPages = scene.pages.map(pg => ({ ...pg, rootTree: structuredClone(pg.rootTree) }));
+    const inlineDatasets={},inlineOwners={};
+    const collectInline=(node,pageId)=>{
+      if(node.type==='repeater'){
+        const name=repeaterDatasetName(node);
+        if(!snapshotDoc.datasets?.[name]){
+          const inline=repeaterInlineRows(node);
+          const rows=inline.length?inline:(node.rows||[]);
+          if(inlineDatasets[name]&&canonicalJson(inlineDatasets[name].rows)!==canonicalJson(rows))throw Object.assign(new Error(`内联列表数据名称冲突：${inlineOwners[name]}与${pageId}/${node.id}。请为不同列表声明不同dataset/source名称。`),{code:'E_EXPORT_DATASET_COLLISION',nodeId:`${pageId}/${node.id}`,field:'dataset'});
+          inlineDatasets[name]={rows:structuredClone(rows)};
+          inlineOwners[name]=`${pageId}/${node.id}`;
+        }
+      }
+      for(const child of node.children||[])collectInline(child,pageId);for(const state of node.states||[])if(state.root)collectInline(state.root,pageId);if(node.template)collectInline(node.template,pageId);
+    };
+    for(const page of exportPages)collectInline(page.rootTree,page.id);
     const effectAssets = await rasterizeStudioPaint(exportPages, { workDir, projectDir, colors: snapshotDoc.tokens?.colors || snapshotDoc.palette || {} });
     const compatEntries = [];
     const resolvedPages = exportPages.map(pgScene => {
+      const datasetToRepeaterId = new Map();
+      const repeaterKeyById = new Map();
+      const datasetRowsByName = new Map();
+      let defaultRepeaterId = null;
+      const scanRepeaters = nd => {
+        if (!nd || typeof nd !== 'object') return;
+        if (nd.type === 'repeater') {
+          const dsName = repeaterDatasetName(nd);
+          if (!datasetToRepeaterId.has(dsName)) datasetToRepeaterId.set(dsName, nd.id);
+          repeaterKeyById.set(nd.id, nd.key || 'id');
+          if (!defaultRepeaterId) defaultRepeaterId = nd.id;
+          if (!datasetRowsByName.has(dsName)) {
+            const declared = snapshotDoc.datasets?.[dsName];
+            const inline = repeaterInlineRows(nd);
+            const rows = Array.isArray(declared) ? declared : (declared?.rows || inline);
+            datasetRowsByName.set(dsName, rows);
+          }
+        }
+        for (const ch of nd.children || []) scanRepeaters(ch);
+        for (const st of nd.states || []) if (st.root) scanRepeaters(st.root);
+      };
+      scanRepeaters(pgScene.rootTree);
+      const exportCtx = { datasetToRepeaterId, repeaterKeyById, defaultRepeaterId, datasetRowsByName };
       const isPhoneShell = pgScene.rootTree?.type === 'phone-shell';
       return {
         id: pgScene.id,
         name: pgScene.name,
         ...(pgScene.device ? { device: pgScene.device } : {}),
         ...(isPhoneShell ? {} : { canvas: { w: pgScene.board.screenW, h: pgScene.board.screenH } }),
-        root: resolvedTreeToRp1Node(pgScene.rootTree, pgScene.id, compatEntries),
+        root: resolvedTreeToRp1Node(pgScene.rootTree, pgScene.id, compatEntries, { exportCtx }),
       };
     });
 
@@ -567,8 +972,9 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
     }
 
     const cleanDatasets = {};
-    for (const [dsName, dsVal] of Object.entries(snapshotDoc.datasets || {})) {
+    for (const [dsName, dsVal] of Object.entries({...inlineDatasets,...(snapshotDoc.datasets || {})})) {
       const rawRows = Array.isArray(dsVal) ? dsVal : (dsVal?.rows || []);
+      if (!rawRows.length) continue; // compiler cannot infer a model for empty rows; emitting one fails compile
       cleanDatasets[dsName] = {
         rows: rawRows.map(r => {
           const rowOut = {};
@@ -580,12 +986,13 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
       };
     }
 
+    const RP1_THEMES = new Set(['enterprise-light', 'modern-dark', 'cobalt-pro', 'mobile-lowfi', 'mobile-hifi', 'aurora-glass', 'editorial-warm', 'cyber-neon']);
     const exportSpec = {
       language: 'rp/1',
       target: snapshotDoc.target || 9,
       name: snapshotDoc.name,
-      domain: snapshotDoc.domain || 'mobile',
-      theme: snapshotDoc.theme || 'mobile-hifi',
+      domain: ['mobile', 'web', 'doc', 'test'].includes(snapshotDoc.domain) ? snapshotDoc.domain : 'mobile',
+      theme: RP1_THEMES.has(snapshotDoc.theme) ? snapshotDoc.theme : 'mobile-hifi',
       palette: cleanPalette,
       ...(Object.keys(snapshotDoc.variables || {}).length ? { variables: structuredClone(snapshotDoc.variables) } : {}),
       ...(Object.keys(cleanDatasets).length ? { datasets: cleanDatasets } : {}),
@@ -643,10 +1050,28 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
     rmSync(absOutRp, { force: true });
     rmSync(`${absOutRp}.baseline.json`, { force: true });
 
-    const buildRes = buildInteractiveRp(planPath, absOutRp);
+    const sourceDir = `${absOutRp}.source`;
+    const sourcePath = join(sourceDir, 'source.json');
+    const studioSourcePath=join(sourceDir,'studio-document.json');
+    assertNotProtected(sourcePath);
+    mkdirSync(sourceDir, { recursive: true });
+    cpSync(workAssetsDir, join(sourceDir, 'assets'), { recursive: true });
+    copyFileSync(specPath, sourcePath);
+    const studioSourceBytes=JSON.stringify(snapshotDoc,null,2)+'\n';
+    writeFileSync(studioSourcePath,studioSourceBytes);
+    const buildRes = buildInteractiveRp(planPath, absOutRp, { sourcePath });
 
     // Patch native AxRun.Family and MyStyle.PropList fontFamily so non-default fonts are preserved in .rp
     const typographyAlignment = patchAndVerifyRpTypography(absOutRp, scene);
+    const vectorAlignment = patchAndVerifyRpVectors(absOutRp, scene);
+    // Typography & vector patching are part of generation, not a later native user edit.
+    const finalBytes = readFileSync(absOutRp), baselinePath = `${absOutRp}.baseline.json`;
+    const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
+    baseline.rpSha256 = sha256(finalBytes);
+    baseline.baseRpBase64 = finalBytes.toString('base64');
+    baseline.studioOrigin={documentId:snapshotDoc.documentId,revision:snapshotDoc.revision,contentHash:snapshotDoc.contentHash,sourceFile:`${basename(sourceDir)}/studio-document.json`,sha256:sha256(studioSourceBytes)};
+    writeFileSync(baselinePath, JSON.stringify(baseline, null, 2) + '\n');
+    buildRes.rpSha256 = baseline.rpSha256;
 
     // Read back the generated .rp and run structural & geometry alignment verification
     const rpSummary = readRp(readFileSync(absOutRp), { path: absOutRp });
@@ -667,8 +1092,12 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
         if (!resNode.visible || resNode.type === 'phone-shell' || resNode.id === `${pgScene.id}_screen`) continue;
         const rpWidget = findRpWidgetByNodeId(rpPage.widgets, resNode.id);
         if (!rpWidget || typeof rpWidget.x !== 'number' || typeof rpWidget.w !== 'number') continue;
-        const dx = Math.abs(rpWidget.x - resNode.pageGlobalX);
-        const dy = Math.abs(rpWidget.y - resNode.pageGlobalY);
+        // Repeater widgets live in the row template's coordinate plane, not at
+        // their first-row preview position on the page.
+        const templateOwner=resNode.repeaterTemplateOwner?pgScene.nodes.find(node=>node.scopedId===resNode.repeaterTemplateOwner):null;
+        const expectedX=resNode.pageGlobalX-(templateOwner?.pageGlobalX||0),expectedY=resNode.pageGlobalY-(templateOwner?.pageGlobalY||0);
+        const dx = Math.abs(rpWidget.x - expectedX);
+        const dy = Math.abs(rpWidget.y - expectedY);
         const dw = Math.abs(rpWidget.w - resNode.w);
         const dh = Math.abs(rpWidget.h - resNode.h);
         const err = Math.max(dx, dy, dw, dh);
@@ -679,7 +1108,8 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
           nodeAlignmentDetails.push({
             pageId: pgScene.id,
             nodeId: resNode.id,
-            resolved: { x: resNode.pageGlobalX, y: resNode.pageGlobalY, w: resNode.w, h: resNode.h },
+            resolved: { x: expectedX, y: expectedY, w: resNode.w, h: resNode.h },
+            ...(templateOwner?{coordinateSpace:'repeater-template',ownerId:templateOwner.scopedId}:{}),
             exported: { x: rpWidget.x, y: rpWidget.y, w: rpWidget.w, h: rpWidget.h },
             errorPx: err,
           });
@@ -697,12 +1127,14 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
     const unparseable = rpSummary.records?.unparseable ?? 0;
     const danglingRefs = rpSummary.counts?.danglingRefs ?? 0;
     const problems = Array.isArray(rpSummary.problems) ? rpSummary.problems.length : (rpSummary.problems ?? 0);
+    const interactionAudit = summarizeInteractionSources(rpSummary);
 
     const report = {
       schemaVersion: 1,
       documentId: snapshotDoc.documentId,
       exportedRevision: snapshotDoc.revision,
       contentHash: snapshotDoc.contentHash,
+      studioOrigin:baseline.studioOrigin,
       exporterVersion: EXPORTER_VERSION,
       exportedAt: new Date().toISOString(),
       outRpPath: absOutRp,
@@ -723,6 +1155,7 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
         outliers: nodeAlignmentDetails,
       },
       typographyAlignment,
+      vectorAlignment,
       componentExportSummary: {
         totalComponentInstances: compatEntries.filter(e => Boolean(e.componentExportMode)).length,
         expandedEditableInstances: compatEntries.filter(e => e.componentExportMode === 'expanded-editable-instance').length,
@@ -730,6 +1163,13 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
         rasterizedComponentInstances: 0,
       },
       compatibilityCounts: counts,
+      interactionSources: interactionAudit.sources,
+      interactionCounts: {
+        ...interactionAudit.counts,
+        rpSummary: { interactions: rpSummary.counts?.interactions ?? null, actions: rpSummary.counts?.actions ?? null },
+        matchesRpSummary: interactionAudit.counts.total.interactions === (rpSummary.counts?.interactions ?? null)
+          && interactionAudit.counts.total.actions === (rpSummary.counts?.actions ?? null),
+      },
       wholePageRasterized: false,
       editableTextRasterized: false,
       interactiveContainerRasterized: false,
@@ -753,6 +1193,8 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
     return {
       ok: true,
       outRpPath: absOutRp,
+      sourcePath,
+      studioSourcePath,
       reportPath: finalReportPath,
       buildResult: buildRes,
       report,

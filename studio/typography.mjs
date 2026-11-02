@@ -1,3 +1,4 @@
+import { BoundedCache, textWeight } from './bounded-cache.mjs';
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -52,7 +53,7 @@ let fontResourceVersion = 1;
 const fontLoadingStates = new Map();
 const customRegisteredFonts = new Map();
 const browserMeasuredOverrides = new Map();
-const typographyCache = new Map();
+const typographyCache = new BoundedCache({maxEntries:2048,maxWeight:8*1024*1024,weight:textWeight});
 let cacheHits = 0;
 let cacheMisses = 0;
 let cacheInvalidations = 0;
@@ -109,7 +110,7 @@ export function clearTypographyCache() {
   cacheInvalidations++;
 }
 
-export function resolveFontDescriptor(requestedFont, { defaultFontFamily = "PingFang SC", projectDir = null } = {}) {
+export function resolveFontDescriptor(requestedFont, { defaultFontFamily = "PingFang SC", projectDir = null, fontCatalog = null } = {}) {
   const raw = String(requestedFont || defaultFontFamily || "PingFang SC").trim();
   const primary = raw.split(",")[0].replace(/[\x27"]/g, "").trim();
   const lower = primary.toLowerCase();
@@ -156,8 +157,14 @@ export function resolveFontDescriptor(requestedFont, { defaultFontFamily = "Ping
   }
 
   if (projectDir) {
-    for (const ext of [".ttf", ".otf", ".ttc", ".woff2", ".woff"]) {
-      const candidate = join(projectDir, "fonts", `${primary}${ext}`);
+    const catalogMatch = Array.isArray(fontCatalog)
+      ? fontCatalog.find(f => String(f?.family || '').toLowerCase() === lower && f?.path)
+      : null;
+    const candidates = [
+      ...(catalogMatch?.path ? [join(projectDir, String(catalogMatch.path).replace(/^\/+/, ''))] : []),
+      ...[".ttf", ".otf", ".ttc", ".woff2", ".woff"].map(ext => join(projectDir, "fonts", `${primary}${ext}`)),
+    ];
+    for (const candidate of candidates) {
       if (existsSync(candidate)) {
         const actual = shapeText('M', { family: primary, size: 14, file: candidate });
         if (!actual || actual.fileValid === false || actual.resolvedFamily.toLowerCase() !== lower) {
@@ -271,11 +278,12 @@ export function measureLineWidthExact(line, {
   letterSpacing = 0,
   defaultFontFamily = "PingFang SC",
   projectDir = null,
+  fontCatalog = null,
   italic = false,
 } = {}) {
   const str = String(line ?? "");
   if (!str.length) return 0;
-  const desc = resolveFontDescriptor(fontFamily, { defaultFontFamily, projectDir });
+  const desc = resolveFontDescriptor(fontFamily, { defaultFontFamily, projectDir, fontCatalog });
   const shaped = shapeText(str, { family: desc.resolvedFont, size: fontSize, weight: fontWeight, italic, file: desc.fontFile });
   if (shaped) {
     const segments = [...graphemeSegmenter.segment(str)].map(s => s.segment);
@@ -365,11 +373,12 @@ export function wrapTextLinesExact(text, maxWidth, {
   letterSpacing = 0,
   defaultFontFamily = "PingFang SC",
   projectDir = null,
+  fontCatalog = null,
 } = {}) {
   const raw = String(text ?? "");
   if (!raw) return [""];
   const limit = Math.max(fontSize, Number(maxWidth) || 9999);
-  const opts = { fontFamily, fontSize, fontWeight, letterSpacing, defaultFontFamily, projectDir };
+  const opts = { fontFamily, fontSize, fontWeight, letterSpacing, defaultFontFamily, projectDir, fontCatalog };
   const paragraphs = raw.split("\n");
   const lines = [];
 
@@ -447,11 +456,12 @@ export function buildTypographyCacheKey({
 export function measureTextBoxExact(node, availableW = null, {
   defaultFontFamily = "PingFang SC",
   projectDir = null,
+  fontCatalog = null,
 } = {}) {
   const hasSpans = Array.isArray(node.spans) && node.spans.length > 0;
   const text = hasSpans
     ? node.spans.map(s => String(s?.text ?? "")).join("")
-    : String(node.text ?? node.value ?? node.placeholder ?? "");
+    : String(node.text ?? node.value ?? node.placeholder ?? node.content ?? "");
   const maxSpanFontSize = hasSpans
     ? Math.max(...node.spans.map(s => Number(s?.fontSize || s?.size || node.fontSize || 14)))
     : Number(node.fontSize || node.size || 14);
@@ -459,9 +469,9 @@ export function measureTextBoxExact(node, availableW = null, {
   const fontWeight = Number(node.fontWeight || node.weight || 400);
   const fontStyle = node.italic ? "italic" : "normal";
   const letterSpacing = Number(node.letterSpacing || 0);
-  const lineHeight = Number(node.lineHeight || Math.max(Math.round(fontSize * 1.4), fontSize + 4));
+  const lineHeight = Number(node.lineHeight || (typeof node.lineGap === "number" ? fontSize + node.lineGap : 0) || Math.max(Math.round(fontSize * 1.4), fontSize + 4));
   const requestedFont = node.fontFamily || node.font || defaultFontFamily || "PingFang SC";
-  const fontDesc = resolveFontDescriptor(requestedFont, { defaultFontFamily, projectDir });
+  const fontDesc = resolveFontDescriptor(requestedFont, { defaultFontFamily, projectDir, fontCatalog });
   const metricsEntry = getFontMetricsEntry(fontDesc.metricsFont, fontWeight);
 
   const hasBox = Boolean(
@@ -469,8 +479,8 @@ export function measureTextBoxExact(node, availableW = null, {
     node.type === "input" ||
     node.type === "badge"
   );
-  const padX = hasBox ? 16 : 0;
-  const padY = hasBox ? 8 : 0;
+  const padX = typeof node.textPaddingX === "number" ? node.textPaddingX * 2 : (hasBox ? 16 : 0);
+  const padY = typeof node.textPaddingY === "number" ? node.textPaddingY * 2 : (hasBox ? 8 : 0);
 
   const maxWConstraint = typeof node.maxW === "number" ? node.maxW : null;
   const explicitW = typeof node.w === "number" ? node.w : null;
@@ -496,7 +506,7 @@ export function measureTextBoxExact(node, availableW = null, {
     targetContentW,
     wrapEnabled,
     hasBox,
-    bounds: [node.h, node.maxH, node.maxLines, node.ellipsis, fontDesc.requestedFont, fontDesc.status],
+    bounds: [node.h, node.maxH, node.maxLines, node.ellipsis, node.lineGap, node.textPaddingX, node.textPaddingY, node.strikethrough, fontDesc.requestedFont, fontDesc.status, fontDesc.fontFile],
   });
 
   if (typographyCache.has(cacheKey)) {
@@ -512,6 +522,7 @@ export function measureTextBoxExact(node, availableW = null, {
     letterSpacing,
     defaultFontFamily,
     projectDir,
+    fontCatalog,
     italic: node.italic === true,
   };
 
@@ -527,6 +538,7 @@ export function measureTextBoxExact(node, availableW = null, {
         letterSpacing: Number(sp?.letterSpacing ?? letterSpacing),
         defaultFontFamily,
         projectDir,
+        fontCatalog,
       });
     }, 0);
     lineWidths = [Number(spanW.toFixed(2))];

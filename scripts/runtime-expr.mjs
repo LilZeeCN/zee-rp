@@ -102,6 +102,8 @@ export function nativeRuntimeValue(ast, ctx, { targetRows = false } = {}) {
         case 'lower': return `(${a}).toLowerCase()`;
         case 'upper': return `(${a}).toUpperCase()`;
         case 'length': return `(${a}).length`;
+        case 'contains': return `((${a}).indexOf(${args[1]})>=0)`;
+        case 'remove': return `(${a}).replace(${args[1]},"")`;
         default: throw new Error(`Unknown runtime function ${node.fn}`);
       }
     }
@@ -117,7 +119,17 @@ export function nativeRuntimeValue(ast, ctx, { targetRows = false } = {}) {
       return coerce(`${targetRows?'TargetItem':'Item'}.${node.field}`,node.valueType);
     }
     if (node.kind !== 'variable' && node.kind !== 'widget') throw new Error(`Unknown runtime value ${node.kind}`);
-    const key = `${node.kind}:${node.name}`;
+    let widget, getter;
+    if (node.kind === 'widget') {
+      widget = findWidget(node.name);
+      const isChoice = ['Axure:DiagramObject:ComboBox', 'Axure:DiagramObject:ListBox'].includes(widget.className);
+      const isCheck = ['Axure:DiagramObject:Checkbox', 'Axure:DiagramObject:RadioButton'].includes(widget.className);
+      const accessor = node.accessor ?? (isCheck ? 'checked' : 'value');
+      if (!['checked', 'selected', 'value', 'text'].includes(accessor)) throw new Error(`Unknown widget accessor ${accessor}`);
+      getter = accessor === 'checked' || accessor === 'selected' ? 'GetCheckState'
+        : accessor === 'value' && isChoice ? 'GetSelectedOption' : 'GetWidgetText';
+    }
+    const key = node.kind === 'widget' ? `widget:${node.name}:${getter}` : `${node.kind}:${node.name}`;
     if (reads.has(key)) return coerce(reads.get(key),node.valueType);
     const alias = `rpv${reads.size}`;
     let read;
@@ -129,9 +141,9 @@ export function nativeRuntimeValue(ast, ctx, { targetRows = false } = {}) {
       read = obj(newGuid(),'Axure:Expr:FCall',{'function-name':str('GetGlobalVariableValue'),args:list([ref(variable.id)])});
       identifiers.push({id:info.pageGuidIndex,name:alias,target:false});
     } else {
-      const path = pathTo(findWidget(node.name).id);
+      const path = pathTo(widget.id);
       const literal = obj(newGuid(),'Axure:Expr:DiagramObjectPathLiteral',{value:ref(path.id)});
-      read = obj(newGuid(),'Axure:Expr:FCall',{'function-name':str('GetWidgetText'),args:list([ref(literal.id)])});
+      read = obj(newGuid(),'Axure:Expr:FCall',{'function-name':str(getter),args:list([ref(literal.id)])});
     }
     scope.push([str(alias),ref(read.id)]); reads.set(key,alias);
     return coerce(alias,node.valueType);

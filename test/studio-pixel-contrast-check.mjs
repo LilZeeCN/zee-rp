@@ -12,6 +12,7 @@ const label = (id, x, y, color, extra = {}) => ({ id, type: 'label', text: 'MMMM
 const source = { domain: 'web', pages: [{ id: 'pixels', domain: 'web', canvas: { w: 1600, h: 1000 }, root: {
   id: 'root', type: 'box', layout: 'stack', w: 1600, h: 1000, fill: '#000000', children: [
     label('white', 30, 30, '#FFFFFF'),
+    label('own-clip', 1220, 400, '#FFFFFF', {text:'gy', fontSize:58, lineHeight:64, h:32}),
     label('alpha', 30, 100, '#FFFFFF33'),
     label('opacity', 30, 170, '#FFFFFF', { opacity: .2 }),
     label('covered', 30, 240, '#FFFFFF'),
@@ -66,7 +67,7 @@ test('pixel measurement uses rendered glyphs, local backgrounds and real capture
       }
     });
     await t.test('fully and partly occluded text cannot pass', () => {
-      for (const id of ['covered', 'partial']) {
+      for (const id of ['covered', 'partial', 'own-clip']) {
         assert.equal(byId.get(id)?.passes, false, JSON.stringify(byId.get(id)));
         assert.ok(byId.get(id)?.status === 'unknown' || byId.get(id)?.ratio < 3);
       }

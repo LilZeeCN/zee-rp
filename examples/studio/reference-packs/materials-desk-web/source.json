@@ -1,0 +1,822 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "材间 / Materials Desk",
+  "domain": "web",
+  "theme": "mobile-hifi",
+  "palette": {
+    "bg": "#F3F0E9",
+    "surface": "#FFFEFA",
+    "ink": "#252A29",
+    "muted": "#686B63",
+    "brand": "#87472E"
+  },
+  "pages": [
+    {
+      "id": "booking",
+      "name": "预约观察席",
+      "canvas": {
+        "w": 1440,
+        "h": 940
+      },
+      "root": {
+        "id": "booking_root",
+        "type": "box",
+        "layout": "stack",
+        "x": 0,
+        "y": 0,
+        "w": 1440,
+        "h": 940,
+        "fill": "#F3F0E9",
+        "children": [
+          {
+            "id": "navigation_rail",
+            "type": "box",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 236,
+            "h": 940,
+            "fill": "#2C3431",
+            "children": [
+              {
+                "id": "desk_brand",
+                "type": "label",
+                "text": "材间",
+                "x": 32,
+                "y": 37,
+                "w": 180,
+                "h": 48,
+                "fontSize": 30,
+                "color": "#F0EDE2",
+                "lineHeight": 42,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600,
+                "role": "brand"
+              },
+              {
+                "id": "desk_subbrand",
+                "type": "label",
+                "text": "MATERIALS / DESK",
+                "x": 32,
+                "y": 93,
+                "w": 180,
+                "h": 28,
+                "fontSize": 11,
+                "color": "#C5CEC8",
+                "lineHeight": 16,
+                "fontFamily": "Menlo",
+                "letterSpacing": 1,
+                "role": "brand-caption"
+              },
+              {
+                "id": "nav_rule",
+                "type": "box",
+                "layout": "stack",
+                "x": 32,
+                "y": 158,
+                "w": 172,
+                "h": 1,
+                "fill": "#52605A",
+                "children": [],
+                "role": "separator"
+              },
+              {
+                "id": "nav_section",
+                "type": "label",
+                "text": "WORKSPACE",
+                "x": 32,
+                "y": 198,
+                "w": 172,
+                "h": 24,
+                "fontSize": 11,
+                "color": "#99ABA2",
+                "lineHeight": 16,
+                "fontFamily": "Menlo",
+                "role": "navigation-label"
+              },
+              {
+                "id": "nav_active_mark",
+                "type": "box",
+                "layout": "stack",
+                "x": 0,
+                "y": 246,
+                "w": 4,
+                "h": 48,
+                "fill": "#87472E",
+                "children": []
+              },
+              {
+                "id": "nav_booking",
+                "type": "label",
+                "text": "01   预约观察席",
+                "x": 32,
+                "y": 251,
+                "w": 180,
+                "h": 35,
+                "fontSize": 16,
+                "color": "#F0EDE2",
+                "lineHeight": 23,
+                "fontFamily": "PingFang SC",
+                "role": "navigation-item"
+              },
+              {
+                "id": "nav_guide",
+                "type": "label",
+                "text": "到场位置见右侧",
+                "x": 32,
+                "y": 318,
+                "w": 180,
+                "h": 35,
+                "fontSize": 13,
+                "color": "#C5CEC8",
+                "lineHeight": 23,
+                "fontFamily": "PingFang SC",
+                "role": "supporting-copy"
+              },
+              {
+                "id": "nav_note",
+                "type": "paragraph",
+                "text": "给材料留一段时间，\n给好奇心一张桌子。",
+                "x": 32,
+                "y": 694,
+                "w": 172,
+                "h": 84,
+                "fontSize": 15,
+                "color": "#C5CEC8",
+                "lineHeight": 28,
+                "fontFamily": "PingFang SC",
+                "wrap": true,
+                "role": "brand-copy"
+              },
+              {
+                "id": "nav_bottom_rule",
+                "type": "box",
+                "layout": "stack",
+                "x": 32,
+                "y": 824,
+                "w": 172,
+                "h": 1,
+                "fill": "#52605A",
+                "children": [],
+                "role": "separator"
+              },
+              {
+                "id": "desk_location",
+                "type": "label",
+                "text": "STUDIO / 02",
+                "x": 32,
+                "y": 851,
+                "w": 172,
+                "h": 28,
+                "fontSize": 12,
+                "color": "#C5CEC8",
+                "lineHeight": 17,
+                "fontFamily": "Menlo",
+                "role": "location"
+              }
+            ]
+          },
+          {
+            "id": "booking_eyebrow",
+            "type": "label",
+            "text": "预约登记 / RESERVATION",
+            "x": 284,
+            "y": 39,
+            "w": 770,
+            "h": 28,
+            "fontSize": 12,
+            "color": "#87472E",
+            "lineHeight": 17,
+            "fontFamily": "Menlo",
+            "letterSpacing": 1,
+            "role": "eyebrow"
+          },
+          {
+            "id": "booking_title",
+            "type": "label",
+            "text": "预约材料观察席",
+            "x": 280,
+            "y": 82,
+            "w": 920,
+            "h": 70,
+            "fontSize": 44,
+            "color": "#252A29",
+            "lineHeight": 64,
+            "fontFamily": "PingFang SC",
+            "fontWeight": 600,
+            "role": "protagonist"
+          },
+          {
+            "id": "booking_subtitle",
+            "type": "label",
+            "text": "一张桌子，两小时。把注意力交还给材料。",
+            "x": 284,
+            "y": 163,
+            "w": 1000,
+            "h": 31,
+            "fontSize": 17,
+            "color": "#686B63",
+            "lineHeight": 24,
+            "fontFamily": "PingFang SC",
+            "role": "subtitle"
+          },
+          {
+            "id": "booking_summary",
+            "type": "box",
+            "layout": "stack",
+            "x": 1020,
+            "y": 220,
+            "w": 348,
+            "h": 658,
+            "fill": "#E5DFD2",
+            "children": [
+              {
+                "id": "summary_heading",
+                "type": "label",
+                "text": "本次观察 / AT A GLANCE",
+                "x": 28,
+                "y": 24,
+                "w": 292,
+                "h": 28,
+                "fontSize": 12,
+                "color": "#87472E",
+                "lineHeight": 17,
+                "fontFamily": "Menlo",
+                "role": "summary-heading"
+              },
+              {
+                "id": "duration",
+                "type": "label",
+                "text": "02",
+                "x": 22,
+                "y": 86,
+                "w": 200,
+                "h": 154,
+                "fontSize": 110,
+                "color": "#252A29",
+                "lineHeight": 154,
+                "fontFamily": "Menlo",
+                "role": "key-number"
+              },
+              {
+                "id": "duration_unit",
+                "type": "label",
+                "text": "HOURS",
+                "x": 224,
+                "y": 168,
+                "w": 96,
+                "h": 32,
+                "fontSize": 15,
+                "color": "#87472E",
+                "lineHeight": 21,
+                "fontFamily": "Menlo",
+                "role": "number-unit"
+              },
+              {
+                "id": "summary_rule",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 252,
+                "w": 292,
+                "h": 1,
+                "fill": "#BDB5A5",
+                "children": [],
+                "role": "separator"
+              },
+              {
+                "id": "summary_date_label",
+                "type": "label",
+                "text": "日期与时段",
+                "x": 28,
+                "y": 284,
+                "w": 292,
+                "h": 26,
+                "fontSize": 13,
+                "color": "#555C56",
+                "lineHeight": 19,
+                "fontFamily": "PingFang SC",
+                "role": "field-label"
+              },
+              {
+                "id": "summary_date",
+                "type": "label",
+                "text": "2026.11.03 / 周二",
+                "x": 28,
+                "y": 324,
+                "w": 292,
+                "h": 32,
+                "fontSize": 18,
+                "color": "#252A29",
+                "lineHeight": 26,
+                "fontFamily": "Menlo",
+                "role": "summary-value"
+              },
+              {
+                "id": "summary_time",
+                "type": "label",
+                "text": "14:00 — 16:00",
+                "x": 28,
+                "y": 370,
+                "w": 292,
+                "h": 32,
+                "fontSize": 21,
+                "color": "#252A29",
+                "lineHeight": 30,
+                "fontFamily": "Menlo",
+                "role": "summary-value"
+              },
+              {
+                "id": "summary_location_label",
+                "type": "label",
+                "text": "到场位置",
+                "x": 28,
+                "y": 450,
+                "w": 292,
+                "h": 26,
+                "fontSize": 13,
+                "color": "#555C56",
+                "lineHeight": 19,
+                "fontFamily": "PingFang SC",
+                "role": "field-label"
+              },
+              {
+                "id": "summary_location",
+                "type": "paragraph",
+                "text": "材间工作室\n二层 · 北侧观察桌",
+                "x": 28,
+                "y": 490,
+                "w": 292,
+                "h": 72,
+                "fontSize": 17,
+                "color": "#252A29",
+                "lineHeight": 29,
+                "fontFamily": "PingFang SC",
+                "wrap": true,
+                "role": "location"
+              },
+              {
+                "id": "summary_capacity",
+                "type": "label",
+                "text": "单人席 / 桌面工具已包含",
+                "x": 28,
+                "y": 594,
+                "w": 292,
+                "h": 30,
+                "fontSize": 13,
+                "color": "#555C56",
+                "lineHeight": 19,
+                "fontFamily": "PingFang SC",
+                "role": "supporting-copy"
+              }
+            ],
+            "role": "reservation-summary"
+          },
+          {
+            "id": "booking_form",
+            "type": "box",
+            "layout": "stack",
+            "x": 284,
+            "y": 220,
+            "w": 672,
+            "h": 658,
+            "fill": "#F3F0E9",
+            "children": [
+              {
+                "id": "slot_section",
+                "type": "label",
+                "text": "01 / 选择时段",
+                "x": 0,
+                "y": 0,
+                "w": 672,
+                "h": 32,
+                "fontSize": 17,
+                "color": "#252A29",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600,
+                "role": "section-heading"
+              },
+              {
+                "id": "slot_rule",
+                "type": "box",
+                "layout": "stack",
+                "x": 0,
+                "y": 48,
+                "w": 672,
+                "h": 1,
+                "fill": "#C9C4B8",
+                "children": [],
+                "role": "separator"
+              },
+              {
+                "id": "slot_day",
+                "type": "label",
+                "text": "03",
+                "x": 0,
+                "y": 64,
+                "w": 150,
+                "h": 100,
+                "fontSize": 72,
+                "color": "#87472E",
+                "lineHeight": 100,
+                "fontFamily": "Menlo",
+                "role": "selected-date"
+              },
+              {
+                "id": "slot_month",
+                "type": "label",
+                "text": "NOV / 2026",
+                "x": 170,
+                "y": 76,
+                "w": 280,
+                "h": 28,
+                "fontSize": 17,
+                "color": "#252A29",
+                "lineHeight": 24,
+                "fontFamily": "Menlo",
+                "role": "date-detail"
+              },
+              {
+                "id": "slot_time",
+                "type": "label",
+                "text": "周二   14:00 — 16:00",
+                "x": 170,
+                "y": 118,
+                "w": 400,
+                "h": 31,
+                "fontSize": 19,
+                "color": "#252A29",
+                "lineHeight": 27,
+                "fontFamily": "PingFang SC",
+                "role": "time-detail"
+              },
+              {
+                "id": "person_section",
+                "type": "label",
+                "text": "02 / 填写使用人",
+                "x": 0,
+                "y": 186,
+                "w": 672,
+                "h": 32,
+                "fontSize": 17,
+                "color": "#252A29",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600,
+                "role": "section-heading"
+              },
+              {
+                "id": "name_label",
+                "type": "label",
+                "text": "姓名 *",
+                "x": 0,
+                "y": 244,
+                "w": 672,
+                "h": 28,
+                "fontSize": 15,
+                "color": "#252A29",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600,
+                "role": "field-label"
+              },
+              {
+                "id": "visitor_name",
+                "type": "input",
+                "value": "",
+                "placeholder": "如何称呼你",
+                "x": 0,
+                "y": 284,
+                "w": 672,
+                "h": 54,
+                "fill": "#FFFEFA",
+                "stroke": "#A8A298",
+                "strokeWidth": 1,
+                "radius": 0,
+                "fontSize": 17,
+                "fontFamily": "PingFang SC",
+                "color": "#252A29",
+                "role": "form-field"
+              },
+              {
+                "id": "purpose_label",
+                "type": "label",
+                "text": "使用目的 *",
+                "x": 0,
+                "y": 364,
+                "w": 672,
+                "h": 28,
+                "fontSize": 15,
+                "color": "#252A29",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600,
+                "role": "field-label"
+              },
+              {
+                "id": "visit_purpose",
+                "type": "input",
+                "value": "",
+                "placeholder": "例如：记录纸张在不同光线下的纹理",
+                "x": 0,
+                "y": 404,
+                "w": 672,
+                "h": 54,
+                "fill": "#FFFEFA",
+                "stroke": "#A8A298",
+                "strokeWidth": 1,
+                "radius": 0,
+                "fontSize": 17,
+                "fontFamily": "PingFang SC",
+                "color": "#252A29",
+                "role": "form-field"
+              },
+              {
+                "id": "booking_instructions",
+                "type": "paragraph",
+                "text": "观察席提供桌面照明、放大镜与材料托盘。请说明想观察的材料，以及是否需要安静环境。预约时段内可短暂离席，离开前请将样本与工具放回原位。",
+                "x": 0,
+                "y": 482,
+                "w": 672,
+                "h": 88,
+                "fontSize": 15,
+                "color": "#686B63",
+                "lineHeight": 26,
+                "fontFamily": "PingFang SC",
+                "wrap": true,
+                "role": "instructions"
+              },
+              {
+                "id": "form_error",
+                "type": "label",
+                "text": "请填写姓名后再登记。",
+                "x": 0,
+                "y": 572,
+                "w": 672,
+                "h": 32,
+                "fontSize": 15,
+                "color": "#A43C2D",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC",
+                "visible": false,
+                "role": "error-message"
+              },
+              {
+                "id": "submit_booking",
+                "type": "button",
+                "text": "确认登记   →",
+                "x": 0,
+                "y": 604,
+                "w": 256,
+                "h": 54,
+                "fontSize": 16,
+                "color": "#FFFEF7",
+                "lineHeight": 23,
+                "fontFamily": "PingFang SC",
+                "fill": "#87472E",
+                "fontWeight": 600,
+                "textAlign": "center",
+                "role": "primary-action",
+                "on": {
+                  "click": {
+                    "cases": [
+                      {
+                        "when": "=@visitor_name == ''",
+                        "actions": [
+                          {
+                            "type": "set-text",
+                            "target": "form_error",
+                            "text": "请填写姓名后再登记。"
+                          },
+                          {
+                            "type": "show",
+                            "target": "form_error"
+                          }
+                        ]
+                      },
+                      {
+                        "when": "=@visit_purpose == ''",
+                        "actions": [
+                          {
+                            "type": "set-text",
+                            "target": "form_error",
+                            "text": "请填写使用目的，方便准备观察席。"
+                          },
+                          {
+                            "type": "show",
+                            "target": "form_error"
+                          }
+                        ]
+                      },
+                      {
+                        "else": true,
+                        "actions": [
+                          {
+                            "type": "hide",
+                            "target": "form_error"
+                          },
+                          {
+                            "type": "set-text",
+                            "target": "confirmed_name",
+                            "text": "=@visitor_name"
+                          },
+                          {
+                            "type": "set-text",
+                            "target": "confirmed_purpose",
+                            "text": "=@visit_purpose"
+                          },
+                          {
+                            "type": "hide",
+                            "target": "booking_form"
+                          },
+                          {
+                            "type": "show",
+                            "target": "booking_success"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                }
+              },
+              {
+                "id": "required_hint",
+                "type": "label",
+                "text": "* 为必填项，登记前可随时修改。",
+                "x": 282,
+                "y": 617,
+                "w": 390,
+                "h": 28,
+                "fontSize": 13,
+                "color": "#686B63",
+                "lineHeight": 19,
+                "fontFamily": "PingFang SC",
+                "role": "supporting-copy"
+              }
+            ],
+            "role": "form-region"
+          },
+          {
+            "id": "booking_success",
+            "type": "box",
+            "layout": "stack",
+            "x": 284,
+            "y": 220,
+            "w": 672,
+            "h": 658,
+            "fill": "#F3F0E9",
+            "children": [
+              {
+                "id": "success_eyebrow",
+                "type": "label",
+                "text": "REGISTERED / 01",
+                "x": 0,
+                "y": 0,
+                "w": 672,
+                "h": 28,
+                "fontSize": 13,
+                "color": "#87472E",
+                "lineHeight": 19,
+                "fontFamily": "Menlo",
+                "role": "status-label"
+              },
+              {
+                "id": "success_title",
+                "type": "label",
+                "text": "观察时间，留好了。",
+                "x": 0,
+                "y": 64,
+                "w": 672,
+                "h": 76,
+                "fontSize": 44,
+                "color": "#252A29",
+                "lineHeight": 66,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600,
+                "role": "feedback"
+              },
+              {
+                "id": "success_description",
+                "type": "paragraph",
+                "text": "材料观察席已登记。请按所选时段到场，\n让眼睛和双手一起，重新认识日常的材料。",
+                "x": 0,
+                "y": 166,
+                "w": 672,
+                "h": 84,
+                "fontSize": 19,
+                "color": "#686B63",
+                "lineHeight": 31,
+                "fontFamily": "PingFang SC",
+                "wrap": true,
+                "role": "confirmation-copy"
+              },
+              {
+                "id": "success_rule",
+                "type": "box",
+                "layout": "stack",
+                "x": 0,
+                "y": 282,
+                "w": 672,
+                "h": 1,
+                "fill": "#C9C4B8",
+                "children": [],
+                "role": "separator"
+              },
+              {
+                "id": "confirmed_name_label",
+                "type": "label",
+                "text": "使用人",
+                "x": 0,
+                "y": 316,
+                "w": 150,
+                "h": 30,
+                "fontSize": 14,
+                "color": "#686B63",
+                "lineHeight": 20,
+                "fontFamily": "PingFang SC",
+                "role": "field-label"
+              },
+              {
+                "id": "confirmed_name",
+                "type": "label",
+                "text": "",
+                "x": 170,
+                "y": 312,
+                "w": 502,
+                "h": 38,
+                "fontSize": 21,
+                "color": "#252A29",
+                "lineHeight": 30,
+                "fontFamily": "PingFang SC",
+                "role": "confirmed-value"
+              },
+              {
+                "id": "confirmed_purpose_label",
+                "type": "label",
+                "text": "使用目的",
+                "x": 0,
+                "y": 390,
+                "w": 150,
+                "h": 30,
+                "fontSize": 14,
+                "color": "#686B63",
+                "lineHeight": 20,
+                "fontFamily": "PingFang SC",
+                "role": "field-label"
+              },
+              {
+                "id": "confirmed_purpose",
+                "type": "paragraph",
+                "text": "",
+                "x": 170,
+                "y": 386,
+                "w": 502,
+                "h": 102,
+                "fontSize": 18,
+                "color": "#252A29",
+                "lineHeight": 30,
+                "fontFamily": "PingFang SC",
+                "wrap": true,
+                "role": "confirmed-value"
+              },
+              {
+                "id": "edit_booking",
+                "type": "button",
+                "text": "返回修改信息",
+                "x": 0,
+                "y": 604,
+                "w": 256,
+                "h": 54,
+                "fontSize": 16,
+                "color": "#FFFEF7",
+                "lineHeight": 23,
+                "fontFamily": "PingFang SC",
+                "fill": "#2C3431",
+                "fontWeight": 600,
+                "textAlign": "center",
+                "role": "secondary-action",
+                "on": {
+                  "click": [
+                    {
+                      "type": "hide",
+                      "target": "booking_success"
+                    },
+                    {
+                      "type": "show",
+                      "target": "booking_form"
+                    }
+                  ]
+                }
+              }
+            ],
+            "visible": false,
+            "role": "success-region"
+          }
+        ],
+        "role": "page-content"
+      }
+    }
+  ]
+}

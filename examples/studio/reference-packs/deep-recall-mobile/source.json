@@ -1,0 +1,617 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "深海回忆 / Deep Recall",
+  "domain": "mobile",
+  "theme": "mobile-hifi",
+  "palette": {
+    "bg": "#102D3B",
+    "surface": "#102D3B",
+    "ink": "#F6F1DF",
+    "muted": "#AFC4CC",
+    "brand": "#F6D94D"
+  },
+  "pages": [
+    {
+      "id": "recall",
+      "name": "单词回忆",
+      "device": "iphone-17-pro",
+      "root": {
+        "id": "recall_shell",
+        "type": "phone-shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#102D3B",
+        "children": [
+          {
+            "id": "recall_screen",
+            "type": "box",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "fill": "#102D3B",
+            "children": [
+              {
+                "id": "clock",
+                "type": "label",
+                "text": "9:41",
+                "x": 28,
+                "y": 15,
+                "w": 76,
+                "h": 24,
+                "fontSize": 15,
+                "color": "#F6F1DF",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600,
+                "role": "device-status"
+              },
+              {
+                "id": "signal",
+                "type": "label",
+                "text": "5G  ▰",
+                "x": 300,
+                "y": 15,
+                "w": 74,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#F6F1DF",
+                "lineHeight": 19,
+                "fontFamily": "PingFang SC",
+                "textAlign": "right",
+                "role": "device-status"
+              },
+              {
+                "id": "brand_dot",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 78,
+                "w": 10,
+                "h": 10,
+                "fill": "#F6D94D",
+                "children": [],
+                "role": "brand-mark"
+              },
+              {
+                "id": "brand",
+                "type": "label",
+                "text": "DEEP / RECALL",
+                "x": 50,
+                "y": 65,
+                "w": 302,
+                "h": 32,
+                "fontSize": 15,
+                "color": "#F6F1DF",
+                "lineHeight": 21,
+                "fontFamily": "Avenir Next",
+                "fontWeight": 600,
+                "letterSpacing": 1.5,
+                "role": "brand"
+              },
+              {
+                "id": "session_label",
+                "type": "label",
+                "text": "专注回忆",
+                "x": 28,
+                "y": 122,
+                "w": 180,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#AFC4CC",
+                "lineHeight": 19,
+                "fontFamily": "PingFang SC",
+                "role": "task-label"
+              },
+              {
+                "id": "session_count",
+                "type": "label",
+                "text": "01 / 01",
+                "x": 262,
+                "y": 120,
+                "w": 112,
+                "h": 28,
+                "fontSize": 14,
+                "color": "#F6D94D",
+                "lineHeight": 20,
+                "fontFamily": "Menlo",
+                "textAlign": "right",
+                "role": "progress"
+              },
+              {
+                "id": "session_rule",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 164,
+                "w": 346,
+                "h": 1,
+                "fill": "#3D5965",
+                "children": [],
+                "role": "separator"
+              },
+              {
+                "id": "word_kind",
+                "type": "label",
+                "text": "TODAY’S WORD",
+                "x": 28,
+                "y": 200,
+                "w": 346,
+                "h": 25,
+                "fontSize": 12,
+                "color": "#F6D94D",
+                "lineHeight": 17,
+                "fontFamily": "Avenir Next",
+                "fontWeight": 600,
+                "letterSpacing": 2,
+                "role": "eyebrow"
+              },
+              {
+                "id": "word",
+                "type": "label",
+                "text": "resilient",
+                "x": 24,
+                "y": 238,
+                "w": 354,
+                "h": 86,
+                "fontSize": 58,
+                "color": "#F6F1DF",
+                "lineHeight": 82,
+                "fontFamily": "Avenir Next",
+                "fontWeight": 600,
+                "role": "protagonist"
+              },
+              {
+                "id": "pronunciation",
+                "type": "label",
+                "text": "/rɪˈzɪliənt/   adj.",
+                "x": 28,
+                "y": 328,
+                "w": 346,
+                "h": 32,
+                "fontSize": 18,
+                "color": "#AFC4CC",
+                "lineHeight": 26,
+                "fontFamily": "Avenir Next",
+                "role": "pronunciation"
+              },
+              {
+                "id": "question",
+                "type": "label",
+                "text": "你能说出它的含义吗？",
+                "x": 28,
+                "y": 382,
+                "w": 346,
+                "h": 31,
+                "fontSize": 18,
+                "color": "#F6F1DF",
+                "lineHeight": 26,
+                "fontFamily": "PingFang SC",
+                "role": "question"
+              },
+              {
+                "id": "recall_prompt",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 430,
+                "w": 346,
+                "h": 382,
+                "fill": "#102D3B",
+                "children": [
+                  {
+                    "id": "recall_index",
+                    "type": "label",
+                    "text": "01",
+                    "x": 0,
+                    "y": 0,
+                    "w": 120,
+                    "h": 104,
+                    "fontSize": 74,
+                    "color": "#F6D94D",
+                    "lineHeight": 104,
+                    "fontFamily": "Avenir Next",
+                    "fontWeight": 500,
+                    "role": "exercise-index"
+                  },
+                  {
+                    "id": "recall_instruction",
+                    "type": "paragraph",
+                    "text": "先在心里说出词义。\n给回忆一点时间，答案不着急出现。",
+                    "x": 0,
+                    "y": 128,
+                    "w": 346,
+                    "h": 72,
+                    "fontSize": 17,
+                    "color": "#F6F1DF",
+                    "lineHeight": 28,
+                    "fontFamily": "PingFang SC",
+                    "wrap": true,
+                    "role": "instructions"
+                  },
+                  {
+                    "id": "reveal",
+                    "type": "button",
+                    "text": "揭示释义  ↗",
+                    "x": 0,
+                    "y": 288,
+                    "w": 346,
+                    "h": 58,
+                    "fontSize": 16,
+                    "color": "#102D3B",
+                    "lineHeight": 23,
+                    "fontFamily": "PingFang SC",
+                    "fill": "#F6D94D",
+                    "fontWeight": 600,
+                    "textAlign": "center",
+                    "role": "primary-action",
+                    "on": {
+                      "click": [
+                        {
+                          "type": "hide",
+                          "target": "recall_prompt"
+                        },
+                        {
+                          "type": "show",
+                          "target": "answer"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "id": "recall_hint",
+                    "type": "label",
+                    "text": "想不起来也没关系，努力回想本身有价值。",
+                    "x": 0,
+                    "y": 354,
+                    "w": 346,
+                    "h": 24,
+                    "fontSize": 12,
+                    "color": "#AFC4CC",
+                    "lineHeight": 17,
+                    "fontFamily": "PingFang SC",
+                    "role": "supporting-copy"
+                  }
+                ]
+              },
+              {
+                "id": "answer",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 430,
+                "w": 346,
+                "h": 382,
+                "fill": "#102D3B",
+                "children": [
+                  {
+                    "id": "answer_rule",
+                    "type": "box",
+                    "layout": "stack",
+                    "x": 0,
+                    "y": 0,
+                    "w": 346,
+                    "h": 1,
+                    "fill": "#F6D94D",
+                    "children": [],
+                    "role": "separator"
+                  },
+                  {
+                    "id": "meaning",
+                    "type": "label",
+                    "text": "能恢复的；有韧性的",
+                    "x": 0,
+                    "y": 18,
+                    "w": 346,
+                    "h": 42,
+                    "fontSize": 25,
+                    "color": "#F6F1DF",
+                    "lineHeight": 35,
+                    "fontFamily": "PingFang SC",
+                    "fontWeight": 600,
+                    "role": "answer"
+                  },
+                  {
+                    "id": "definition",
+                    "type": "paragraph",
+                    "text": "经历困难后，仍能恢复状态、继续向前。它可以描述一个人，也可以描述有弹性、能够恢复原状的材料。",
+                    "x": 0,
+                    "y": 76,
+                    "w": 346,
+                    "h": 88,
+                    "fontSize": 16,
+                    "color": "#AFC4CC",
+                    "lineHeight": 26,
+                    "fontFamily": "PingFang SC",
+                    "wrap": true,
+                    "role": "explanation"
+                  },
+                  {
+                    "id": "example",
+                    "type": "paragraph",
+                    "text": "A resilient mind can find\na way forward.",
+                    "x": 0,
+                    "y": 180,
+                    "w": 346,
+                    "h": 60,
+                    "fontSize": 21,
+                    "color": "#F6F1DF",
+                    "lineHeight": 29,
+                    "fontFamily": "Avenir Next",
+                    "wrap": true,
+                    "role": "example"
+                  },
+                  {
+                    "id": "translation",
+                    "type": "paragraph",
+                    "text": "有韧性的心，总能找到继续向前的路。",
+                    "x": 0,
+                    "y": 250,
+                    "w": 346,
+                    "h": 46,
+                    "fontSize": 14,
+                    "color": "#AFC4CC",
+                    "lineHeight": 23,
+                    "fontFamily": "PingFang SC",
+                    "wrap": true,
+                    "role": "translation"
+                  },
+                  {
+                    "id": "remember",
+                    "type": "button",
+                    "text": "记住了  ✓",
+                    "x": 0,
+                    "y": 316,
+                    "w": 166,
+                    "h": 54,
+                    "fontSize": 16,
+                    "color": "#102D3B",
+                    "lineHeight": 23,
+                    "fontFamily": "PingFang SC",
+                    "fill": "#F6D94D",
+                    "fontWeight": 600,
+                    "textAlign": "center",
+                    "role": "primary-action",
+                    "on": {
+                      "click": [
+                        {
+                          "type": "hide",
+                          "target": "answer"
+                        },
+                        {
+                          "type": "show",
+                          "target": "remembered"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "id": "try_again",
+                    "type": "button",
+                    "text": "还需再想",
+                    "x": 180,
+                    "y": 316,
+                    "w": 166,
+                    "h": 54,
+                    "fontSize": 16,
+                    "color": "#F6F1DF",
+                    "lineHeight": 23,
+                    "fontFamily": "PingFang SC",
+                    "fill": "#102D3B",
+                    "fontWeight": 600,
+                    "textAlign": "center",
+                    "role": "secondary-action",
+                    "stroke": "#AFC4CC",
+                    "strokeWidth": 1,
+                    "on": {
+                      "click": [
+                        {
+                          "type": "hide",
+                          "target": "answer"
+                        },
+                        {
+                          "type": "show",
+                          "target": "retry_feedback"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "visible": false,
+                "role": "answer-region"
+              },
+              {
+                "id": "remembered",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 430,
+                "w": 346,
+                "h": 382,
+                "fill": "#102D3B",
+                "children": [
+                  {
+                    "id": "remembered_rule",
+                    "type": "box",
+                    "layout": "stack",
+                    "x": 0,
+                    "y": 0,
+                    "w": 346,
+                    "h": 1,
+                    "fill": "#F6D94D",
+                    "children": [],
+                    "role": "separator"
+                  },
+                  {
+                    "id": "remembered_mark",
+                    "type": "label",
+                    "text": "✓",
+                    "x": 0,
+                    "y": 24,
+                    "w": 74,
+                    "h": 82,
+                    "fontSize": 56,
+                    "color": "#F6D94D",
+                    "lineHeight": 79,
+                    "fontFamily": "Avenir Next",
+                    "role": "status-mark"
+                  },
+                  {
+                    "id": "remembered_title",
+                    "type": "label",
+                    "text": "把这个词，留住了。",
+                    "x": 0,
+                    "y": 130,
+                    "w": 346,
+                    "h": 42,
+                    "fontSize": 25,
+                    "color": "#F6F1DF",
+                    "lineHeight": 35,
+                    "fontFamily": "PingFang SC",
+                    "fontWeight": 600,
+                    "role": "feedback"
+                  },
+                  {
+                    "id": "remembered_copy",
+                    "type": "paragraph",
+                    "text": "下一次遇到困难时，想想 resilient。\n不是从未跌倒，而是还能重新开始。",
+                    "x": 0,
+                    "y": 190,
+                    "w": 346,
+                    "h": 88,
+                    "fontSize": 17,
+                    "color": "#AFC4CC",
+                    "lineHeight": 29,
+                    "fontFamily": "PingFang SC",
+                    "wrap": true,
+                    "role": "explanation"
+                  },
+                  {
+                    "id": "practice_again",
+                    "type": "button",
+                    "text": "再练一次",
+                    "x": 0,
+                    "y": 316,
+                    "w": 346,
+                    "h": 54,
+                    "fontSize": 16,
+                    "color": "#102D3B",
+                    "lineHeight": 23,
+                    "fontFamily": "PingFang SC",
+                    "fill": "#F6D94D",
+                    "fontWeight": 600,
+                    "textAlign": "center",
+                    "role": "primary-action",
+                    "on": {
+                      "click": [
+                        {
+                          "type": "hide",
+                          "target": "remembered"
+                        },
+                        {
+                          "type": "show",
+                          "target": "recall_prompt"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "visible": false,
+                "role": "success-region"
+              },
+              {
+                "id": "retry_feedback",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 430,
+                "w": 346,
+                "h": 382,
+                "fill": "#102D3B",
+                "children": [
+                  {
+                    "id": "retry_rule",
+                    "type": "box",
+                    "layout": "stack",
+                    "x": 0,
+                    "y": 0,
+                    "w": 346,
+                    "h": 1,
+                    "fill": "#F6D94D",
+                    "children": [],
+                    "role": "separator"
+                  },
+                  {
+                    "id": "retry_title",
+                    "type": "label",
+                    "text": "再想一次，没关系。",
+                    "x": 0,
+                    "y": 40,
+                    "w": 346,
+                    "h": 46,
+                    "fontSize": 26,
+                    "color": "#F6F1DF",
+                    "lineHeight": 37,
+                    "fontFamily": "PingFang SC",
+                    "fontWeight": 600,
+                    "role": "feedback"
+                  },
+                  {
+                    "id": "memory_cue",
+                    "type": "paragraph",
+                    "text": "想象一根被压弯的枝条，\n松开手，它又慢慢回到原来的样子。\n\n“恢复过来”，就是这个词的核心。",
+                    "x": 0,
+                    "y": 116,
+                    "w": 346,
+                    "h": 148,
+                    "fontSize": 17,
+                    "color": "#AFC4CC",
+                    "lineHeight": 29,
+                    "fontFamily": "PingFang SC",
+                    "wrap": true,
+                    "role": "memory-cue"
+                  },
+                  {
+                    "id": "review_answer",
+                    "type": "button",
+                    "text": "再看释义",
+                    "x": 0,
+                    "y": 316,
+                    "w": 346,
+                    "h": 54,
+                    "fontSize": 16,
+                    "color": "#102D3B",
+                    "lineHeight": 23,
+                    "fontFamily": "PingFang SC",
+                    "fill": "#F6D94D",
+                    "fontWeight": 600,
+                    "textAlign": "center",
+                    "role": "primary-action",
+                    "on": {
+                      "click": [
+                        {
+                          "type": "hide",
+                          "target": "retry_feedback"
+                        },
+                        {
+                          "type": "show",
+                          "target": "answer"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "visible": false,
+                "role": "retry-region"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

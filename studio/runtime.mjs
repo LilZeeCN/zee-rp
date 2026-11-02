@@ -1,8 +1,33 @@
 import { resolveDocumentScene, evaluateSimpleDisplayFormula } from './scene-resolver.mjs';
+import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
+
+export const SCENARIO_STEP_SCHEMA = {
+  type: 'object', additionalProperties: false,
+  properties: {
+    action: { type: 'string', enum: ['navigate', 'input', 'click', 'dataset', 'expect'] },
+    target: { type: 'string' }, id: { type: 'string' }, page: { type: 'string' },
+    goto: { type: 'string' }, fill: { type: 'string' }, click: { type: 'string' },
+    value: {}, text: { type: 'string' },
+    dataset: { type: 'string' }, repeater: { type: 'string' },
+    op: { type: 'string', enum: ['select', 'toggle-select', 'add', 'update', 'delete', 'filter', 'sort', 'page'] },
+    row: { type: 'object' }, patch: { type: 'object' }, rowId: {}, clearOthers: { type: 'boolean' },
+    field: { type: 'string' }, query: {}, operator: { type: 'string' }, order: { type: 'string' },
+    requireNonEmpty: {}, onEmptyShow: { type: 'string' }, onEmptySelectionShow: { type: 'string' },
+    expect: { type: 'object', minProperties: 1, additionalProperties: false, properties: {
+      page: { type: 'string' },
+      visible: { type: 'object', minProperties: 1, additionalProperties: { type: 'boolean' } },
+      text: { type: 'object', minProperties: 1 }, variables: { type: 'object', minProperties: 1 },
+      panelState: { type: 'object', minProperties: 1, additionalProperties: { type: 'string' } },
+      datasetCount: { type: 'object', minProperties: 1, additionalProperties: { type: 'integer', minimum: 0 } },
+      datasetFirstRow: { type: 'object', minProperties: 1 },
+    } },
+  },
+};
 
 export class StudioRuntimeSession {
-  constructor(doc, { sessionId = `rt_${Date.now()}` } = {}) {
+  constructor(doc, { sessionId = `rt_${Date.now()}`, projectDir = null } = {}) {
     this.sessionId = sessionId;
+    this.projectDir = projectDir;
     this.docSnapshot = structuredClone(doc);
     this.reset();
   }
@@ -18,10 +43,13 @@ export class StudioRuntimeSession {
     this.inputs = {};
     this.visibility = {};
     this.textOverrides = {};
+    this.textFormulas = {};
     this.panelStates = {};
     this.datasets = {};
     this.datasetFilters = {};
     this.datasetSorts = {};
+    this.datasetPages = {};
+    this.datasetPageSizes = {};
     this.selectedRows = {};
     this.cardFlipped = {};
     this.trace = [];
@@ -34,6 +62,8 @@ export class StudioRuntimeSession {
       }));
       this.datasetFilters[dsName] = null;
       this.datasetSorts[dsName] = null;
+      this.datasetPages[dsName] = 1;
+      this.datasetPageSizes[dsName] = null;
       this.selectedRows[dsName] = new Set();
     }
 
@@ -45,103 +75,137 @@ export class StudioRuntimeSession {
     return this.getState();
   }
 
-  _initTreeState(node, pageId) {
+  _initTreeState(node, pageId, scopePrefix = pageId) {
     if (!node || typeof node !== 'object') return;
+    const scopedId = `${scopePrefix}/${node.id}`;
     if (node.visible === false || node.hidden === true) {
-      this.visibility[`${pageId}/${node.id}`] = false;
-      this.visibility[node.id] = false;
+      this.visibility[scopedId] = false;
     }
     if (node.type === 'input') {
       const val = node.value !== undefined ? String(node.value) : '';
-      this.inputs[`${pageId}/${node.id}`] = val;
-      this.inputs[node.id] = val;
+      this.inputs[scopedId] = val;
     }
     if (node.type === 'dynamic-panel' && Array.isArray(node.states) && node.states.length > 0) {
       const active = node.activeState || node.states[0].id;
-      this.panelStates[`${pageId}/${node.id}`] = active;
-      this.panelStates[node.id] = active;
+      this.panelStates[scopedId] = active;
       for (const st of node.states) {
-        if (st.root) this._initTreeState(st.root, pageId);
+        if (st.root) this._initTreeState(st.root, pageId, `${scopedId}/${st.id}`);
       }
     }
-    if (node.type === 'repeater' && !this.datasets[node.dataset || node.id] && Array.isArray(node.rows)) {
-      const key = node.dataset || node.id;
-      this.datasets[key] = structuredClone(node.rows).map((r, idx) => ({
-        _rowId: r._rowId ?? r.id ?? `row_${idx + 1}`,
-        ...r,
-      }));
-      this.datasetFilters[key] = null;
-      this.datasetSorts[key] = null;
-      this.selectedRows[key] = new Set();
+    if (node.type === 'repeater') {
+      const key = repeaterDatasetName(node);
+      const inlineRows = repeaterInlineRows(node);
+      if (!this.datasets[key] && (inlineRows.length || Array.isArray(node.rows))) {
+        const seedRows = inlineRows.length ? inlineRows : node.rows;
+        this.datasets[key] = structuredClone(seedRows).map((r, idx) => ({
+          _rowId: r._rowId ?? r.id ?? `row_${idx + 1}`,
+          ...r,
+        }));
+        this.datasetFilters[key] = null;
+        this.datasetSorts[key] = null;
+        this.selectedRows[key] = new Set();
+      }
+      if (Number.isInteger(node.pageSize) && node.pageSize > 0) {
+        this.datasetPageSizes[key] = node.pageSize;
+      }
+      if (this.datasetPages[key] === undefined || (Number.isInteger(node.page) && node.page >= 1)) {
+        this.datasetPages[key] = Number.isInteger(node.page) && node.page >= 1 ? node.page : 1;
+      }
     }
+    const collectFormulas = spec => {
+      if (!spec || typeof spec !== 'object') return;
+      if (Array.isArray(spec)) { spec.forEach(collectFormulas); return; }
+      if (spec.type === 'set-text' && spec.target) {
+        const expr = spec.text ?? spec.value;
+        if (typeof expr === 'string' && expr.includes('dataset.')) {
+          const target = this.findNodeEntry(pageId, spec.target, { scopePrefix });
+          if (target && !this.textFormulas[target.scopedId]) this.textFormulas[target.scopedId] = { pageId, scopePrefix, expr };
+        }
+      }
+      for (const k of ['actions', 'then', 'else', 'cases']) if (spec[k]) collectFormulas(spec[k]);
+    };
+    if (node.on?.click) collectFormulas(node.on.click);
     if (Array.isArray(node.children)) {
-      for (const ch of node.children) this._initTreeState(ch, pageId);
+      for (const ch of node.children) this._initTreeState(ch, pageId, scopePrefix);
     }
+  }
+
+  findNodeEntry(pageId, targetId, { scopePrefix = this.interactionScope } = {}) {
+    const raw = String(targetId?.ref ?? targetId), entries = [];
+    const explicitPage = this.docSnapshot.pages.find(pg => raw.startsWith(`${pg.id}/`));
+    const pg = explicitPage || this.docSnapshot.pages.find(p => p.id === pageId);
+    if (!pg) return null;
+    const walk = (node, prefix, active = true) => {
+      if (!node) return;
+      const scopedId = `${prefix}/${node.id}`;
+      entries.push({ node, scopedId, scopePrefix: prefix, pageId: pg.id, active });
+      for (const child of node.children || []) walk(child, prefix, active);
+      for (const state of node.states || []) {
+        const selected = this.panelStates[scopedId] || node.activeState || node.states[0]?.id;
+        walk(state.root, `${scopedId}/${state.id}`, active && state.id === selected);
+      }
+      if (node.template) walk(node.template, `${scopedId}/template`, false);
+    };
+    walk(pg.root, pg.id);
+    const full = explicitPage ? raw : `${pg.id}/${raw}`;
+    let matches = entries.filter(e => e.scopedId === full);
+    if (!raw.includes('/') && scopePrefix && scopePrefix !== pg.id) {
+      const local = entries.filter(e => e.scopePrefix === scopePrefix && (e.node.id === raw || e.node.name === raw));
+      if (local.length) matches = local;
+    }
+    if (!matches.length && !raw.includes('/')) {
+      matches = entries.filter(e => e.node.id === raw || e.node.name === raw);
+      const local = matches.filter(e => e.scopePrefix === scopePrefix);
+      if (local.length) matches = local;
+      else if (matches.some(e => e.active)) matches = matches.filter(e => e.active);
+    }
+    // Macro/component children have stable public scene IDs but no raw source
+    // node of their own. Keep those targets usable without discarding the scope.
+    if (!matches.length) {
+      const scene = resolveDocumentScene(this.docSnapshot, { projectDir: this.projectDir, activePanelStates: this.panelStates });
+      const nodes = scene.pages.find(p => p.id === pg.id)?.nodes || [];
+      const candidates = nodes.filter(n => raw.includes('/') ? n.scopedId === full : n.id === raw || n.name === raw);
+      matches = candidates.map(n => ({ node: { ...n, text: n.rawText ?? n.text }, scopedId: n.scopedId, scopePrefix: n.scopedId.slice(0, -n.id.length - 1), pageId: pg.id, active: true }));
+    }
+    if (matches.length > 1) throw Object.assign(new Error(`运行态目标 ${raw} 不唯一，请使用完整作用域路径`), { code: 'E_RUNTIME_TARGET_AMBIGUOUS', targetId: raw, candidates: matches.map(e => e.scopedId) });
+    return matches[0] || null;
   }
 
   findNodeInPage(pageId, targetId) {
-    const pg = (this.docSnapshot.pages || []).find(p => p.id === pageId);
-    if (!pg) return null;
-    const rawTarget = String(targetId);
-    const parts = rawTarget.split('/').filter(Boolean);
-    const stripped = parts.at(-1);
-    const explicitState = parts.length >= 3 ? parts[parts.length - 2] : null;
-    const panelStates = this.panelStates;
-
-    function walk(n) {
-      if (!n || typeof n !== 'object') return null;
-      if (n.id === stripped || n.name === stripped) return n;
-      for (const ch of n.children || []) {
-        const hit = walk(ch);
-        if (hit) return hit;
-      }
-      if (Array.isArray(n.states) && n.states.length > 0) {
-        const activeStateId = explicitState || panelStates[`${pageId}/${n.id}`] || panelStates[n.id] || n.activeState || n.states[0].id;
-        const orderedStates = [
-          ...n.states.filter(s => s.id === activeStateId),
-          ...n.states.filter(s => s.id !== activeStateId),
-        ];
-        for (const st of orderedStates) {
-          if (st.root) {
-            const hit = walk(st.root);
-            if (hit) return hit;
-          }
-        }
-      }
-      return null;
-    }
-    return walk(pg.root);
+    return this.findNodeEntry(pageId, targetId)?.node || null;
   }
 
-  getWidgetText(widgetId) {
-    const stripped = String(widgetId).includes('/') ? String(widgetId).split('/').pop() : String(widgetId);
-    const scoped = `${this.currentPageId}/${stripped}`;
-    if (scoped in this.inputs) return String(this.inputs[scoped] ?? '');
-    if (stripped in this.inputs) return String(this.inputs[stripped] ?? '');
-    if (scoped in this.textOverrides) return String(this.textOverrides[scoped] ?? '');
-    if (stripped in this.textOverrides) return String(this.textOverrides[stripped] ?? '');
+  targetKey(targetId, pageId = this.currentPageId) {
+    const entry = this.findNodeEntry(pageId, targetId);
+    if (!entry) throw Object.assign(new Error(`页面 ${pageId} 中未找到目标 ${targetId}`), { code: 'E_RUNTIME_NODE_NOT_FOUND', pageId, targetId });
+    return entry.scopedId;
+  }
 
-    const node = this.findNodeInPage(this.currentPageId, stripped)
-      || resolveDocumentScene(this.docSnapshot).pages.find(p => p.id === this.currentPageId)?.nodes.find(n => n.id === stripped);
-    if (!node) return '';
+  getWidgetText(widgetId, { pageId = this.currentPageId, scopePrefix = this.interactionScope } = {}) {
+    const entry = this.findNodeEntry(pageId, widgetId, { scopePrefix });
+    if (!entry) return '';
+    const scoped = entry.scopedId;
+    if (scoped in this.inputs) return String(this.inputs[scoped] ?? '');
+    if (scoped in this.textOverrides) return String(this.textOverrides[scoped] ?? '');
+    const node = entry.node;
     const raw = String(node.text ?? node.value ?? '');
     if (raw.startsWith('=')) {
-      return this.evaluateExpression(raw);
+      return String(this.evaluateExpression(raw, { pageId: entry.pageId, scopePrefix: entry.scopePrefix }) ?? '');
     }
     return raw;
   }
 
-  isNodeVisible(nodeId, pageId = this.currentPageId, resolvedNode = null) {
-    const stripped = String(nodeId).includes('/') ? String(nodeId).split('/').pop() : String(nodeId);
-    const scoped = `${pageId}/${stripped}`;
-    if (scoped in this.visibility) return Boolean(this.visibility[scoped]);
-    if (stripped in this.visibility) return Boolean(this.visibility[stripped]);
-    const node = this.findNodeInPage(pageId, stripped) || resolvedNode;
-    if (!node) return false;
-    return node.visible !== false && node.hidden !== true;
+  isNodeVisible(nodeId, pageId = this.currentPageId) {
+    const nodes = resolveDocumentScene(this.docSnapshot, {
+      projectDir: this.projectDir,
+      activePanelStates: this.panelStates,
+      runtimeState: { variables: this.variables, panelStates: this.panelStates, visibility: this.visibility },
+    }).pages.find(p => p.id === pageId)?.nodes || [];
+    const entry = this.findNodeEntry(pageId, nodeId);
+    return Boolean(entry && nodes.some(n => n.scopedId === entry.scopedId && n.visible));
   }
 
-  evaluateExpression(expr) {
+  evaluateExpression(expr, context = {}) {
     if (expr === null || expr === undefined) return '';
     if (typeof expr === 'number' || typeof expr === 'boolean') return expr;
     const str = String(expr).trim();
@@ -162,13 +226,14 @@ export class StudioRuntimeSession {
     // Check @widget shorthand (e.g. =@note or =@location)
     const atWidgetMatch = body.match(/^@([a-zA-Z0-9_/-]+)$/);
     if (atWidgetMatch) {
-      return this.getWidgetText(atWidgetMatch[1]);
+      return this.getWidgetText(atWidgetMatch[1], context);
     }
 
-    // Replace @<id>, widget.<id>.text, var.<name>, $<name>
+    // Replace dataset.<ds>.<path>, @<id>, widget.<id>.text, var.<name>, $<name>
     const jsExpr = body
-      .replace(/@([a-zA-Z0-9_-]+)/g, (_, id) => JSON.stringify(this.getWidgetText(id)))
-      .replace(/widget\.([a-zA-Z0-9_-]+)\.text/g, (_, id) => JSON.stringify(this.getWidgetText(id)))
+      .replace(/dataset\.([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_.]+)/g, (_, dsName, propPath) => JSON.stringify(this.resolveDatasetPath(dsName, propPath)))
+      .replace(/@([a-zA-Z0-9_/-]+)/g, (_, id) => JSON.stringify(this.getWidgetText(id, context)))
+      .replace(/widget\.([a-zA-Z0-9_-]+)\.text/g, (_, id) => JSON.stringify(this.getWidgetText(id, context)))
       .replace(/var\.([a-zA-Z0-9_]+)/g, (_, name) => JSON.stringify(this.variables[name] ?? ''))
       .replace(/\$([a-zA-Z0-9_]+)/g, (_, name) => JSON.stringify(this.variables[name] ?? ''));
 
@@ -181,6 +246,65 @@ export class StudioRuntimeSession {
     }
   }
 
+  getDatasetPageSize(dsName) {
+    return this.datasetPageSizes?.[dsName] || null;
+  }
+
+  getDatasetTotalPages(dsName) {
+    const rows = this.getVisibleDatasetRows(dsName);
+    const pageSize = this.getDatasetPageSize(dsName);
+    if (!pageSize || pageSize <= 0) return 1;
+    return Math.max(1, Math.ceil(rows.length / pageSize));
+  }
+
+  getDatasetPage(dsName) {
+    const totalPages = this.getDatasetTotalPages(dsName);
+    const raw = Number(this.datasetPages?.[dsName] || 1);
+    return Math.min(Math.max(1, Number.isFinite(raw) ? Math.floor(raw) : 1), totalPages);
+  }
+
+  getPagedDatasetRows(dsName) {
+    const rows = this.getVisibleDatasetRows(dsName);
+    const pageSize = this.getDatasetPageSize(dsName);
+    if (!pageSize || pageSize <= 0) return rows;
+    const page = this.getDatasetPage(dsName);
+    const start = (page - 1) * pageSize;
+    return rows.slice(start, start + pageSize);
+  }
+
+  resolveDatasetPath(dsName, propPath) {
+    const visible = this.getVisibleDatasetRows(dsName);
+    const paged = this.getPagedDatasetRows(dsName);
+    const page = this.getDatasetPage(dsName);
+    const totalPages = this.getDatasetTotalPages(dsName);
+    if (propPath === 'count') return visible.length;
+    if (propPath === 'total') return (this.datasets[dsName] || []).length;
+    if (propPath === 'page') return page;
+    if (propPath === 'totalPages') return totalPages;
+    if (propPath === 'pageStatus') return visible.length === 0 ? '第 0 / 0 页' : `第 ${page} / ${totalPages} 页`;
+    if (propPath === 'countStatus') return `共 ${visible.length} 条记录`;
+    if (propPath.startsWith('pageFirst.')) {
+      const field = propPath.slice('pageFirst.'.length);
+      return paged[0]?.[field] ?? '-';
+    }
+    if (propPath.startsWith('first.')) {
+      const field = propPath.slice('first.'.length);
+      return visible[0]?.[field] ?? '-';
+    }
+    if (propPath.startsWith('selected.')) {
+      const field = propPath.slice('selected.'.length);
+      const sel = visible.find(r => r._selected) || (this.datasets[dsName] || []).find(r => (this.selectedRows[dsName] || new Set()).has(r._rowId) || (r.id !== undefined && (this.selectedRows[dsName] || new Set()).has(r.id))) || paged[0] || visible[0];
+      return sel?.[field] ?? '';
+    }
+    return '';
+  }
+
+  _refreshDatasetBoundText() {
+    for (const [scopedId, info] of Object.entries(this.textFormulas || {})) {
+      this.textOverrides[scopedId] = String(this.evaluateExpression(info.expr, info));
+    }
+  }
+
   getVisibleDatasetRows(dsName) {
     const baseRows = this.datasets[dsName] || [];
     const filterSpec = this.datasetFilters[dsName];
@@ -189,7 +313,7 @@ export class StudioRuntimeSession {
 
     let rows = baseRows.map(r => ({
       ...r,
-      _selected: selectedSet.has(r._rowId),
+      _selected: selectedSet.has(r._rowId) || (r.id !== undefined && selectedSet.has(r.id)),
     }));
 
     if (filterSpec) {
@@ -232,15 +356,13 @@ export class StudioRuntimeSession {
   }
 
   setInput(targetId, value) {
-    const stripped = String(targetId).includes('/') ? String(targetId).split('/').pop() : String(targetId);
-    const scoped = `${this.currentPageId}/${stripped}`;
+    const scoped = this.targetKey(targetId);
     this.inputs[scoped] = String(value);
-    this.inputs[stripped] = String(value);
     this.trace.push({
       step: this.trace.length + 1,
       type: 'input',
       pageId: this.currentPageId,
-      targetId: stripped,
+      targetId: scoped,
       value: String(value),
     });
     return this.getState();
@@ -261,26 +383,42 @@ export class StudioRuntimeSession {
   }
 
   click(targetId) {
-    const stripped = String(targetId).includes('/') ? String(targetId).split('/').pop() : String(targetId);
-    const node = this.findNodeInPage(this.currentPageId, stripped);
+    const entry = this.findNodeEntry(this.currentPageId, targetId);
+    const node = entry?.node;
     if (!node) {
+      // 跨页目标：明确指出目标所在页与会话起始页（startPageId），避免被误读为节点不存在。
+      const otherPageIds = (this.docSnapshot.pages || [])
+        .filter(page => page.id !== this.currentPageId)
+        .filter(page => { try { return this.findNodeEntry(page.id, targetId)?.node; } catch { return false; } })
+        .map(page => page.id);
+      if (otherPageIds.length) {
+        throw Object.assign(
+          new Error(`交互目标 "${targetId}" 不在当前页 "${this.currentPageId}"，它位于页面 ${otherPageIds.map(id => `"${id}"`).join(', ')}；会话从起始页 "${this.currentPageId}" 开始，请先 navigate 到该页，或在 startPageId 中指定它`),
+          { code: 'E_RUNTIME_NODE_NOT_FOUND', pageId: this.currentPageId, targetId, availableOnPages: otherPageIds, suggestion: `navigate("${otherPageIds[0]}") 或将 startPageId 设为 "${otherPageIds[0]}" 后重跑` }
+        );
+      }
       throw Object.assign(
         new Error(`当前页面 "${this.currentPageId}" 中未找到交互目标 "${targetId}"`),
         { code: 'E_RUNTIME_NODE_NOT_FOUND', pageId: this.currentPageId, targetId }
       );
     }
 
+    if (!this.isNodeVisible(targetId)) throw Object.assign(new Error(`交互目标 ${targetId} 当前不可见`), { code: 'E_RUNTIME_NODE_HIDDEN', targetId, suggestion: '目标在当前运行态不可见；若运行态已被弄脏，请重置会话恢复初始状态（重新进入预览或 POST /api/runtime/reset）' });
+
     const clickSpec = node.on?.click || node.onClick || node.interactions?.click;
     const executed = [];
     if (clickSpec && !['disabled', 'loading'].includes(node.state)) {
-      this._executeInteractionSpec(clickSpec, node, executed);
+      const previousScope = this.interactionScope;
+      this.interactionScope = entry.scopePrefix;
+      try { this._executeInteractionSpec(clickSpec, node, executed); }
+      finally { this.interactionScope = previousScope; }
     }
 
     this.trace.push({
       step: this.trace.length + 1,
       type: 'click',
       pageId: this.currentPageId,
-      targetId: stripped,
+      targetId: entry.scopedId,
       executed,
       variables: structuredClone(this.variables),
     });
@@ -335,17 +473,25 @@ export class StudioRuntimeSession {
       return;
     }
 
+    const assignVariable = (name, value) => {
+      const declared = this.docSnapshot.variables?.[name];
+      if (declared !== undefined) {
+        const initial = declared && typeof declared === 'object' && 'value' in declared ? declared.value : declared;
+        if (typeof value !== typeof initial) throw Object.assign(new Error(`变量 ${name} 需要 ${typeof initial}，表达式返回 ${typeof value}`), {code:'E_TYPE', field:name, expected:typeof initial, actual:typeof value});
+      }
+      this.variables[name] = value;
+    };
     // 1. Set variables (`setVar` map or `type: 'set-var'` / `'set-variable'`)
     if (act.setVar && typeof act.setVar === 'object') {
       for (const [varName, expr] of Object.entries(act.setVar)) {
         const val = this.evaluateExpression(expr);
-        this.variables[varName] = val;
+        assignVariable(varName, val);
         executed.push({ action: 'set-var', name: varName, value: val });
       }
     }
     if (act.type === 'set-var' || act.type === 'set-variable' || act.action === 'set-var' || act.action === 'set-variable') {
       const val = this.evaluateExpression(act.value ?? act.expr);
-      this.variables[act.name || act.variable] = val;
+      assignVariable(act.name || act.variable, val);
       executed.push({ action: 'set-var', name: act.name || act.variable, value: val });
     }
 
@@ -353,45 +499,49 @@ export class StudioRuntimeSession {
     if (act.show) {
       const targets = Array.isArray(act.show) ? act.show : [act.show];
       for (const t of targets) {
-        const stripped = String(t).split('/').pop();
-        this.visibility[`${this.currentPageId}/${stripped}`] = true;
-        this.visibility[stripped] = true;
-        executed.push({ action: 'show', target: stripped });
+        const target = this.targetKey(t);
+        this.visibility[target] = true;
+        executed.push({ action: 'show', target });
       }
     }
     if (act.hide) {
       const targets = Array.isArray(act.hide) ? act.hide : [act.hide];
       for (const t of targets) {
-        const stripped = String(t).split('/').pop();
-        this.visibility[`${this.currentPageId}/${stripped}`] = false;
-        this.visibility[stripped] = false;
-        executed.push({ action: 'hide', target: stripped });
+        const target = this.targetKey(t);
+        this.visibility[target] = false;
+        executed.push({ action: 'hide', target });
       }
     }
-    if (act.type === 'show' || act.type === 'hide') {
-      const vis = act.type === 'show';
-      const stripped = String(act.target).split('/').pop();
-      this.visibility[`${this.currentPageId}/${stripped}`] = vis;
-      this.visibility[stripped] = vis;
-      executed.push({ action: act.type, target: stripped });
+    if (act.type === 'show' || act.type === 'hide' || act.type === 'toggle') {
+      const target = this.targetKey(act.target);
+      const authored = this.findNodeInPage(this.currentPageId, act.target);
+      const current = this.visibility[target] ?? (authored?.visible !== false && authored?.hidden !== true);
+      const vis = act.type === 'toggle' ? !current : act.type === 'show';
+      this.visibility[target] = vis;
+      executed.push({ action: act.type, target });
     }
 
     // 3. Set widget text
     if (act.setText && typeof act.setText === 'object') {
       for (const [targetId, expr] of Object.entries(act.setText)) {
-        const stripped = String(targetId).split('/').pop();
+        const target = this.targetKey(targetId);
+        if (typeof expr === 'string' && expr.includes('dataset.')) {
+          this.textFormulas[target] = { pageId: this.currentPageId, scopePrefix: this.interactionScope, expr };
+        }
         const val = String(this.evaluateExpression(expr));
-        this.textOverrides[`${this.currentPageId}/${stripped}`] = val;
-        this.textOverrides[stripped] = val;
-        executed.push({ action: 'set-text', target: stripped, text: val });
+        this.textOverrides[target] = val;
+        executed.push({ action: 'set-text', target, text: val });
       }
     }
     if (act.type === 'set-text') {
-      const stripped = String(act.target).split('/').pop();
-      const val = String(this.evaluateExpression(act.text ?? act.value));
-      this.textOverrides[`${this.currentPageId}/${stripped}`] = val;
-      this.textOverrides[stripped] = val;
-      executed.push({ action: 'set-text', target: stripped, text: val });
+      const target = this.targetKey(act.target);
+      const rawExpr = act.text ?? act.value;
+      if (typeof rawExpr === 'string' && rawExpr.includes('dataset.')) {
+        this.textFormulas[target] = { pageId: this.currentPageId, scopePrefix: this.interactionScope, expr: rawExpr };
+      }
+      const val = String(this.evaluateExpression(rawExpr));
+      this.textOverrides[target] = val;
+      executed.push({ action: 'set-text', target, text: val });
     }
 
     // 4. Set dynamic panel state (including study-card flip / next / prev / toggle)
@@ -399,10 +549,10 @@ export class StudioRuntimeSession {
     if (panelAct) {
       const list = Array.isArray(panelAct) ? panelAct : [panelAct];
       for (const item of list) {
-        const panelId = String(item.target || item.panel).split('/').pop();
+        const panelId = this.targetKey(item.target || item.panel);
         const panelNode = this.findNodeInPage(this.currentPageId, panelId);
         let nextState = item.state;
-        const curState = this.panelStates[`${this.currentPageId}/${panelId}`] || this.panelStates[panelId] || panelNode?.activeState || panelNode?.states?.[0]?.id;
+        const curState = this.panelStates[panelId] || panelNode?.activeState || panelNode?.states?.[0]?.id;
         if ((nextState === 'next' || nextState === 'toggle' || nextState === 'flip') && panelNode?.states?.length) {
           const idx = panelNode.states.findIndex(s => s.id === curState);
           nextState = panelNode.states[(idx + 1) % panelNode.states.length].id;
@@ -410,7 +560,6 @@ export class StudioRuntimeSession {
           const idx = panelNode.states.findIndex(s => s.id === curState);
           nextState = panelNode.states[(idx - 1 + panelNode.states.length) % panelNode.states.length].id;
         }
-        this.panelStates[`${this.currentPageId}/${panelId}`] = nextState;
         this.panelStates[panelId] = nextState;
         executed.push({ action: 'set-panel-state', panel: panelId, state: nextState });
       }
@@ -443,11 +592,37 @@ export class StudioRuntimeSession {
     const selected = this.selectedRows[dsName] || new Set();
 
     if (op === 'select' || op === 'toggle-select') {
-      const rowId = act.rowId;
+      let rowId = act.rowId;
+      if (rowId === 'first' || rowId === 'pageFirst') {
+        const firstRow = (rowId === 'pageFirst' ? this.getPagedDatasetRows(dsName) : this.getPagedDatasetRows(dsName))[0] || this.getVisibleDatasetRows(dsName)[0];
+        rowId = firstRow?._rowId ?? firstRow?.id ?? null;
+      } else if (typeof rowId === 'string' && rowId.startsWith('=')) {
+        rowId = this.evaluateExpression(rowId);
+      }
       if (act.clearOthers !== false) selected.clear();
       if (op === 'toggle-select' && selected.has(rowId)) selected.delete(rowId);
-      else if (rowId !== undefined && rowId !== null) selected.add(rowId);
+      else if (rowId !== undefined && rowId !== null && rowId !== '') selected.add(rowId);
+      this._refreshDatasetBoundText();
       executed.push({ action: 'dataset-select', dataset: dsName, selectedRowIds: [...selected] });
+      return;
+    }
+
+    if (op === 'page') {
+      const rawTarget = act.page ?? act.value ?? act.query;
+      const totalPages = this.getDatasetTotalPages(dsName);
+      const curPage = this.getDatasetPage(dsName);
+      let nextPage = curPage;
+      if (rawTarget === 'next') nextPage = Math.min(totalPages, curPage + 1);
+      else if (rawTarget === 'prev' || rawTarget === 'previous') nextPage = Math.max(1, curPage - 1);
+      else if (rawTarget === 'first') nextPage = 1;
+      else if (rawTarget === 'last') nextPage = totalPages;
+      else {
+        const evaluated = Number(this.evaluateExpression(rawTarget));
+        if (Number.isFinite(evaluated)) nextPage = Math.min(totalPages, Math.max(1, Math.floor(evaluated)));
+      }
+      this.datasetPages[dsName] = nextPage;
+      this._refreshDatasetBoundText();
+      executed.push({ action: 'dataset-page', dataset: dsName, page: nextPage, totalPages });
       return;
     }
 
@@ -463,8 +638,7 @@ export class StudioRuntimeSession {
         const hasEmpty = fields.some(f => !String(resolvedRow[f] ?? '').trim());
         if (hasEmpty) {
           if (act.onEmptyShow) {
-            this.visibility[`${this.currentPageId}/${act.onEmptyShow}`] = true;
-            this.visibility[act.onEmptyShow] = true;
+            this.visibility[this.targetKey(act.onEmptyShow)] = true;
           }
           executed.push({ action: 'dataset-add-blocked', dataset: dsName, reason: 'empty_required_field' });
           return;
@@ -479,8 +653,7 @@ export class StudioRuntimeSession {
       const targetIds = act.rowId ? new Set([act.rowId]) : selected;
       if (targetIds.size === 0) {
         if (act.onEmptySelectionShow) {
-          this.visibility[`${this.currentPageId}/${act.onEmptySelectionShow}`] = true;
-          this.visibility[act.onEmptySelectionShow] = true;
+          this.visibility[this.targetKey(act.onEmptySelectionShow)] = true;
         }
         executed.push({ action: 'dataset-update-guarded', dataset: dsName, reason: 'empty_selection' });
         return;
@@ -503,8 +676,7 @@ export class StudioRuntimeSession {
       const targetIds = act.rowId ? new Set([act.rowId]) : selected;
       if (targetIds.size === 0) {
         if (act.onEmptySelectionShow) {
-          this.visibility[`${this.currentPageId}/${act.onEmptySelectionShow}`] = true;
-          this.visibility[act.onEmptySelectionShow] = true;
+          this.visibility[this.targetKey(act.onEmptySelectionShow)] = true;
         }
         executed.push({ action: 'dataset-delete-guarded', dataset: dsName, reason: 'empty_selection' });
         return;
@@ -521,17 +693,53 @@ export class StudioRuntimeSession {
       this.datasetFilters[dsName] = act.field
         ? { field: act.field, value: query, operator: act.operator || 'includes' }
         : query;
+      this.datasetPages[dsName] = 1;
+      if (act.onEmptyShow) {
+        const isEmpty = this.getVisibleDatasetRows(dsName).length === 0;
+        this.visibility[this.targetKey(act.onEmptyShow)] = isEmpty;
+      }
+      this._refreshDatasetBoundText();
       executed.push({ action: 'dataset-filter', dataset: dsName, filter: this.datasetFilters[dsName] });
       return;
     }
 
     if (op === 'sort') {
       this.datasetSorts[dsName] = act.field ? { field: act.field, order: act.order || 'asc' } : null;
+      this.datasetPages[dsName] = 1;
+      this._refreshDatasetBoundText();
       executed.push({ action: 'dataset-sort', dataset: dsName, sort: this.datasetSorts[dsName] });
     }
   }
 
   runScenario(steps = []) {
+    const expectKeys = new Set(Object.keys(SCENARIO_STEP_SCHEMA.properties.expect.properties));
+    let assertionCount = 0;
+    const invalid = (index, message) => ({ ok: false, code: 'E_SCENARIO_STEP', failedStepIndex: index + 1, message,
+      example: { action: 'click', target: 'reveal', expect: { visible: { answer: true } } }, totalSteps: Array.isArray(steps) ? steps.length : 0, passedSteps: 0, stepResults: [], finalState: this.getState() });
+    if (!Array.isArray(steps) || !steps.length) return invalid(-1, 'steps 必须是非空数组，且至少有一条明确断言');
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      if (!step || typeof step !== 'object' || Array.isArray(step)) return invalid(i, '步骤必须是对象');
+      const allowed = new Set(Object.keys(SCENARIO_STEP_SCHEMA.properties));
+      const unknown = Object.keys(step).find(k => !allowed.has(k));
+      if (unknown) return invalid(i, `未知步骤字段 ${unknown}；动作使用 action，断言使用 expect`);
+      if (step.action !== undefined && !['navigate', 'input', 'click', 'dataset', 'expect'].includes(step.action)) return invalid(i, `未知 action: ${step.action}`);
+      if (step.action === 'expect' && !step.expect) return invalid(i, 'expect 动作需要 expect 断言');
+      if (step.action === 'dataset' && !['select', 'toggle-select', 'add', 'update', 'delete', 'filter', 'sort', 'page'].includes(step.op)) return invalid(i, 'dataset 动作需要受支持的 op');
+      if (step.action && ['click', 'input'].includes(step.action) && !(step.target || step.id || step.fill || step.click)) return invalid(i, '动作缺少 target');
+      if (step.expect !== undefined) {
+        if (!step.expect || typeof step.expect !== 'object' || Array.isArray(step.expect) || !Object.keys(step.expect).length) return invalid(i, 'expect 必须含至少一条断言');
+        for (const [key, value] of Object.entries(step.expect)) {
+          if (!expectKeys.has(key)) return invalid(i, `未知 expect 字段 ${key}`);
+          if (key === 'page') { if (typeof value !== 'string' || !value) return invalid(i, 'expect.page 需要页面 ID'); assertionCount++; continue; }
+          if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.keys(value).length) return invalid(i, `expect.${key} 必须是非空对象`);
+          if (key === 'visible' && Object.values(value).some(v => typeof v !== 'boolean')) return invalid(i, 'visible 的期望值必须为 true/false');
+          assertionCount += Object.keys(value).length;
+        }
+      }
+      if (!step.action && !step.goto && !step.fill && !step.click && !step.expect) return invalid(i, '步骤缺少动作或断言');
+    }
+    if (!assertionCount) return invalid(-1, '场景没有任何断言，不能认证为通过');
     const stepResults = [];
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
@@ -556,7 +764,7 @@ export class StudioRuntimeSession {
         }
         if (exp.panelState) {
           for (const [panelId, expectedState] of Object.entries(exp.panelState)) {
-            const actual = this.panelStates[`${this.currentPageId}/${panelId}`] || this.panelStates[panelId];
+            const actual = this.panelStates[this.targetKey(panelId)];
             assertions.push({ type: 'panelState', target: panelId, expected: expectedState, actual, passed: actual === expectedState });
           }
         }
@@ -607,6 +815,7 @@ export class StudioRuntimeSession {
 
     return {
       ok: stepResults.every(s => s.passed),
+      assertionCount: stepResults.reduce((sum, step) => sum + step.assertions.length, 0),
       totalSteps: stepResults.length,
       passedSteps: stepResults.filter(s => s.passed).length,
       stepResults,
@@ -616,10 +825,17 @@ export class StudioRuntimeSession {
 
   getState() {
     const visibleDatasets = {};
+    const datasetPages = {};
     for (const dsName of Object.keys(this.datasets)) {
+      const page = this.getDatasetPage(dsName);
+      datasetPages[dsName] = page;
       visibleDatasets[dsName] = {
         totalRows: this.datasets[dsName].length,
         visibleRows: this.getVisibleDatasetRows(dsName),
+        pagedRows: this.getPagedDatasetRows(dsName),
+        page,
+        pageSize: this.getDatasetPageSize(dsName),
+        totalPages: this.getDatasetTotalPages(dsName),
         selectedRowIds: [...(this.selectedRows[dsName] || [])],
         filter: this.datasetFilters[dsName],
         sort: this.datasetSorts[dsName],
@@ -627,29 +843,26 @@ export class StudioRuntimeSession {
     }
 
     const scene = resolveDocumentScene(this.docSnapshot, {
+      projectDir: this.projectDir,
       activePanelStates: this.panelStates,
       runtimeState: {
         variables: this.variables,
         panelStates: this.panelStates,
+        visibility: this.visibility,
+        inputs: this.inputs,
+        textOverrides: this.textOverrides,
+        evaluateText: (expression, context) => this.evaluateExpression(expression, context),
+        datasets: Object.fromEntries(Object.entries(visibleDatasets).map(([name, value]) => [name, { rows: value.visibleRows }])),
+        datasetPages,
       },
     });
     const activePageScene = scene.pages.find(p => p.id === this.currentPageId) || scene.pages[0];
 
-    // Overlay runtime visibility, input values, and text overrides onto activePageScene.nodes
+    // Values are resolved before measurement; retain the row-view rendering flag.
     const runtimeNodes = (activePageScene?.nodes || []).map(n => {
-      const vis = this.isNodeVisible(n.id, this.currentPageId, n);
-      let txt = n.text;
-      if (n.type === 'input') {
-        txt = this.inputs[`${this.currentPageId}/${n.id}`] ?? this.inputs[n.id] ?? n.text;
-      } else if (`${this.currentPageId}/${n.id}` in this.textOverrides || n.id in this.textOverrides) {
-        txt = this.textOverrides[`${this.currentPageId}/${n.id}`] ?? this.textOverrides[n.id];
-      } else if (typeof n.rawText === 'string' && n.rawText.startsWith('=')) {
-        txt = String(this.evaluateExpression(n.rawText));
-      }
       return {
         ...n,
-        visible: vis,
-        text: txt,
+        ...(n.type==='repeater'?{rowViewResolved:true}:{}),
       };
     });
 

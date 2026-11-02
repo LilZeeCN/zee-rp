@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "files": {
+    "CREDITS.md": "cadae6a11ee76ff0df3304f93cdb0374fe12d119c79a4bfe421b48474414e981",
+    "README.md": "7f97e43d8c5ba4938992b886f4dea945613e48344a0f5e4ef71009d22c8dc637",
+    "assets/home_photo.jpg": "35b7b259ad9d28aa8f6f4c60ac52377a5c69114c97d772a4dd88d03c76553000",
+    "assets/jr_met_photo.jpg": "62e029d149060d8d5a03e23caa8c4863a5115bc98d24b2052cabb9419202efea",
+    "assets/jr_photo.jpg": "f4bd2783866f7763ae6d6a2a11c6abbac16c50d1f223196dbff773a86506812c",
+    "assets/ok_photo.jpg": "1bc848a2e5b5d62dbe232cc6886649aa971bbc1080f5d3b5b8f7614e27b5a273",
+    "assets/original/kingfisher.jpg": "99e26f98213f836b79c0202ca134d571a75c3245ee05284f507025553253611a",
+    "assets/original/原图片来源.md": "926867f8ae50080df884cceffe26a7c7be80e3b22707446f87f0e85197873718",
+    "assets/rec_photo.jpg": "17ba1ddb3bac098578554d33ef49b9c44613e55b0154faf17de8896458903370",
+    "assets/sp_mark_back.jpg": "4d6e0a00654701d345b3ea63c10b658e237e70085001cfc01e23cdd9e3fbb8fb",
+    "assets/sp_mark_belly.jpg": "622be256d0f6a270ea24566c13939ecdc706600c801a685f735f08968999bbfb",
+    "assets/sp_mark_bill.jpg": "120ac82f111d3010cb393a879c8bafcdfbaf9decff71c1f0ea82664e2bc66ffe",
+    "assets/sp_photo.jpg": "4118b3d3562bcb17781efc60dc2281f5993f00f0d2cd76c91313ae78b51b6662",
+    "benchmark.json": "bac205a410a024f7bb6565fcb50adf2cc725f2566efa5b62e7974a1028ac805a",
+    "media-recipes.json": "63b4be35395938f906639a0f9e761b597c3c8e0ab8bbaf521b4f38a4038597f2",
+    "previews/home.png": "2a995e009731ab247bc5bed3386ee67835bd7fa84e94d025723ba447c0cb50d0",
+    "previews/record.png": "7c83c488790c47aad8c13c297f7d107e37017b85f2ed65d314a9dadebb8c26fb",
+    "previews/saved.png": "6f68aad31eb5de9a023f3f170afc3cb856c5914172f5e2bd5e8537f8ca2e59f8",
+    "previews/species.png": "e07ada67f63e55779c0ab4514a8cc2becbbb4fa5866bc8a24c52459cf0af506f",
+    "source.json": "501b5e4814ff1c14752b7d85e2bf00517680fb5aa79d63280c373600c4956939"
+  }
+}

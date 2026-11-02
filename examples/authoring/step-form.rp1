@@ -1,0 +1,33 @@
+# 研途 · 制定计划
+# 修改共享组件、palette 和数据；保留逻辑 ID 以便后续改稿。
+rp/1 target=9 name="研途 · 制定计划" domain=mobile theme=enterprise-light
+palette:
+  $brand = #6D5CE7
+  $brand-soft = #EEEAFB
+  $bg = #F6F5FA
+var $subject = ""
+var $goal = ""
+var $duration = "25"
+page #form name="制定学习计划" device=iphone-17
+  phone-shell #shell title="制定学习计划" gap=16
+    label #headline [fillx40] "让下一步足够具体" fontSize=24 fontWeight=700
+    paragraph #intro [fillx72] "先填写科目，再确认目标。上一步返回后，输入仍保留。" fontSize=16 lineHeight=24
+    wizard-card #plan title="两步建立计划" w=370 bodyHeight=308 padding=16 gap=12
+      :step(root) id=basic title="选择科目" nextWhen="=@subject != ''" errorMessage="请先填写复习科目" onNext=[{"type":"set-variable","variable":"subject","value":"=@subject"}]
+        box #basicBody [fillx200] layout=column gap=12
+          label #subjectLabel [fillx32] "今天复习什么？"
+          input #subject [fillx44] value="" placeholder="例如：高等数学"
+          paragraph #tip [fillx64] "请填写一个明确科目，空白输入不能进入下一步。" fontSize=16 lineHeight=24
+      :step(root) id=confirm title="确认目标" nextWhen="=@goal != ''" errorMessage="请先填写具体目标" onNext=[{"type":"set-variable","variable":"goal","value":"=@goal"},{"type":"link","page":"result"}]
+        box #confirmBody [fillx200] layout=column gap=12
+          label #selected [fillx32] "='复习科目：' + var.subject"
+          input #goal [fillx44] value="" placeholder="例如：完成三道极限题"
+          paragraph #tip [fillx64] "填写一个能在 25 分钟内完成的目标。" fontSize=16 lineHeight=24
+page #result name="计划已建立" device=iphone-17
+  phone-shell #shell title="计划已建立" gap=16
+    label #headline [fillx44] "现在，开始专注" fontSize=24 fontWeight=700
+    label #subject [fillx40] "='复习科目：' + var.subject" fontSize=20
+    paragraph #goal [fillx96] "='本次目标：' + var.goal" fontSize=16 lineHeight=24
+    label #duration [fillx32] "建议专注 25 分钟"
+    button #restart [fillx44] "再建一个计划" variant=secondary
+      +onClick [{"type":"set-variable","variable":"subject","value":""},{"type":"set-variable","variable":"goal","value":""},{"type":"link","page":"form"}]

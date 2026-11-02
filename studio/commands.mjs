@@ -1,6 +1,16 @@
-import { buildNodeIndex, canonicalJson, computeContentHash, sha256 } from './document.mjs';
-import { measureTextBox, resolveDocumentScene } from './scene-resolver.mjs';
+import { diffDocuments } from './document-diff.mjs';
+import { spawnSync } from 'node:child_process';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { resolveNodeEdits } from './relation-edit.mjs';
+import { buildNodeIndex, currentDocumentDiagnostics, inheritCleanCanonicalCache, normalizeNodeInteractions, canonicalJson, computeContentHash, sha256, DEVICE_PRESETS } from './document.mjs';
+import { measureTextBox, resolveDocumentScene, getLastResolvedScene, parsePadding } from './scene-resolver.mjs';
 import { normalizeVisualCss } from './visual-style.mjs';
+import { NODE_PROPERTY_NAMES, NODE_READONLY_PROPERTIES, NODE_UNCONSUMED_PROPERTIES, NODE_SYNTAX_ONLY_PROPERTIES, propertySuggestions } from './node-properties.mjs';
+import { materializeNodeSnapshots } from './clipboard.mjs';
+import {assertKnownNodeEffects,assertCanvasNodeType} from './node-capabilities.mjs';
+import { validateCommandFields } from './command-contracts.mjs';
+import { recordDesignDecision, finalizeDesignDecisions } from './design-decisions.mjs';
 import {
   CORE_COMPONENT_CONTRACTS,
   ensureCoreComponentsRegistered,
@@ -13,16 +23,29 @@ import {
   validateExplorationsUsability,
   applySelectedExplorationToPage,
 } from './explorations.mjs';
+import {
+  normalizeVectorNodeSpec,
+  bakeVectorTransform,
+  parseSvgPathD,
+  parseSvgMarkup,
+  subpathsToSvgD,
+  booleanVectorPaths,
+  computeVectorBounds,
+} from './vector-paths.mjs';
 
-const VALID_NODE_TYPES = new Set([
-  'box', 'card', 'label', 'paragraph', 'button', 'badge', 'input', 'image', 'icon',
+export const VALID_NODE_TYPES = new Set([
+  'box', 'card', 'label', 'paragraph', 'button', 'badge', 'input', 'image', 'icon', 'path',
   'dynamic-panel', 'repeater', 'phone-shell', 'tab-bar', 'nav-bar',
   'stat-row', 'list-item', 'progress-bar', 'instance', 'use',
-  // 场景解析器已支持这些类型，命令层不接受会让调用方凭空多绕一步（试用者实测踩到）。
+  // Full RP/1 names are retained for historical documents. Type-specific
+  // canvas expansion boundaries are exposed by node-capabilities.
   'divider', 'spacer', 'detail-card', 'data-table', 'searchable-list', 'master-detail',
 ]);
 
 const VALID_LAYOUTS = new Set(['stack', 'row', 'column', 'grid', 'free']);
+// 可直接容纳 children 的源容器类型；reorderNode/pasteNodes 换父失败时作为候选列出。
+const CONTAINER_TYPES = ['box', 'card', 'phone-shell'];
+const EXPRESSION_CHECKER = resolve(dirname(fileURLToPath(import.meta.url)), '../scripts/rp-expression-check.py');
 
 function cmdError(code, message, { commandIndex = 0, nodeId = null, field = null, suggestion = null, extra = {} } = {}) {
   return Object.assign(new Error(message), {
@@ -35,14 +58,89 @@ function cmdError(code, message, { commandIndex = 0, nodeId = null, field = null
   });
 }
 
-function validatePropertiesObject(props, nodeId, cmdIdx) {
+function validateInteractionAssignments(spec, doc, cmdIdx, nodeId) {
+        const formulaChecks = [];
+        const rpType = value => typeof value === 'string' ? 'text' : typeof value;
+        const variableTypes = Object.fromEntries(Object.entries(doc.variables || {}).map(([name, declared]) => {
+          const value = declared && typeof declared === 'object' && 'value' in declared ? declared.value : declared;
+          return [name, rpType(value)];
+        }));
+        const validateAssignment = (name, value) => {
+          if (!name) throw cmdError('E_INTERACTION_ACTION', 'set-var 动作缺少 variable/name 字段', { commandIndex: cmdIdx, nodeId: nodeId, field: 'name' });
+          if (!Object.hasOwn(doc.variables || {}, name)) throw cmdError('E_VARIABLE', `set-var 目标变量 "${name}" 未声明`, { commandIndex: cmdIdx, nodeId: nodeId, field: name, suggestion: `先用 set-variable 声明变量 ${name}` });
+          const declared = doc.variables[name];
+          const declaredValue = declared && typeof declared === 'object' && 'value' in declared ? declared.value : declared;
+          const expected = rpType(declaredValue);
+          const isFormula = typeof value === 'string' && value.trim().startsWith('=');
+          let actual = rpType(value);
+          if (isFormula) {
+            const body = value.trim().slice(1).trim();
+            if (/^(true|false)$/.test(body)) actual = 'boolean';
+            else if (/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(body)) actual = 'number';
+            else {
+              actual = null;
+              formulaChecks.push({ expr: value, expected, variables: variableTypes });
+            }
+          }
+          if (actual !== null && actual !== expected) {
+            throw cmdError('E_TYPE', `set-var 目标变量 "${name}" 声明为 ${expected}，收到 ${actual}`, {
+              commandIndex: cmdIdx, nodeId: nodeId, field: `${name}.value`, extra: { expected, actual },
+              suggestion: `请提供 ${expected} 类型的字面量或可计算的表达式`,
+            });
+          }
+        };
+        const visit = spec => {
+          if (Array.isArray(spec)) { for (const item of spec) visit(item); return; }
+          if (!spec || typeof spec !== 'object') return;
+          if (spec.type === 'set-var' || spec.type === 'set-variable') validateAssignment(spec.variable || spec.name, spec.value ?? spec.expr);
+          if (spec.setVar && typeof spec.setVar === 'object') for (const [name, value] of Object.entries(spec.setVar)) validateAssignment(name, value);
+          for (const key of ['cases', 'actions', 'then', 'else']) visit(spec[key]);
+        };
+        visit(spec);
+        if (formulaChecks.length) {
+          const checked = spawnSync('python3', [EXPRESSION_CHECKER], {
+            input: JSON.stringify({ expressions: formulaChecks }),
+            encoding: 'utf8',
+          });
+          if (checked.status !== 0) {
+            let detail = null;
+            try { detail = JSON.parse(checked.stdout.trim()); } catch {}
+            const code = detail?.code || 'E_INVALID_VALUE';
+            throw cmdError(code, detail?.message || checked.stderr.trim() || '变量表达式未通过 RP/1 语法检查', {
+              commandIndex: cmdIdx,
+              nodeId,
+              suggestion: '使用变量、@控件读数、文本/数字转换函数和允许的运算；同一表达式必须能被画布运行态与 RP/1 导出共同执行',
+            });
+          }
+        }
+}
+
+export function validatePropertiesObject(props, nodeId, cmdIdx, {creation=false,historical=false}={}) {
   if (!props || typeof props !== 'object' || Array.isArray(props)) {
     throw cmdError('E_INVALID_PROPERTIES', `命令 #${cmdIdx} properties 必须是非空对象`, { commandIndex: cmdIdx, nodeId, field: 'properties' });
   }
-  const unknownKeys = Object.keys(props).filter(k => k.startsWith('__'));
+  if(!creation&&!Object.keys(props).length)throw cmdError('E_EMPTY_PROPERTIES','改属性需要至少一个明确字段；未提交空修改',{commandIndex:cmdIdx,nodeId});
+  const readOnly=Object.keys(props).find(key=>NODE_READONLY_PROPERTIES.has(key));
+  if(!creation&&readOnly)throw cmdError('E_READONLY_PROPERTY',`属性 ${readOnly} 是稳定标识或源控制信息，不能作为普通属性覆盖`,{commandIndex:cmdIdx,nodeId,field:readOnly,suggestion:'显示名称用renameNode，样式和文案使用查询返回的源目标；不要改节点ID或内部控制标记。'});
+  const unconsumed=Object.keys(props).find(key=>NODE_UNCONSUMED_PROPERTIES.has(key));
+  if(unconsumed&&!historical)throw cmdError('E_UNCONSUMED_PROPERTY',NODE_SYNTAX_ONLY_PROPERTIES.has(unconsumed)?`${unconsumed}是节点声明的语法键，不是可写属性；请用type声明节点或使用RP/1片段`:`属性 ${unconsumed} 没有画布或运行态消费，未保存无效值`,{commandIndex:cmdIdx,nodeId,field:unconsumed,suggestion:NODE_SYNTAX_ONLY_PROPERTIES.has(unconsumed)?'例如node:{type:"box",id:"stable_id",children:[...]}；不要把box/row/card作为节点属性。':'repeater筛选/排序使用repeaterSetFilter/repeaterSetSort；运行中的数据变化使用受支持的dataset交互。'});
+  if(props.overrides&&typeof props.overrides==='object')for(const value of Object.values(props.overrides))if(!value||typeof value!=='object'||Object.keys(value).length)validatePropertiesObject(value,nodeId,cmdIdx,{historical});
+  const unknownKeys = Object.keys(props).filter(k => !NODE_PROPERTY_NAMES.has(k));
   if ('css' in props) normalizeVisualCss(props.css);
   if (unknownKeys.length > 0) {
-    throw cmdError('E_UNKNOWN_PROPERTY', `命令 #${cmdIdx} 包含非法属性名: ${unknownKeys.join(', ')}`, { commandIndex: cmdIdx, nodeId, field: unknownKeys[0] });
+    const candidates = propertySuggestions(unknownKeys[0]);
+    throw cmdError('E_UNKNOWN_PROPERTY', `命令 #${cmdIdx} 包含未知属性: ${unknownKeys.join(', ')}${candidates.length ? `；是否想用 ${candidates.join(' / ')}？` : ''}`, {
+      commandIndex: cmdIdx, nodeId, field: unknownKeys[0], extra: { candidates },
+      suggestion: '调用 studio_describe(topic:"node") 查看可写属性；整批命令未应用。',
+    });
+  }
+  if ('rotation' in props) {
+    const rot = props.rotation;
+    if (typeof rot !== 'number' || !Number.isFinite(rot)) {
+      throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的旋转 rotation=${JSON.stringify(rot)} 必须是有限数值（度）`, {
+        commandIndex: cmdIdx, nodeId, field: 'rotation', suggestion: '请提供数值角度，如 15、-30、180；画布旋转手柄与原生导出均消费该属性',
+      });
+    }
   }
   if ('radius' in props) {
     const r = props.radius;
@@ -60,22 +158,27 @@ function validatePropertiesObject(props, nodeId, cmdIdx) {
       });
     }
   }
-  if ('fontSize' in props) {
-    const fs = props.fontSize;
-    if (!(typeof fs === 'string' && fs.startsWith('$')) && (typeof fs !== 'number' || !Number.isFinite(fs) || fs <= 0 || fs > 120)) {
-      throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的字号 fontSize=${JSON.stringify(fs)} 必须在 (0, 120] 范围内`, {
-        commandIndex: cmdIdx, nodeId, field: 'fontSize', suggestion: '请提供 10~72 之间的正数',
+  for(const fontKey of ['fontSize','titleFontSize','valueFontSize'])if (fontKey in props) {
+    const fs = props[fontKey];
+    if (!(fontKey==='fontSize'&&typeof fs === 'string' && fs.startsWith('$')) && (typeof fs !== 'number' || !Number.isFinite(fs) || fs <= 0 || fs > 120)) {
+      throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的字号 ${fontKey}=${JSON.stringify(fs)} 必须在 (0, 120] 范围内`, {
+        commandIndex: cmdIdx, nodeId, field: fontKey, suggestion: '请提供 10~120 之间的正数',
       });
     }
   }
-  if ('gap' in props) {
-    const g = props.gap;
+  if(Array.isArray(props.items))for(const [itemIndex,item]of props.items.entries())if(item&&typeof item==='object'&&'valueFontSize'in item){
+    try{validatePropertiesObject({valueFontSize:item.valueFontSize},nodeId,cmdIdx,{creation:true,historical});}
+    catch(error){error.field=`items[${itemIndex}].valueFontSize`;throw error;}
+  }
+  for (const gapKey of ['gap','rowGap','columnGap']) if (gapKey in props) {
+    const g = props[gapKey];
     if (!(typeof g === 'string' && g.startsWith('$')) && (typeof g !== 'number' || !Number.isFinite(g) || g < 0)) {
-      throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的间距 gap=${JSON.stringify(g)} 必须是非负数值`, {
-        commandIndex: cmdIdx, nodeId, field: 'gap',
+      throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的间距 ${gapKey}=${JSON.stringify(g)} 必须是非负数值`, {
+        commandIndex: cmdIdx, nodeId, field: gapKey,
       });
     }
   }
+  for (const key of ['columns','colSpan','rowSpan']) if (key in props && (!Number.isInteger(props[key]) || props[key] < 1)) throw cmdError('E_INVALID_VALUE',`${key}必须是正整数`,{commandIndex:cmdIdx,nodeId,field:key});
   for (const dim of ['w', 'h']) {
     if (dim in props) {
       const v = props[dim];
@@ -104,9 +207,19 @@ function validatePropertiesObject(props, nodeId, cmdIdx) {
       const c = String(props[colorKey]);
       if (!c.startsWith('$') && !/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(c) && !/^rgba?\(/.test(c)) {
         throw cmdError('E_INVALID_COLOR', `节点 "${nodeId}" 的颜色属性 ${colorKey}="${c}" 格式非法`, {
-          commandIndex: cmdIdx, nodeId, field: colorKey, suggestion: '请使用 #RRGGBB、#RRGGBBAA 或 $token 引用',
+          commandIndex: cmdIdx, nodeId, field: colorKey,
+          suggestion: '请使用 #RRGGBB、#RRGGBBAA、rgba(...) 或 $token 引用；fill/stroke/color 不支持 linear-gradient 等渐变串——需要渐变请写节点 gradient 属性（浏览器涂装层）或 css.background',
         });
       }
+    }
+  }
+  if ('points' in props && props.points !== null && props.points !== undefined) {
+    try {
+      normalizeVectorNodeSpec({ points: props.points, w: props.w, h: props.h, smooth: props.smooth });
+    } catch (err) {
+      throw cmdError(err.code || 'E_INVALID_VECTOR', `节点 "${nodeId}" 的路径数据非法: ${err.message}`, {
+        commandIndex: cmdIdx, nodeId, field: err.field || 'points',
+      });
     }
   }
 }
@@ -209,6 +322,60 @@ function applyChildConstraintsOnResize(containerNode, oldW, oldH, newW, newH) {
   }
 }
 
+// T-I-1：stack（自由定位）容器收到多个未带 x/y 的子节点时，插入后会全部静默堆叠在
+// 内容盒原点（gap 不生效）。在事务诊断中显式报错，让调用方在读回/回放前就能发现。
+function stackUnplacedChildDiagnostics(commands, fallbackPageId = null) {
+  const out = [];
+  const walk = (node, pageId) => {
+    if (!node || typeof node !== 'object') return;
+    const children = Array.isArray(node.children) ? node.children : [];
+    if (node.layout === 'stack' && children.length >= 2) {
+      const unplaced = children.filter(child => typeof child?.x !== 'number' || typeof child?.y !== 'number');
+      if (unplaced.length >= 2) out.push({
+        severity: 'error',
+        code: 'E_STACK_CHILDREN_UNPLACED',
+        pageId,
+        nodeId: node.id,
+        message: `stack（自由定位）容器 ${node.id} 有 ${unplaced.length} 个子节点未提供 x/y，插入后将堆叠在内容盒原点、互相遮挡`,
+        suggestion: '如需自动排布请改用 layout=column（配合 gap），或为每个子节点提供 x/y',
+      });
+    }
+    for (const child of children) walk(child, pageId);
+    for (const state of node.states || []) if (state?.root) walk(state.root, pageId);
+  };
+  for (const cmd of commands || []) if (cmd?.type === 'addNode' && cmd.node) walk(cmd.node, cmd.pageId || fallbackPageId);
+  return out;
+}
+
+// 画布坐标合理上限：超出视为把节点推离可视区的脏坐标（与负尺寸 E_INVALID_VALUE 校验对齐）。
+const COORD_LIMIT = 1e6;
+function assertCoordinateBounds(value, field, cmdIdx, nodeId) {
+  if (typeof value === 'number' && Math.abs(value) > COORD_LIMIT) {
+    throw cmdError('E_INVALID_VALUE', `坐标 ${field}=${value} 超出合理范围（绝对值上限 ${COORD_LIMIT}）`, {
+      commandIndex: cmdIdx, nodeId, field, suggestion: `请提供 -${COORD_LIMIT} ~ ${COORD_LIMIT} 范围内的坐标`,
+    });
+  }
+}
+
+function applyNodePosition(doc, entry, command, sceneOptions = {}) {
+  const node = entry.node;
+  const anchored = typeof node.right === 'number' || typeof node.bottom === 'number';
+  const scene = anchored ? resolveDocumentScene(doc, sceneOptions) : null;
+  const resolved = scene?.nodesByScopedId[entry.scopedId];
+  const parent = resolved && scene.nodesByScopedId[resolved.parentScopedId];
+  const padding = parsePadding(parent?.padding);
+  const x = typeof command.x === 'number' ? command.x : typeof command.deltaX === 'number' ? (resolved?.sourceX ?? Number(node.x || 0)) + command.deltaX : null;
+  const y = typeof command.y === 'number' ? command.y : typeof command.deltaY === 'number' ? (resolved?.sourceY ?? Number(node.y || 0)) + command.deltaY : null;
+  if (x !== null) {
+    node.x = Math.round(x);
+    if (parent && typeof node.right === 'number') node.right = Math.round(parent.w-padding[1]-padding[3]-resolved.w-x);
+  }
+  if (y !== null) {
+    node.y = Math.round(y);
+    if (parent && typeof node.bottom === 'number') node.bottom = Math.round(parent.h-padding[0]-padding[2]-resolved.h-y);
+  }
+}
+
 const NON_STRUCTURAL_COMMANDS = new Set([
   'setProperties', 'set-props', 'setText', 'renameNode', 'resizeNode',
   'setLayout', 'setConstraints', 'setToken', 'set-tokens', 'bindToken',
@@ -216,20 +383,51 @@ const NON_STRUCTURAL_COMMANDS = new Set([
   'renamePage', 'resizeArtboard', 'setInstanceVariant',
   'setInstanceOverride', 'resetInstanceOverride', 'setPanelActiveState',
   'repeaterAddRow', 'repeaterUpdateRow', 'repeaterDeleteRows',
-  'repeaterSetFilter', 'repeaterSetSort', 'set-variable', 'dataset-op',
+  'repeaterSetFilter', 'repeaterSetSort', 'set-variable', 'dataset-op', 'editPath',
 ]);
 
-const COMMAND_TYPES_BY_GROUP = {
-  节点: ['addNode', 'deleteNode', 'duplicateNode', 'moveNode', 'resizeNode', 'reorderNode', 'renameNode', 'setProperties', 'set-props', 'setText', 'setLayout', 'switchLayoutMode', 'resizeArtboard'],
+export const COMMAND_TYPES_BY_GROUP = {
+  节点: ['editNodes', 'addNode', 'deleteNode', 'duplicateNode', 'pasteNodes', 'moveNode', 'resizeNode', 'reorderNode', 'renameNode', 'setProperties', 'set-props', 'setText', 'setLayout', 'switchLayoutMode', 'resizeArtboard', 'editPath', 'booleanPathOp'],
   页面: ['addPage', 'duplicatePage', 'renamePage', 'deletePage', 'reorderPages'],
   组件: ['createComponent', 'registerCoreComponents', 'register-core-components', 'upsert-component', 'evolveComponentContract', 'evolve-component-contract', 'upgrade-component-contract', 'updateComponent', 'createInstance', 'setInstanceOverride', 'clearInstanceOverride', 'resetInstanceOverride', 'setInstanceVariant', 'detachInstance', 'detachMacro'],
-  数据与状态: ['setToken', 'set-tokens', 'setTokens', 'setVariable', 'set-variable', 'datasetOp', 'dataset-op', 'setPanelActiveState', 'setFont'],
+  数据与状态: ['setToken', 'set-tokens', 'setTokens', 'setVariable', 'set-variable', 'datasetOp', 'dataset-op', 'setPanelActiveState', 'setFont', 'repeaterSetFilter', 'repeaterSetSort'],
   资源与交互: ['registerAsset', 'setInteraction', 'removeInteraction'],
-  探索: ['generateExplorations', 'selectExploration'],
+  探索: ['generateExplorations', 'selectExploration', 'recordDesignDecision'],
+  版本: ['restoreDocument'],
 };
-const VALID_COMMAND_TYPES = Object.values(COMMAND_TYPES_BY_GROUP).flat();
+export const VALID_COMMAND_TYPES = Object.values(COMMAND_TYPES_BY_GROUP).flat();
 
-export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cachedIndex = null, contractEvolutionResults = null) {
+function validateAuthoredTree(node, cmdIdx, {historical=false}={}) {
+  if (!node || typeof node !== 'object' || Array.isArray(node)) throw cmdError('E_INVALID_NODE', '节点需要对象', {commandIndex:cmdIdx});
+  if (node.type === 'svg' || node.type === 'sparkline') node.type = 'path';
+  if (node.type !== undefined && !VALID_NODE_TYPES.has(node.type)) throw cmdError('E_NODE_TYPE', `未知节点类型 ${node.type}；可用类型：${[...VALID_NODE_TYPES].join(', ')}`, {commandIndex:cmdIdx,nodeId:node.id,extra:{candidates:[...VALID_NODE_TYPES].sort()}});
+  validatePropertiesObject(Object.fromEntries(Object.entries(node).filter(([key]) => !['type','id','sourcePointer'].includes(key))),node.id,cmdIdx,{creation:true,historical});
+  if (node.type === 'path' && (node.content !== undefined || node.points !== undefined)) {
+    try {
+      normalizeVectorNodeSpec(node);
+    } catch (err) {
+      throw cmdError(err.code || 'E_INVALID_VECTOR', `节点 "${node.id}" 的矢量路径语法或属性非法: ${err.message}`, {
+        commandIndex: cmdIdx, nodeId: node.id, field: err.field || (node.points !== undefined ? 'points' : 'content'),
+      });
+    }
+  }
+  if(!historical){assertCanvasNodeType(node,{commandIndex:cmdIdx});if(!node.component)assertKnownNodeEffects(node,node,{commandIndex:cmdIdx,nodeId:node.id});}
+  for (const key of ['children','states']) if (node[key] !== undefined && !Array.isArray(node[key])) throw cmdError('E_INVALID_NODE', `${key}需要数组`, {commandIndex:cmdIdx,nodeId:node.id,field:key});
+  for (const child of node.children || []) validateAuthoredTree(child,cmdIdx,{historical});
+  for (const state of node.states || []) {if(!state?.id || !state.root) throw cmdError('E_INVALID_NODE','状态需要id和root',{commandIndex:cmdIdx,nodeId:node.id});validateAuthoredTree(state.root,cmdIdx,{historical});}
+  if (node.template) validateAuthoredTree(node.template,cmdIdx,{historical});
+}
+
+// 同一事务内显式设定过宽度（resizeNode/setProperties w）的标记；不可枚举，不进内容哈希，
+// structuredClone 天然丢弃，作用域即当前事务。显式自动宽度据此尊重事务内宽度。
+function markExplicitWidth(node) {
+  try {
+    Object.defineProperty(node, '_explicitWSet', { value: true, enumerable: false, configurable: true });
+  } catch {}
+}
+
+export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cachedIndex = null, contractEvolutionResults = null, sceneOptions = {}) {
+  const checkInteraction = (spec, nodeId) => sceneOptions.interactionValidationQueue ? sceneOptions.interactionValidationQueue.push({spec: structuredClone(spec), cmdIdx, nodeId}) : validateInteractionAssignments(spec, doc, cmdIdx, nodeId);
   if (cmd && typeof cmd === 'object' && !cmd.type && typeof cmd.cmd === 'string') {
     // 常见笔误：把命令种类写成 cmd。做别名而不是让人猜。
     cmd = { ...cmd, type: cmd.cmd };
@@ -248,10 +446,33 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
     );
   }
   const index = cachedIndex || buildNodeIndex(doc);
+  validateCommandFields(cmd, cmdIdx);
   const pageScope = cmd.pageId || preferredPageId;
+  if (pageScope && !doc.pages.some(page=>page.id===pageScope) && cmd.type!=='addPage') throw cmdError('E_PAGE_NOT_FOUND',`页面不存在：${pageScope}`,{commandIndex:cmdIdx,field:'pageId'});
+  for (const tree of [cmd.node,cmd.root,cmd.component?.root,...(cmd.nodes || [])]) if(tree) validateAuthoredTree(tree,cmdIdx);
+  for (const key of ['children','states','template']) {
+    const value=(cmd.properties||cmd.props)?.[key];
+    if (value === undefined) continue;
+    if (key==='template') validateAuthoredTree(value,cmdIdx);
+    else if(!Array.isArray(value)) throw cmdError('E_INVALID_NODE',`${key}需要数组`,{commandIndex:cmdIdx,field:key});
+    else for(const item of value) validateAuthoredTree(key==='states'?item.root:item,cmdIdx);
+  }
   const affectedIds = [];
 
   switch (cmd.type) {
+    case 'restoreDocument': {
+      const snapshot = cmd.document;
+      if (!snapshot || snapshot.documentId !== doc.documentId) throw cmdError('E_DOCUMENT_ID_MISMATCH','恢复源必须属于当前工程',{commandIndex:cmdIdx});
+      if (snapshot.schemaVersion !== doc.schemaVersion || !snapshot.pages?.length || computeContentHash(snapshot)!==cmd.expectedContentHash) throw cmdError('E_VERSION_CORRUPT','恢复快照格式或内容哈希不一致',{commandIndex:cmdIdx});
+      const previewHash=sha256(canonicalJson({current:computeContentHash(doc),version:cmd.versionId,target:sha256(canonicalJson(snapshot))}));
+      if(previewHash!==cmd.previewHash)throw cmdError('E_VERSION_PREVIEW_STALE','恢复预览不再匹配当前内容',{commandIndex:cmdIdx});
+      for(const page of snapshot.pages) validateAuthoredTree(page.root,cmdIdx,{historical:true});
+      const revision=doc.revision;
+      for(const key of Object.keys(doc))delete doc[key];
+      Object.assign(doc,structuredClone(snapshot),{revision});
+      affectedIds.push(...doc.pages.map(page=>page.id));
+      break;
+    }
     case 'registerAsset': {
       const asset = cmd.asset;
       if (!asset || !/^assets\/[a-zA-Z0-9_.-]+$/.test(asset.relativePath || '') || !/^[a-f0-9]{64}$/.test(asset.sha256 || '')
@@ -263,11 +484,21 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
       affectedIds.push(`asset:${asset.relativePath}`);
       break;
     }
+    case 'editNodes': {
+      let primitives;
+      try { primitives = resolveNodeEdits(doc, cmd, preferredPageId); }
+      catch (err) { err.commandIndex = cmdIdx; throw err; }
+      for (const primitive of primitives) affectedIds.push(...applySingleCommand(doc, primitive, cmdIdx, preferredPageId, index, contractEvolutionResults, sceneOptions));
+      break;
+    }
+
     case 'setProperties':
     case 'set-props': {
-      const propsPayload = cmd.properties || cmd.props;
-      const targetInfo = resolveTargetOrSubnode(doc, index, cmd.nodeId, pageScope, cmdIdx);
+      const propsPayload = structuredClone(cmd.properties || cmd.props);
       validatePropertiesObject(propsPayload, cmd.nodeId, cmdIdx);
+      normalizeNodeInteractions(propsPayload);
+      if (propsPayload.on) for (const spec of Object.values(propsPayload.on)) checkInteraction(spec, cmd.nodeId);
+      const targetInfo = resolveTargetOrSubnode(doc, index, cmd.nodeId, pageScope, cmdIdx);
       if (targetInfo.isInstanceSubnode) {
         const inst = targetInfo.instanceEntry.node;
         inst.overrides = inst.overrides || {};
@@ -279,12 +510,13 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
         affectedIds.push(targetInfo.instanceEntry.scopedId);
       } else {
         const { node, scopedId } = targetInfo.entry;
+        if(node.type!=='instance'&&!node.component)assertKnownNodeEffects(node,propsPayload,{commandIndex:cmdIdx,nodeId:scopedId});
         if (node.locked && !('locked' in propsPayload) && !('visible' in propsPayload)) {
           throw cmdError('E_NODE_LOCKED', `节点 "${node.id}" 已锁定，无法修改属性`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
         }
         if (node.type === 'instance' && !cmd.directInstanceProps) {
           // Top-level overrides or instance contract props ($root, state, props, overrides, variant, slots)
-          const directInstKeys = new Set(['x', 'y', 'w', 'h', 'minW', 'maxW', 'minH', 'maxH', 'flex', 'visible', 'locked', 'name', 'state', 'variant', 'props', 'overrides', 'slots', 'on']);
+          const directInstKeys = new Set(['component', 'use', 'x', 'y', 'w', 'h', 'minW', 'maxW', 'minH', 'maxH', 'flex', 'visible', 'locked', 'name', 'state', 'variant', 'props', 'overrides', 'slots', 'on']);
           for (const [k, v] of Object.entries(propsPayload)) {
             if (directInstKeys.has(k)) {
               if (k === 'props' || k === 'overrides') {
@@ -311,6 +543,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
             });
           }
           Object.assign(node, structuredClone(propsPayload));
+          if (typeof node.w === 'number' && propsPayload.w !== undefined) markExplicitWidth(node);
         }
         affectedIds.push(scopedId);
       }
@@ -341,6 +574,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
         affectedIds.push(targetInfo.instanceEntry.scopedId);
       } else {
         const { node, scopedId } = targetInfo.entry;
+        if(node.type!=='instance'&&!node.component)assertKnownNodeEffects(node,{text:cmd.text,...extraProps},{commandIndex:cmdIdx,nodeId:scopedId});
         if (node.locked) {
           throw cmdError('E_NODE_LOCKED', `节点 "${node.id}" 已锁定，无法修改文本`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
         }
@@ -354,16 +588,29 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
         } else {
           node.text = cmd.text;
           Object.assign(node, extraProps);
-          if ((node.type === 'label' || node.type === 'button') && !node.wrap && typeof node.w === 'number') {
+          if (cmd.autoSize === true && (node.type === 'label' || node.type === 'button') && !node.wrap && typeof node.w === 'number') {
             const tm = measureTextBox({ ...node, w: 'hug' }, null);
             const neededW = tm.w + (node.type === 'button' ? 8 : 16);
-            if (neededW > node.w) {
+            // 默认 setText 是纯文字编辑并保留几何。只有调用方显式选择 autoSize
+            // 才允许随文本回缩/加宽；加宽上限仍压在所属画板内（T-A-3）。
+            const nodePage = doc.pages.find(p => p.id === targetInfo.entry.pageId);
+            const nodePreset = nodePage?.device ? (DEVICE_PRESETS[nodePage.device] || DEVICE_PRESETS['iphone-17-pro']) : null;
+            const boardW = nodePage ? Number(nodePage.canvas?.w || nodePreset?.w || 402) : null;
+            const capW = boardW !== null && typeof node.x === 'number' && boardW - node.x >= 16
+              ? boardW - node.x
+              : (boardW !== null ? boardW : null);
+            let newW = neededW;
+            if (capW !== null) newW = Math.min(newW, capW);
+            if (typeof node.minW === 'number') newW = Math.max(newW, node.minW);
+            if (newW < node.w && node._explicitWSet) {
+              // 同一事务内刚被显式设定过宽度的节点，回缩尊重显式宽度（原生导出回填路径）。
+            } else if (newW !== node.w) {
               if (node.align === 'right' && typeof node.x === 'number') {
                 const rightEdge = node.x + node.w;
-                node.w = neededW;
-                node.x = Math.max(0, rightEdge - neededW);
+                node.w = newW;
+                node.x = Math.max(0, rightEdge - newW);
               } else {
-                node.w = neededW;
+                node.w = newW;
               }
             }
           }
@@ -400,6 +647,8 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
 
     case 'moveNode': {
       const targetInfo = resolveTargetOrSubnode(doc, index, cmd.nodeId, pageScope, cmdIdx);
+      assertCoordinateBounds(cmd.x, 'x', cmdIdx, cmd.nodeId);
+      assertCoordinateBounds(cmd.y, 'y', cmdIdx, cmd.nodeId);
       if (targetInfo.isInstanceSubnode) {
         const inst = targetInfo.instanceEntry.node;
         if (inst.locked) {
@@ -420,7 +669,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
         throw cmdError('E_NODE_LOCKED', `节点 "${node.id}" 已锁定，无法移动`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
       }
       const parentLayout = parent?.layout || 'stack';
-      if (parentLayout === 'row' || parentLayout === 'column') {
+      if (['row','column','grid'].includes(parentLayout)) {
         // In auto-layout, dragging changes child order (never silently converts auto-layout to absolute coordinates!)
         if (typeof cmd.targetIndex === 'number' && Array.isArray(parent.children)) {
           const curIdx = parent.children.indexOf(node);
@@ -437,10 +686,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
           );
         }
       } else {
-        if (typeof cmd.x === 'number') node.x = Math.round(cmd.x);
-        else if (typeof cmd.deltaX === 'number') node.x = Math.round(Number(node.x || 0) + cmd.deltaX);
-        if (typeof cmd.y === 'number') node.y = Math.round(cmd.y);
-        else if (typeof cmd.deltaY === 'number') node.y = Math.round(Number(node.y || 0) + cmd.deltaY);
+        applyNodePosition(doc,targetInfo.entry,cmd,sceneOptions);
       }
       affectedIds.push(scopedId);
       break;
@@ -489,6 +735,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
           node.h = Math.max(8, Math.round(cmd.w / ratio));
         }
         node.w = typeof cmd.w === 'number' ? Math.round(cmd.w) : cmd.w;
+        if (typeof node.w === 'number') markExplicitWidth(node);
       }
       if (cmd.h !== undefined) {
         if (cmd.h !== 'fill' && cmd.h !== 'hug' && (typeof cmd.h !== 'number' || cmd.h <= 0)) {
@@ -496,8 +743,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
         }
         node.h = typeof cmd.h === 'number' ? Math.round(cmd.h) : cmd.h;
       }
-      if (typeof cmd.x === 'number') node.x = Math.round(cmd.x);
-      if (typeof cmd.y === 'number') node.y = Math.round(cmd.y);
+      applyNodePosition(doc,targetInfo.entry,cmd,sceneOptions);
 
       const newW = typeof node.w === 'number' ? node.w : oldW;
       const newH = typeof node.h === 'number' ? node.h : oldH;
@@ -536,9 +782,14 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
       const { entry } = resolveTargetOrSubnode(doc, index, cmd.nodeId, pageScope, cmdIdx);
       const { node, parent, scopedId } = entry;
       const targetParent = cmd.parentId ? resolveTargetOrSubnode(doc, index, cmd.parentId, pageScope, cmdIdx).entry.node : parent;
+      // 存量容器可能缺 children 数组（历史 addNode 未补），容器类型就地补齐后再换父
+      if (targetParent && !Array.isArray(targetParent.children) && CONTAINER_TYPES.includes(targetParent.type)) targetParent.children = [];
       if (!targetParent || !Array.isArray(targetParent.children)) {
-        throw cmdError('E_INVALID_PARENT', `目标父容器不支持重排子节点`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
+        throw cmdError('E_INVALID_PARENT', `目标父容器不支持重排子节点；可容纳子节点的类型：${CONTAINER_TYPES.join(', ')}`, { commandIndex: cmdIdx, nodeId: cmd.nodeId, field: 'parentId', extra: { parentType: targetParent?.type ?? null, candidates: CONTAINER_TYPES } });
       }
+      const contains = n => n===targetParent || (n.children||[]).some(contains) || (n.states||[]).some(state=>contains(state.root));
+      if (contains(node)) throw cmdError('E_NODE_CYCLE','不能将节点移入自身或后代',{commandIndex:cmdIdx,nodeId:cmd.nodeId});
+      for (const siblingId of [cmd.beforeId,cmd.afterId]) if(siblingId && !targetParent.children.some(child=>child.id===siblingId && child!==node)) throw cmdError('E_NODE_NOT_FOUND',`目标父容器没有参照兄弟 ${siblingId}`,{commandIndex:cmdIdx,nodeId:siblingId});
       if (parent && Array.isArray(parent.children)) {
         const oldIdx = parent.children.indexOf(node);
         if (oldIdx >= 0) parent.children.splice(oldIdx, 1);
@@ -569,7 +820,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
         nextLayoutProps.layout = mode === 'free' ? 'stack' : mode;
       }
       const allowedLayoutProps = {};
-      for (const k of ['gap', 'padding', 'align', 'justify', 'minW', 'maxW', 'minH', 'maxH', 'w', 'h', 'wrap']) {
+      for (const k of ['gap', 'padding', 'align', 'justify', 'minW', 'maxW', 'minH', 'maxH', 'w', 'h', 'wrap', 'columns', 'columnGap', 'rowGap', 'equalHeight']) {
         if (layoutSpec[k] !== undefined) allowedLayoutProps[k] = layoutSpec[k];
       }
       if (Object.keys(allowedLayoutProps).length > 0) {
@@ -601,7 +852,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
 
     case 'switchLayoutMode': {
       // Explicit mode switch between auto-layout (row/column) and free positioning (stack)
-      const sceneBefore = resolveDocumentScene(doc);
+      const sceneBefore = resolveDocumentScene(doc, sceneOptions);
       const targetInfo = resolveTargetOrSubnode(doc, index, cmd.nodeId, pageScope, cmdIdx);
       const rawMode = cmd.mode || cmd.targetLayout || cmd.layout;
       const targetMode = rawMode === 'free' ? 'stack' : rawMode;
@@ -627,7 +878,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
       if (node.locked) {
         throw cmdError('E_NODE_LOCKED', `节点 "${node.id}" 已锁定，无法切换布局模式`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
       }
-      if (targetMode === 'stack' && (node.layout === 'row' || node.layout === 'column')) {
+      if (targetMode === 'stack' && ['row','column','grid'].includes(node.layout)) {
         // Preserve exact current resolved positions and sizes of children!
         const resContainer = sceneBefore.nodesByScopedId[scopedId];
         if (resContainer && Array.isArray(node.children)) {
@@ -637,8 +888,9 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
             const chScoped = `${entry.scope}/${ch.id}`;
             const resCh = sceneBefore.nodesByScopedId[chScoped];
             if (resCh) {
-              ch.x = resCh.relX;
-              ch.y = resCh.relY;
+              const padding = parsePadding(resContainer.padding);
+              ch.x = resCh.relX-padding[3];
+              ch.y = resCh.relY-padding[0];
               ch.w = resCh.w;
               ch.h = resCh.h;
             }
@@ -658,7 +910,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
         parentNode = parentInfo.entry.node;
         parentScope = parentInfo.entry.scope;
       } else {
-        const pg = (doc.pages || []).find(p => p.id === parentScope) || doc.pages?.[0];
+        const pg = (doc.pages || []).find(p => p.id === parentScope);
         if (!pg) {
           throw cmdError('E_PAGE_NOT_FOUND', `未找到页面 "${parentScope}"`, { commandIndex: cmdIdx, field: 'pageId' });
         }
@@ -669,11 +921,23 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
         throw cmdError('E_INVALID_NODE', `addNode 需要提供 node 对象`, { commandIndex: cmdIdx, field: 'node' });
       }
       const newNode = structuredClone(cmd.node);
-      newNode.type = newNode.type || 'box';
+      normalizeNodeInteractions(newNode);
+      const validateNode = node => {
+        if (!node) return;
+        if (node.on) for (const spec of Object.values(node.on)) checkInteraction(spec, node.id);
+        for (const child of node.children || []) validateNode(child);
+        for (const state of node.states || []) validateNode(state.root);
+        validateNode(node.template);
+      };
+      validateNode(newNode);
+      newNode.type = (newNode.type === 'svg' || newNode.type === 'sparkline') ? 'path' : (newNode.type || 'box');
+      // 容器类型必须带 children 数组，否则 reorderNode 换父会被 E_INVALID_PARENT 拒收
+      if (['box', 'card', 'phone-shell'].includes(newNode.type)) newNode.children = Array.isArray(newNode.children) ? newNode.children : [];
+      validatePropertiesObject(Object.fromEntries(Object.entries(newNode).filter(([key]) => !['type','id','sourcePointer'].includes(key))), newNode.id, cmdIdx,{creation:true});
       if (!VALID_NODE_TYPES.has(newNode.type)) {
-        throw cmdError('E_NODE_TYPE', `未知的节点类型 "${newNode.type}"`, { commandIndex: cmdIdx, field: 'node.type' });
+        throw cmdError('E_NODE_TYPE', `未知的节点类型 "${newNode.type}"；可用类型：${[...VALID_NODE_TYPES].join(', ')}`, { commandIndex: cmdIdx, field: 'node.type', extra: { candidates: [...VALID_NODE_TYPES].sort() } });
       }
-      newNode.id = newNode.id || `${newNode.type}_${Date.now().toString(36)}`;
+      if (!newNode.id) {const base=`${newNode.type}_r${doc.revision+1}_${cmdIdx}`;newNode.id=base;let n=2;while(index.byScopedId.has(`${parentScope}/${newNode.id}`))newNode.id=`${base}_${n++}`;}
       newNode.name = newNode.name || newNode.id;
       parentNode.children = parentNode.children || [];
       const idx = typeof cmd.index === 'number'
@@ -749,12 +1013,9 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
       if (!parent || !Array.isArray(parent.children)) {
         throw cmdError('E_INVALID_PARENT', `无法复制根节点`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
       }
-      const clone = structuredClone(node);
-      const baseId = cmd.newId || `${node.id}_copy`;
-      let finalId = baseId;
-      let n = 2;
-      while (index.byId.has(finalId)) finalId = `${baseId}_${n++}`;
-      clone.id = finalId;
+      const clone = materializeNodeSnapshots({ doc, nodes: [node], pageId: entry.pageId, sourcePageId: entry.pageId,
+        firstId: cmd.newId, offset: { x: 0, y: 0 } })[0];
+      const finalId = clone.id;
       clone.name = cmd.newName || `${node.name || node.id} 副本`;
       if ((parent.layout || 'stack') === 'stack') {
         clone.x = Number(clone.x || 0) + Number(cmd.offset?.x ?? 16);
@@ -763,6 +1024,37 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
       parent.children.splice(pos + 1, 0, clone);
       if (!index.byId.has(finalId)) index.byId.set(finalId, [{ node: clone, id: finalId }]);
       affectedIds.push(`${entry.scope}/${clone.id}`);
+      break;
+    }
+
+    case 'pasteNodes': {
+      const pageId = cmd.pageId || pageScope || doc.pages[0]?.id;
+      const page = doc.pages.find(item => item.id === pageId);
+      if (!page) throw cmdError('E_PAGE_NOT_FOUND', `页面不存在：${pageId}`);
+      if (cmd.sourceDocumentId && cmd.sourceDocumentId !== doc.documentId) throw cmdError('E_CLIPBOARD_DOCUMENT', '此剪贴板属于其他工程，请先导入对应资源与组件');
+      let parent = page.root?.type === 'phone-shell' ? page.root.children[0] : page.root;
+      let position = cmd.index;
+      if (cmd.parentId || cmd.anchorId) {
+        const target = resolveTargetOrSubnode(doc, index, cmd.parentId || cmd.anchorId, pageId, cmdIdx);
+        if (target.isInstanceSubnode) throw cmdError('E_INVALID_PARENT', '请粘贴到明确的源容器');
+        if (target.entry.pageId !== pageId) throw cmdError('E_INVALID_PARENT', '粘贴目标必须位于指定页面');
+        if (cmd.parentId || CONTAINER_TYPES.includes(target.entry.node.type)) parent = target.entry.node;
+        else { parent = target.entry.parent; position = target.entry.index + 1; }
+      }
+      if (!parent || !CONTAINER_TYPES.includes(parent.type) || parent.locked) throw cmdError('E_INVALID_PARENT', `粘贴目标需要未锁定的普通源容器；可容纳子节点的类型：${CONTAINER_TYPES.join(', ')}`, { commandIndex: cmdIdx, field: 'parentId', extra: { parentType: parent?.type ?? null, parentLocked: parent?.locked ?? null, candidates: CONTAINER_TYPES } });
+      const cloned = materializeNodeSnapshots({ doc, nodes: cmd.nodes, sourcePageId: cmd.sourcePageId, pageId, offset: cmd.offset });
+      parent.children = parent.children || [];
+      if (Number.isInteger(position)) position = Math.max(0, Math.min(position, parent.children.length));
+      for (const node of cloned) {
+        if (!VALID_NODE_TYPES.has(node.type)) throw cmdError('E_NODE_TYPE', `未知的粘贴节点类型 ${node.type}；可用类型：${[...VALID_NODE_TYPES].join(', ')}`, { commandIndex: cmdIdx, field: 'node.type', extra: { candidates: [...VALID_NODE_TYPES].sort() } });
+        parent.children.splice(Number.isInteger(position) ? position++ : parent.children.length, 0, node);
+        affectedIds.push(`${pageId}/${node.id}`);
+      }
+      break;
+    }
+
+    case 'recordDesignDecision': {
+      affectedIds.push(...recordDesignDecision(doc, cmd));
       break;
     }
 
@@ -867,6 +1159,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
         validatePropertiesObject(cmd.properties, compId, cmdIdx);
         const subId = cmd.subNodeId;
         if (!subId || subId === '$root' || subId === comp.root.id) {
+          assertKnownNodeEffects(comp.root,cmd.properties,{commandIndex:cmdIdx,nodeId:`component:${compId}/${comp.root.id}`});
           Object.assign(comp.root, structuredClone(cmd.properties));
         } else {
           const findSub = n => {
@@ -882,6 +1175,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
           if (!subNode) {
             throw cmdError('E_NODE_NOT_FOUND', `组件 "${compId}" 中未找到子节点 "${subId}"`, { commandIndex: cmdIdx, nodeId: subId });
           }
+          assertKnownNodeEffects(subNode,cmd.properties,{commandIndex:cmdIdx,nodeId:`component:${compId}/${subId}`});
           Object.assign(subNode, structuredClone(cmd.properties));
         }
       }
@@ -1015,7 +1309,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
 
     case 'detachInstance':
     case 'detachMacro': {
-      const sceneBefore = resolveDocumentScene(doc);
+      const sceneBefore = resolveDocumentScene(doc, sceneOptions);
       const targetInfo = resolveTargetOrSubnode(doc, index, cmd.nodeId, pageScope, cmdIdx);
       const entry = targetInfo.isInstanceSubnode ? targetInfo.instanceEntry : targetInfo.entry;
       const { node, parent, index: pos, scopedId } = entry;
@@ -1125,66 +1419,39 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
     case 'dataset-op':
     case 'datasetOp': {
       const op = cmd.op || cmd.operation || 'add';
-      if (cmd.dataset) {
-        doc.datasets = doc.datasets || {};
-        doc.datasets[cmd.dataset] = doc.datasets[cmd.dataset] || { columns: [], rows: [] };
-        const ds = doc.datasets[cmd.dataset];
-        ds.rows = Array.isArray(ds.rows) ? ds.rows : [];
-        if (op === 'add') {
-          ds.rows.push(structuredClone(cmd.row || cmd.item || {}));
-        } else if (op === 'replace-all') {
-          ds.rows = structuredClone(cmd.rows || []);
-        } else if (op === 'update') {
-          const matchKey = cmd.matchKey || 'id';
-          for (const r of ds.rows) {
-            if (cmd.matchValue === undefined || String(r[matchKey]) === String(cmd.matchValue)) {
-              Object.assign(r, structuredClone(cmd.patch || cmd.row || {}));
-            }
-          }
-        } else if (op === 'delete') {
-          const matchKey = cmd.matchKey || 'id';
-          ds.rows = ds.rows.filter(r => String(r[matchKey]) !== String(cmd.matchValue));
-        } else if (op === 'filter') {
-          ds.activeFilter = cmd.filter || cmd.query || null;
-        } else if (op === 'sort') {
-          ds.activeSort = cmd.sort || null;
-          const sortField = cmd.sort?.field || cmd.field;
-          const sortDir = (cmd.sort?.direction || cmd.direction) === 'desc' ? -1 : 1;
-          if (sortField) {
-            ds.rows.sort((a, b) => (a[sortField] > b[sortField] ? sortDir : a[sortField] < b[sortField] ? -sortDir : 0));
-          }
-        }
-        affectedIds.push(`dataset:${cmd.dataset}`);
-        break;
+      if(op==='filter') throw cmdError('E_DATASET_FILTER_UNSUPPORTED','datasetOp.filter没有运行态消费；筛选repeater请用repeaterSetFilter，运行中筛选请用dataset-filter交互',{commandIndex:cmdIdx,field:'op'});
+      if(op==='sort' && !cmd.sort?.field && !cmd.field) throw cmdError('E_SORT_FIELD','排序需要field或sort.field',{commandIndex:cmdIdx,field:'sort'});
+      let rows,writeRows;
+      const bindDataset=name=>{
+        doc.datasets=doc.datasets||{};doc.datasets[name]=doc.datasets[name]||{columns:[],rows:[]};
+        const dataset=doc.datasets[name];
+        rows=Array.isArray(dataset)?dataset:Array.isArray(dataset.rows)?dataset.rows:[];
+        writeRows=value=>{if(Array.isArray(dataset))doc.datasets[name]=value;else dataset.rows=value;};
+        affectedIds.push(`dataset:${name}`);
+      };
+      if(cmd.dataset)bindDataset(cmd.dataset);
+      else{
+        const target=resolveTargetOrSubnode(doc,index,cmd.nodeId||cmd.targetId,pageScope,cmdIdx);
+        const {node,scopedId}=target.entry||target.instanceEntry;
+        if(node.type!=='repeater')throw cmdError('E_REPEATER_REQUIRED','按节点修改数据需要repeater；其他数据集请明确dataset',{commandIndex:cmdIdx,nodeId:cmd.nodeId||cmd.targetId});
+        const datasetName=node.dataset||node.source;
+        if(datasetName&&doc.datasets?.[datasetName])bindDataset(datasetName);
+        else{rows=Array.isArray(node.rows)?node.rows:[];writeRows=value=>{node.rows=value;};}
+        affectedIds.push(scopedId);
       }
-      const targetInfo = resolveTargetOrSubnode(doc, index, cmd.nodeId || cmd.targetId, pageScope, cmdIdx);
-      const { node, scopedId } = targetInfo.entry || targetInfo.instanceEntry;
-      node.data = Array.isArray(node.data) ? node.data : [];
-      if (op === 'add') {
-        node.data.push(structuredClone(cmd.row || cmd.item || {}));
-      } else if (op === 'replace-all') {
-        node.data = structuredClone(cmd.rows || []);
-      } else if (op === 'update') {
-        const matchKey = cmd.matchKey || 'id';
-        for (const r of node.data) {
-          if (cmd.matchValue === undefined || String(r[matchKey]) === String(cmd.matchValue)) {
-            Object.assign(r, structuredClone(cmd.patch || cmd.row || {}));
-          }
-        }
-      } else if (op === 'delete') {
-        const matchKey = cmd.matchKey || 'id';
-        node.data = node.data.filter(r => String(r[matchKey]) !== String(cmd.matchValue));
-      } else if (op === 'filter') {
-        node.activeFilter = cmd.filter || null;
-      } else if (op === 'sort') {
-        node.activeSort = cmd.sort || null;
-        if (cmd.sort?.field) {
-          const dir = cmd.sort.direction === 'desc' ? -1 : 1;
-          const fld = cmd.sort.field;
-          node.data.sort((a, b) => (a[fld] > b[fld] ? dir : a[fld] < b[fld] ? -dir : 0));
-        }
+      let next=structuredClone(rows);
+      if(op==='add')next.push(structuredClone(cmd.row||cmd.item||{}));
+      else if(op==='replace-all')next=structuredClone(cmd.rows||[]);
+      else if(op==='update'){
+        const key=cmd.matchKey||'id';
+        for(const row of next)if(cmd.matchValue===undefined||String(row[key])===String(cmd.matchValue))Object.assign(row,structuredClone(cmd.patch||cmd.row||{}));
+      }else if(op==='delete'){
+        const key=cmd.matchKey||'id';next=next.filter(row=>String(row[key])!==String(cmd.matchValue));
+      }else if(op==='sort'){
+        const field=cmd.sort?.field||cmd.field,dir=(cmd.sort?.direction||cmd.direction)==='desc'?-1:1;
+        next.sort((a,b)=>a[field]>b[field]?dir:a[field]<b[field]?-dir:0);
       }
-      affectedIds.push(scopedId);
+      writeRows(next);
       break;
     }
 
@@ -1265,6 +1532,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
           if (targetInfo.entry.node.locked) {
             throw cmdError('E_NODE_LOCKED', `节点 "${targetInfo.entry.node.id}" 已锁定，无法修改字体`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
           }
+          assertKnownNodeEffects(targetInfo.entry.node,fontProps,{commandIndex:cmdIdx,nodeId:targetInfo.entry.scopedId});
           Object.assign(targetInfo.entry.node, fontProps);
           affectedIds.push(targetInfo.entry.scopedId);
         }
@@ -1274,10 +1542,12 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
       break;
     }
 
+    case 'removeInteraction':
     case 'setInteraction': {
       const targetInfo = resolveTargetOrSubnode(doc, index, cmd.nodeId, pageScope, cmdIdx);
       const ev = cmd.event || 'click';
-      const rawActs = cmd.actions !== undefined ? cmd.actions : cmd.action;
+      if (cmd.type !== 'removeInteraction') checkInteraction(cmd.actions !== undefined ? cmd.actions : cmd.action, cmd.nodeId);
+      const rawActs = cmd.type === 'removeInteraction' ? null : cmd.actions !== undefined ? cmd.actions : cmd.action;
       let normalizedActs = null;
       if (rawActs !== null && rawActs !== undefined && rawActs !== '') {
         const list = Array.isArray(rawActs) ? rawActs : [rawActs];
@@ -1324,6 +1594,329 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
       break;
     }
 
+    case 'editPath': {
+      const targetInfo = resolveTargetOrSubnode(doc, index, cmd.nodeId, pageScope, cmdIdx);
+      const isSub = targetInfo.isInstanceSubnode;
+      const inst = isSub ? targetInfo.instanceEntry.node : null;
+      const entry = isSub ? targetInfo.instanceEntry : targetInfo.entry;
+      const targetNode = isSub
+        ? (() => {
+            const comp = doc.components?.[inst.component];
+            const findSub = n => {
+              if (!n) return null;
+              if (n.id === targetInfo.subNodeId) return n;
+              for (const ch of n.children || []) {
+                const found = findSub(ch);
+                if (found) return found;
+              }
+              return null;
+            };
+            const baseSub = findSub(comp?.root);
+            if (!baseSub) throw cmdError('E_NODE_NOT_FOUND', `未找到实例子节点 "${cmd.nodeId}"`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
+            return { ...structuredClone(baseSub), ...(inst.overrides?.[targetInfo.subNodeId] || {}) };
+          })()
+        : entry.node;
+
+      if ((isSub && inst.locked) || (!isSub && targetNode.locked)) {
+        throw cmdError('E_NODE_LOCKED', `节点 "${cmd.nodeId}" 已锁定，无法编辑路径`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
+      }
+      if (targetNode.type !== 'path') {
+        throw cmdError('E_INVALID_NODE_TYPE', `editPath 仅适用于 path 矢量节点，当前节点 "${cmd.nodeId}" 类型为 "${targetNode.type}"`, {
+          commandIndex: cmdIdx,
+          nodeId: cmd.nodeId,
+          field: 'nodeId',
+        });
+      }
+
+      let spec;
+      try {
+        spec = normalizeVectorNodeSpec(targetNode);
+      } catch (err) {
+        throw cmdError(err.code || 'E_INVALID_VECTOR', err.message, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
+      }
+
+      let subpaths = structuredClone(spec.subpaths || []);
+      let fillRule = cmd.fillRule || spec.fillRule || 'nonzero';
+      let strokeLinecap = cmd.strokeLinecap || spec.strokeLinecap || 'round';
+      let strokeLinejoin = cmd.strokeLinejoin || spec.strokeLinejoin || 'round';
+      let strokeDasharray = cmd.strokeDasharray !== undefined ? cmd.strokeDasharray : spec.strokeDasharray;
+      let transform = cmd.transform !== undefined ? cmd.transform : spec.transform;
+
+      const op = cmd.operation || (
+        cmd.svg ? 'import-svg' :
+        cmd.d || cmd.subpaths || cmd.points ? 'set-subpaths' :
+        cmd.bakeTransform ? 'bake-transform' :
+        cmd.dx !== undefined || cmd.dy !== undefined ? 'move-point' :
+        cmd.pointIndex !== undefined && (cmd.x !== undefined || cmd.y !== undefined || cmd.point) ? 'set-point' :
+        'set-subpaths'
+      );
+
+      if (op === 'import-svg' || typeof cmd.svg === 'string') {
+        const parsedSvg = parseSvgMarkup(cmd.svg || cmd.d || '');
+        subpaths = parsedSvg.subpaths;
+        if (parsedSvg.fillRule && !cmd.fillRule) fillRule = parsedSvg.fillRule;
+        if (parsedSvg.strokeLinecap && !cmd.strokeLinecap) strokeLinecap = parsedSvg.strokeLinecap;
+        if (parsedSvg.strokeLinejoin && !cmd.strokeLinejoin) strokeLinejoin = parsedSvg.strokeLinejoin;
+        if (parsedSvg.strokeDasharray && cmd.strokeDasharray === undefined) strokeDasharray = parsedSvg.strokeDasharray;
+        if (!isSub) {
+          if (parsedSvg.extractedFill && !targetNode.fill) targetNode.fill = parsedSvg.extractedFill;
+          if (parsedSvg.extractedStroke && !targetNode.stroke) targetNode.stroke = parsedSvg.extractedStroke;
+          if (parsedSvg.extractedStrokeWidth !== null && targetNode.strokeWidth === undefined) {
+            targetNode.strokeWidth = parsedSvg.extractedStrokeWidth;
+          }
+        }
+      } else if (op === 'set-subpaths') {
+        if (typeof cmd.d === 'string') {
+          subpaths = parseSvgPathD(cmd.d);
+        } else if (Array.isArray(cmd.subpaths)) {
+          subpaths = normalizeVectorNodeSpec({ points: { subpaths: cmd.subpaths, fillRule } }).subpaths;
+        } else if (cmd.points !== undefined) {
+          const nextSpec = normalizeVectorNodeSpec({ points: cmd.points, w: targetNode.w, h: targetNode.h, smooth: cmd.smooth ?? targetNode.smooth });
+          subpaths = nextSpec.subpaths;
+          if (nextSpec.fillRule && !cmd.fillRule) fillRule = nextSpec.fillRule;
+        }
+      } else if (op === 'set-point' || op === 'move-point') {
+        const sIdx = cmd.subpathIndex ?? 0;
+        const pIdx = cmd.pointIndex ?? 0;
+        const sp = subpaths[sIdx];
+        if (!sp || !sp.points?.[pIdx]) {
+          throw cmdError('E_VECTOR_POINT_RANGE', `控制点索引越界: subpathIndex=${sIdx}, pointIndex=${pIdx}`, {
+            commandIndex: cmdIdx,
+            nodeId: cmd.nodeId,
+          });
+        }
+        const pt = sp.points[pIdx];
+        const handle = cmd.handle || 'anchor';
+        if (cmd.point && typeof cmd.point === 'object') {
+          sp.points[pIdx] = normalizeVectorNodeSpec({ points: { subpaths: [{ closed: sp.closed, points: [cmd.point] }] } }).subpaths[0].points[0];
+        } else if (handle === 'anchor') {
+          const nx = op === 'move-point' ? pt.x + Number(cmd.dx || 0) : Number(cmd.x ?? pt.x);
+          const ny = op === 'move-point' ? pt.y + Number(cmd.dy || 0) : Number(cmd.y ?? pt.y);
+          const deltaX = nx - pt.x;
+          const deltaY = ny - pt.y;
+          pt.x = Math.round(nx * 1000) / 1000;
+          pt.y = Math.round(ny * 1000) / 1000;
+          if (pt.in) {
+            pt.in.x = Math.round((pt.in.x + deltaX) * 1000) / 1000;
+            pt.in.y = Math.round((pt.in.y + deltaY) * 1000) / 1000;
+          }
+          if (pt.out) {
+            pt.out.x = Math.round((pt.out.x + deltaX) * 1000) / 1000;
+            pt.out.y = Math.round((pt.out.y + deltaY) * 1000) / 1000;
+          }
+        } else {
+          const curHandle = pt[handle] || { x: pt.x, y: pt.y };
+          const nx = op === 'move-point' ? curHandle.x + Number(cmd.dx || 0) : Number(cmd.x ?? curHandle.x);
+          const ny = op === 'move-point' ? curHandle.y + Number(cmd.dy || 0) : Number(cmd.y ?? curHandle.y);
+          pt[handle] = {
+            x: Math.round(nx * 1000) / 1000,
+            y: Math.round(ny * 1000) / 1000,
+          };
+          if (handle === 'q' && pIdx > 0) {
+            const prev = sp.points[pIdx - 1];
+            prev.out = {
+              x: Math.round((prev.x + (2 / 3) * (nx - prev.x)) * 1000) / 1000,
+              y: Math.round((prev.y + (2 / 3) * (ny - prev.y)) * 1000) / 1000,
+            };
+            pt.in = {
+              x: Math.round((pt.x + (2 / 3) * (nx - pt.x)) * 1000) / 1000,
+              y: Math.round((pt.y + (2 / 3) * (ny - pt.y)) * 1000) / 1000,
+            };
+          }
+        }
+      } else if (op === 'insert-point') {
+        const sIdx = cmd.subpathIndex ?? 0;
+        const sp = subpaths[sIdx];
+        if (!sp || !Array.isArray(sp.points)) {
+          throw cmdError('E_VECTOR_POINT_RANGE', `子路径索引越界: subpathIndex=${sIdx}`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
+        }
+        const newPt = cmd.point
+          ? normalizeVectorNodeSpec({ points: { subpaths: [{ closed: false, points: [cmd.point] }] } }).subpaths[0].points[0]
+          : { x: Number(cmd.x || 0), y: Number(cmd.y || 0) };
+        const pIdx = cmd.pointIndex !== undefined ? Math.max(0, Math.min(sp.points.length, cmd.pointIndex)) : sp.points.length;
+        sp.points.splice(pIdx, 0, newPt);
+      } else if (op === 'delete-point') {
+        const sIdx = cmd.subpathIndex ?? 0;
+        const pIdx = cmd.pointIndex ?? 0;
+        const sp = subpaths[sIdx];
+        if (!sp || !sp.points?.[pIdx]) {
+          throw cmdError('E_VECTOR_POINT_RANGE', `控制点索引越界: subpathIndex=${sIdx}, pointIndex=${pIdx}`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
+        }
+        if (sp.points.length <= 2) {
+          throw cmdError('E_VECTOR_DEGENERATE', `子路径至少需要保留 2 个控制点`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
+        }
+        sp.points.splice(pIdx, 1);
+      }
+
+      if (cmd.closed !== undefined && subpaths[cmd.subpathIndex ?? 0]) {
+        subpaths[cmd.subpathIndex ?? 0].closed = Boolean(cmd.closed);
+      }
+      if (cmd.bakeTransform && transform) {
+        subpaths = bakeVectorTransform(subpaths, transform, {
+          x: (Number(targetNode.w) || 100) / 2,
+          y: (Number(targetNode.h) || 100) / 2,
+        });
+        transform = null;
+      }
+
+      const nextPointsObj = {
+        subpaths,
+        fillRule,
+        ...(transform ? { transform } : {}),
+        ...(strokeLinecap ? { strokeLinecap } : {}),
+        ...(strokeLinejoin ? { strokeLinejoin } : {}),
+        ...(strokeDasharray ? { strokeDasharray } : {}),
+      };
+      const nextSvgD = subpathsToSvgD(subpaths);
+
+      if (isSub) {
+        inst.overrides = inst.overrides || {};
+        inst.overrides[targetInfo.subNodeId] = {
+          ...(inst.overrides[targetInfo.subNodeId] || {}),
+          points: nextPointsObj,
+          content: nextSvgD,
+          ...(cmd.smooth !== undefined ? { smooth: Boolean(cmd.smooth) } : {}),
+        };
+        affectedIds.push(entry.scopedId);
+      } else {
+        targetNode.points = nextPointsObj;
+        targetNode.content = nextSvgD;
+        if (op === 'import-svg' && subpaths.length > 0) {
+          // 导入 SVG 会用解析出的子路径整体替换内容；盒尺寸必须跟随新内容，
+          // 否则路径按旧盒子裁切/显示。与 booleanPathOp 一样按局部坐标取整。
+          const bounds = computeVectorBounds(subpaths);
+          targetNode.w = Math.max(1, Math.ceil(bounds.maxX || bounds.width || 1));
+          targetNode.h = Math.max(1, Math.ceil(bounds.maxY || bounds.height || 1));
+        }
+        if (cmd.smooth !== undefined) targetNode.smooth = Boolean(cmd.smooth);
+        affectedIds.push(entry.scopedId);
+      }
+      break;
+    }
+
+    case 'booleanPathOp': {
+      const op = cmd.op || cmd.operation;
+      const pairIds = Array.isArray(cmd.nodeIds) && cmd.nodeIds.length === 2
+        ? cmd.nodeIds
+        : [cmd.targetId, cmd.clipId].filter(Boolean);
+      if (!op || pairIds.length !== 2) {
+        throw cmdError('E_VECTOR_BOOLEAN_ARGS', `booleanPathOp 需要 op (union/subtract/intersect/exclude) 与两个目标路径节点 (nodeIds 或 targetId+clipId)`, {
+          commandIndex: cmdIdx,
+        });
+      }
+      const infoA = resolveTargetOrSubnode(doc, index, pairIds[0], pageScope, cmdIdx);
+      const infoB = resolveTargetOrSubnode(doc, index, pairIds[1], pageScope, cmdIdx);
+      if (infoA.isInstanceSubnode || infoB.isInstanceSubnode) {
+        throw cmdError('E_VECTOR_BOOLEAN_SCOPE', `booleanPathOp 需要直接作用于两个可编辑 path 源节点`, { commandIndex: cmdIdx });
+      }
+      const nodeA = infoA.entry.node;
+      const nodeB = infoB.entry.node;
+      if (nodeA.locked || nodeB.locked) {
+        throw cmdError('E_NODE_LOCKED', `参与布尔运算的节点已锁定`, { commandIndex: cmdIdx, nodeId: nodeA.locked ? nodeA.id : nodeB.id });
+      }
+      if (nodeA.type !== 'path' || nodeB.type !== 'path') {
+        throw cmdError('E_INVALID_NODE_TYPE', `booleanPathOp 要求两个节点均为 path 类型`, {
+          commandIndex: cmdIdx,
+          nodeId: nodeA.type !== 'path' ? nodeA.id : nodeB.id,
+        });
+      }
+
+      const specA = normalizeVectorNodeSpec(nodeA);
+      const specB = normalizeVectorNodeSpec(nodeB);
+      const oxA = Number(nodeA.x || 0);
+      const oyA = Number(nodeA.y || 0);
+      const oxB = Number(nodeB.x || 0);
+      const oyB = Number(nodeB.y || 0);
+      const sameOrigin = oxA === oxB && oyA === oyB;
+
+      const worldSubpathsA = sameOrigin ? specA.subpaths : bakeVectorTransform(specA.subpaths, [1, 0, 0, 1, oxA, oyA]);
+      const worldSubpathsB = sameOrigin ? specB.subpaths : bakeVectorTransform(specB.subpaths, [1, 0, 0, 1, oxB, oyB]);
+
+      let boolResult;
+      try {
+        boolResult = booleanVectorPaths(
+          op,
+          { points: { subpaths: worldSubpathsA, fillRule: specA.fillRule } },
+          { points: { subpaths: worldSubpathsB, fillRule: specB.fillRule } },
+          { allowSelfIntersection: Boolean(cmd.allowSelfIntersection) }
+        );
+      } catch (err) {
+        throw cmdError(err.code || 'E_VECTOR_BOOLEAN_FAILED', err.message, {
+          commandIndex: cmdIdx,
+          nodeId: nodeA.id,
+          extra: { intersections: err.intersections, subpathIndex: err.subpathIndex },
+        });
+      }
+
+      let finalSubpaths = boolResult.subpaths;
+      let nextX = oxA;
+      let nextY = oyA;
+      let nextW = Math.max(8, Number(nodeA.w || 100), Math.ceil(boolResult.bounds.maxX || 0));
+      let nextH = Math.max(8, Number(nodeA.h || 100), Math.ceil(boolResult.bounds.maxY || 0));
+
+      if (!sameOrigin && finalSubpaths.length > 0) {
+        nextX = Math.round(boolResult.bounds.minX);
+        nextY = Math.round(boolResult.bounds.minY);
+        finalSubpaths = bakeVectorTransform(finalSubpaths, [1, 0, 0, 1, -nextX, -nextY]);
+        const localBounds = computeVectorBounds(finalSubpaths);
+        nextW = Math.max(8, Math.ceil(localBounds.maxX || localBounds.width || 24));
+        nextH = Math.max(8, Math.ceil(localBounds.maxY || localBounds.height || 24));
+      }
+
+      const finalSvgD = subpathsToSvgD(finalSubpaths);
+      const finalPointsObj = {
+        subpaths: finalSubpaths,
+        fillRule: boolResult.fillRule,
+        strokeLinecap: specA.strokeLinecap,
+        strokeLinejoin: specA.strokeLinejoin,
+        ...(specA.strokeDasharray ? { strokeDasharray: specA.strokeDasharray } : {}),
+      };
+
+      if (cmd.resultId && cmd.resultId !== nodeA.id) {
+        const parent = infoA.entry.parent;
+        if (!parent || !Array.isArray(parent.children)) {
+          throw cmdError('E_INVALID_PARENT', `无法在根节点同级创建布尔运算结果节点`, { commandIndex: cmdIdx });
+        }
+        const created = {
+          ...structuredClone(nodeA),
+          id: cmd.resultId,
+          name: cmd.name || `${nodeA.name || nodeA.id}_${op}`,
+          type: 'path',
+          x: nextX,
+          y: nextY,
+          w: nextW,
+          h: nextH,
+          points: finalPointsObj,
+          content: finalSvgD,
+        };
+        const posA = parent.children.indexOf(nodeA);
+        parent.children.splice(posA >= 0 ? posA + 1 : parent.children.length, 0, created);
+        if (cmd.keepSources === false) {
+          for (const src of [nodeA, nodeB]) {
+            const p = infoA.entry.parent?.children?.includes(src) ? infoA.entry.parent : infoB.entry.parent;
+            const idx = p?.children?.indexOf(src) ?? -1;
+            if (idx >= 0) p.children.splice(idx, 1);
+          }
+        }
+        affectedIds.push(`${infoA.entry.scope}/${created.id}`);
+      } else {
+        nodeA.x = nextX;
+        nodeA.y = nextY;
+        nodeA.w = nextW;
+        nodeA.h = nextH;
+        nodeA.points = finalPointsObj;
+        nodeA.content = finalSvgD;
+        if (cmd.name) nodeA.name = cmd.name;
+        if (cmd.keepSources === false && infoB.entry.parent && Array.isArray(infoB.entry.parent.children)) {
+          const posB = infoB.entry.parent.children.indexOf(nodeB);
+          if (posB >= 0) infoB.entry.parent.children.splice(posB, 1);
+          affectedIds.push(infoB.entry.scopedId);
+        }
+        affectedIds.push(infoA.entry.scopedId);
+      }
+      break;
+    }
+
     case 'addPage': {
       let pageId = cmd.pageId || cmd.id;
       if (!pageId) {
@@ -1355,10 +1948,10 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
           type: 'box',
           id: `${pageId}_root`,
           name: cmd.name || pageId,
-          layout: 'column',
+          layout: 'stack',
           w,
           h,
-          padding: 24,
+          padding: 0,
           gap: 12,
           fill: '$bg',
           children: [],
@@ -1404,6 +1997,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
         throw cmdError('E_INVALID_VALUE', `reorderPages 需要 pageIds 数组`, { commandIndex: cmdIdx, field: 'pageIds' });
       }
       const map = new Map((doc.pages || []).map(p => [p.id, p]));
+      for (const id of cmd.pageIds) if(!map.has(id)) throw cmdError('E_PAGE_NOT_FOUND',`页面不存在：${id}`,{commandIndex:cmdIdx,field:'pageIds'});
       const nextPages = [];
       for (const id of cmd.pageIds) {
         if (map.has(id)) {
@@ -1458,7 +2052,7 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
 
     case 'generateExplorations': {
       const targetPageId = cmd.pageId || cmd.targetPageId || 'home';
-      const basePage = (doc.pages || []).find(p => p.id === targetPageId) || doc.pages[0];
+      const basePage = (doc.pages || []).find(p => p.id === targetPageId);
       if (!basePage) throw cmdError('E_PAGE_NOT_FOUND', `未找到页面 "${targetPageId}"`, { commandIndex: cmdIdx });
 
       const designBrief = cmd.designBrief || cmd.brief || {
@@ -1551,20 +2145,43 @@ export function applySingleCommand(doc, cmd, cmdIdx, preferredPageId = null, cac
   return affectedIds;
 }
 
+const SAFE_NODE_CACHE_COMMANDS = new Set([
+  'setText', 'setProperties', 'set-props', 'renameNode', 'moveNode',
+  'setLayout', 'setFont', 'setTypography', 'setConstraints',
+  'setInteraction', 'removeInteraction', 'setInstanceVariant',
+  'setInstanceOverride', 'clearInstanceOverride', 'resetInstanceOverride',
+  'setPanelActiveState', 'renamePage', 'resizeArtboard', 'recordDesignDecision',
+]);
+
+const INTERACTION_MUTATING_COMMANDS = new Set([
+  'addNode', 'pasteNodes', 'duplicateNode', 'addPage', 'duplicatePage',
+  'createComponent', 'upsert-component', 'updateComponent',
+  'setInteraction', 'removeInteraction', 'selectExploration', 'restoreDocument',
+]);
+
 export class StudioDocumentStore {
-  constructor(initialDoc, { onCommit = null, maxSnapshots = 120 } = {}) {
+  constructor(initialDoc, { onCommit = null, maxSnapshots = 120, maxHistoryBytes = 8 * 1024 * 1024, projectDir = null } = {}) {
+    this.projectDir = projectDir;
     this.doc = structuredClone(initialDoc);
+    for (const page of this.doc.pages || []) normalizeNodeInteractions(page.root);
+    for (const component of Object.values(this.doc.components || {})) normalizeNodeInteractions(component.root);
+    this.doc.diagnostics = currentDocumentDiagnostics(this.doc);
+    Object.defineProperty(this.doc, '_diagnosticsCurrent', { value: true, enumerable: false, configurable: true });
     this.doc.revision = Number(this.doc.revision || 1);
-    this.doc.contentHash = computeContentHash(this.doc);
+    this.doc.contentHash = computeContentHash(this.doc, { cacheNodes: true });
     this.durableRevision = this.doc.revision;
+    this.lastScene = null;
     this.renderedRevisions = new Map(); // sessionId -> { revision, contentHash, updatedAt, fontsReady, assetsReady }
     this.history = []; // committed transactions
     this.transactions = this.history;
     this.redoStack = [];
+    this.lastHistoryRecord = null;
     this.idempotencyMap = new Map(); // idempotencyKey -> { requestHash, result, timestamp, revision }
     this.idempotencyRecords = this.idempotencyMap;
     this.snapshots = new Map(); // revision -> docClone
     this.maxSnapshots = maxSnapshots;
+    this.maxHistoryBytes = maxHistoryBytes;
+    this.snapshotBytes = new Map();
     this.onCommit = onCommit;
     this._saveSnapshot(this.doc);
   }
@@ -1578,12 +2195,28 @@ export class StudioDocumentStore {
     return this.durableRevision;
   }
 
-  _saveSnapshot(docSnap) {
-    this.snapshots.set(docSnap.revision, structuredClone(docSnap));
-    if (this.snapshots.size > this.maxSnapshots) {
+  _saveSnapshot(docSnap, { alreadyCloned = false } = {}) {
+    const snap = alreadyCloned ? docSnap : structuredClone(docSnap);
+    const bytes = docSnap._approxBytes || Buffer.byteLength(JSON.stringify(docSnap));
+    Object.defineProperty(snap, '_approxBytes', { value: bytes, enumerable: false, configurable: true });
+    this.snapshots.set(docSnap.revision, snap);
+    this.snapshotBytes.set(docSnap.revision, bytes);
+    while (this.snapshots.size > 1 && (this.snapshots.size > this.maxSnapshots || [...this.snapshotBytes.values()].reduce((sum, n) => sum + n, 0) > this.maxHistoryBytes)) {
       const oldest = Math.min(...this.snapshots.keys());
       this.snapshots.delete(oldest);
+      this.snapshotBytes.delete(oldest);
     }
+  }
+
+  trimHistory() {
+    const approx = doc => doc?._approxBytes || Buffer.byteLength(JSON.stringify(doc || {}));
+    const size = tx => tx.snapshotBytes ??= approx(tx.beforeSnapshot) + approx(tx.afterSnapshot);
+    let bytes = [...this.history, ...this.redoStack].reduce((sum, tx) => sum + size(tx), 0);
+    while (this.history.length + this.redoStack.length > 1 && (this.history.length + this.redoStack.length > this.maxSnapshots || bytes > this.maxHistoryBytes)) {
+      const removed = this.history.length ? this.history.shift() : this.redoStack.shift();
+      bytes -= size(removed);
+    }
+    this.historyBytes = bytes;
   }
 
   getSnapshot(revision) {
@@ -1598,6 +2231,23 @@ export class StudioDocumentStore {
       );
     }
     return structuredClone(snap);
+  }
+
+  requestHash(request) {
+    return sha256(canonicalJson({ documentId: this.doc.documentId,
+      ...(request.selectionId ? {selectionId:request.selectionId} : {}),
+      ...(request.sourceIdentity ? { sourceIdentity: request.sourceIdentity } : { commands: request.commands }) }));
+  }
+
+  getIdempotentResult(request) {
+    const key = request.idempotencyKey ? String(request.idempotencyKey) : null;
+    const previous = key && this.idempotencyMap.get(key);
+    if (!previous) return null;
+    if (previous.requestHash !== this.requestHash(request)) return {
+      ok: false, status: 'failed', code: 'E_IDEMPOTENCY_CONFLICT', idempotencyKey: key,
+      originalRevision: previous.revision, message: `幂等键 "${key}" 已被用于不同内容，请使用新的幂等键`,
+    };
+    return { ...structuredClone(previous.result), ok: true, idempotentReplay: true };
   }
 
   applyTransaction(request) {
@@ -1620,30 +2270,11 @@ export class StudioDocumentStore {
     }
 
     const idempotencyKey = request.idempotencyKey ? String(request.idempotencyKey) : null;
-    const reqHash = sha256(canonicalJson({
-      documentId: this.doc.documentId,
-      commands: request.commands,
-    }));
+    const reqHash = this.requestHash(request);
 
     // 2. Check idempotency store BEFORE baseRevision check (Section 7.2 rule!)
-    if (idempotencyKey && this.idempotencyMap.has(idempotencyKey)) {
-      const prev = this.idempotencyMap.get(idempotencyKey);
-      if (prev.requestHash !== reqHash) {
-        return {
-          ok: false,
-          status: 'failed',
-          code: 'E_IDEMPOTENCY_CONFLICT',
-          idempotencyKey,
-          originalRevision: prev.revision,
-          message: `幂等键 "${idempotencyKey}" 已被用于不同命令内容的事务 (r${prev.revision})，拒绝重复混用`,
-        };
-      }
-      return {
-        ...structuredClone(prev.result),
-        ok: true,
-        idempotentReplay: true,
-      };
-    }
+    const replay = this.getIdempotentResult(request);
+    if (replay) return replay;
 
     // 3. Check baseRevision precondition
     if (request.baseRevision !== undefined && request.baseRevision !== null) {
@@ -1673,31 +2304,67 @@ export class StudioDocumentStore {
     }
 
     // 4. Atomic execution on working clone
-    const beforeDoc = structuredClone(this.doc);
-    let beforeScene = null;
-    try {
-      beforeScene = resolveDocumentScene(beforeDoc);
-    } catch {
-      beforeScene = { pages: [] };
+    const beforeDoc = this.doc;
+    let beforeScene = (this.lastScene && this.lastScene.revision === beforeDoc.revision && this.lastScene.contentHash === beforeDoc.contentHash)
+      ? this.lastScene
+      : getLastResolvedScene(beforeDoc);
+    if (!beforeScene) {
+      try {
+        beforeScene = resolveDocumentScene(beforeDoc, { projectDir: this.projectDir });
+      } catch {
+        beforeScene = { pages: [] };
+      }
     }
     const workingDoc = structuredClone(this.doc);
     const allAffected = new Set();
     const contractEvolutionResults = [];
+    const interactionValidationQueue = [];
     let resolvedScene = null;
 
     try {
       let cachedIndex = buildNodeIndex(workingDoc);
+      let needsInteractionNormalize = false;
+      let canInheritNodeCache = true;
       for (let i = 0; i < request.commands.length; i++) {
         const cmd = request.commands[i];
         if (!cachedIndex) cachedIndex = buildNodeIndex(workingDoc);
-        const affected = applySingleCommand(workingDoc, cmd, i, request.pageId || null, cachedIndex, contractEvolutionResults);
+        const affected = applySingleCommand(workingDoc, cmd, i, request.pageId || null, cachedIndex, contractEvolutionResults, { projectDir: this.projectDir, interactionValidationQueue });
         for (const id of affected) allAffected.add(id);
-        if (!NON_STRUCTURAL_COMMANDS.has(cmd.type)) {
+        const props = cmd.properties || cmd.props;
+        if (
+          INTERACTION_MUTATING_COMMANDS.has(cmd.type) ||
+          (props && ('on' in props || 'onClick' in props || 'interactions' in props || 'goto' in props || 'children' in props || 'states' in props || 'template' in props))
+        ) {
+          needsInteractionNormalize = true;
+        }
+        if (
+          !SAFE_NODE_CACHE_COMMANDS.has(cmd.type) ||
+          (props && ('children' in props || 'states' in props || 'template' in props))
+        ) {
+          canInheritNodeCache = false;
+        }
+        if (!NON_STRUCTURAL_COMMANDS.has(cmd.type) || props && ['children', 'states', 'template'].some(key => key in props)) {
           cachedIndex = null;
         }
       }
+      for (const {spec, cmdIdx, nodeId} of interactionValidationQueue) validateInteractionAssignments(spec, workingDoc, cmdIdx, nodeId);
+      if (needsInteractionNormalize) {
+        for (const page of workingDoc.pages || []) normalizeNodeInteractions(page.root);
+        for (const component of Object.values(workingDoc.components || {})) normalizeNodeInteractions(component.root);
+      }
+      finalizeDesignDecisions(workingDoc);
+      if (request.selectionGuard) {
+        const outside = diffDocuments(this.doc, workingDoc, { limit: Infinity }).changes.filter(change => !request.selectionGuard.paths.some(path => path.every((part, index) => change.path[index] === part)));
+        if (outside.length) throw cmdError('E_SELECTION_SCOPE', '修改超出绑定选区，整笔未写入', { extra: { outsidePaths: outside.slice(0, 8).map(change => change.path) } });
+      }
+      workingDoc.diagnostics = currentDocumentDiagnostics(workingDoc);
+      Object.defineProperty(workingDoc, '_diagnosticsCurrent', { value: true, enumerable: false, configurable: true });
+      if (canInheritNodeCache && allAffected.size > 0) {
+        inheritCleanCanonicalCache(beforeDoc, workingDoc, allAffected);
+      }
+      workingDoc.contentHash = computeContentHash(workingDoc, { cacheNodes: true });
       // Verify the entire document resolves cleanly (catches component cycles, size dependency loops, etc.)
-      resolvedScene = resolveDocumentScene(workingDoc);
+      resolvedScene = resolveDocumentScene(workingDoc, { projectDir: this.projectDir });
     } catch (err) {
       return {
         ok: false,
@@ -1706,6 +2373,13 @@ export class StudioDocumentStore {
         failedCommandIndex: err.commandIndex ?? 0,
         nodeId: err.nodeId ?? null,
         field: err.field ?? null,
+        candidates: err.candidates ?? undefined,
+        parentType: err.parentType ?? undefined,
+        parentLocked: err.parentLocked ?? undefined,
+        expected: err.expected ?? undefined,
+        actual: err.actual ?? undefined,
+        outsidePaths: err.outsidePaths ?? undefined,
+        capability: err.capability ?? undefined,
         suggestion: err.suggestion ?? '请修复失败的命令后重新提交整批事务',
         message: err.message,
         currentRevision: this.doc.revision,
@@ -1716,10 +2390,11 @@ export class StudioDocumentStore {
     // 5. Commit transaction & compute transitive impact + semantic diff
     workingDoc.revision = this.doc.revision + 1;
     workingDoc.updatedAt = new Date().toISOString();
-    workingDoc.contentHash = computeContentHash(workingDoc);
     resolvedScene.revision = workingDoc.revision;
     resolvedScene.contentHash = workingDoc.contentHash;
+    this.lastScene = resolvedScene;
 
+    const stackUnplaced = stackUnplacedChildDiagnostics(request.commands, request.pageId);
     const impactReport = computeCommandImpactAndDiff({
       beforeDoc,
       afterDoc: workingDoc,
@@ -1728,11 +2403,30 @@ export class StudioDocumentStore {
       commands: request.commands,
       directAffectedIds: [...allAffected],
       contractEvolutionResults,
+      extraDiagnostics: stackUnplaced,
     });
     const fullAffectedIds = impactReport.transitiveImpact.allAffectedNodeIds.length > 0
       ? impactReport.transitiveImpact.allAffectedNodeIds
       : [...allAffected];
 
+    // 文字截断/溢出风险来自场景级 clipDiagnostics；并入事务 diagnostics，让摘要与明细可定位（T-A-3）。
+    const txDiagnostics = [
+      ...structuredClone(workingDoc.diagnostics || []),
+      ...structuredClone(stackUnplaced),
+      ...(resolvedScene?.clipDiagnostics || []).map(d => ({
+        severity: d.severity || 'warning',
+        code: d.code || 'E_TEXT_CLIP',
+        pageId: d.pageId,
+        nodeId: d.nodeId,
+        scopedId: d.scopedId,
+        message: d.message,
+      })),
+    ];
+
+    const afterSnapshot = structuredClone(workingDoc);
+    if (workingDoc._approxBytes) {
+      Object.defineProperty(afterSnapshot, '_approxBytes', { value: workingDoc._approxBytes, enumerable: false, configurable: true });
+    }
     const txId = `tx_r${workingDoc.revision}_${sha256(`${workingDoc.revision}:${Date.now()}:${idempotencyKey || ''}`).slice(0, 10)}`;
     const txRecord = {
       txId,
@@ -1740,6 +2434,7 @@ export class StudioDocumentStore {
       revision: workingDoc.revision,
       appliedRevision: workingDoc.revision,
       baseRevision: beforeDoc.revision,
+      pageId: request.pageId || null,
       idempotencyKey,
       requestHash: reqHash,
       actor: request.actor || { kind: request.source || 'unknown', id: request.clientId || 'default' },
@@ -1751,18 +2446,19 @@ export class StudioDocumentStore {
       transitiveImpact: impactReport.transitiveImpact,
       semanticDiff: impactReport.semanticDiff,
       humanReadableSummary: impactReport.humanReadableSummary,
-      diagnostics: structuredClone(workingDoc.diagnostics || []),
+      diagnostics: structuredClone(txDiagnostics),
       beforeContentHash: beforeDoc.contentHash,
       afterContentHash: workingDoc.contentHash,
       contentHash: workingDoc.contentHash,
       beforeSnapshot: beforeDoc,
-      afterSnapshot: structuredClone(workingDoc),
+      afterSnapshot,
     };
 
     this.doc = workingDoc;
     this.history.push(txRecord);
     this.redoStack = []; // New forward edit invalidates redo branch
-    this._saveSnapshot(this.doc);
+    this.trimHistory();
+    this._saveSnapshot(afterSnapshot, { alreadyCloned: true });
 
     const result = {
       ok: true,
@@ -1779,7 +2475,7 @@ export class StudioDocumentStore {
       transitiveImpact: impactReport.transitiveImpact,
       semanticDiff: impactReport.semanticDiff,
       humanReadableSummary: impactReport.humanReadableSummary,
-      diagnostics: structuredClone(workingDoc.diagnostics || []),
+      diagnostics: structuredClone(txDiagnostics),
       label: txRecord.label,
       actor: txRecord.actor,
       idempotentReplay: false,
@@ -1834,19 +2530,26 @@ export class StudioDocumentStore {
       };
     }
 
-    this.history.pop();
-    this.redoStack.push(headTx);
-
+    if (!headTx.beforeSnapshot) {
+      return { ok: false, status: 'failed', code: 'E_HISTORY_SNAPSHOT_UNAVAILABLE', currentRevision: this.doc.revision, message: '此历史缺少可恢复的原稿快照，未修改文档；请使用有快照的版本。' };
+    }
+    const beforeSnapshot = structuredClone(this.doc);
     const restored = structuredClone(headTx.beforeSnapshot);
     restored.revision = this.doc.revision + 1;
     restored.updatedAt = new Date().toISOString();
     restored.contentHash = computeContentHash(restored);
+    this.history.pop();
+    this.redoStack.push(headTx);
     this.doc = restored;
     this._saveSnapshot(this.doc);
 
     const undoRecord = {
       txId: `undo_r${this.doc.revision}_${headTx.txId}`,
       kind: 'undo',
+      baseRevision: beforeSnapshot.revision,
+      restoreSnapshotRevision: headTx.beforeSnapshot.revision,
+      beforeSnapshot,
+      afterSnapshot: structuredClone(this.doc),
       undoneTxId: headTx.txId,
       revision: this.doc.revision,
       actor,
@@ -1856,7 +2559,10 @@ export class StudioDocumentStore {
       beforeContentHash: headTx.afterContentHash,
       afterContentHash: this.doc.contentHash,
     };
+    this.lastHistoryRecord = undoRecord;
 
+    const resolvedUndoScene = resolveDocumentScene(this.doc, { projectDir: this.projectDir });
+    this.lastScene = resolvedUndoScene;
     const result = {
       ok: true,
       status: 'completed',
@@ -1866,7 +2572,7 @@ export class StudioDocumentStore {
       durableRevision: this.durableRevision,
       contentHash: this.doc.contentHash,
       affectedNodeIds: headTx.affectedNodeIds,
-      scene: resolveDocumentScene(this.doc),
+      scene: resolvedUndoScene,
     };
 
     if (this.onCommit) {
@@ -1886,19 +2592,25 @@ export class StudioDocumentStore {
         message: `重做冲突：文档当前版本为 r${this.doc.revision}（预期 r${expectedRevision}）`,
       };
     }
-    const nextTx = this.redoStack.pop();
+    const nextTx = this.redoStack.at(-1);
     if (!nextTx) {
       return { status: 'failed', code: 'E_NOTHING_TO_REDO', currentRevision: this.doc.revision, message: '当前没有可重做的事务（或已被新分支覆盖）' };
     }
 
+    if (!nextTx.afterSnapshot) {
+      return { ok: false, status: 'failed', code: 'E_HISTORY_SNAPSHOT_UNAVAILABLE', currentRevision: this.doc.revision, message: '此历史缺少可重做的快照，未修改文档。' };
+    }
+    const beforeSnapshot = structuredClone(this.doc);
     const reapplied = structuredClone(nextTx.afterSnapshot);
     reapplied.revision = this.doc.revision + 1;
     reapplied.updatedAt = new Date().toISOString();
     reapplied.contentHash = computeContentHash(reapplied);
+    this.redoStack.pop();
 
     const pushedTx = {
       ...nextTx,
       revision: reapplied.revision,
+      baseRevision: beforeSnapshot.revision,
       beforeSnapshot: structuredClone(this.doc),
       afterSnapshot: structuredClone(reapplied),
     };
@@ -1909,6 +2621,10 @@ export class StudioDocumentStore {
     const redoRecord = {
       txId: `redo_r${this.doc.revision}_${nextTx.txId}`,
       kind: 'redo',
+      baseRevision: beforeSnapshot.revision,
+      restoreSnapshotRevision: nextTx.afterSnapshot.revision,
+      beforeSnapshot,
+      afterSnapshot: structuredClone(this.doc),
       redoneTxId: nextTx.txId,
       revision: this.doc.revision,
       actor,
@@ -1918,7 +2634,10 @@ export class StudioDocumentStore {
       beforeContentHash: nextTx.beforeContentHash,
       afterContentHash: this.doc.contentHash,
     };
+    this.lastHistoryRecord = redoRecord;
 
+    const resolvedRedoScene = resolveDocumentScene(this.doc, { projectDir: this.projectDir });
+    this.lastScene = resolvedRedoScene;
     const result = {
       ok: true,
       status: 'completed',
@@ -1928,7 +2647,7 @@ export class StudioDocumentStore {
       durableRevision: this.durableRevision,
       contentHash: this.doc.contentHash,
       affectedNodeIds: nextTx.affectedNodeIds,
-      scene: resolveDocumentScene(this.doc),
+      scene: resolvedRedoScene,
     };
 
     if (this.onCommit) {
