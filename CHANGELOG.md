@@ -1,8 +1,11 @@
 # Changelog
 
-- Studio conditional exports now preserve event-level cases and convert branch actions. RP/1 accepts typed `===`/`!==` comparisons without rewriting string literals.
-
 ## Unreleased
+
+- 新增 Studio 自由画布：RP/1 与命令双路线创作、参考设计与局部查询改稿、事务撤销重做、浏览器交互验证、工程包、三方合并、矢量及离线代码导出。
+- 增加原生旋转、原生表单与状态样式；原生回填按 GUID 追踪元件身份，保护宏参数、组件实例与数据绑定。
+- 修复条件导出：保留事件级 cases、转换分支动作，RP/1 接受带类型检查的 `===` / `!==`，保持字符串字面量原样。
+- 补齐公开安装包及浏览器 CI；保留真实模型失败与未完成记录，不再将脚本式 48/48 或旧评分作为真实 AI 成功率。
 
 - 修复 `image.radius/opacity` 在原生与离线预览中被忽略；现代机壳增加局部透明角部遮罩，覆盖前景内容超出内屏圆角的像素。
 - 单 label 的双向居中容器继承文字水平居中，保留显式对齐；tab-bar 新增 `activeVariant/activeIndicator/justify/itemFlex`，接通已有激活/非激活颜色与填充设置。

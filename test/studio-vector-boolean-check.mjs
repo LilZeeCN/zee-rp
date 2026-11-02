@@ -27,6 +27,7 @@ import { launchChrome } from '../studio/cdp.mjs';
 import { decodePng } from '../studio/png-decode.mjs';
 import { JobManager } from '../scripts/jobs.mjs';
 import { spawnSync } from 'node:child_process';
+import { nativeTemplateSkipReason } from './host-capabilities.mjs';
 
 test('V01-1: vector paths, quadratic/cubic curves, holes, transforms, fillRule, SVG interop & hit-testing', async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-v01-doc-'));
@@ -201,7 +202,7 @@ test('V01-2: boolean operations (union / subtract / intersect / exclude) and exp
   );
 });
 
-test('V01-3: RP9 native Shape:300 export, per-node compatibility report, and ControlPoints roundtrip', async () => {
+test('V01-3: RP9 native Shape:300 export, per-node compatibility report, and ControlPoints roundtrip', { skip: nativeTemplateSkipReason() }, async () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-v01-rp-'));
   try {
     const doc = normalizeDocument({

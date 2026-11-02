@@ -575,7 +575,10 @@
     "test/studio-run-scenario-hit-test-check.mjs",
     "test/studio-startup-normalization-check.mjs",
     "test/fixtures/g7-anim.gif",
-    "test/fixtures/g7-transparent.png"
+    "test/fixtures/g7-transparent.png",
+    "benchmarks/studio/real-trial-acceptance.mjs",
+    "test/rp1-macro-lift-check.mjs",
+    "test/rp1-repeater-where-check.mjs"
   ],
   "repository": {
     "type": "git",
