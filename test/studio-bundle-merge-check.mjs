@@ -14,6 +14,7 @@ import {
 import { mergeStudioDocuments } from '../studio/document-merge.mjs';
 import { importToStudioDocument } from '../studio/document.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
+import { nativeTemplateSkipReason } from './host-capabilities.mjs';
 
 // 1x1 Valid PNG
 const TINY_PNG = Buffer.from(
@@ -100,7 +101,7 @@ function createSampleSourceSpec(externalAssetPath) {
               type: 'label',
               role: 'heading',
               text: '海岸田野笔记',
-              fontFamily: 'Georgia',
+              fontFamily: 'Zee Studio Test Sans',
               fontSize: '$headingSize',
               color: '#0F172A',
               w: 350,
@@ -158,7 +159,7 @@ function createSampleSourceSpec(externalAssetPath) {
   };
 }
 
-test('P02: portable project bundle exports full closure, strips absolute paths, detects tampering, and works after deleting original source & project directories', { timeout: 60000 }, async () => {
+test('P02: portable project bundle exports full closure, strips absolute paths, detects tampering, and works after deleting original source & project directories', { timeout: 60000 }, async t => {
   const workRoot = mkdtempSync(join(tmpdir(), 'studio-p02-bundle-'));
   const origSourceDir = join(workRoot, 'orig-source');
   const origProjectDir = join(workRoot, 'orig-project');
@@ -187,7 +188,7 @@ test('P02: portable project bundle exports full closure, strips absolute paths, 
     mkdirSync(join(origProjectDir, 'assets'), { recursive: true });
     writeFileSync(join(origProjectDir, 'assets', 'cover-photo.png'), TINY_PNG);
     mkdirSync(join(origProjectDir, 'fonts'), { recursive: true });
-    cpSync('/System/Library/Fonts/Supplemental/Georgia.ttf', join(origProjectDir, 'fonts', 'Georgia.ttf'));
+    cpSync(new URL('./fixtures/fonts/studio-test-sans.ttf', import.meta.url), join(origProjectDir, 'fonts', 'studio-test-sans.ttf'));
 
     // Update image src to relative assets/cover-photo.png and add a design decision + version
     const rev1 = studio1.store.appliedRevision;
@@ -218,10 +219,10 @@ test('P02: portable project bundle exports full closure, strips absolute paths, 
     // Register local font in doc.fonts.catalog and persist
     studio1.store.doc.fonts = {
       catalog: [
-        { family: 'Georgia', path: 'fonts/Georgia.ttf', source: 'project' },
+        { family: 'Zee Studio Test Sans', path: 'fonts/studio-test-sans.ttf', source: 'project' },
       ],
       fallbacks: {
-        Georgia: ['Songti SC', 'serif'],
+        'Zee Studio Test Sans': ['sans-serif'],
       },
     };
     studio1.persistence.saveFullSnapshot(studio1.store.doc);
@@ -279,7 +280,7 @@ test('P02: portable project bundle exports full closure, strips absolute paths, 
     assert.equal(importRes.ok, true);
     assert.equal(existsSync(join(relocatedProjectDir, 'document.json')), true);
     assert.equal(existsSync(join(relocatedProjectDir, 'assets', 'cover-photo.png')), true);
-    assert.equal(existsSync(join(relocatedProjectDir, 'fonts', 'Georgia.ttf')), true);
+    assert.equal(existsSync(join(relocatedProjectDir, 'fonts', 'studio-test-sans.ttf')), true);
 
     // 6. Start a new Studio server on relocatedProjectDir and verify open, screenshot, edit, scenario, and .rp export
     const started2 = await startStudioServer({
@@ -347,15 +348,17 @@ test('P02: portable project bundle exports full closure, strips absolute paths, 
     assert.equal(scenRes.finalState?.variables?.savedCount, 2);
 
     // Export native .rp on relocated project
-    const outRpPath = join(workRoot, 'relocated.rp');
-    const rpRes = await studioHandlers.studio_export_rp({
-      url: studio2.url,
-      outRpPath,
+    await t.test('relocated project exports native RP9 when the host template is available', { skip: nativeTemplateSkipReason() }, async () => {
+      const outRpPath = join(workRoot, 'relocated.rp');
+      const rpRes = await studioHandlers.studio_export_rp({
+        url: studio2.url,
+        outRpPath,
+      });
+      assert.equal(rpRes.ok, true, JSON.stringify(rpRes));
+      const rpData = readRp(readFileSync(outRpPath));
+      assert.equal(rpData.counts.problems, 0);
+      assert.ok(rpData.pages[0].widgets.some(w => (w.text || '').includes('海岸田野笔记（迁移后编辑）')));
     });
-    assert.equal(rpRes.ok, true, JSON.stringify(rpRes));
-    const rpData = readRp(readFileSync(outRpPath));
-    assert.equal(rpData.counts.problems, 0);
-    assert.ok(rpData.pages[0].widgets.some(w => (w.text || '').includes('海岸田野笔记（迁移后编辑）')));
   } finally {
     if (studio1) await studio1.close();
     if (studio2) await studio2.close();

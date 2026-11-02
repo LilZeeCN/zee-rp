@@ -193,7 +193,11 @@ export async function launchChrome({ headless = true, width = 1440, height = 900
   ];
 
   const ownedOperation=Boolean(process.env.ZEE_STUDIO_OPERATION_DIR);
-  const proc = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'], detached: !ownedOperation });
+  // Linux Chrome puts its singleton socket under TMPDIR (108-byte socket path
+  // limit). Operation-owned temp paths can be much longer; keep the profile
+  // owned by the operation, but use the short system temp root for sockets.
+  const env = process.platform === 'linux' ? { ...process.env, TMPDIR: '/tmp' } : process.env;
+  const proc = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'], detached: !ownedOperation, env });
   const killProcessTree = sig => {
     if(!ownedOperation)try { process.kill(-proc.pid, sig); } catch {}
     try { proc.kill(sig); } catch {}

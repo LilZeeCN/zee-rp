@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import{createServer}from'node:http';import{launchChrome}from'../studio/cdp.mjs';
 import {spawnSync} from 'node:child_process';
-import {mkdtempSync,rmSync,readdirSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,rmSync,readdirSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 
@@ -13,4 +13,12 @@ test('failed browser startup releases its own profile before returning an error'
  const dir=mkdtempSync(join(tmpdir(),'studio-startup-failure-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
  const source=`import {launchChrome} from ${JSON.stringify(new URL('../studio/cdp.mjs',import.meta.url).href)};try{await launchChrome();process.exitCode=1;}catch(error){console.log(JSON.stringify({failed:true,message:error.message}));}`;
  const result=spawnSync(process.execPath,['--input-type=module','-e',source],{env:{...process.env,TMPDIR:dir,CHROME_BIN:process.execPath},encoding:'utf8',timeout:10000});assert.equal(result.status,0,result.stderr);assert(JSON.parse(result.stdout).failed);assert.deepEqual(readdirSync(dir),[]);
+});
+
+test('browser starts with a long operation temp path and removes its private profile', t => {
+ const root=mkdtempSync(join(tmpdir(),'studio-deep-temp-'));t.after(()=>rmSync(root,{recursive:true,force:true}));
+ const dir=join(root,'operation-'.repeat(12),'tmp');mkdirSync(dir,{recursive:true});
+ const source=`import {launchChrome} from ${JSON.stringify(new URL('../studio/cdp.mjs',import.meta.url).href)};const browser=await launchChrome();try{const page=await browser.openPage();console.log(JSON.stringify({ready:await page.evaluate('document.readyState')}));}finally{await browser.close();}`;
+ const result=spawnSync(process.execPath,['--input-type=module','-e',source],{env:{...process.env,TMPDIR:dir},encoding:'utf8',timeout:20000});
+ assert.equal(result.status,0,result.stderr);assert.equal(JSON.parse(result.stdout).ready,'complete');assert.deepEqual(readdirSync(dir),[]);
 });
