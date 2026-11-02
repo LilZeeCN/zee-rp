@@ -252,7 +252,7 @@ RP/1 的 `set-panel-state` 不开放过渡参数；原生编辑工具有独立�
 
 RP/1 默认 `native`；旧 Spec 默认 `gui`，可用 `--backend native|gui` 显式选择。原生路径直接构造 Layer、VectorShape、RichTextBlock 和内嵌 ImageBox，递归装配面板、原生 TextBox 和 Repeater，然后写入事件。
 
-生成依赖 Node、Python/Pillow、字体、本机 RP 9 空白模板；面板、输入和 Repeater 按需使用 RP 9 安装资源。生成不需要运行 Axure、剪贴板、Swift 或 Stage 缓存；真实预览和原生编辑仍使用 Axure。原生图形不是通用 Axvg 导入器，自定义路径、旋转、效果、渐变和不等角圆角拒绝。
+生成依赖 Node、Python/Pillow、字体、本机 RP 9 空白模板；面板、输入和 Repeater 按需使用 RP 9 安装资源。生成不需要运行 Axure、剪贴板、Swift 或 Stage 缓存；真实预览和原生编辑仍使用 Axure。原生图形不是通用 Axvg 导入器，任意自定义路径、效果、渐变和不等角圆角仍受对应后端限制。节点 `rotation`（度）已支持；TextBox 使用原生加载旋转动作，详见 [输入框旋转](native-forms.md#输入框旋转)。
 
 ```sh
 npm run test:language

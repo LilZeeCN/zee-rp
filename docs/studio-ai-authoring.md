@@ -1,6 +1,6 @@
 # AI 在自由画布中用 RP/1 创作与改稿
 
-本地开发快照，2026-10-28，未发布。画布、RP/1 片段、关系命令、截图、状态验证和原生导出使用同一份 Studio 文档；局部片段不替换整个工程。
+开发分支快照，2026-11-02。画布、RP/1 片段、关系命令、截图、状态验证和原生导出使用同一份 Studio 文档；局部片段不替换整个工程。
 
 先调用 `studio_describe({topic:"workflow"})`，按需读取 `rp1`、某个 `command`（或用 `names:["addPage","addNode","setProperties"]` 一次查多个）、`node` 或 `design`。CLI 可用 `node bin/axure.mjs studio describe --topic rp1`，不需要先启动工程，也不需要阅读实现源码。
 
@@ -9,6 +9,28 @@
 节点属性按实际类型与canvas/runtime/native消费面发现，精确用法及行模板边界见 [节点能力说明](studio-node-capabilities.md)。
 
 Axure手工改稿与AI并行修改的已验证流程、稀疏回填和剩余边界见 [原生往返说明](studio-native-roundtrip.md)。
+
+## 交互先写对，再验证完整流程
+
+`studio_describe({topic:"workflow"})` 和 `{topic:"rp1"}` 都返回 `interactionGuide`，内含可直接执行的三词复习、完成页与重开示例，以及带断言的四步剧本。
+
+条件统一用 `when:"=$index === 1"`；也接受 `if` / `condition` 和省略 `=` 的字符串。兜底用 `else:true`。未知变量、类型不符与无效条件在写入时指出具体字段，整笔事务不写入。分支按顺序取第一个匹配项；动作也按顺序执行：先更新文字与变量，再跳页。不要只更新显示文字而忘记推进状态变量。
+
+```json
+{"type":"setInteraction","nodeId":"remember","actions":{"cases":[
+  {"when":"=$index === 1","actions":[
+    {"type":"set-text","target":"word","text":"meticulous"},
+    {"type":"set-var","name":"index","value":2}
+  ]},
+  {"else":true,"actions":[{"type":"navigate","page":"done"}]}
+]}}
+```
+
+先声明 `index` 变量、`word` / `remember` 节点和 `done` 页面。表达式可使用 `text`、`number`、`concat`、`contains`、`length`、`lower`、`upper`、`not`、`remove`；引号里的 `$name` / `@widget` 保持原文。`run_scenario` 的 `stepResults[].executed` 给出条件表达式、实际值和分支是否命中；为每道题与跳页结果写断言，不能只验首屏。
+
+Studio 原生出口会把跨页 `set-text`（普通 label / paragraph / button / badge）转换为全局文字状态与目标页加载恢复，同页后续改字也同步保存。`crossPageTextState` 列出转换；动态文字绑定、富文本、输入和行模板不使用此自动桥接。
+
+`input.rotation` 保留原生 TextBox，借原生 `OnLoad` 绝对旋转动作恢复预览，兼容报告标记 `native-init-action`。RP9 编辑器本身不提供 TextBox 静态旋转；这与预览中可旋转、可输入分别说明。完整 RP/1 也支持此路径；显式静态／禁用交互输出会跳过初始化动作。
 
 ## 两种 RP/1 用法
 

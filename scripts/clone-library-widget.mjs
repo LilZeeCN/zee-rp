@@ -103,6 +103,7 @@ export function cloneLibraryWidget(sourceFile, targetFile, outputFile, {
     put(9, int({ left: 0, center: 1, right: 2 }[inputStyle.align]));
     put(11, num(inputStyle.textPaddingX)); put(13, num(inputStyle.textPaddingX));
     put(12, num(0)); put(14, num(0));
+    if (inputStyle.rotation !== undefined) put(50, num(inputStyle.rotation));
     Object.assign(field(widget.body, 'PlaceholderText'), str(placeholder ?? ''));
   }
 

@@ -48,6 +48,20 @@ export function normalizeInteractionSpec(spec) {
     out.cases = out.cases.map(branch => normalizeInteractionSpec({ ...branch, actions: branch.actions || [] }));
   }
   if (out.datasetAction) out.datasetAction = normalizeInteractionSpec({ ...out.datasetAction, type: `dataset-${out.datasetAction.op}` });
+  const conditions = ['when', 'if', 'condition'].filter(key => out[key] !== undefined);
+  if (conditions.length > 1 && conditions.some(key => JSON.stringify(out[key]) !== JSON.stringify(out[conditions[0]]))) fail('when/if/condition 条件冲突，请只保留一个条件', conditions[1]);
+  if (conditions.length) {
+    let condition = out[conditions[0]];
+    delete out.if;
+    delete out.condition;
+    if (condition === 'else') {
+      delete out.when;
+      out.else = true;
+    } else {
+      if (typeof condition === 'string' && condition.trim() && !condition.trim().startsWith('=')) condition = `=${condition.trim()}`;
+      out.when = condition;
+    }
+  }
   if (!out.type && !['cases', 'when', 'if', 'actions', 'then', 'else', 'setVar', 'show', 'hide', 'setText', 'setPanelState', 'datasetAction', 'link'].some(key => out[key] !== undefined)) fail('未识别的动作对象，未写入；请提供受支持的type或公开简写', 'type');
   return out;
 }

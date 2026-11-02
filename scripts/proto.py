@@ -2953,7 +2953,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 if key in node:
                     style[key] = node[key]
             config = {"name": name, "kind": kind, "x": nx, "y": ny, "w": nw, "h": nh, "style": style,
-                      **{key: copy.deepcopy(node[key]) for key in ("text", "value", "placeholder", "checked", "group", "options", "selectedIndex", "multiple", "selectedIndices") if key in node},
+                      **{key: copy.deepcopy(node[key]) for key in ("text", "value", "placeholder", "checked", "group", "options", "selectedIndex", "multiple", "selectedIndices", "rotation") if key in node},
                       **state_fields, **({"styles": state_styles} if state_styles else {})}
             if active_when_ctx[0] and any(not ctx[2] for ctx in active_when_ctx[0]):
                 config["visible"] = False
@@ -2998,6 +2998,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                     "color": resolve_color(node.get("color", "$ink"), theme_dict),
                     "align": node.get("align", "left"),
                     "textPaddingX": node.get("textPaddingX", 10),
+                    "rotation": node.get("rotation", 0),
                 },
             })
             if cur_modal:
@@ -3017,12 +3018,14 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 "stroke": stroke_h,
                 "radius": node.get("radius", 6),
                 "isNativeInputBg": True,
+                "rotation": float(node.get("rotation") or 0),
                 "inModal": cur_modal,
                 **({"previewText": inp_txt, "size": node.get("fontSize", node.get("size", 13)), "weight": node.get("fontWeight", node.get("weight", 400)), "color": inp_col, "align": node.get("align", "left")} if inp_txt else {}),
             })
             return make_axvg_vector_shape(
                 next_id(), bg_name, nx, ny, nw, nh,
                 fill_hex=fill_h, stroke_hex=stroke_h, radius=node.get("radius", 6),
+                rotation=node.get("rotation"),
             )
         if ntype in ("label", "shape-text"):
             fill_h = resolve_color(node.get("fill"), theme_dict)
@@ -6207,7 +6210,7 @@ def _expand_declarative_tree_core(node, prefix="p1"):
                 "stroke": node.get("stroke", "$line-strong"),
                 "radius": snap_token(node.get("radius", 6), RADIUS_TOKENS),
             }
-            for key in ("fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX", "x", "y", "right", "bottom", "anchor"):
+            for key in ("fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX", "rotation", "x", "y", "right", "bottom", "anchor"):
                 if key in node:
                     out_ni[key] = node[key]
             if "flex" in node:

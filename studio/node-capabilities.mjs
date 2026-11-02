@@ -183,7 +183,7 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
     // W1 2026-11-02：原生 2D 旋转破解。.rp MyStyle DOA 3221225522（0xC0000000+50，f64 度）；
     // 官方库 Menu Carat=180°/Summing Junction 315° 样本 + 探针三重验证（注入存活/规范重写存活/preview data.js rotation:15 + styles.css rotate(15deg)）。
     result.surfaces.native = fact('implemented', 'shape/box/image 导出为原生可编辑旋转（DOA 3221225522）；纯文本元件的旋转在 .rp 中持久化，但 Axure RP9 预览发布不渲染文本旋转（平台边界）', 'scripts/native-scene.mjs:emit + scripts/proto.py make_axvg_* + studio/export-rp.mjs:resolvedTreeToRp1Node');
-    if (type === 'input') result.surfaces.native = fact('unsupported', 'Studio 原生输入控件的旋转尚未得到宿主验证，导出会披露该限制', 'studio/export-rp.mjs:classifyNodeCompatibility');
+    if (type === 'input') result.surfaces.native = fact('implemented', 'RP9 TextBox 保留角度，以原生 OnLoad 绝对旋转动作恢复预览；输入保持可编辑，编辑器不提供静态旋转', 'scripts/rp_language.py:input_rotations + studio/export-rp.mjs:classifyNodeCompatibility');
     result.surfaces['full-rp1'] = fact('implemented', 'RP/1 节点属性 rotation（度）', 'scripts/rp_language.py STYLE_EXTRAS + references/rp-language.schema.json');
   }
   if (field === 'anchor') {

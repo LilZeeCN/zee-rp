@@ -60,12 +60,16 @@ def infer(node, variables):
                 raise ValueError(failure("E_TYPE", f'Operator {op} requires number operands'))
             if left == "text" and right == "text" and op == "+":
                 return "text"
+            if op == "+" and left is not None and right is not None and (left != "number" or right != "number"):
+                raise ValueError(failure("E_TYPE", 'Addition requires two numbers or two text values; use text() for conversion'))
             return "boolean" if op in {">", "<", ">=", "<="} else "number"
         if op in {"&&", "||"}:
             if left is not None and right is not None and (left != "boolean" or right != "boolean"):
                 raise ValueError(failure("E_TYPE", f'Operator {op} requires boolean operands'))
             return "boolean"
         if op in {"==", "!="}:
+            if left is not None and right is not None and left != right:
+                raise ValueError(failure("E_TYPE", f'Comparison requires matching types, got {left} and {right}'))
             return "boolean"
         raise ValueError(failure("E_OPERATOR", f"Unsupported expression operator {op}"))
     if "fn" in node:
@@ -94,11 +98,11 @@ def main():
             if expected and actual and actual != expected:
                 raise ValueError(failure("E_TYPE", f"Expected {expected}, got {actual}"))
         except LanguageError as error:
-            print(json.dumps({"ok": False, "code": error.diagnostic["code"], "message": str(error)}, ensure_ascii=False))
+            print(json.dumps({"ok": False, "index": index, "code": error.diagnostic["code"], "message": str(error)}, ensure_ascii=False))
             return 1
         except ValueError as error:
             payload = error.args[0] if error.args and isinstance(error.args[0], dict) else failure("E_EXPRESSION", str(error))
-            print(json.dumps({"ok": False, **payload}, ensure_ascii=False))
+            print(json.dumps({"ok": False, "index": index, **payload}, ensure_ascii=False))
             return 1
     print(json.dumps({"ok": True, "checked": len(request.get("expressions", []))}, ensure_ascii=False))
 

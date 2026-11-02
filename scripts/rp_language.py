@@ -2851,6 +2851,7 @@ class Frontend:
         self.row_conditionals = []
         self.page_conditionals = []
         self.initial_hidden_nodes = []
+        self.input_rotations = []
         self.passthrough_layers = {}
         self.source_origins = {}
         self.macro_calls = {}
@@ -4844,6 +4845,8 @@ class Frontend:
         if kind == "paragraph":
             values["_rp1_single_shape"] = True
         values["name"] = self.register(logical, kind, source, path)
+        if kind == "input" and values.get("rotation"):
+            self.input_rotations.append((logical, values["name"], values["rotation"], path))
         if "children" in source:
             if not isinstance(source["children"], list):
                 fail("E_TYPE", ptr(path, "children"), "Expected a node array")
@@ -6342,6 +6345,18 @@ class Frontend:
             by_id[symbol["pageId"]]["interactions"].append({"trigger": symbol["name"],
                 "sourceId": logical, "sourcePointer": path,
                 "events": self.events(declarations, scope, path)})
+        # RP9 TextBox lacks static Rotation capability (REA get_Capabilities),
+        # but its native centered Rotate action works. Apply an absolute angle
+        # on widget load so panel/master instances keep their own initialization.
+        for logical, name, angle, path in self.input_rotations:
+            by_id[logical.split("/")[0]]["interactions"].append({
+                "trigger": name, "sourceId": logical, "sourcePointer": path,
+                "events": [{"event": "OnLoad", "cases": [{
+                    "description": "RP/1 input rotation", "isNewIfGroup": True,
+                    "actions": [{"type": "rotate", "target": name, "degree": angle,
+                                 "rotateType": "location", "duration": 0, "easing": "none"}],
+                }]}],
+            })
         for i, page in enumerate(pages):
             pid, pp = page["id"], ptr("/pages", i)
             self.current_trigger_name = "page"
@@ -6702,6 +6717,7 @@ class ReferenceRuntime:
                 "visible": (node.get("visible", True) is not False) and not bool(node.get("hidden", False)), "enabled": True,
                 "parent": parent, "panelStates": list(panel_states),
                 "selected": node.get("selected", node.get("checked", False)),
+                "rotation": node.get("rotation", 0),
                 "checked": node.get("checked", False),
                 "group": node.get("group", ""), "selectionGroup": node.get("selectionGroup", ""),
                 "options": copy.deepcopy(node.get("options", [])),
@@ -6998,6 +7014,10 @@ class ReferenceRuntime:
                 self.widgets[target]["enabled"] = (kind == "enable")
         elif kind == "focus":
             self.focused_widget = target
+        elif kind == "rotate" and target in self.widgets:
+            widget = self.widgets[target]
+            angle = act.get("degree", 90)
+            widget["rotation"] = angle if act.get("rotateType") == "location" else widget["rotation"] + angle
         elif kind == "link":
             dest_slug = self.pages_by_name.get(act.get("page"), act.get("page"))
             if dest_slug in self.pages_by_slug:

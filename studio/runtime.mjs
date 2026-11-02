@@ -230,17 +230,32 @@ export class StudioRuntimeSession {
     }
 
     // Replace dataset.<ds>.<path>, @<id>, widget.<id>.text, var.<name>, $<name>
-    const jsExpr = body
-      .replace(/dataset\.([a-zA-Z0-9_-]+)\.([a-zA-Z0-9_.]+)/g, (_, dsName, propPath) => JSON.stringify(this.resolveDatasetPath(dsName, propPath)))
-      .replace(/@([a-zA-Z0-9_/-]+)/g, (_, id) => JSON.stringify(this.getWidgetText(id, context)))
-      .replace(/widget\.([a-zA-Z0-9_-]+)\.text/g, (_, id) => JSON.stringify(this.getWidgetText(id, context)))
-      .replace(/var\.([a-zA-Z0-9_]+)/g, (_, name) => JSON.stringify(this.variables[name] ?? ''))
-      .replace(/\$([a-zA-Z0-9_]+)/g, (_, name) => JSON.stringify(this.variables[name] ?? ''));
+    const jsExpr = body.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|dataset\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_.]+|widget\.[a-zA-Z0-9_-]+\.text|var\.[a-zA-Z0-9_-]+|@[a-zA-Z0-9_/-]+|\$[a-zA-Z0-9_-]+|[a-zA-Z_][a-zA-Z0-9_-]*/g, (token, offset) => {
+      if (token.startsWith('"') || token.startsWith("'")) return token;
+      if (token.startsWith('dataset.')) {
+        const [, name, ...path] = token.split('.');
+        return JSON.stringify(this.resolveDatasetPath(name, path.join('.')));
+      }
+      if (token.startsWith('@')) return JSON.stringify(this.getWidgetText(token.slice(1), context));
+      if (token.startsWith('widget.')) return JSON.stringify(this.getWidgetText(token.slice(7, -5), context));
+      if (token.startsWith('var.')) return JSON.stringify(this.variables[token.slice(4)] ?? '');
+      if (token.startsWith('$')) return JSON.stringify(this.variables[token.slice(1)] ?? '');
+      if (Object.hasOwn(this.variables, token) && !body.slice(offset + token.length).trimStart().startsWith('(')) return JSON.stringify(this.variables[token]);
+      return token;
+    });
 
     try {
       // Safe expression evaluation for arithmetic/boolean/string expressions
-      const fn = new Function(`return (${jsExpr});`);
-      return fn();
+      const functions = {
+        text: value => String(value ?? ''), number: value => Number(value) || 0,
+        concat: (...values) => values.map(value => String(value ?? '')).join(''),
+        contains: (value, part) => String(value).includes(String(part)),
+        length: value => String(value).length, lower: value => String(value).toLowerCase(),
+        upper: value => String(value).toUpperCase(), not: value => !value,
+        remove: (value, part) => String(value).split(String(part)).join(''),
+      };
+      const fn = new Function(...Object.keys(functions), `return (${jsExpr});`);
+      return fn(...Object.values(functions));
     } catch {
       return evaluateSimpleDisplayFormula(str, this.variables);
     }
@@ -441,9 +456,11 @@ export class StudioRuntimeSession {
 
     // Conditional cases (`cases` array or `if`/`when`)
     if (Array.isArray(spec.cases)) {
-      for (const c of spec.cases) {
+      for (const [caseIndex, c] of spec.cases.entries()) {
         const cond = c.when ?? c.if ?? c.condition;
-        const matched = cond === undefined || cond === 'else' || Boolean(this.evaluateExpression(cond));
+        const value = cond === undefined || cond === 'else' ? true : this.evaluateExpression(cond);
+        const matched = Boolean(value);
+        executed.push({ action: 'condition', caseIndex, expression: cond ?? 'else', value, matched });
         if (matched) {
           this._executeActionObject(c, sourceNode, executed);
           if (c.break !== false) break;
@@ -454,7 +471,9 @@ export class StudioRuntimeSession {
 
     if (spec.when !== undefined || spec.if !== undefined) {
       const cond = spec.when ?? spec.if;
-      const matched = Boolean(this.evaluateExpression(cond));
+      const value = this.evaluateExpression(cond);
+      const matched = Boolean(value);
+      executed.push({ action: 'condition', expression: cond, value, matched });
       if (matched) {
         this._executeActionObject(spec.then || spec, sourceNode, executed);
       } else if (spec.else) {
@@ -743,6 +762,7 @@ export class StudioRuntimeSession {
     const stepResults = [];
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
+      const traceStart = this.trace.length;
       if (step.action === 'navigate' || step.goto) {
         this.navigate(step.page || step.goto || step.target);
       } else if (step.action === 'input' || step.fill) {
@@ -809,6 +829,7 @@ export class StudioRuntimeSession {
         step,
         currentPageId: this.currentPageId,
         assertions,
+        executed: this.trace.slice(traceStart).flatMap(event => event.executed || []),
         passed: assertions.every(a => a.passed),
       });
     }

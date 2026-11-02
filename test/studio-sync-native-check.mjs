@@ -16,6 +16,8 @@ import { setWidgetRichText } from '../scripts/set-widget-richtext.mjs';
 import { readRecords, encodeRecord, replaceRecord } from '../scripts/rp-records.mjs';
 import { parsePayload, encodePayload, field } from '../scripts/parse-payload.mjs';
 import { nativeTemplateSkipReason } from './host-capabilities.mjs';
+import { spawnSync } from 'node:child_process';
+import { StudioRuntimeSession } from '../studio/runtime.mjs';
 
 function setNativeTextInPlace(rpPath, recordIdx, widgetId, text) {
   const tmpOut = `${rpPath}.tmp-text-${Date.now()}.rp`;
@@ -621,10 +623,44 @@ test('button and badge rotations survive Studio native export', { timeout: 60000
   }
 });
 
-test('input rotation is explicitly reported as unsupported by native export', () => {
+test('input rotation uses native initialization and preserves editable angles without mutating source', { timeout: 60000, skip: nativeTemplateSkipReason() }, async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'studio-input-rotation-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
   const entries = [];
   classifyNodeCompatibility({ id: 'input_rot', type: 'input', rotation: 76 }, 'home', entries);
-  assert(entries.some(entry => entry.classification === 'unsupported' && entry.feature === 'input.rotation'));
+  assert(entries.some(entry => entry.classification === 'native-init-action' && entry.feature === 'input.rotation' && entry.nativePreviewPreserved));
+  const store = new StudioDocumentStore(createEmptyStudioDocument({ domain: 'web' }));
+  const result = store.applyTransaction({ commands: [25, -30, 0].map((rotation, i) => ({ type: 'addNode', node: {
+    id: `entry_${i}`, type: 'input', x: 80, y: 80 + i * 130, w: 200, h: 44, rotation, value: 'editable',
+  } })) });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const before = store.doc.contentHash;
+  const path = join(dir, 'input-rotation.rp');
+  const exported = await exportStudioDocumentToRp(store.doc, { outRpPath: path });
+  assert.equal(store.doc.contentHash, before);
+  assert.equal(exported.report.summary.threeZerosPassed, true);
+  const model = extractRpModel(readFileSync(path));
+  const baseline = JSON.parse(readFileSync(`${path}.baseline.json`, 'utf8'));
+  for (const [i, angle] of [25, -30, 0].entries()) {
+    const loc = findLoc(baseline, `home/entry_${i}`);
+    assert.equal(model.byRecordId.get(`${loc.record}:${loc.id}`).rotation, angle);
+  }
+  const generated = exported.report.interactionSources.filter(row => row.origin === 'export-input-rotation');
+  assert.equal(generated.length, 2);
+  assert(generated.every(row => row.actionCount === 1));
+  // Check the native action's absolute mode and zero duration, rather than
+  // trusting summary prose or a static angle that RP9's preview ignores.
+  let rotations = 0;
+  for (const record of readRecords(readFileSync(path))) {
+    if (!['Axure:Page', 'Axure:PanelState'].includes(record.className)) continue;
+    for (const object of parsePayload(record).objects.values()) {
+      if (object.className !== 'Axure:RotateWidgetInfo') continue;
+      assert.equal(field(object.body, 'RotateType').value, 0);
+      assert.equal(field(object.body, 'Duration').value, 0);
+      rotations++;
+    }
+  }
+  assert.equal(rotations, 2);
 });
 
 test('conditional event wrappers export as native cases with converted branch actions', { timeout: 60000, skip: nativeTemplateSkipReason() }, async t => {
@@ -635,6 +671,10 @@ test('conditional event wrappers export as native cases with converted branch ac
     { type: 'set-variable', name: 'step', value: 1 },
     { type: 'addNode', node: { type: 'label', id: 'word', text: 'First', x: 20, y: 20, w: 200, h: 40 } },
     { type: 'addNode', node: { type: 'button', id: 'next', text: 'Next', x: 20, y: 80, w: 200, h: 44 } },
+    { type: 'addNode', node: { type: 'button', id: 'branch', text: 'Branch', x: 20, y: 150, w: 200, h: 44, on: { click: {
+      if: '$step === 1', then: [{ type: 'set-text', target: 'word', text: '=$step + 1' }],
+      else: [{ type: 'set-text', target: 'word', text: 'Other' }],
+    } } } },
     { type: 'setInteraction', nodeId: 'next', event: 'click', actions: { cases: [
       { when: '=$step === 1', actions: [{ type: 'set-text', target: 'word', text: 'Second === word' }, { type: 'set-var', name: 'step', value: 2 }] },
       { when: '=$step !== 1', actions: [{ type: 'set-text', target: 'word', text: 'Complete' }] },
@@ -652,4 +692,66 @@ test('conditional event wrappers export as native cases with converted branch ac
   assert.equal(event.cases[0].actions[1].type, 'set-variable');
   assert.equal(event.cases[0].actions[1].variable, 'step');
   assert(exported.report.interactionSources.some(source => source.actionCount === 3));
+  const checked = spawnSync('python3', ['-c', `
+import json,sys
+sys.path.insert(0, sys.argv[2] + '/scripts')
+from rp_language import ReferenceRuntime
+r=ReferenceRuntime(json.load(open(sys.argv[1])))
+r.trigger('branch','click')
+assert r.widgets[r.resolve_trigger_name('word')]['text']=='2'
+r.trigger('next','click');r.trigger('branch','click')
+assert r.widgets[r.resolve_trigger_name('word')]['text']=='Other'
+`, exported.sourcePath, new URL('..', import.meta.url).pathname], { encoding: 'utf8' });
+  assert.equal(checked.status, 0, checked.stderr || checked.stdout);
+});
+
+test('cross-page text updates and later local edits preserve two independent native values after navigation', { timeout: 60000, skip: nativeTemplateSkipReason() }, async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'studio-cross-page-text-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = new StudioDocumentStore(createEmptyStudioDocument({ domain: 'web' }));
+  const seed = store.applyTransaction({ commands: [
+    { type: 'set-variable', name: 'step', value: 0 },
+    { type: 'addNode', node: { type: 'label', id: 'word', text: 'First', x: 20, y: 20, w: 220, h: 40 } },
+    { type: 'addNode', node: { type: 'label', id: 'progress', text: '0', x: 20, y: 70, w: 100, h: 32 } },
+    { type: 'addNode', node: { type: 'button', id: 'next', text: 'Next', x: 20, y: 120, w: 150, h: 44, on: { click: { cases: [
+      { when: '$step === 0', actions: [{ type: 'set-text', target: 'word', text: '=concat("Next ", text($step + 1))' }, { type: 'set-var', name: 'step', value: 1 }, { type: 'navigate', page: 'detail' }] },
+      { else: true, actions: [{ type: 'set-text', target: 'word', text: 'Local again' }, { type: 'navigate', page: 'detail' }] },
+    ] } } } },
+    { type: 'addPage', pageId: 'detail', name: 'Detail' },
+    { type: 'addNode', pageId: 'detail', node: { type: 'button', id: 'reset', text: 'Reset', x: 20, y: 40, w: 150, h: 44, on: { click: [
+      { type: 'set-text', target: 'home/word', text: '=concat("Reset ", text($step))' },
+      { type: 'set-text', target: 'home/progress', text: 'reset' }, { type: 'navigate', page: 'home' },
+    ] } } },
+    { type: 'addNode', pageId: 'detail', node: { type: 'button', id: 'back', text: 'Back', x: 20, y: 110, w: 150, h: 44, on: { click: [{ type: 'navigate', page: 'home' }] } } },
+  ] });
+  assert.equal(seed.ok, true, JSON.stringify(seed));
+  const before = store.doc.contentHash;
+  const runtime = new StudioRuntimeSession(store.doc);
+  const scenario = runtime.runScenario([
+    { action: 'click', target: 'next', expect: { page: 'detail' } },
+    { action: 'click', target: 'reset', expect: { page: 'home', text: { word: 'Reset 1', progress: 'reset' } } },
+    { action: 'click', target: 'next', expect: { page: 'detail' } },
+    { action: 'click', target: 'back', expect: { page: 'home', text: { word: 'Local again', progress: 'reset' } } },
+  ]);
+  assert.equal(scenario.ok, true, JSON.stringify(scenario));
+  const result = await exportStudioDocumentToRp(store.doc, { outRpPath: join(dir, 'cross-page.rp') });
+  assert.equal(store.doc.contentHash, before);
+  assert.equal(result.report.summary.threeZerosPassed, true);
+  assert.equal(result.report.crossPageTextState.length, 2);
+  assert(result.report.interactionSources.some(source => source.origin === 'export-page-state'));
+  const checked = spawnSync('python3', ['-c', `
+import json,sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[2]) / 'scripts'))
+from rp_language import compile_language,ReferenceRuntime
+r=ReferenceRuntime(compile_language(json.load(open(sys.argv[1]))))
+def text(name): return r.widgets[r.resolve_trigger_name(name)]['text']
+r.trigger('next','click');assert r.current_page=='detail'
+r.trigger('reset','click');assert r.current_page=='home'
+assert (text('word'),text('progress'))==('Reset 1','reset')
+r.trigger('next','click');r.trigger('back','click')
+assert (text('word'),text('progress'))==('Local again','reset')
+print('native-reference-passed')
+`, result.sourcePath, new URL('..', import.meta.url).pathname], { encoding: 'utf8' });
+  assert.equal(checked.status, 0, checked.stderr || checked.stdout);
 });

@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import { StudioDocumentStore } from '../studio/commands.mjs';
 import { createEmptyStudioDocument } from '../studio/document.mjs';
 import { StudioRuntimeSession } from '../studio/runtime.mjs';
+import { describeAuthoring } from '../studio/authoring-help.mjs';
 
 const fresh = () => {
   const store = new StudioDocumentStore(createEmptyStudioDocument({ domain: 'mobile' }));
@@ -14,6 +15,60 @@ const fresh = () => {
   assert.equal(added.ok, true, JSON.stringify(added));
   return store;
 };
+
+test('public interaction guide executes all three words and cross-page restart in one transaction', () => {
+  const store = fresh();
+  const guide = describeAuthoring({ topic: 'workflow' }).interactionGuide;
+  const result = store.applyTransaction({ commands: guide.example.commands });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const scenario = new StudioRuntimeSession(store.doc).runScenario(guide.example.scenario);
+  assert.equal(scenario.ok, true, JSON.stringify(scenario));
+  assert.equal(scenario.totalSteps, 4);
+  assert.equal(scenario.assertionCount, 8);
+});
+
+test('conditions reject unknown variables, malformed expressions and mismatched comparisons before writing', () => {
+  for (const [when, code] of [['=$missing === 1', 'E_VARIABLE'], ['=$count === "1"', 'E_TYPE'], ['=(', 'E_EXPRESSION'], ['=$count + 1', 'E_TYPE'], [{ variable: 'count', equals: 1 }, 'E_CONDITION']]) {
+    const store = fresh();
+    store.applyTransaction({ commands: [{ type: 'set-variable', name: 'count', value: 0 }] });
+    const before = store.doc.contentHash;
+    const result = store.applyTransaction({ commands: [{ type: 'setInteraction', nodeId: 'btn', actions: { cases: [{ when, actions: [{ type: 'set-var', name: 'count', value: 1 }] }] } }] });
+    assert.equal(result.code, code, JSON.stringify(result));
+    assert.match(result.field, /when/);
+    assert.equal(store.doc.contentHash, before);
+  }
+});
+
+test('condition aliases and missing equals markers normalize; scenarios explain the chosen branch', () => {
+  const store = fresh();
+  const result = store.applyTransaction({ commands: [
+    { type: 'set-variable', name: 'count', value: 0 },
+    { type: 'setInteraction', nodeId: 'btn', actions: { cases: [
+      { condition: '$count === 1', actions: [{ type: 'set-var', name: 'count', value: 9 }] },
+      { when: 'false', actions: [{ type: 'set-var', name: 'count', value: 8 }] },
+      { when: 'else', actions: [{ type: 'set-var', name: 'count', value: 1 }] },
+    ] } },
+  ] });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const runtime = new StudioRuntimeSession(store.doc);
+  const scenario = runtime.runScenario([{ action: 'click', target: 'btn', expect: { variables: { count: 1 } } }]);
+  assert.equal(scenario.ok, true, JSON.stringify(scenario));
+  assert.deepEqual(scenario.stepResults[0].executed.filter(item => item.action === 'condition').map(item => item.matched), [false, false, true]);
+  assert.equal(scenario.stepResults[0].executed[0].value, false);
+});
+
+test('RP/1 text functions and bare variables execute without rewriting quoted references', () => {
+  const store = fresh();
+  const result = store.applyTransaction({ commands: [
+    { type: 'set-variable', name: 'count', value: 2 },
+    { type: 'set-variable', name: 'copy', value: '' },
+    { type: 'setInteraction', nodeId: 'btn', actions: [{ type: 'set-var', name: 'copy', value: '=concat("literal $count @btn ", upper("ok"), text(count + 1))' }] },
+  ] });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const runtime = new StudioRuntimeSession(store.doc);
+  runtime.click('btn');
+  assert.equal(runtime.variables.copy, 'literal $count @btn OK3');
+});
 
 test('未声明变量的 set-var 在写入时被 E_VARIABLE 拒绝且零写入', () => {
   const store = fresh();

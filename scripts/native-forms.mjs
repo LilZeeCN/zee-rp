@@ -106,6 +106,7 @@ function writeWidget(e, widget, config, file) {
   if (config.visible !== undefined) e.put(widget.body, 'VisibleFromSettings', e.bool(config.visible));
   const style = e.graph.objects.get(field(widget.body, 'MyStyle')?.value);
   if (!style) throw new Error(`Native widget ${config.name} has no MyStyle`);
+  if (config.rotation !== undefined) e.property(style, 50, e.num(config.rotation));
   if (config.style) writeStyle(e, style, config.style);
   if (!config.styles || !Object.keys(config.styles).length) return;
   const props = field(style.body, 'PropList').items;

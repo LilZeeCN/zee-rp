@@ -21,7 +21,7 @@ const ROOT = resolve(HERE, '..');
 
 // 让导出的 interactions/actions 计数可自证：列出 .rp 内被统计的每个交互来源，
 // 并区分「Studio 源稿作者交互」与「导出器为初始隐藏生成的页面 OnLoad hide」。
-export function summarizeInteractionSources(rpSummary = {}) {
+export function summarizeInteractionSources(rpSummary = {}, { crossPageTextState = [] } = {}) {
   const rows = [];
   const actionTypesOf = ix => (ix.cases || []).flatMap(c => (c.actions || []).map(a => a.type || a.human || 'unknown'));
   const add = (page, owner, ownerId, ix) => {
@@ -33,9 +33,12 @@ export function summarizeInteractionSources(rpSummary = {}) {
       event: ix.event,
       actionCount: actionTypes.length,
       actionTypes,
-      origin: owner === 'page' && ix.event === 'OnLoad' && actionTypes.length > 0 && actionTypes.every(type => type === 'hide')
+      origin: owner === 'widget' && ix.event === 'OnLoad' && actionTypes.length > 0 && actionTypes.every(type => type === 'rotate')
+        ? 'export-input-rotation'
+        : owner === 'page' && ix.event === 'OnLoad' && actionTypes.length > 0 && actionTypes.every(type => type === 'hide')
         ? 'export-initial-hidden'
-        : 'authored',
+        : owner === 'page' && ix.event === 'OnLoad' && crossPageTextState.length && actionTypes.every(type => ['hide', 'set-text', 'set-rich-text-from-variable'].includes(type))
+          ? 'export-page-state' : 'authored',
     });
   };
   for (const page of rpSummary.pages || []) {
@@ -54,8 +57,8 @@ export function summarizeInteractionSources(rpSummary = {}) {
       total: summaryOf(rows),
       authored: summaryOf(rows.filter(row => row.origin === 'authored')),
       exportGenerated: {
-        ...summaryOf(rows.filter(row => row.origin === 'export-initial-hidden')),
-        reason: '导出器为保持初始隐藏节点在 Axure 运行态不可见，生成页面 OnLoad hide 动作',
+        ...summaryOf(rows.filter(row => row.origin.startsWith('export-'))),
+        reason: '导出器生成 OnLoad 动作，保持初始隐藏、跨页文字和原生输入框旋转；作者事件中的原生状态更新另见 crossPageTextState',
       },
     },
   };
@@ -100,6 +103,7 @@ function normalizeSingleExportAction(act, exportCtx = null) {
       delete c.value;
     }
     c.text = toRp1RuntimeValue(c.text);
+    if (typeof c.text === 'string' && c.text.trim().startsWith('=') || c.text && typeof c.text === 'object') c.text = { fn: 'text', args: [c.text] };
     return c;
   }
   if (c.type === 'navigate') {
@@ -180,7 +184,7 @@ function normalizeSingleExportAction(act, exportCtx = null) {
 function normalizeExportEventSpec(evSpec, exportCtx = null) {
   // Studio normalizes an event's conditional block into a one-item array;
   // RP/1 expects cases at the event level, outside the action list.
-  if (Array.isArray(evSpec) && evSpec.length === 1 && Array.isArray(evSpec[0]?.cases)) {
+  if (Array.isArray(evSpec) && evSpec.length === 1 && (Array.isArray(evSpec[0]?.cases) || evSpec[0]?.when !== undefined || evSpec[0]?.if !== undefined)) {
     return normalizeExportEventSpec(evSpec[0], exportCtx);
   }
   if (Array.isArray(evSpec)) {
@@ -188,6 +192,16 @@ function normalizeExportEventSpec(evSpec, exportCtx = null) {
     return mapped.length > 0 ? mapped : null;
   }
   if (!evSpec || typeof evSpec !== 'object') return evSpec;
+  if (evSpec.when !== undefined || evSpec.if !== undefined) {
+    const action = { ...evSpec };
+    for (const key of ['when', 'if', 'then', 'else']) delete action[key];
+    const primary = normalizeExportEventSpec(evSpec.then ?? evSpec.actions ?? (evSpec.type ? [action] : []), exportCtx);
+    const fallback = evSpec.else && evSpec.else !== true ? normalizeExportEventSpec(evSpec.else, exportCtx) : null;
+    return { cases: [
+      { when: evSpec.when ?? evSpec.if, actions: primary },
+      ...(fallback ? [{ else: true, actions: fallback }] : []),
+    ] };
+  }
   if (Array.isArray(evSpec.cases)) {
     const cases = evSpec.cases
       .map(cs => {
@@ -231,6 +245,76 @@ function normalizeExportOn(onObj, exportCtx = null) {
     if (norm) out[ev] = norm;
   }
   return Object.keys(out).length > 0 ? out : undefined;
+}
+
+// Axure only has access to widgets on the loaded page. Keep text written from
+// another page in native global variables, then restore it on the target page.
+// Local writes to the same target update the backing value too.
+function preserveCrossPageText(spec) {
+  const nodes = new Map(), owners = [];
+  const walk = (node, page, scope = page.id, inRow = false) => {
+    if (!node) return;
+    const ref = `${scope}/${node.id}`;
+    nodes.set(ref, { node, page, inRow });
+    owners.push({ node, page, scope });
+    for (const child of node.children || []) walk(child, page, scope, inRow);
+    for (const state of node.states || []) walk(state.root, page, `${ref}/${state.id}`, inRow);
+    if (node.template) walk(node.template, page, `${ref}/item`, true);
+  };
+  for (const page of spec.pages) walk(page.root, page);
+  const resolveTarget = (target, owner) => {
+    if (typeof target !== 'string') return null;
+    return nodes.has(target) ? target : nodes.has(`${owner.scope}/${target}`) ? `${owner.scope}/${target}` : null;
+  };
+  const visit = (value, fn) => {
+    if (Array.isArray(value)) return value.flatMap(item => visit(item, fn));
+    if (!value || typeof value !== 'object') return value;
+    const out = { ...value };
+    for (const key of ['actions', 'then', 'else', 'cases']) {
+      if (out[key] && typeof out[key] === 'object') out[key] = visit(out[key], fn);
+    }
+    return fn(out);
+  };
+  const tracked = new Map();
+  for (const owner of owners) for (const event of Object.values(owner.node.on || {})) {
+    visit(event, action => {
+      const target = action.type === 'set-text' && resolveTarget(action.target, owner);
+      const entry = nodes.get(target);
+      if (entry && entry.page !== owner.page && !entry.inRow) {
+        const initial = entry.node.text ?? '';
+        if (!['label', 'paragraph', 'button', 'badge'].includes(entry.node.type) || typeof initial !== 'string' || initial.startsWith('=') || entry.node.spans?.length) {
+          throw Object.assign(new Error(`跨页改字目标 ${target} 需要普通文字元件；动态绑定、富文本、输入控件和行模板请用显式变量与目标页加载事件`), { code: 'E_EXPORT_CROSS_PAGE_TEXT', nodeId: target });
+        }
+        tracked.set(target, entry);
+      }
+      return action;
+    });
+  }
+  if (!tracked.size) return [];
+  spec.variables ||= {};
+  for (const [target, entry] of tracked) {
+    let variable = `studio_text_${sha256(target).slice(0, 12)}`;
+    while (Object.hasOwn(spec.variables, variable)) variable += '_';
+    spec.variables[variable] = entry.node.text ?? '';
+    entry.variable = variable;
+  }
+  for (const owner of owners) for (const [event, value] of Object.entries(owner.node.on || {})) {
+    owner.node.on[event] = visit(value, action => {
+      const target = action.type === 'set-text' && resolveTarget(action.target, owner);
+      const entry = tracked.get(target);
+      if (!entry) return action;
+      const write = { type: 'set-variable', variable: entry.variable, value: { fn: 'text', args: [action.text] } };
+      return entry.page === owner.page
+        ? [write, { ...action, text: { variable: entry.variable } }]
+        : [write];
+    });
+  }
+  for (const [target, entry] of tracked) {
+    entry.page.on ||= {};
+    entry.page.on.load ||= [];
+    entry.page.on.load.push({ type: 'set-text', target, text: { variable: entry.variable } });
+  }
+  return [...tracked].map(([target, entry]) => ({ target, variable: entry.variable, targetPageId: entry.page.id, strategy: 'native-global-variable-and-page-load' }));
 }
 
 export function findRpWidgetByNodeId(widgets, nodeId) {
@@ -538,7 +622,7 @@ export function classifyNodeCompatibility(node, pageId, entries) {
     name: node.name || node.id,
   };
   const cssPlan = exportCssPlan(node);
-  if (node.type === 'input' && node.rotation) entries.push({ ...baseInfo, classification: 'unsupported', feature: 'input.rotation', browserPreserved: true, reason: '原生输入控件旋转尚未验证并可能在导出时丢失', fallback: '在 Studio 或代码包保留旋转；原生 .rp 暂不保证输入控件旋转' });
+  if (node.type === 'input' && node.rotation) entries.push({ ...baseInfo, classification: 'native-init-action', feature: 'input.rotation', browserPreserved: true, nativePreviewPreserved: true, reason: 'RP9 TextBox 静态旋转不参与预览；导出保留角度，并生成原生 OnLoad 绝对旋转动作，输入框仍可编辑', strategy: 'native-widget-onload-rotate', editorStaticRotationSupported: false });
   if(node.type==='repeater')for(const key of ['filter','sort','pageSize','page','on']){
     const value=key==='on'?nodeEvents(node):node[key];
     const hasValue=value!==undefined&&value!==null&&(typeof value!=='object'||Object.keys(value).length>0);
@@ -680,7 +764,7 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
     id: node.id,
     // Studio already expanded these macros. Send their resolved editable tree,
     // otherwise the native compiler would reject/expand it a second time.
-    type: ['instance', 'spacer', 'divider', 'stat-row', 'list-item', 'path'].includes(node.type) || STUDIO_SOURCE_ONLY_MACROS.has(node.type) ? 'box' : node.type,
+    type: ['instance', 'card', 'spacer', 'divider', 'stat-row', 'list-item', 'path'].includes(node.type) || STUDIO_SOURCE_ONLY_MACROS.has(node.type) ? 'box' : node.type,
     ...(omitRootXY
       ? {}
       : {
@@ -998,6 +1082,7 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
       ...(Object.keys(cleanDatasets).length ? { datasets: cleanDatasets } : {}),
       pages: resolvedPages,
     };
+    const crossPageTextState = preserveCrossPageText(exportSpec);
 
     // Copy project assets into workDir/assets so proto.py compile can package them
     const workAssetsDir = join(workDir, 'assets');
@@ -1127,7 +1212,7 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
     const unparseable = rpSummary.records?.unparseable ?? 0;
     const danglingRefs = rpSummary.counts?.danglingRefs ?? 0;
     const problems = Array.isArray(rpSummary.problems) ? rpSummary.problems.length : (rpSummary.problems ?? 0);
-    const interactionAudit = summarizeInteractionSources(rpSummary);
+    const interactionAudit = summarizeInteractionSources(rpSummary, { crossPageTextState });
 
     const report = {
       schemaVersion: 1,
@@ -1164,6 +1249,7 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
       },
       compatibilityCounts: counts,
       interactionSources: interactionAudit.sources,
+      crossPageTextState,
       interactionCounts: {
         ...interactionAudit.counts,
         rpSummary: { interactions: rpSummary.counts?.interactions ?? null, actions: rpSummary.counts?.actions ?? null },

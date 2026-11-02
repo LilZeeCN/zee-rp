@@ -725,7 +725,8 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         const rot = info('Axure:RotateWidgetInfo', {
           Clockwise: bool(!(spec.clockwise === false || spec.clockwise === 'false')),
           Duration: f64(spec.duration ?? 1000), Degree: ref(literal(spec.degree ?? spec.degrees ?? 90).id),
-          RotateType: int(1), Easing: int(pick(EASE, spec.easing ?? 'linear', 'easing')),
+          // RP9 RotateType uses MoveBehavior: Location=0, Delta=1 (REA + oracle).
+          RotateType: int(pick({ location: 0, delta: 1 }, spec.rotateType ?? 'delta', 'rotateType')), Easing: int(pick(EASE, spec.easing ?? 'linear', 'easing')),
           OffsetX: ref(literal(0).id), OffsetY: ref(literal(0).id), Anchor: str(spec.anchor ?? 'center')
         });
         return obj(newGuid(), 'Axure:InteractionRotateWidgetAction', {

@@ -10,6 +10,7 @@ import { NODE_PROPERTY_NAMES, NODE_READONLY_PROPERTIES, NODE_UNCONSUMED_PROPERTI
 import { materializeNodeSnapshots } from './clipboard.mjs';
 import {assertKnownNodeEffects,assertCanvasNodeType} from './node-capabilities.mjs';
 import { validateCommandFields } from './command-contracts.mjs';
+import { normalizeInteractionSpec } from './interactions.mjs';
 import { recordDesignDecision, finalizeDesignDecisions } from './design-decisions.mjs';
 import {
   CORE_COMPONENT_CONTRACTS,
@@ -59,6 +60,7 @@ function cmdError(code, message, { commandIndex = 0, nodeId = null, field = null
 }
 
 function validateInteractionAssignments(spec, doc, cmdIdx, nodeId) {
+        spec = normalizeInteractionSpec(spec);
         const formulaChecks = [];
         const rpType = value => typeof value === 'string' ? 'text' : typeof value;
         const variableTypes = Object.fromEntries(Object.entries(doc.variables || {}).map(([name, declared]) => {
@@ -89,12 +91,18 @@ function validateInteractionAssignments(spec, doc, cmdIdx, nodeId) {
             });
           }
         };
-        const visit = spec => {
-          if (Array.isArray(spec)) { for (const item of spec) visit(item); return; }
+        const visit = (spec, path = 'on') => {
+          if (Array.isArray(spec)) { spec.forEach((item, i) => visit(item, `${path}/${i}`)); return; }
           if (!spec || typeof spec !== 'object') return;
+          if (spec.when !== undefined) {
+            if (typeof spec.when === 'string' && spec.when.trim().length > 1) formulaChecks.push({ expr: spec.when, expected: 'boolean', variables: variableTypes, field: `${path}/when` });
+            else if (typeof spec.when !== 'boolean') throw cmdError('E_CONDITION', '交互条件需要布尔值或布尔表达式，例如 =$index === 1', { commandIndex: cmdIdx, nodeId, field: `${path}/when`, suggestion: '使用 when:"=$index === 1"；兜底分支使用 else:true' });
+          }
           if (spec.type === 'set-var' || spec.type === 'set-variable') validateAssignment(spec.variable || spec.name, spec.value ?? spec.expr);
           if (spec.setVar && typeof spec.setVar === 'object') for (const [name, value] of Object.entries(spec.setVar)) validateAssignment(name, value);
-          for (const key of ['cases', 'actions', 'then', 'else']) visit(spec[key]);
+          const text = spec.type === 'set-text' ? spec.text ?? spec.value : undefined;
+          if (typeof text === 'string' && text.trim().startsWith('=')) formulaChecks.push({ expr: text, variables: variableTypes, field: `${path}/text` });
+          for (const key of ['cases', 'actions', 'then', 'else']) visit(spec[key], `${path}/${key}`);
         };
         visit(spec);
         if (formulaChecks.length) {
@@ -109,6 +117,7 @@ function validateInteractionAssignments(spec, doc, cmdIdx, nodeId) {
             throw cmdError(code, detail?.message || checked.stderr.trim() || '变量表达式未通过 RP/1 语法检查', {
               commandIndex: cmdIdx,
               nodeId,
+              field: formulaChecks[detail?.index]?.field ?? null,
               suggestion: '使用变量、@控件读数、文本/数字转换函数和允许的运算；同一表达式必须能被画布运行态与 RP/1 导出共同执行',
             });
           }

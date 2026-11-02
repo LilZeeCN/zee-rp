@@ -31,6 +31,12 @@ listbox #choices [280x120] options=["一","二","三"] multiple=true selectedInd
 
 底层 `add_interaction` 的 `set-selected` 仍表示列表选项；RP/1 使用 `set-option` 表达该动作，避免与普通元件的 Selected 状态混淆。
 
+## 输入框旋转
+
+`input #entry [220x44] value="editable" rotation=25` 保留真实 TextBox 和角度字段。RP9 TextBox 的静态 Rotation 能力位未设置，预览不会应用静态属性；编译器因此生成元件 `OnLoad` 的原生居中绝对旋转动作（`RotateType=Location=0`，零时长），背景仍使用静态角度。输入、取值和 change 事件保持可用。
+
+2026-11-02 本机 RP9 样本已保存、关闭、重开并发布，真实浏览器核验 25°、−30°、0°、输入联动与跳页返回。编辑器不提供 TextBox 静态旋转；生成的初始化动作可以在原生交互中查看。显式 `static` / `--no-interactions` 会移除动作，不能据此保证旋转预览。不扩展其他表单控件、RP11 或任意容器组合的宿主证明。
+
 ## 原生状态样式
 
 ```text

@@ -12,15 +12,45 @@ export const AUTHORING_ENTRY = {
   verify: 'studio_review_design → studio_run_scenario（默认语义层；hitTest:true 加真实指针遮挡校验，被遮挡返回E_SCENARIO_OCCLUDED） → studio_export_rp → studio_sync_native → studio_export_code → studio_project_bundle / studio_merge_document；视觉、行为、原生往返、可运行代码出口、工程包与并发合并分别验证',
 };
 const sample = 'column #lesson w=350 h=hug gap=24\n  label #word "serendipity" fontFamily=Georgia fontSize=44\n  paragraph #answer [fillxhug] "意外发现美好事物的能力。" visible=false fontSize=16 lineHeight=25\n  button #reveal [fillx48] "揭示答案"\n    +onClick [{"type":"show","target":"answer"}]';
+const INTERACTION_GUIDE = {
+  conditions: 'when/if/condition 统一为 when 布尔表达式；可写 =$index === 1 或 $index === 1，缺少 = 会补齐。未知变量、错误语法和类型不符在写入前拒绝，整笔事务保持原样。兜底分支用 else:true。',
+  ordering: 'cases 按顺序判断，默认首次命中后停止；分支动作按顺序执行。先改文字与显隐，再推进状态变量，最后跳页，避免后续条件读取到已推进的值。',
+  expressions: '浏览器与原生共用 RP/1 函数 text/number/concat/contains/length/lower/upper/not/remove；引号内的 $变量 和 @控件保持字面文字。set-text 数值结果会自动转成文字。',
+  native: '跨页 set-text 对普通 label/paragraph/button/badge 由导出器自动保存原生状态并在目标页恢复；动态绑定、富文本、输入和行模板不使用此自动桥接。输入框 rotation 由原生 OnLoad 绝对旋转动作恢复，保留可编辑输入；RP9 编辑器不提供 TextBox 静态旋转。',
+  debugging: 'run_scenario 的 stepResults[].executed 返回每个 condition 的 expression/value/matched 和实际动作；失败时先核对未命中的条件及变量，再改分支，不用猜。',
+  example: {
+    commands: [
+      { type: 'set-variable', name: 'index', value: 1 },
+      { type: 'addNode', pageId: 'home', node: { type: 'label', id: 'word', text: 'abandon', fontSize: 44, fontFamily: 'Georgia', x: 24, y: 120, w: 330, h: 64 } },
+      { type: 'addNode', pageId: 'home', node: { type: 'button', id: 'next', text: '记住了', x: 24, y: 240, w: 330, h: 48, on: { click: { cases: [
+        { when: '=$index === 1', actions: [{ type: 'set-text', target: 'word', text: 'meticulous' }, { type: 'set-var', name: 'index', value: 2 }] },
+        { when: '=$index === 2', actions: [{ type: 'set-text', target: 'word', text: 'serendipity' }, { type: 'set-var', name: 'index', value: 3 }] },
+        { else: true, actions: [{ type: 'navigate', page: 'done' }] },
+      ] } } } },
+      { type: 'addPage', pageId: 'done', name: '本轮完成' },
+      { type: 'addNode', pageId: 'done', node: { type: 'button', id: 'restart', text: '重新开始', x: 24, y: 200, w: 330, h: 48, on: { click: [
+        { type: 'set-var', name: 'index', value: 1 }, { type: 'set-text', target: 'home/word', text: 'abandon' }, { type: 'navigate', page: 'home' },
+      ] } } },
+    ],
+    scenario: [
+      { action: 'click', target: 'next', expect: { text: { word: 'meticulous' }, variables: { index: 2 } } },
+      { action: 'click', target: 'next', expect: { text: { word: 'serendipity' }, variables: { index: 3 } } },
+      { action: 'click', target: 'next', expect: { page: 'done' } },
+      { action: 'click', target: 'restart', expect: { page: 'home', text: { word: 'abandon' }, variables: { index: 1 } } },
+    ],
+  },
+};
 const fail = (code, message, candidates) => { throw Object.assign(new Error(message), { code, candidates }); };
 
 export function describeAuthoring({ topic = 'workflow', name = null, names = null, intent = 'learning', platform = 'mobile', guideId = null,fields=null,operation='edit',surface=null } = {}) {
   if((fields!==null||surface!==null||operation!=='edit')&&topic!=='node')fail('E_NODE_CAPABILITY_QUERY','fields/operation/surface只用于topic:node');
   if (topic === 'workflow') return { ok: true, entry: AUTHORING_ENTRY,
+    interactionGuide: structuredClone(INTERACTION_GUIDE),
     sequence: ['open_project获取工程ID和版本', 'get_design_context(stage:planning,target:{pageId})一次取得任务参考、当前目标与精确写入入口', 'describe(rp1)简洁创作或describe(command)精确改稿', 'query_nodes确认源目标与布局', 'apply_commands提交', 'review_design看真实图片', 'explore比较多构图与交互态', 'run_scenario语义断言（语义执行层不做遮挡/hitTest校验，通过≠真实可点；hitTest:true 会先用真实浏览器指针重放校验点击目标，被遮挡返回E_SCENARIO_OCCLUDED且语义不执行该步；多状态遮挡/命中结论仍可用explore.states真实浏览器指针核验）', 'export_rp检查原生与降级报告'],
     rules: ['RP/1的column/row和hug/fill承担内容布局，避免逐节点算高。', '保留稳定ID；局部update只改显式字段，不从省略推断删除。', 'AI审美判断必须看对应版本的图；指标通过不等于用户认可。', '写入回包丢失先查版本与内容，不盲目重复撤销或创建。'],
     examples: { inspect: { pageId: 'home', role: 'primary-action', fields: ['target', 'layoutContext'] }, edit: { baseRevision: 1, idempotencyKey: 'make-lesson', pageId: 'home', sourceMode: 'insert', rp1: sample } } };
   if (topic === 'rp1') return { ok: true, format: 'studio-rp1-subset',
+    interactionGuide: structuredClone(INTERACTION_GUIDE),
     parameters: { rp1: '节点片段文本；一个显式根容器，每个节点写#稳定ID', sourceMode: 'insert新建子树 / update仅修改显式字段', pageId: '必须是当前页面ID', parentId: 'insert目标容器 / update允许区域，可省略', baseRevision: '当前版本', idempotencyKey: '此笔修改的唯一身份' },
     example: { pageId: 'home', parentId: 'home_screen', sourceMode: 'insert', baseRevision: 1, idempotencyKey: 'lesson-v1', rp1: sample },
     updateExample: { pageId: 'home', parentId: 'lesson', sourceMode: 'update', baseRevision: 2, idempotencyKey: 'word-copy-v2', rp1: 'label #word "a beautiful coincidence" fontSize=32' },

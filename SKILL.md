@@ -22,7 +22,7 @@ description: Reconstruct screenshots as editable Axure layouts, compile RP/1 spe
 
 自由画布已支持关系与批量改稿：`studio_apply_commands` 的 `editNodes` 可按 role/type/文字/容器/ID 集合选择节点，执行 set、move、align、place、distribute；支持同事务 token 绑定和撤销。常规样式优先使用 token 与语义 role，重复内容优先考虑已有组件和动态状态。改稿前记录一次 `studio_review_design`，改稿后传 `compareWithReviewId` 可一次取得前后真实图片、变更图层和指标变化。编辑器顶栏也有「对照」入口。完整命令示例与边界见 [关系编辑与画面对照](docs/studio-editing-20261027.md)。
 
-Studio 的完整用法见 [AI 创作流程](docs/studio-design-workflow.md)。当前源码含 `studio_describe`、命名版本与长操作入口，共83个MCP工具、24个 `studio_*`；本地未发布，已运行连接须核对指纹。开始创作时先检查当前连接：若没有 `studio_open_project`，重新连接指向本安装目录 `bin/mcp.mjs` 的 MCP，或用 `node bin/axure.mjs studio start --project /abs/project --source /abs/source.json` 启动画布；旧连接里的59个工具不能代表已安装程序。
+Studio 的完整用法见 [AI 创作流程](docs/studio-design-workflow.md)。当前源码含 `studio_describe`、命名版本与长操作入口，共87个MCP工具、28个 `studio_*`；功能分支未发行新版本，已运行连接须核对指纹。`studio_describe` 的 workflow/rp1 返回交互指南、可执行三词例子与验证剧本；条件错误写前拒绝，场景回包包含分支实际值。原生出口支持普通文字跨页更新；输入框旋转使用原生加载动作，保留可输入性。精确边界见 [AI 与 RP/1 创作](docs/studio-ai-authoring.md)。开始创作时先检查当前连接：若没有 `studio_open_project`，重新连接指向本安装目录 `bin/mcp.mjs` 的 MCP，或用 `node bin/axure.mjs studio start --project /abs/project --source /abs/source.json` 启动画布；旧连接里的59个工具不能代表已安装程序。
 
 1. 打开工程，调用 `studio_get_design_context` 选择 `editorial`、`task` 或 `learning`，明确每页的用户任务、必备内容、主操作和状态。栖羽仅是用户认可的摄影内容型参考；设备与学习应用尚无用户认可标杆。
 2. 先确定构图、字号角色、素材与文字留白，再用基础节点自由构建。现有三种探索模板是可选示例；不要把换色、替换标题当成完成设计。系统内容不得编造为默认示例条目。
