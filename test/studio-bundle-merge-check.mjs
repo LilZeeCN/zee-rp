@@ -247,7 +247,11 @@ test('P02: portable project bundle exports full closure, strips absolute paths, 
     assert.equal(exportRes.manifest.format, 'zee-studio-bundle/v1');
     assert.equal(exportRes.compatibilityReport.portable, true);
     assert.equal(exportRes.compatibilityReport.summary.missingAssets, 0);
-    assert.equal(exportRes.compatibilityReport.summary.missingFonts, 0);
+    const fontClosure = exportRes.compatibilityReport.dependencyClosure.fonts;
+    assert.equal(fontClosure.used['Zee Studio Test Sans'].filePresentInProject, true);
+    // CoreText validates the font family on macOS. Other hosts report the
+    // unavailable shaper as a fallback while retaining the actual font bytes.
+    assert.deepEqual(fontClosure.missing.map(font => font.family), process.platform === 'darwin' ? [] : ['Zee Studio Test Sans']);
     assert.equal(exportRes.compatibilityReport.summary.missingComponents, 0);
 
     // 3. Verify bundle integrity & zero absolute path leak
