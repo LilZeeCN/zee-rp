@@ -22,6 +22,8 @@ const state = {
   panY: 40,
   dragSession: null,
   snapGuides: [],
+  altPressed: false,
+  measureTarget: null,
   isComposing: false,
   editingNodeId: null,
   spacePressed: false,
@@ -230,6 +232,7 @@ async function applyServerSnapshot(payload) {
       return;
     }
   }
+  const previousTokenStyles = tokenCss();
   const interruptedGesture = cancelCanvasGesture({ render: false });
   state.sessionId = payload.sessionId || state.sessionId;
   if (payload.doc && payload.scene && !payload.scenePatch) {
@@ -308,6 +311,7 @@ async function applyServerSnapshot(payload) {
   let hasPatchedImage = false;
   if (
     state.mode === 'design' &&
+    previousTokenStyles === tokenCss() &&
     !interruptedGesture &&
     state.renderedRevision > 0 &&
     !payload.forceSync &&
@@ -484,20 +488,27 @@ function fitWorkspace(overview = false) {
   const viewport = document.getElementById('canvas-viewport');
   const page = getActivePageScene();
   if (!viewport || !page) return;
-  const left = document.getElementById('left-sidebar').offsetWidth + 40;
-  const right = document.getElementById('inspector-shell').offsetWidth + 40;
-  const top = 110, bottom = 108;
-  const count = overview ? Math.min(2, state.scene.pages.length) : 1;
-  const spread = page.board.totalW * count + 80 * (count - 1);
-  const width = Math.max(180, viewport.clientWidth - left - right);
-  const height = Math.max(200, viewport.clientHeight - top - bottom);
-  const zoom = Math.max(0.25, Math.min(1.5, width / spread, height / page.board.totalH));
+  const {left,top,width,height} = workspaceBounds();
+  const pages = overview && state.mode !== 'interact' ? state.scene.pages : [page];
+  const bounds = pages.map(pg => ({x:state.mode === 'interact' ? 60 : pg._stageX ?? 60,y:state.mode === 'interact' ? 40 : pg._stageY ?? 40,w:pg.board.totalW,h:pg.board.totalH}));
+  const stageX = Math.min(...bounds.map(b=>b.x)), stageY = Math.min(...bounds.map(b=>b.y));
+  const spread = Math.max(...bounds.map(b=>b.x+b.w))-stageX;
+  const tall = Math.max(...bounds.map(b=>b.y+b.h))-stageY;
+  const zoom = Math.max(0.01, Math.min(1.5, width / spread, height / tall));
   state.zoom = zoom;
-  const stageX = state.mode === 'interact' ? 60 : page._stageX ?? 60;
-  const stageY = state.mode === 'interact' ? 40 : page._stageY ?? 40;
   state.panX = Math.round(left + (width - spread * zoom) / 2 - stageX * zoom);
-  state.panY = Math.round(top + (height - page.board.totalH * zoom) / 2 - stageY * zoom);
+  state.panY = Math.round(top + (height - tall * zoom) / 2 - stageY * zoom);
   updateCanvasTransform();
+}
+
+function workspaceBounds() {
+  const viewport = document.getElementById('canvas-viewport'), vp = viewport.getBoundingClientRect();
+  const panel = id => { const el=document.getElementById(id); return el?.getClientRects().length ? el.getBoundingClientRect() : null; };
+  const sidebar=panel('left-sidebar'), inspector=panel('inspector-shell'), topbar=panel('topbar');
+  const left=sidebar ? Math.max(20,sidebar.right-vp.left+20) : 20;
+  const right=inspector ? Math.min(vp.width-20,inspector.left-vp.left-20) : vp.width-20;
+  const top=topbar ? Math.max(40,topbar.bottom-vp.top+40) : 40;
+  return {left,top,width:Math.max(40,right-left),height:Math.max(40,vp.height-top-108)};
 }
 
 // 切页后把当前页画板滚入视口：按画板真实 DOM 矩形判定（不依赖 _stageX/board 缓存，P02），
@@ -509,14 +520,12 @@ function revealActiveArtboard() {
   const wrapper = document.querySelector(`.artboard-wrapper[data-artboard-id="${CSS.escape(page.id)}"]`);
   const target = wrapper?.querySelector('.artboard-screen') || document.getElementById('screen-root');
   if (!target) return;
-  const left = document.getElementById('left-sidebar').offsetWidth + 40;
-  const right = document.getElementById('inspector-shell').offsetWidth + 40;
-  const top = 110, bottom = 108;
   const vpRect = viewport.getBoundingClientRect();
-  const vpW = viewport.clientWidth - left - right, vpH = viewport.clientHeight - top - bottom;
+  const {left,top,width:vpW,height:vpH} = workspaceBounds();
   if (vpW <= 40 || vpH <= 40) return;
   const r = target.getBoundingClientRect();
   if (![r.left, r.top, r.right, r.bottom].every(Number.isFinite)) return;
+  if (r.width > vpW || r.height > vpH) { fitWorkspace(); return; }
   const visL = vpRect.left + left, visT = vpRect.top + top;
   if (r.left >= visL && r.top >= visT && r.right <= visL + vpW && r.bottom <= visT + vpH) return;
   state.panX += Math.round(visL + vpW / 2 - (r.left + r.width / 2));
@@ -613,8 +622,11 @@ function updateTopbarStatus() {
 
 function updateCanvasTransform() {
   const stage = document.getElementById('canvas-stage');
+  const dpr = window.devicePixelRatio || 1;
+  state.panX = Math.round(state.panX*dpr)/dpr;
+  state.panY = Math.round(state.panY*dpr)/dpr;
   if (stage) {
-    stage.style.transform = `translate3d(${Math.round(state.panX)}px, ${Math.round(state.panY)}px, 0) scale(${state.zoom})`;
+    stage.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
   }
   if (state.selectedIds.length > 0 || state.snapGuides.length > 0) {
     renderSelectionOverlay();
@@ -626,6 +638,27 @@ function updateCanvasTransform() {
   if (zoomEl) {
     zoomEl.textContent = `${Math.round(state.zoom * 100)}%`;
   }
+  scheduleBoardMounts();
+}
+
+let boardMountFrame = null;
+function shouldMountPage(pg) {
+  if (pg.id === state.activePageId) return true;
+  if (state.zoom < 0.15) return false; // Distant board overviews need outlines, not thousands of unreadable DOM labels.
+  const view=workspaceBounds(), margin=160;
+  const x=state.panX+(pg._stageX ?? 60)*state.zoom, y=state.panY+(pg._stageY ?? 40)*state.zoom;
+  return x+pg.board.totalW*state.zoom>=view.left-margin && x<=view.left+view.width+margin
+    && y+pg.board.totalH*state.zoom>=view.top-margin && y<=view.top+view.height+margin;
+}
+
+function scheduleBoardMounts() {
+  if (boardMountFrame !== null || state.mode !== 'design' || state.scene?.pages.length < 2) return;
+  boardMountFrame=requestAnimationFrame(()=>{
+    boardMountFrame=null;
+    if (state.mode !== 'design' || state.editingNodeId || (state.dragSession && state.dragSession.kind !== 'pan')) return;
+    const mounted=new Map([...document.querySelectorAll('.artboard-wrapper')].map(el=>[el.dataset.artboardId,el.dataset.nodesMounted==='true']));
+    if (state.scene.pages.some(pg=>mounted.get(pg.id)!==shouldMountPage(pg))) renderCanvasStage();
+  });
 }
 
 function renderTextContentHtml(n) {
@@ -665,7 +698,7 @@ function buildNodeElementHtml(n, pageId, childrenHtml = '', parent = null) {
     `font-weight:${n.fontWeight || 400}`,
     `line-height:${n.lineHeight || 20}px`,
     `letter-spacing:${n.letterSpacing || 0}px`,
-    `color:${n.color || '#203B32'}`,
+    `color:${n.color || 'var(--ink, #203B32)'}`,
     `text-align:${n.textAlign || 'left'}`,
     `z-index:${typeof n.z === 'number' ? n.z : (n.renderOrder || n.depth || 1)}`,
   ];
@@ -674,8 +707,13 @@ function buildNodeElementHtml(n, pageId, childrenHtml = '', parent = null) {
   }
   if (n.type !== 'path' && n.fill && n.fill !== '#FFFFFF00') styles.push(`background:${n.fill}`);
   const hasSideBorders = n.borderSides || n.borderTop || n.borderRight || n.borderBottom || n.borderLeft;
+  const transparent = value => !value || value === 'transparent' || /^#[\da-f]{6}00$/i.test(value);
+  // Prototype-only leaf hit areas remain selectable in Layers and active in Preview.
+  if (state.mode === 'design' && n.type === 'box' && n.on?.click && !n.childrenIds?.length && !n.text
+    && transparent(n.fill) && transparent(n.stroke) && !hasSideBorders
+    && !n.css?.background && !n.css?.backgroundImage && !n.css?.boxShadow) styles.push('pointer-events:none');
   if (hasSideBorders) {
-    const borderColor = n.stroke && n.stroke !== '#FFFFFF00' ? n.stroke : '#E3E7DC';
+    const borderColor = n.stroke && n.stroke !== '#FFFFFF00' ? n.stroke : 'var(--line, #E3E7DC)';
     const borderW = n.strokeWidth > 0 ? n.strokeWidth : 1;
     const sides = typeof n.borderSides === 'string'
       ? new Set(n.borderSides.split(/[\s,]+/).filter(Boolean))
@@ -794,7 +832,7 @@ function renderNodeTree(source,pageId) {
 function renderPageNodes(pg) {return renderNodeTree(pg.nodes,pg.id);}
 
 function tokenCss() {
-  return escapeHtml(Object.entries(state.doc?.tokens?.colors || {}).map(([key, value]) => `--${key}:${value}`).join(';'));
+  return escapeHtml(Object.entries({ ...state.doc?.palette, ...state.doc?.tokens?.colors }).map(([key, value]) => `--${key}:${value}`).join(';'));
 }
 
 function nodeViewportBounds(node) {
@@ -865,7 +903,7 @@ function renderCanvasStage() {
       <div class="artboard-wrapper" data-artboard-id="${escapeHtml(pgScene.id)}" style="left:60px;top:40px;width:${b.totalW}px;height:${b.totalH}px;">
         <div class="artboard-title-bar active" title="${escapeHtml(pgScene.id)} · ${b.screenW} × ${b.screenH}">预览 · ${escapeHtml(pgScene.name)}</div>
         <div class="artboard-outer" style="width:${b.totalW}px;height:${b.totalH}px;border-radius:${b.outerRadius}px;background:#09090B;box-shadow:inset 0 0 0 2px #8B8D8E,inset 0 0 0 4px #33343B;">
-          <div class="artboard-screen" id="screen-root" data-page-id="${escapeHtml(pgScene.id)}" style="left:${b.shellPad}px;top:${b.shellPad}px;width:${b.screenW}px;height:${b.screenH}px;border-radius:${b.screenRadius}px;${tokenCss()}">
+          <div class="artboard-screen" id="screen-root" data-page-id="${escapeHtml(pgScene.id)}" style="left:${b.shellPad}px;top:${b.shellPad}px;width:${b.screenW}px;height:${b.screenH}px;border-radius:${b.screenRadius}px;background:var(--bg,#F7F8F2);${tokenCss()}">
             ${islandHtml}
             ${b.island && b.showHomeIndicator ? `<div class="artboard-island" style="left:${(b.screenW-134)/2}px;top:${b.screenH-12}px;width:134px;height:5px;border-radius:9px;background:#18181B;"></div>` : ''}
             ${nodesHtml}
@@ -893,23 +931,23 @@ function renderCanvasStage() {
     pg._stageY = boardY;
     cursorX = boardX + b.totalW + 80;
 
-    // For large multi-page documents, mount activePageId (and all pages when <= 6 pages) so pan/zoom and edits stay ultra fast
-    const shouldMountNodes = pg.id === state.activePageId || pages.length <= 6;
+    // Keep the active page available to editing/capture; lazily mount visible neighbors.
+    const shouldMountNodes = shouldMountPage(pg);
     const nodesHtml = shouldMountNodes
       ? renderPageNodes(pg)
-      : `<div style="padding:24px;color:#6E8279;font-size:13px;">点击画板激活加载 (${pg.nodes.length} 节点)</div>`;
+      : `<div style="padding:24px;color:#6E8279;font-size:13px;">点击画板查看内容</div>`;
 
     const islandHtml = b.island && b.darkIsland
       ? `<div class="artboard-island" style="left:${(b.screenW - b.island.w) / 2}px;top:${b.island.y}px;width:${b.island.w}px;height:${b.island.h}px;border-radius:${b.island.r ?? b.island.h / 2}px;"><span style="position:absolute;right:12px;top:11px;width:10px;height:10px;border-radius:50%;background:#1B2431;border:1px solid #2B3546;box-sizing:border-box;"></span></div>`
       : '';
 
     boardHtmlList.push(`
-      <div class="artboard-wrapper" data-artboard-id="${escapeHtml(pg.id)}" style="left:${boardX}px;top:${boardY}px;width:${b.totalW}px;height:${b.totalH}px;">
+      <div class="artboard-wrapper" data-artboard-id="${escapeHtml(pg.id)}" data-nodes-mounted="${shouldMountNodes}" style="left:${boardX}px;top:${boardY}px;width:${b.totalW}px;height:${b.totalH}px;">
         <div class="artboard-title-bar ${pg.id === state.activePageId ? 'active' : ''}" data-select-page="${escapeHtml(pg.id)}" title="${escapeHtml(pg.id)} · ${b.screenW} × ${b.screenH}">
           <span>${escapeHtml(pg.name)}</span>
         </div>
         <div class="artboard-outer" style="width:${b.totalW}px;height:${b.totalH}px;border-radius:${b.outerRadius}px;background:${b.shellPad > 0 ? '#09090B' : 'transparent'};${b.shellPad > 0 ? 'box-shadow:inset 0 0 0 2px #8B8D8E,inset 0 0 0 4px #33343B;' : ''}">
-          <div class="artboard-screen" id="${pg.id === state.activePageId ? 'screen-root' : `screen-${pg.id}`}" data-page-id="${escapeHtml(pg.id)}" style="left:${b.shellPad}px;top:${b.shellPad}px;width:${b.screenW}px;height:${b.screenH}px;border-radius:${b.screenRadius}px;${tokenCss()}">
+          <div class="artboard-screen" id="${pg.id === state.activePageId ? 'screen-root' : `screen-${pg.id}`}" data-page-id="${escapeHtml(pg.id)}" style="left:${b.shellPad}px;top:${b.shellPad}px;width:${b.screenW}px;height:${b.screenH}px;border-radius:${b.screenRadius}px;background:var(--bg,#F7F8F2);${tokenCss()}">
             ${islandHtml}
             ${b.island && b.showHomeIndicator ? `<div class="artboard-island" style="left:${(b.screenW-134)/2}px;top:${b.screenH-12}px;width:134px;height:5px;border-radius:9px;background:#18181B;"></div>` : ''}
             ${nodesHtml}
@@ -1059,7 +1097,38 @@ function renderSelectionOverlay() {
     }
   }
 
+  boxesHtml.push(distanceGuidesHtml());
   overlay.innerHTML = boxesHtml.join('\n');
+}
+
+function distanceGuidesHtml() {
+  if (!state.altPressed || state.dragSession || state.selectedIds.length !== 1 || !state.measureTarget) return '';
+  const active=getActivePageScene(), selected=active?.nodes.find(n=>n.id===state.selectedIds[0]);
+  const targetPage=state.scene.pages.find(pg=>pg.id===state.measureTarget.pageId);
+  const target=targetPage?.nodes.find(n=>n.scopedId===state.measureTarget.scopedId);
+  if (!selected || !target || selected.scopedId===target.scopedId) return '';
+  const a=nodeViewportBounds(selected),b=nodeViewportBounds(target);
+  if (!a || !b) return '';
+  const lines=[];
+  const add=(axis,x,y,length)=>{
+    const value=Number((Math.abs(length)/state.zoom).toFixed(1));
+    lines.push(`<div class="distance-guide ${axis}" data-distance="${value}" style="left:${x}px;top:${y}px;${axis==='horizontal'?'width':'height'}:${Math.abs(length)}px"><span>${value}px</span></div>`);
+  };
+  if (a.x+a.w<=b.x) add('horizontal',a.x+a.w,(a.y+a.h/2+b.y+b.h/2)/2,b.x-a.x-a.w);
+  else if (b.x+b.w<=a.x) add('horizontal',b.x+b.w,(a.y+a.h/2+b.y+b.h/2)/2,a.x-b.x-b.w);
+  if (a.y+a.h<=b.y) add('vertical',(a.x+a.w/2+b.x+b.w/2)/2,a.y+a.h,b.y-a.y-a.h);
+  else if (b.y+b.h<=a.y) add('vertical',(a.x+a.w/2+b.x+b.w/2)/2,b.y+b.h,a.y-b.y-b.h);
+  if (!lines.length) {
+    const outer=a.x<=b.x&&a.y<=b.y&&a.x+a.w>=b.x+b.w&&a.y+a.h>=b.y+b.h?a:b;
+    const inner=outer===a?b:a;
+    add('horizontal',Math.min(a.x,b.x),inner.y+inner.h/2,Math.abs(a.x-b.x));
+    add('vertical',inner.x+inner.w/2,Math.min(a.y,b.y),Math.abs(a.y-b.y));
+    if (outer.x<=inner.x&&outer.y<=inner.y&&outer.x+outer.w>=inner.x+inner.w&&outer.y+outer.h>=inner.y+inner.h) {
+      add('horizontal',inner.x+inner.w,inner.y+inner.h/2,outer.x+outer.w-inner.x-inner.w);
+      add('vertical',inner.x+inner.w/2,inner.y+inner.h,outer.y+outer.h-inner.y-inner.h);
+    }
+  }
+  return lines.join('');
 }
 
 function renderSidebar() {
@@ -1488,9 +1557,10 @@ function renderInspectorContent() {
     ? `<div class="diagnostic-banner"><strong>${escapeHtml(state.lastError.code || 'ERROR')}</strong>: ${escapeHtml(state.lastError.message)}</div>`
     : '';
 
-  const fontDiagHtml = (state.scene?.fontDiagnostics || [])
-    .map(d => `<div class="diagnostic-banner">🔤 ${escapeHtml(d.message)}</div>`)
-    .join('');
+  const diagnostics = [...(state.scene?.fontDiagnostics || []), ...(state.doc?.diagnostics || [])];
+  const diagnosticsHtml = diagnostics.length
+    ? `<details class="inspector-diagnostics"><summary>⚠ ${diagnostics.length} 条布局与字体提示</summary>${diagnostics.map(d => `<div class="diagnostic-banner"><strong>${escapeHtml(d.code || '提示')}</strong> · ${escapeHtml(d.message)}</div>`).join('')}</details>`
+    : '';
 
   if (state.mode === 'interact') {
     const rt = state.runtimeState;
@@ -1625,9 +1695,7 @@ function renderInspectorContent() {
     return;
   }
 
-  const docDiagHtml = (state.doc?.diagnostics || [])
-    .map(d => `<div class="diagnostic-banner">⚠️ <strong>${escapeHtml(d.code || 'DIAG')}</strong>: ${escapeHtml(d.message)}</div>`)
-    .join('');
+
 
   const lastImp = state.lastImpact || state.recentHistory?.[0] || null;
   const sumText = state.lastSummary
@@ -1675,8 +1743,7 @@ function renderInspectorContent() {
     const screenNode = pgScene?._nodeMap?.get(`${pgDoc?.id}/${pgDoc?.id}_screen`) || pgScene?.nodes.find(n => n.id === `${pgDoc?.id}_screen`) || pgScene?.nodes[0];
     panel.innerHTML = `
       ${errBanner}
-      ${fontDiagHtml}
-      ${docDiagHtml}
+      ${diagnosticsHtml}
       ${impactSummaryHtml}
       <div class="prop-group">
         <div class="prop-group-title">工程与文档概览</div>
@@ -1776,7 +1843,7 @@ function renderInspectorContent() {
       : '';
     panel.innerHTML = `
       ${errBanner}
-      ${fontDiagHtml}
+      ${diagnosticsHtml}
       <div class="provenance-banner">
         <span>✨ 已选中 ${selNodes.length} 个节点 (${escapeHtml(selNodes.slice(0, 3).map(n => n.id).join(', '))}${selNodes.length > 3 ? '…' : ''})</span>
       </div>
@@ -1823,7 +1890,6 @@ function renderInspectorContent() {
           </div>
         </div>
       </div>
-      ${docDiagHtml}
       ${impactSummaryHtml}
     `;
     panel.querySelectorAll('[data-bool-op]').forEach(btn => {
@@ -2006,8 +2072,8 @@ function renderInspectorContent() {
 
   panel.innerHTML = `
     ${errBanner}
-    ${fontDiagHtml}
-    ${docDiagHtml}
+    ${diagnosticsHtml}
+
     ${lockedBannerHtml}
     ${provenanceHtml}
     ${contractParamsSectionHtml}
@@ -2643,7 +2709,7 @@ function setupCanvasInteractions() {
         const factor = e.deltaY < 0 ? 1.1 : 0.9;
         const worldX = (e.clientX - state.panX) / state.zoom;
         const worldY = (e.clientY - state.panY) / state.zoom;
-        state.zoom = Math.min(4, Math.max(0.25, Number((state.zoom * factor).toFixed(3))));
+        state.zoom = Math.min(4, Math.max(0.01, Number((state.zoom * factor).toFixed(3))));
         state.panX = e.clientX - worldX * state.zoom;
         state.panY = e.clientY - worldY * state.zoom;
       } else if (e.shiftKey) {
@@ -2825,13 +2891,17 @@ function setupCanvasInteractions() {
       const nodeId = nodeEl.getAttribute('data-node-id');
       if (pageId && pageId !== state.activePageId) {
         state.activePageId = pageId;
+        state.selectedIds = [];
+        renderCanvasStage();
+        nodeEl = document.querySelector(`.studio-node[data-page-id="${CSS.escape(pageId)}"][data-node-id="${CSS.escape(nodeId)}"]`);
       }
       const activePg = getActivePageScene();
       let node = activePg?.nodes.find(n => n.id === nodeId);
-      if (!node || node.locked) return;
+      if (!node) return;
 
       // 整屏背景容器不是拖拽目标：画板内空白处按下应框选，而非移动画板（S1-N2）
-      if (node.depth <= 1 && node.w >= (activePg.board.screenW || 402) - 4 && node.h >= (activePg.board.screenH || 874) - 4) {
+      if ((node.depth <= 1 && node.w >= (activePg.board.screenW || 402) - 4 && node.h >= (activePg.board.screenH || 874) - 4)
+        || (e.shiftKey && (node.locked || (node.childrenIds?.length && !node.on?.click)))) {
         state.lastNodePress = null;
         const prevSelectedIds = e.shiftKey ? [...state.selectedIds] : [];
         if (!e.shiftKey) {
@@ -2848,9 +2918,12 @@ function setupCanvasInteractions() {
           vpLeft: vpRect.left,
           vpTop: vpRect.top,
           prevSelectedIds,
+          clickNodeId: e.shiftKey && !node.locked ? node.id : null,
+          marqueeOriginId: node.id,
         };
         return;
       }
+      if (node.locked) return;
 
       // 双击文字节点进入内联编辑：两次点击之间 DOM 可能被重渲染，原生 dblclick 会丢，
       // 因此按「同一节点 400ms 内二次按下」自行判定（S1-N3）。
@@ -2955,7 +3028,12 @@ function setupCanvasInteractions() {
   });
 
   window.addEventListener('mousemove', e => {
-    if (!state.dragSession) return;
+    if (!state.dragSession) {
+      const el=e.target.closest?.('.studio-node');
+      state.measureTarget=el ? {pageId:el.dataset.pageId,scopedId:el.dataset.scopedId} : null;
+      if (state.altPressed || e.altKey) { state.altPressed=e.altKey; renderSelectionOverlay(); }
+      return;
+    }
     const ds = state.dragSession;
     if (ds.pageId !== state.activePageId || ds.baseRevision !== state.appliedRevision) { cancelCanvasGesture(); return; }
 
@@ -2972,7 +3050,11 @@ function setupCanvasInteractions() {
     const dy = mappedNow ? mappedNow.y - mappedStart.y : (e.clientY - ds.startClientY) / state.zoom;
 
     if (ds.kind === 'move') {
-      if (Math.abs(dx) > 1 || Math.abs(dy) > 1) ds.moved = true;
+      if (!ds.moved) {
+        if (Math.hypot(e.clientX-ds.startClientX,e.clientY-ds.startClientY) < 4) return;
+        ds.moved = true;
+        state.lastNodePress = null;
+      }
       const pg = getActivePageScene();
       const node = pg?.nodes.find(n => n.id === ds.nodeId);
       state.snapGuides = [];
@@ -3250,12 +3332,14 @@ function setupCanvasInteractions() {
           document.querySelectorAll(`#screen-root .studio-node`).forEach(el => {
             if (el.getAttribute('data-locked') === 'true') return;
             const nId = el.getAttribute('data-node-id');
+            if (nId === ds.marqueeOriginId) return;
             const nObj = pg?.nodes.find(x => x.id === nId);
             // Skip full-screen background containers unless explicitly clicked
             if (nObj && nObj.depth <= 1 && nObj.w >= (pg?.board.screenW || 402) - 4 && nObj.h >= (pg?.board.screenH || 874) - 4) {
               return;
             }
             const r = el.getBoundingClientRect();
+            if (nObj?.childrenIds?.length && !(r.left>=x1&&r.top>=y1&&r.right<=x2&&r.bottom<=y2)) return;
             const intersects = !(r.right < x1 || r.left > x2 || r.bottom < y1 || r.top > y2);
             if (intersects && nId) {
               hits.add(nId);
@@ -3265,6 +3349,11 @@ function setupCanvasInteractions() {
           renderSidebar();
           renderSelectionOverlay();
           renderInspector();
+        } else if (ds.clickNodeId) {
+          const ids = new Set(ds.prevSelectedIds || []);
+          if (ids.has(ds.clickNodeId)) ids.delete(ds.clickNodeId); else ids.add(ds.clickNodeId);
+          state.selectedIds = [...ids];
+          renderSidebar(); renderSelectionOverlay(); renderInspector();
         }
       }
     } catch {
@@ -3281,6 +3370,7 @@ function setupCanvasInteractions() {
 
   window.addEventListener('blur', () => {
     state.spacePressed = false;
+    state.altPressed = false;
     cancelCanvasGesture();
     updateWorkspaceChrome();
   });
@@ -3304,6 +3394,7 @@ function setupCanvasInteractions() {
   });
 
   window.addEventListener('keyup', e => {
+    if (e.key === 'Alt') { state.altPressed=false; renderSelectionOverlay(); }
     if (e.code === 'Space') {
       state.spacePressed = false;
       updateWorkspaceChrome();
@@ -3314,6 +3405,7 @@ function setupCanvasInteractions() {
   window.addEventListener('keydown', async e => {
     if (e.key === 'Escape' && state.dragSession) { e.preventDefault(); cancelCanvasGesture(); return; }
     if (isInputFocused() || state.isComposing || e.isComposing) return;
+    if (e.key === 'Alt' && state.mode === 'design') { state.altPressed=true; renderSelectionOverlay(); return; }
 
     if (!e.metaKey && !e.ctrlKey && !e.altKey && state.mode === 'design' && ['v', 'h'].includes(e.key.toLowerCase())) {
       state.tool = e.key.toLowerCase() === 'h' ? 'pan' : 'select';
@@ -3625,15 +3717,17 @@ function setupToolbarAndTabs() {
   });
   document.getElementById('btn-distribute-h')?.addEventListener('click', () => editSelection('distribute', { axis: 'x' }));
 
-  document.getElementById('btn-zoom-in')?.addEventListener('click', () => {
-    state.zoom = Math.min(4, Number((state.zoom + 0.15).toFixed(2)));
+  const zoomSteps=[0.1,0.125,0.25,0.33,0.5,0.67,0.75,1,1.25,1.5,2,3,4];
+  const setZoom = zoom => {
+    const view=workspaceBounds(), cx=view.left+view.width/2, cy=view.top+view.height/2;
+    const x=(cx-state.panX)/state.zoom,y=(cy-state.panY)/state.zoom;
+    state.zoom=zoom;state.panX=cx-x*zoom;state.panY=cy-y*zoom;
     updateCanvasTransform();
-  });
-
-  document.getElementById('btn-zoom-out')?.addEventListener('click', () => {
-    state.zoom = Math.max(0.25, Number((state.zoom - 0.15).toFixed(2)));
-    updateCanvasTransform();
-  });
+  };
+  document.getElementById('btn-zoom-in')?.addEventListener('click', () => setZoom(zoomSteps.find(v=>v>state.zoom+0.001) ?? 4));
+  document.getElementById('btn-zoom-out')?.addEventListener('click', () => setZoom([...zoomSteps].reverse().find(v=>v<state.zoom-0.001) ?? 0.01));
+  document.getElementById('zoom-label')?.addEventListener('click', () => setZoom(1));
+  document.getElementById('btn-zoom-all')?.addEventListener('click', () => fitWorkspace(true));
 
   document.getElementById('btn-zoom-fit')?.addEventListener('click', () => {
     fitWorkspace();

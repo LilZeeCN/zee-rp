@@ -18,6 +18,36 @@ export const RENDERER_VERSION = 'zee-studio-renderer-1.1.0';
 export const EXPORTER_VERSION = 'zee-studio-exporter-1.1.0';
 
 export const DEFAULT_THEMES = {
+  'modern-dark': {
+    bg: '#0B0F19',
+    surface: '#111827',
+    'surface-2': '#1E293B',
+    'surface-3': '#1E293B',
+    'sidebar-bg': '#0B0F19',
+    'sidebar-surface': '#111827',
+    'sidebar-active': '#6366F1',
+    'sidebar-ink': '#64748B',
+    'sidebar-ink-active': '#F8FAFC',
+    ink: '#F8FAFC',
+    'ink-2': '#CBD5E1',
+    'ink-3': '#64748B',
+    'ink-inv': '#F8FAFC',
+    line: '#1E293B',
+    'line-strong': '#1E293B',
+    brand: '#6366F1',
+    'brand-soft': '#1E1B4B',
+    accent: '#06B6D4',
+    'accent-soft': '#083344',
+    success: '#10B981',
+    'success-soft': '#064E3B',
+    warning: '#F59E0B',
+    'warning-soft': '#451A03',
+    danger: '#F43F5E',
+    error: '#F43F5E',
+    'danger-soft': '#4C0519',
+    backdrop: '#0B0F19',
+    muted: '#CBD5E1',
+  },
   'mobile-hifi': {
     bg: '#F7F8F2',
     surface: '#FFFFFF',
@@ -480,6 +510,15 @@ function normalizeNode(node, pageId, seenIds, pathPtr, assetCollector) {
     copy.type = 'path';
   }
   copy.sourcePointer = copy.sourcePointer || pathPtr;
+
+  // Import shorthand phone content as flow, while saved Studio documents keep
+  // their authored geometry (they bypass normalizeNode in the import branch).
+  if (copy.type === 'phone-shell') {
+    copy.layout ??= 'column';
+    copy.gap ??= 12;
+    copy.padding ??= [DEVICE_PRESETS[copy.device]?.safeAreaTop ?? 60, 16, 20, 16];
+    if (copy.fill === undefined) copy.fill = copy.screenFill ?? '$bg';
+  }
 
   if (MACRO_TYPES.has(copy.type) && !copy.macroSource) {
     copy.macroSource = {
@@ -1027,6 +1066,8 @@ export function createEmptyStudioDocument({ name = 'Untitled Project', documentI
           root: {
             type: 'phone-shell',
             id: 'home_shell',
+            layout: 'stack',
+            padding: 0,
             device,
             children: [
               {

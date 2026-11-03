@@ -16,6 +16,106 @@ async function fixture(t){
  return{studio,page,node,key,begin,release,geometry};
 }
 
+async function auditFixture(t) {
+ const dir=mkdtempSync(join(tmpdir(),'studio-audit-ui-'));
+ const doc=createEmptyStudioDocument({domain:'web'});
+ doc.pages[0].root.children=[
+  {type:'label',id:'under',text:'Editable under hotspot',x:40,y:80,w:220,h:40},
+  {type:'box',id:'hotspot',x:30,y:70,w:260,h:60,fill:'#FFFFFF00',on:{click:[{type:'set-var',name:'clicked',value:1}]}},
+  {type:'box',id:'container',layout:'stack',x:40,y:200,w:300,h:180,fill:'#EEEEEE',children:[{type:'label',id:'inside',text:'Inside',x:40,y:40,w:100,h:30}]},
+  {type:'label',id:'target',text:'Measure',x:284,y:80,w:100,h:40},
+ ];
+ doc.variables={clicked:{type:'number',value:0}};
+ doc.diagnostics=Array.from({length:8},(_,i)=>({code:'W_AUDIT_'+i,severity:'warning',message:'Layout hint '.repeat(25)}));
+ const path=join(dir,'source.json');writeFileSync(path,JSON.stringify(doc));
+ const {studio}=await startStudioServer({projectDir:join(dir,'project'),sourcePath:path,port:0});
+ t.after(async()=>{await studio.close();rmSync(dir,{recursive:true,force:true});});
+ const page=await studio.ensureManagedBrowserPage();
+ await page.evaluate('window.__STUDIO_APP__.setPanZoom(300,40,0.75)');
+ const point=id=>page.evaluate(`(()=>{const r=document.querySelector('[data-node-id="${id}"]').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+ const mouse=(type,p,extra={})=>page.send('Input.dispatchMouseEvent',{type,...p,button:'left',buttons:type==='mouseReleased'?0:1,clickCount:1,...extra});
+ return{studio,page,point,mouse};
+}
+
+test('transparent leaf hotspots pass design picking through and retain runtime clicks',async t=>{
+ const f=await auditFixture(t),p=await f.point('under');
+ await f.mouse('mousePressed',p);await f.mouse('mouseReleased',p);
+ assert.deepEqual(await f.page.evaluate('window.__STUDIO_STATE__.selectedIds'),['under']);
+ await f.page.evaluate("window.__STUDIO_APP__.selectNodes(['hotspot'],'home')");
+ assert.equal(await f.page.evaluate("!!document.querySelector('[data-selection-for=hotspot]')"),true);
+ await f.page.evaluate("document.getElementById('mode-interact-btn').click()");
+ await f.page.waitForFunction("window.__STUDIO_STATE__.mode==='interact'&&!!window.__STUDIO_STATE__.runtimeState");
+ const hit=await f.point('hotspot');await f.mouse('mousePressed',hit);await f.mouse('mouseReleased',hit);
+ await f.page.waitForFunction('window.__STUDIO_STATE__.runtimeState.variables.clicked===1');
+});
+
+test('three CSS pixels of mouse jitter neither move text nor interrupt double-click editing',async t=>{
+ const f=await fixture(t),p=await f.page.evaluate(`(()=>{const r=document.querySelector('[data-node-id=title]').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()`);
+ await f.page.send('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'left',buttons:1,clickCount:1});
+ const q={x:p.x+2,y:p.y+2};await f.page.send('Input.dispatchMouseEvent',{type:'mouseMoved',...q,buttons:1});
+ await f.page.send('Input.dispatchMouseEvent',{type:'mouseReleased',...q,button:'left',buttons:0,clickCount:1});
+ assert.equal(await f.page.evaluate('window.__STUDIO_STATE__.scene.pages[0].nodes.find(n=>n.id==="title").x'),40);
+ assert.equal(f.studio.store.appliedRevision,1);
+ await f.page.send('Input.dispatchMouseEvent',{type:'mousePressed',...q,button:'left',buttons:1,clickCount:2});
+ assert.equal(await f.page.evaluate('window.__STUDIO_STATE__.editingNodeId'),'title');
+});
+
+test('fit respects both side panels even for a large artboard and hints stay collapsed',async t=>{
+ const f=await auditFixture(t);
+ await f.page.evaluate("window.__STUDIO_APP__.selectNodes(['under'],'home')");
+ const hints=await f.page.evaluate(`(()=>{const d=document.querySelector('.inspector-diagnostics');return{exists:!!d,open:d?.open,geometry:!!document.getElementById('insp-w')}})()`);
+ assert.deepEqual(hints,{exists:true,open:false,geometry:true});
+ const result=await(await fetch(f.studio.url+'/api/commands',{method:'POST',body:JSON.stringify({baseRevision:1,idempotencyKey:'huge-board',commands:[{type:'resizeArtboard',pageId:'home',w:6000,h:4000}]})})).json();assert(result.ok);
+ await f.page.waitForFunction(`window.__STUDIO_RENDERED_REVISION__===${result.appliedRevision}`);
+ await f.page.evaluate("document.getElementById('btn-zoom-fit').click()");
+ const bounds=await f.page.evaluate(`(()=>{const b=document.querySelector('.artboard-outer').getBoundingClientRect(),l=document.getElementById('left-sidebar').getBoundingClientRect(),r=document.getElementById('inspector-shell').getBoundingClientRect();return{left:b.left,right:b.right,min:l.right,max:r.left}})()`);
+ assert(bounds.left>=bounds.min&&bounds.right<=bounds.max,JSON.stringify(bounds));
+});
+
+test('Shift-drag starts a marquee inside a nested container without moving the background',async t=>{
+ const f=await auditFixture(t),hash=f.studio.store.doc.contentHash;
+ const r=await f.page.evaluate("(()=>{const r=document.querySelector('[data-node-id=container]').getBoundingClientRect();return{x:r.x,y:r.y}})()");
+ const start={x:r.x+3,y:r.y+3},end={x:r.x+170*0.75,y:r.y+100*0.75};
+ await f.mouse('mousePressed',start,{modifiers:8});
+ assert.equal(await f.page.evaluate('window.__STUDIO_STATE__.dragSession?.kind'),'marquee');
+ await f.mouse('mouseMoved',end,{modifiers:8});await f.mouse('mouseReleased',end,{modifiers:8});
+ const selected=await f.page.evaluate('window.__STUDIO_STATE__.selectedIds');assert(selected.includes('inside'),JSON.stringify(selected));assert(!selected.includes('container'));
+ assert.equal(f.studio.store.doc.contentHash,hash);
+});
+
+test('Alt hover measures world-space gaps and releases cleanly without editing',async t=>{
+ const f=await auditFixture(t),hash=f.studio.store.doc.contentHash;
+ await f.page.evaluate("window.__STUDIO_APP__.selectNodes(['under'],'home')");
+ const p=await f.point('target');
+ await f.page.send('Input.dispatchKeyEvent',{type:'keyDown',key:'Alt',code:'AltLeft',modifiers:1});
+ await f.mouse('mouseMoved',p,{buttons:0,modifiers:1});
+ const distances=await f.page.evaluate("[...document.querySelectorAll('.distance-guide')].map(el=>Number(el.dataset.distance))");
+ assert(distances.includes(24),JSON.stringify(distances));
+ await f.page.send('Input.dispatchKeyEvent',{type:'keyUp',key:'Alt',code:'AltLeft',modifiers:0});
+ assert.equal(await f.page.evaluate("document.querySelectorAll('.distance-guide').length"),0);
+ assert.equal(f.studio.store.doc.contentHash,hash);
+ await f.page.evaluate("document.getElementById('zoom-label').click()");
+ assert.equal(await f.page.evaluate('window.__STUDIO_STATE__.zoom'),1);
+});
+
+test('pan mounts visible neighbor boards and leaves offscreen pages out of the DOM',async t=>{
+ const dir=mkdtempSync(join(tmpdir(),'studio-board-culling-')),doc=createEmptyStudioDocument({domain:'web'});
+ doc.pages=Array.from({length:20},(_,i)=>({id:i?'p'+i:'home',name:'Page '+i,domain:'web',canvas:{w:800,h:600},root:{type:'box',id:'root'+i,layout:'stack',w:800,h:600,children:Array.from({length:50},(_,j)=>({type:'label',id:'n'+i+'_'+j,text:'Node '+j,x:20+(j%5)*140,y:20+Math.floor(j/5)*50,w:120,h:30}))}}));
+ const path=join(dir,'source.json');writeFileSync(path,JSON.stringify(doc));const {studio}=await startStudioServer({projectDir:join(dir,'project'),sourcePath:path,port:0});t.after(async()=>{await studio.close();rmSync(dir,{recursive:true,force:true});});
+ const page=await studio.ensureManagedBrowserPage();
+ await page.evaluate('window.__STUDIO_APP__.setPanZoom(300,100,0.75)');
+ await page.waitForFunction("!document.querySelector('[data-node-id=n19_0]')");
+ assert(await page.evaluate("document.querySelectorAll('.studio-node').length")<200);
+ await page.evaluate('(()=>{const s=window.__STUDIO_STATE__,pg=s.scene.pages[19];window.__STUDIO_APP__.setPanZoom(300-pg._stageX*0.75,100,0.75)})()');
+ await page.waitForFunction("!!document.querySelector('[data-node-id=n19_0]')");
+ assert(await page.evaluate("document.querySelectorAll('.studio-node').length")<200);
+ const p=await page.evaluate("(()=>{const r=document.querySelector('[data-node-id=n19_0]').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()");
+ await page.send('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'left',buttons:1,clickCount:1});await page.send('Input.dispatchMouseEvent',{type:'mouseReleased',...p,button:'left',buttons:0,clickCount:1});
+ assert.equal(await page.evaluate("document.getElementById('screen-root').dataset.pageId"),'p19');
+ assert.deepEqual(await page.evaluate('window.__STUDIO_STATE__.selectedIds'),['n19_0']);
+ assert.equal(page.scriptErrors.length,0);
+});
+
 test('Escape cancels move and resize previews without committing on the later mouse release',async t=>{
  const f=await fixture(t),hash=f.studio.store.doc.contentHash,original=await f.geometry();
  for(const handle of[null,'se']){const point=await f.begin(handle);await f.key('Escape');assert.equal(await f.page.evaluate('window.__STUDIO_STATE__.dragSession'),null);await f.release(point);assert.equal(f.studio.store.doc.contentHash,hash);assert.deepEqual(await f.geometry(),original);}

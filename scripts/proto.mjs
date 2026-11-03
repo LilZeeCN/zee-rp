@@ -25,7 +25,7 @@ import { createBlankProject } from './create-blank-project.mjs';
 import { createPanel } from './create-panel-clone.mjs';
 import { fillPanelState } from './fill-panel-state.mjs';
 import { cloneLibraryWidget } from './clone-library-widget.mjs';
-import { addInteractions } from './ix-actions.mjs';
+import { createInteractionWriter } from './ix-actions.mjs';
 import { mergePages } from './merge-pages.mjs';
 import { placeMaster } from './place-master.mjs';
 import { resolvePageRecord } from './ix-actions.mjs';
@@ -370,6 +370,11 @@ function createBlankPageBuffer() {
   }
 }
 
+export function reportPrototypeProgress(phase, completed, total) {
+  // Only asynchronous workers have this IPC channel; CLI stdout stays JSON.
+  if (typeof process.send === 'function') process.send({ type: 'zee-rp-progress', phase, completed, total });
+}
+
 export function buildInteractiveRp(
   planPath,
   outputRpPath,
@@ -455,6 +460,7 @@ export function buildInteractiveRp(
   };
 
   for (let pIdx = 0; pIdx < pagesList.length; pIdx++) {
+    reportPrototypeProgress('assemble-pages', pIdx, pagesList.length);
     const pPlan = pagesList[pIdx];
     const targetPageName = pPlan.pageName || `Page ${pIdx + 1}`;
     const pageSlug = pPlan.slug || `p${pIdx + 1}`;
@@ -467,11 +473,14 @@ export function buildInteractiveRp(
     }
 
     builtPageInputs.push({ buf: pageBuf, name: targetPageName });
+    reportPrototypeProgress('assemble-pages', pIdx + 1, pagesList.length);
   }
 
   // Step 2: 合并全部单页为多页 .rp (或重命名单页)
   const mergeT0 = Date.now();
+  reportPrototypeProgress('merge-pages', 0, 1);
   let currentBuf = mergePages(builtPageInputs);
+  reportPrototypeProgress('merge-pages', 1, 1);
   logVerbose(verbose, 'merge-pages', `pages=${builtPageInputs.length}`, Date.now() - mergeT0);
 
   if ((plan.masters ?? []).length) {
@@ -635,6 +644,9 @@ export function buildInteractiveRp(
 
   // Every accepted event must be materialized, including panel-state owners.
   const ixT0 = Date.now();
+  const interactionWriter = createInteractionWriter(currentBuf);
+  let boundInteractions = 0;
+  reportPrototypeProgress('bind-interactions', 0, deferredInteractions.length);
   for (const { pageName, masterName, ix } of deferredInteractions) {
     const isPageTrig = ix.trigger === 'page' || (typeof ix.trigger === 'object' && ix.trigger?.page && !ix.trigger?.widget);
     const owner = masterName ? { master: masterName } : { page: pageName };
@@ -642,7 +654,7 @@ export function buildInteractiveRp(
       : { ...(typeof ix.trigger === 'object' ? ix.trigger : { widget: ix.trigger }), ...owner };
     let res;
     try {
-      res = addInteractions(currentBuf, trig, normalizeEvents(ix.events), { replaceEvent: true, version: 9 });
+      res = interactionWriter.add(trig, normalizeEvents(ix.events), { replaceEvent: true, version: 9 });
     } catch (cause) {
       if (!ix.sourcePointer) throw cause;
       const error = new Error(cause.message);
@@ -650,15 +662,18 @@ export function buildInteractiveRp(
         sourceId: ix.sourceId, message: cause.message }];
       throw error;
     }
-    currentBuf = res.file;
     interactionReports.push({ page: pageName, trigger: res.report.target,
       sourceId: ix.sourceId, sourcePointer: ix.sourcePointer, record: res.report.record,
       addedObjects: res.report.addedObjects, events: res.report.interactions.map(e => e.event) });
+    if (++boundInteractions % 25 === 0) reportPrototypeProgress('bind-interactions', boundInteractions, deferredInteractions.length);
   }
+  currentBuf = interactionWriter.finish();
+  reportPrototypeProgress('bind-interactions', boundInteractions, deferredInteractions.length);
   logVerbose(verbose, 'interactions:all', `bound=${deferredInteractions.length}`, Date.now() - ixT0);
 
   // Step 4: 落盘并执行 rp-read 三零与结构验证
   const auditT0 = Date.now();
+  reportPrototypeProgress('validate-native', 0, 1);
   mkdirSync(dirname(absOut), { recursive: true });
   const assembledSummary = readRp(currentBuf, { path: absOut, includeMasterWidgets: true });
   const allPageWidgets = assembledSummary.pages.flatMap(p => (p.widgets ?? []).map(w => ({ ...w, record: p.record })));
@@ -736,6 +751,7 @@ export function buildInteractiveRp(
   const totalElapsedMs = Date.now() - buildT0;
   logVerbose(verbose, 'audit:rp-read', `pages=${finalSummary.counts.pages} widgets=${finalSummary.counts.widgets} interactions=${finalSummary.counts.interactions} problems=0`, Date.now() - auditT0);
   logVerbose(verbose, 'build-rp:done', `${absOut}`, totalElapsedMs);
+  reportPrototypeProgress('validate-native', 1, 1);
 
   return {
     ok: true,
@@ -743,6 +759,7 @@ export function buildInteractiveRp(
     baselinePath: skipBaseline ? null : baselinePath,
     rpSha256,
     backend,
+    interactionAssembly: interactionWriter.stats(),
     version: finalSummary.version,
     static: staticMode,
     elapsedMs: totalElapsedMs,

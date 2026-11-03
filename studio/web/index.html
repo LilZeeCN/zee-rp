@@ -85,12 +85,13 @@
       </div>
       <div class="zoom-control" data-workspace-chrome aria-label="画布缩放">
         <button id="btn-zoom-out" title="缩小" aria-label="缩小" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-minus"></use></svg></button>
-        <span id="zoom-label">100%</span>
+        <button id="zoom-label" title="实际大小 (100%)" aria-label="实际大小 (100%)">100%</button>
         <button id="btn-zoom-in" title="放大" aria-label="放大" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-plus"></use></svg></button>
         <span class="tool-divider" aria-hidden="true"></span>
         <button id="btn-zoom-fit" title="适应当前画板" aria-label="适应当前画板" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-fit"></use></svg></button>
+        <button id="btn-zoom-all" title="适应全部画板" aria-label="适应全部画板"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-layers"></use></svg></button>
       </div>
-      <span class="canvas-note" data-workspace-chrome><kbd>空格</kbd> 拖动平移 <span>⌘ 滚轮缩放</span></span>
+      <span class="canvas-note" data-workspace-chrome><kbd>空格</kbd> 平移 <span>Shift 拖动框选 · Option 悬停测距</span></span>
     </main>
     <aside id="inspector-shell" data-workspace-chrome aria-label="属性面板">
       <div class="inspector-head"><strong>属性</strong><span id="inspector-selection">画板设置</span></div>

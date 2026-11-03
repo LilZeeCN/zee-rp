@@ -74,7 +74,9 @@ function expandMacroNode(node, palette) {
     ...(Array.isArray(node.padding) ? { padding: [...node.padding] } : {}),
   };
   if (n.type === 'phone-shell') {
-    if (n.fill === undefined && n.screenFill !== undefined) n.fill = n.screenFill;
+    n.layout ??= 'column';
+    n.gap ??= 12;
+    if (n.fill === undefined) n.fill = n.screenFill ?? '$bg';
     if ((!Array.isArray(n.children) || n.children.length === 0) && Array.isArray(n.body)) {
       n.children = structuredClone(n.body);
     }
@@ -618,7 +620,7 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
       }
     }
 
-    const myLayout = node.layout || (node.type === 'phone-shell' ? 'stack' : 'stack');
+    const myLayout = node.layout || 'stack';
     if (Array.isArray(node.children)) {
       if (isRoot && enableChildSliceMeta) {
         node.children = node.children.map(ch => {

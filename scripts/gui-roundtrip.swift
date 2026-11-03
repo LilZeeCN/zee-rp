@@ -78,16 +78,26 @@ do {
     func name(_ window: [String: Any]) -> String { window[kCGWindowName as String] as? String ?? "" }
     func matchesTitle(_ wTitle: String) -> Bool {
         wTitle == title
+            || wTitle == title + ".rp"
             || wTitle == procName + " - " + title
+            || wTitle == procName + " - " + title + ".rp"
             || wTitle.hasPrefix(title + " - " + procName)
             || wTitle.hasPrefix(title + ".rp - " + procName)
             || wTitle.hasPrefix(title + "* - " + procName)
             || wTitle.hasPrefix(title + ".rp* - " + procName)
     }
     func isTarget(_ window: [String: Any]) -> Bool { matchesTitle(name(window)) }
+    var observedDocument = false
     func focusTarget() throws {
         try waitUntil({ windows().contains(where: isTarget) }, "Owned job document is unavailable")
-        let actualTitle = name(windows().first(where: isTarget)!)
+        guard let target = windows().first(where: isTarget) else {
+            throw GuiFailure.message("Owned job document is unavailable")
+        }
+        if !observedDocument {
+            observedDocument = true
+            FileHandle.standardError.write(Data("AXURE_GUI_DOCUMENT_OPENED\n".utf8))
+        }
+        let actualTitle = name(target)
         if (try? appleScript("""
         tell application "System Events" to tell process "\(procName)"
           set frontmost to true
@@ -111,13 +121,22 @@ do {
         Thread.sleep(forTimeInterval: 0.3)
     }
     func openTarget() throws {
-        if (try? appleScript("tell application id \"\(bundleId)\" to open POSIX file " + literal(path))) == nil {
-            let proc = Process()
-            proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-            proc.arguments = ["-b", bundleId, path]
-            try proc.run(); proc.waitUntilExit()
+        for attempt in 0..<2 {
+            // A successful Apple event can precede the document window. If it
+            // never appears, redeliver once through LaunchServices in this same
+            // owned job; do not restart the whole save/close/reopen sequence.
+            if attempt > 0 || (try? appleScript("tell application id \"\(bundleId)\" to open POSIX file " + literal(path))) == nil {
+                let proc = Process()
+                proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+                proc.arguments = ["-b", bundleId, path]
+                try proc.run(); proc.waitUntilExit()
+            }
+            do { try focusTarget(); return }
+            catch GuiFailure.message(let message) where message == "Owned job document is unavailable" && attempt == 0 {
+                FileHandle.standardError.write(Data("AXURE_GUI_RETRY open-document (1/1)\n".utf8))
+                Thread.sleep(forTimeInterval: 0.35)
+            }
         }
-        try focusTarget()
     }
     func axPressMenu(_ menuNames: [String], _ itemNames: [String]) -> Bool {
         guard let bar = axAttr(axApp, kAXMenuBarAttribute as String) else { return false }

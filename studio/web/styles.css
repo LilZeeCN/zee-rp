@@ -152,7 +152,7 @@ pre, code { user-select: text; font-size: 12px; line-height: 1.7; }
   overflow: hidden;
   isolation: isolate;
   contain: paint;
-  background: #F7F8F2;
+  background: var(--bg, #F7F8F2);
 }
 
 .artboard-island {
@@ -284,6 +284,15 @@ pre, code { user-select: text; font-size: 12px; line-height: 1.7; }
 .inspector-foot button { font-size: 12px; padding: 0 8px; }
 .provenance-banner { padding: 12px 18px; background: var(--ui-accent-soft); font-size: 12px; line-height: 1.7; display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .diagnostic-banner { padding: 12px 18px; background: #493d21; color: #ffe09b; font-size: 14px; line-height: 1.7; }
+.inspector-diagnostics { margin: 8px 12px; border: 1px solid #62512d; border-radius: 8px; font-size: 12px; }
+.inspector-diagnostics summary { padding: 8px; color: #ffe09b; cursor: pointer; }
+.distance-guide { position: absolute; color: #FF7676; pointer-events: none; font: 11px/18px system-ui; }
+.distance-guide.horizontal { border-top: 1px solid currentColor; }
+.distance-guide.vertical { border-left: 1px solid currentColor; }
+.distance-guide span { position: absolute; white-space: nowrap; padding: 0 4px; border-radius: 3px; background: #271D22; }
+.distance-guide.horizontal span { left: 50%; top: -19px; transform: translateX(-50%); }
+.distance-guide.vertical span { left: 3px; top: 50%; transform: translateY(-50%); }
+.inspector-diagnostics .diagnostic-banner { padding: 8px; font-size: 12px; max-height: 180px; overflow: auto; }
 .exploration-card { padding: 16px; border: 1px solid var(--ui-border); border-radius: 12px; margin: 12px 0; background: var(--ui-panel-2); }
 .exploration-card button { margin-top: 6px; }
 #inspector-panel [style*="font-size:10px"], #inspector-panel [style*="font-size: 10px"], #inspector-panel [style*="font-size:11px"], #inspector-panel [style*="font-size: 11px"] { font-size: 12px !important; }

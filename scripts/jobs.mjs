@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { copyFileSync, existsSync, readFileSync, statSync, realpathSync, constants } from 'node:fs';
+import { copyFileSync, existsSync, readFileSync, statSync, lstatSync, unlinkSync, realpathSync, constants } from 'node:fs';
 import { dirname, basename, join, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertNotProtected, assertWritable } from './engine.mjs';
@@ -21,7 +21,7 @@ export class JobManager {
   get(id) {
     const job = this.jobs.get(id);
     if (!job) throw new Error(`未知 job ${id}`);
-    const { child, done, finish, input, inputHashes, ...data } = job;
+    const { child, done, finish, input, inputHashes, outputCopy, ...data } = job;
     if (['generate-prototype', 'revise-prototype'].includes(job.type)) delete data.stdout;
     return structuredClone(data);
   }
@@ -60,7 +60,12 @@ export class JobManager {
   pumpGeneration(job) {
     job.phase = job.type === 'revise-prototype' ? 'revise' : 'generate'; job.startedAt = new Date().toISOString();
     try {
-      const child = job.child = spawn(process.execPath, [GENERATOR], { detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = job.child = spawn(process.execPath, [GENERATOR], { detached: process.platform !== 'win32', stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
+      child.on('message', message => {
+        if (message?.type !== 'zee-rp-progress') return;
+        job.phase = message.phase;
+        job.progress = { phase: message.phase, completed: message.completed, total: message.total, updatedAt: new Date().toISOString() };
+      });
       child.stdout.on('data', c => { job.stdout += c; });
       child.stderr.on('data', c => { job.stderr += c; });
       child.stdin.on('error', error => { job.stderr += error.message; });
@@ -100,10 +105,17 @@ export class JobManager {
     if (before.records.unparseable || before.counts.danglingRefs || before.counts.problems) throw new Error('源文件结构检查失败，拒绝 GUI job');
     // 宿主版本：显式参数 > 源文件版本。双版本并行时不能靠「第一个 Axure 进程」。
     const host = resolvePasteTarget({ version: version ?? before.version });
-    copyFileSync(source, output, constants.COPYFILE_EXCL);
+    try { copyFileSync(source, output, constants.COPYFILE_EXCL); }
+    catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      throw Object.assign(new Error(`输出文件已存在，未覆盖：${output}。请换用新路径；若这是上次失败留下的文件，先核对失败记录与内容再删除重试。`), { code: 'EEXIST', path: output });
+    }
+    const copied = statSync(output);
     const id = randomUUID();
     const job = { id, type: 'gui-roundtrip', source, output, preview: Boolean(preview), host: { version: host.version, label: host.label, bundleId: host.bundleId },
-      status: 'queued', stdout: '', stderr: '', phase: 'queued', validation: null };
+      status: 'queued', stdout: '', stderr: '', phase: 'queued', validation: null,
+      outputCopy: { dev: copied.dev, ino: copied.ino, mtimeMs: copied.mtimeMs,
+        sha256: createHash('sha256').update(readFileSync(output)).digest('hex') } };
     job.done = new Promise(resolveDone => { job.finish = resolveDone; });
     this.jobs.set(id, job);
     setImmediate(() => this.pump());
@@ -160,10 +172,29 @@ export class JobManager {
     job.finished = true;
     if (job.status !== 'cancelled') job.status = code === 0 && !error ? 'completed' : 'failed';
     if (error) job.stderr += error;
+    if (job.status === 'failed') this.cleanupRoundtrip(job);
     job.exitCode = code;
     this.active = null;
     job.finish();
     setImmediate(() => this.pump());
+  }
+
+  cleanupRoundtrip(job) {
+    if (job.type !== 'gui-roundtrip' || !job.outputCopy) return;
+    if (job.phase !== 'queued' || /AXURE_GUI_(?:PHASE|DOCUMENT_OPENED)/.test(job.stderr)) {
+      job.outputCleanup = { removed: false, reason: 'native-document-observed' };
+      return;
+    }
+    try {
+      const current = lstatSync(job.output), copied = job.outputCopy;
+      const unchanged = current.isFile() && current.dev === copied.dev && current.ino === copied.ino
+        && current.mtimeMs === copied.mtimeMs
+        && createHash('sha256').update(readFileSync(job.output)).digest('hex') === copied.sha256;
+      if (unchanged) unlinkSync(job.output);
+      job.outputCleanup = { removed: unchanged, reason: unchanged ? 'unopened-copy-removed' : 'output-changed' };
+    } catch (error) {
+      job.outputCleanup = { removed: false, reason: error.code === 'ENOENT' ? 'already-absent' : 'cleanup-failed', ...(error.code === 'ENOENT' ? {} : { message: error.message }) };
+    }
   }
 
   cancel(id) {
@@ -177,7 +208,7 @@ export class JobManager {
         try { process.kill(-job.child.pid, 'SIGTERM'); } catch (error) { if (error.code !== 'ESRCH') throw error; }
       } else job.child.kill('SIGTERM');
     }
-    else { job.finished = true; job.finish(); }
+    else { this.cleanupRoundtrip(job); job.finished = true; job.finish(); }
     return { ...this.get(id), cancelled: true, reason: running ? 'termination_requested' : 'cancelled_queued' };
   }
 

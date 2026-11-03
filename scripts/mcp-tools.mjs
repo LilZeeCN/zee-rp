@@ -15,7 +15,7 @@ import { setRecordWidgetText } from './set-widget-text.mjs';
 import { setWidgetRichText } from './set-widget-richtext.mjs';
 import { setWidgetNames } from './name-widget.mjs';
 import { EVENTS } from './ix-actions.mjs';
-import { compilePrototype, buildInteractiveRp } from './proto.mjs';
+import { compilePrototype, buildInteractiveRp, reportPrototypeProgress } from './proto.mjs';
 import { expandSpec, pasteAxvg } from './axvg.mjs';
 import { createBlankProject } from './create-blank-project.mjs';
 import { writeNativeScene } from './native-scene.mjs';
@@ -1193,7 +1193,9 @@ export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sour
     source = join(artifactDir, 'source.json');
     writeFileSync(source, JSON.stringify(spec, null, 2) + '\n', { flag: 'wx' });
     stage = 'compile';
+    reportPrototypeProgress('compile', 0, 1);
     const compiled = compilePrototype(resolvedSourceFile ?? source, artifactDir, { strictAudit, autoHeal: Boolean(autoHeal) });
+    reportPrototypeProgress('compile', 1, 1);
     plan = JSON.parse(readFileSync(compiled.planPath, 'utf8'));
     if (!compiled.ok) {
       const error = new Error('原型未通过布局检查。');

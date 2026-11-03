@@ -250,6 +250,10 @@ RP/1 的 `set-panel-state` 不开放过渡参数；原生编辑工具有独立�
 
 ## 后端与验证范围
 
+大工程可对 `generate_prototype` / `revise_prototype` 传 `async:true`，再用 `jobs_get({id})` 读取进度。重建时 `phase` 会区分 `compile`、`assemble-pages`、`merge-pages`、`bind-interactions`、`validate-native`；`progress` 包含当前阶段的 `completed/total/updatedAt`。这是阶段内工作量，不能把某一阶段100%当成整个任务完成；最终看 `status` 与验证结果。
+
+2026-11-03 写侧改用一次装配内的记录/页面/状态上下文缓存，全部交互绑定后按脏记录一次编码压缩并修正manifest偏移，保留完整三零、事件覆盖与基线。读取缓存不跨工程共享；失败的交互批次不能提交。独立编辑入口 `add_interaction` 的逐次事务语义保留。
+
 RP/1 默认 `native`；旧 Spec 默认 `gui`，可用 `--backend native|gui` 显式选择。原生路径直接构造 Layer、VectorShape、RichTextBlock 和内嵌 ImageBox，递归装配面板、原生 TextBox 和 Repeater，然后写入事件。
 
 生成依赖 Node、Python/Pillow、字体、本机 RP 9 空白模板；面板、输入和 Repeater 按需使用 RP 9 安装资源。生成不需要运行 Axure、剪贴板、Swift 或 Stage 缓存；真实预览和原生编辑仍使用 Axure。原生图形不是通用 Axvg 导入器，任意自定义路径、效果、渐变和不等角圆角仍受对应后端限制。节点 `rotation`（度）已支持；TextBox 使用原生加载旋转动作，详见 [输入框旋转](native-forms.md#输入框旋转)。

@@ -854,6 +854,7 @@ def make_button(name, text, variant="primary", w=None, h=32, size=13, radius=6, 
         "fontWeight": snap_token(st["weight"], FONT_WEIGHT_TOKENS),
         "radius": snap_token(radius, RADIUS_TOKENS),
         "align": kwargs.pop("align", "center"),
+        "_text_v_align": "middle",
     }
     node.update(kwargs)
     return node
@@ -3169,6 +3170,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 **({"wrap": True} if node.get("wrap") else {}),
                 **({"spans": resolved_spans} if resolved_spans else {}),
                 **({"worstCase": node["_worst_case"]} if "_worst_case" in node else {}),
+                **({"textAlignment": 1, "_expectedTextAlignment": 1} if node.get("_text_v_align") == "middle" else {}),
             })
             return make_axvg_vector_shape(
                 next_id(), name, nx, ny, nw, nh,
@@ -3178,6 +3180,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 italic=node.get("italic", False), underline=node.get("underline", False),
                 strikethrough=node.get("strikethrough", False), letter_spacing=node.get("letterSpacing", 0),
                 rotation=node.get("rotation"),
+                v_align=node.get("_text_v_align"),
             )
         # Box / Container
         fill_h = resolve_color(node.get("fill"), theme_dict)
@@ -3702,7 +3705,9 @@ def text_ink_geometry(child, scale=1):
         tx = x + width - ink_w - padding
     else:
         tx = x + padding
-    ty = y + (height - ink_h) // 2 - bbox[1]
+    vertical = child.get("textAlignment", 1)
+    offset = 0 if vertical == 0 else height - ink_h if vertical == 2 else (height - ink_h) // 2
+    ty = y + offset - bbox[1]
     return font, tx, ty, [tx + bbox[0], ty + bbox[1], ink_w, ink_h]
 
 
@@ -3938,6 +3943,18 @@ def ensure_unique_names(root_node, scope_prefix=""):
 def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False):
     """执行领域自适应的两级量化审计：结构与安全门禁 (硬失败) + 审美与令牌门禁 (默认告警，--strict-audit 下升级为硬失败)。"""
     flat = [c for c in emitted_preview["flatChildren"] if not c.get("inModal") and not c.get("_repeaterPreviewExtraRow")]
+    # Check the actual native scene, not just the offline text placement: a
+    # transparent button must retain the same centering as a filled button.
+    native_alignment = {}
+    def index_alignment(item):
+        if "textAlignment" in item:
+            native_alignment[item.get("name")] = item["textAlignment"]
+        for child in item.get("scene", {}).get("items", []):
+            index_alignment(child)
+    for item in emitted_preview.get("axvg", {}).get("scene", {}).get("items", []):
+        index_alignment(item)
+    alignment_mismatches = [c for c in flat if "_expectedTextAlignment" in c
+                            and native_alignment.get(c.get("name")) != c["_expectedTextAlignment"]]
     # 遮挡审计：文字墨迹被后续不透明图元大面积覆盖时告警（此前完全无检查，容易“全绿但难看”）
     _opaque_later = []
     for _idx, _ch in enumerate(flat):
@@ -4450,11 +4467,17 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
                          "target": _d.get("target", ""),
                          "similar": _d.get("similar", []),
                          "detail": "交互目标元件不存在" + (f"；页面内相似名：{', '.join(_d['similar'])}" if _d.get("similar") else "")})
+    for child in alignment_mismatches:
+        failures.append({"gate": "button_text_alignment_ok", "severity": "structural",
+                         "widget": child.get("name"), "expected": child["_expectedTextAlignment"],
+                         "actual": native_alignment.get(child.get("name")),
+                         "detail": "按钮原生文字必须垂直居中，与填充色及激活状态无关"})
     # 给每条明细补 pageName（由调用方注入或留空）
     for _f in failures:
         if not _f.get("page"):
             _f["page"] = compile_plan.get("pageName", "")
     structural_gates = {
+        "button_text_alignment_ok": not alignment_mismatches,
         "no_text_overlap": text_overlap_count == 0,
         "no_text_clip": text_clip_count == 0,
         "no_missing_glyphs": missing_glyph_count == 0,

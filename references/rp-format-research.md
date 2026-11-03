@@ -1,5 +1,13 @@
 # .rp 格式与研究入口
 
+## RP9 文字垂直对齐（2026-11-03）
+
+同版本程序集 oracle 确认 `Axure.Constants.PName.VERTICAL_ALIGNMENT=10`。MyStyle 的显式 DOAName 为 `0xC0000000 + 10 = 3221225482`，Value 是 Int32（tag5）；对应 `Axure.Axvg.Graphics.VerticalAlignment` 的 `Top=0`、`Center=1`、`Bottom=2`。不要与另一枚举 `Axure.Platform.Alignment` 的数字混用。它控制文字在元件内部的垂直位置，与元件矩形、横向对齐、填充和选中状态分别生效。
+
+按钮与 badge 现在独立于填充/描边显式居中；原来透明 ghost 按钮漏掉居中，导致共享 tab-bar 未激活项顶部对齐。两页样本在 Axure 保存关闭重开后，四个按钮均为1；真实预览切页返回，文字框中心偏移从未激活项−10.75px变为0px。离线预览消费显式 `textAlignment`，结构门禁 `button_text_alignment_ok` 直接检查原生场景，避免截图看似居中而原生属性错误。
+
+这是底层序列化字段说明；现有 `set_widget_style` 仍只接受其 schema 中的 fill/stroke/color/radius，不接受原始 DOAName 或 verticalAlign。已有原型应从源码重新生成以应用修复。
+
 ## RP9 输入旋转：静态属性与原生动作分开验证（2026-11-02）
 
 本次沿用 REA 成员／IL 定位、项目 oracle 读取常量、原生文件对照与宿主验证的组合，不从一次失败推断整个能力不支持。

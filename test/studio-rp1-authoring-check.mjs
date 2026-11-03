@@ -1,12 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
-import { createEmptyStudioDocument, buildNodeIndex } from '../studio/document.mjs';
+import { createEmptyStudioDocument, buildNodeIndex, importToStudioDocument } from '../studio/document.mjs';
 import { StudioDocumentStore } from '../studio/commands.mjs';
 import { prepareRp1Commands } from '../studio/rp1-authoring.mjs';
 import { resolveDocumentScene } from '../studio/scene-resolver.mjs';
@@ -17,6 +17,86 @@ import { copyNodeSnapshots } from '../studio/clipboard.mjs';
 
 const source = 'column #lesson [350xhug] gap=20\n  label #word "serendipity" fontFamily=Georgia fontSize=44\n  paragraph #answer [fillxhug] "意外发现美好事物的能力。" visible=false fontSize=16 lineHeight=25\n  button #reveal [fillx48] "揭示答案"\n    +onClick [{"type":"show","target":"answer"}]';
 const node = (store, id) => [...buildNodeIndex(store.doc).byScopedId.values()].find(entry => entry.id === id)?.node;
+
+test('full RP/1 import lays out phone-shell cards in a safe-area column and preserves overrides', t => {
+  const dir = mkdtempSync(join(tmpdir(), 'studio-phone-import-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const path = join(dir, 'repro.rp1');
+  writeFileSync(path, `rp/1 target=9 name="ReproBug" domain=mobile theme=modern-dark
+palette:
+  $bg = "#0B0F17"
+  $surface = "#151D2A"
+  $ink = "#F8FAFC"
+  $brand = "#F59E0B"
+page #home name="首页" device=iphone-17
+  phone-shell #shell title="REPRO" gap=12
+    card #card1 [fillxhug] padding=16 title="Card 1" body="Should be at the top"
+    card #card2 [fillxhug] padding=16 title="Card 2" body="Should be below Card 1"
+`);
+  const doc = importToStudioDocument(path);
+  const scene = resolveDocumentScene(doc);
+  const find = id => scene.pages[0].nodes.find(n => n.id === id);
+  const first = find('card1'), second = find('card2');
+  assert.equal(second.y - first.y - first.h, 12, 'cards must not overlap');
+  assert.equal(first.x, 16);
+  assert.equal(first.y, 60);
+  assert.equal(first.w, 370);
+  assert.equal(find('shell').fill, '#0B0F17');
+  assert.equal(find('card1_title').color, '#F8FAFC');
+  assert.equal(doc.palette.brand, '#F59E0B');
+  assert.deepEqual(importToStudioDocument(doc).pages, doc.pages, 'reimport must be idempotent');
+
+  const explicit = importToStudioDocument({ pages: [{ id: 'home', device: 'iphone-17', root: {
+    type: 'phone-shell', id: 'shell', layout: 'stack', padding: 0, gap: 0, fill: '#123456',
+    children: [{ type: 'box', id: 'fixed', x: 30, y: 90, w: 80, h: 40 }],
+  } }] });
+  const fixed = resolveDocumentScene(explicit).pages[0].nodes.find(n => n.id === 'fixed');
+  assert.deepEqual([fixed.x, fixed.y], [30, 90]);
+  assert.equal(explicit.pages[0].root.fill, '#123456');
+  assert.equal(explicit.pages[0].root.gap, 0);
+});
+
+test('modern-dark imports its native palette without falling back to mobile-hifi', () => {
+  const doc = importToStudioDocument({ theme: 'modern-dark', pages: [{ id: 'home', root: { type: 'label', id: 'text', text: 'Dark' } }] });
+  assert.equal(doc.palette.bg, '#0B0F19');
+  assert.equal(doc.palette.ink, '#F8FAFC');
+  assert.equal(doc.palette.line, '#1E293B');
+  assert.equal(doc.palette['ink-2'], '#CBD5E1');
+});
+
+test('theme colors update screen, text and border in design and preview without reloading', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'studio-theme-browser-'));
+  const sourcePath = join(dir, 'source.json');
+  writeFileSync(sourcePath, JSON.stringify({ theme: 'modern-dark', pages: [{ id: 'home', device: 'iphone-17', root: {
+    type: 'phone-shell', id: 'shell', children: [{ type: 'card', id: 'card', title: 'Theme', borderTop: true }],
+  } }] }));
+  const { studio } = await startStudioServer({ projectDir: join(dir, 'project'), sourcePath, port: 0 });
+  t.after(async () => { await studio.close(); rmSync(dir, { recursive: true, force: true }); });
+  const page = await studio.ensureManagedBrowserPage();
+  const readColors = () => page.evaluate(`[
+    getComputedStyle(document.querySelector('.artboard-screen')).backgroundColor,
+    getComputedStyle(document.querySelector('[data-node-id="card_title"]')).color,
+    getComputedStyle(document.querySelector('[data-node-id="card"]')).borderTopColor
+  ]`);
+  assert.deepEqual(await readColors(), ['rgb(11, 15, 25)', 'rgb(248, 250, 252)', 'rgb(30, 41, 59)']);
+  for (const [name, colors, expected] of [
+    ['light', { bg: '#F7F8F2', ink: '#203B32', line: '#E3E7DC' }, ['rgb(247, 248, 242)', 'rgb(32, 59, 50)', 'rgb(227, 231, 220)']],
+    ['custom', { bg: '#26102F', ink: '#FFF1B8', line: '#A878CB' }, ['rgb(38, 16, 47)', 'rgb(255, 241, 184)', 'rgb(168, 120, 203)']],
+  ]) {
+    await page.evaluate(`document.getElementById('mode-design-btn').click()`);
+    const result = await (await fetch(studio.url + '/api/commands', { method: 'POST', body: JSON.stringify({
+      baseRevision: studio.store.appliedRevision, idempotencyKey: 'theme-' + name,
+      commands: [{ type: 'setTokens', tokens: { colors } }],
+    }) })).json();
+    assert.equal(result.ok, true, JSON.stringify(result));
+    await page.waitForFunction(`window.__STUDIO_RENDERED_REVISION__===${result.appliedRevision}`);
+    assert.deepEqual(await readColors(), expected, name + ' design');
+    await page.evaluate(`document.getElementById('mode-interact-btn').click()`);
+    await page.waitForFunction(`document.getElementById('mode-interact-btn').getAttribute('aria-pressed')==='true'`);
+    assert.deepEqual(await readColors(), expected, name + ' preview');
+  }
+  assert.equal(page.scriptErrors.length, 0);
+});
 function seeded() {
   const store = new StudioDocumentStore(createEmptyStudioDocument());
   const prepared = prepareRp1Commands({ doc: store.doc, source, mode: 'insert', pageId: 'home' });

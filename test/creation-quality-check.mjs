@@ -57,6 +57,9 @@ try {
     assert(performance.now() - started < 3000); assert.equal(job.input, undefined);
     const result = await finished(job.id);
     assert.equal(result.status, 'completed', JSON.stringify(result));
+    assert.equal(result.progress.phase, 'validate-native');
+    assert.equal(result.progress.completed, result.progress.total);
+    assert.ok(result.progress.updatedAt);
     assert.equal(result.result.verification.structure, true); assert(existsSync(result.result.baseline));
   });
   await check('async semantic failure remains structured and does not publish an output', async () => {
