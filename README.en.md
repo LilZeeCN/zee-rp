@@ -1,46 +1,47 @@
 <div align="center">
 
-<img src="assets/readme/hero.svg" alt="zee-rp — Describe. Compile. Keep editing." width="100%">
+<img src="assets/readme/cover.svg" alt="zee-rp · Make room for ideas. AI-native canvas. Editable Axure output." width="100%">
 
-# Let AI build a prototype you can keep editing in Axure.
+# Give AI room to design.<br>Bring the work into Axure.
 
-From a brief or screenshot to a native **`.rp`** with pages, variables and interactions.<br>
-Author in **RP/1**, generate through **MCP / CLI**, continue in **Axure**.
+**Author in RP/1. Explore with your agent. Refine together. Keep an editable `.rp`.**
 
-[![MIT](https://img.shields.io/badge/license-MIT-142033?style=flat-square)](LICENSE)
-[![Version](https://img.shields.io/github/v/release/LilZeeCN/zee-rp?style=flat-square&color=304FFE)](https://github.com/LilZeeCN/zee-rp/releases)
-[![Checks](https://img.shields.io/github/actions/workflow/status/LilZeeCN/zee-rp/test.yml?style=flat-square&label=checks)](https://github.com/LilZeeCN/zee-rp/actions)
+[Get started](#quickstart)　·　[Studio](#studio)　·　[RP/1](#rp1)　·　[简体中文](README.md)
 
-[See a prototype](#a-complete-app-first) · [Get started](#connect-your-agent) · [RP/1](#a-design-with-source-code) · [Scope](#verify-each-step-of-the-delivery) · [简体中文](README.md)
+[![MIT](https://img.shields.io/badge/MIT-open_source-D5FF70?style=flat-square&labelColor=202825)](LICENSE) [![Checks](https://img.shields.io/github/actions/workflow/status/LilZeeCN/zee-rp/test.yml?branch=main&style=flat-square&label=checks&labelColor=202825&color=637E51)](https://github.com/LilZeeCN/zee-rp/actions)
 
 </div>
 
-## A complete app, first
+<br>
 
-> “Build a good-looking birdwatching app with an iPhone 17 Pro frame. You decide the design.”
+<img src="assets/readme/showcase.png" alt="QIYU: real generated discovery, species details and journal screens from a nine-page native prototype" width="100%">
 
-**QIYU** uses forest green, warm white and bird photography across nine pages: discovery, a sample-photo identification flow, species details, birding locations and a personal journal. Enter an observation, save it, revisit its text, favorite a bird and switch between timeline and collection views.
+<p align="center"><b>QIYU</b>　Discover a bird. Get to know it. Keep the encounter.</p>
+<p align="center"><sub>Nine-page native prototype · Separate text, buttons and inputs · Demo identification and statistics · <a href="assets/readme/README.md">Case notes and credits</a></sub></p>
 
-<table>
-<tr>
-<td width="33%"><img src="assets/readme/qiyu-home.png" alt="QIYU discovery screen" width="100%"></td>
-<td width="33%"><img src="assets/readme/qiyu-species.png" alt="Editable species details and interactive field guide" width="100%"></td>
-<td width="33%"><img src="assets/readme/qiyu-journal.png" alt="Personal journal with variable-backed observations" width="100%"></td>
-</tr>
-<tr><td align="center">Discover</td><td align="center">Get to know a bird</td><td align="center">Keep the encounter</td></tr>
-</table>
+<br>
 
-Text, cards, buttons, inputs and the schematic map are separate objects. Photos are embedded images. Identification, routes and statistics use demo data. [Image credits and case notes](assets/readme/README.md).
+<a id="studio"></a>
 
-### A 40-second look at the workflow
+## 01　Make room for refinement.
 
-https://github.com/user-attachments/assets/39c37462-3956-48b8-b495-fe90d2ab9431
+Studio is a free canvas for people and agents. Let AI build the first draft, then select, edit text and adjust layouts directly. Hand a small part back to your agent and explore another direction.
 
-The Zhixu study app illustrates the path from a brief to an editable prototype. The film is a workflow animation based on the case specification. [Download 1080p / 60fps](https://github.com/LilZeeCN/zee-rp/releases/download/v0.2.1/zee-rp-zhixu-1080p60.mp4) · [Production notes](assets/promo/README.md).
+<img src="assets/readme/studio.png" alt="The real Studio editor: a second QIYU design, independent layers, a selected text object and editable geometry" width="100%">
 
-## A design with source code
+**AI drafts.** Author through RP/1 or commands; query layers and make targeted changes.<br>
+**You refine.** Double-click text, Shift-drag a marquee, hold Option / Alt to measure, undo and redo.<br>
+**Verify together.** Inspect real screenshots and exercise interactions before delivery.
 
-**RP/1** keeps pages, layout, data and events in one source file. Generate a native project, revise its source, or make supported native edits in Axure and merge them back.
+[Studio workflow](docs/studio-design-workflow.md)　↗　[AI authoring](docs/studio-ai-authoring.md)
+
+<br>
+
+<a id="rp1"></a>
+
+## 02　Give design intent a source file.
+
+**RP/1** keeps pages, layout, components, variables and interactions together. Agents can target specific changes while the design keeps its structure, revision identity and a place to continue.
 
 ```text
 rp/1 target=9 name="Next encounter" domain=mobile theme=mobile-hifi
@@ -55,58 +56,31 @@ page #notes name="Journal" device=iphone-17-pro
     button #back [fillx44] "Back to discovery" goto="home"
 ```
 
-Save as `birding.rp1`, then call MCP `generate_prototype`:
+Grow a page into a complete flow, revise with `revise_prototype`, and merge supported native edits back into source.
 
-```json
-{
-  "source": "/absolute/path/birding.rp1",
-  "output": "/absolute/path/birding.rp"
-}
-```
+[RP/1 reference](references/rp-language.md)　↗　[Examples](examples/authoring/mobile-cards.rp1)　↗　[Native roundtrip](docs/studio-native-roundtrip.md)
 
-The output includes the native file, source baseline, page previews, state sheets and verification reports. `[fillxhug]` fills the available width and measures height from content. [Language guide](references/rp-language.md) · [Examples](examples/authoring/mobile-cards.rp1) · [MCP guide](references/mcp-prototype.md).
+<br>
 
-| Your task | What zee-rp provides |
+## 03　Keep the design in your hands.
+
+Generate a native **`.rp`** and continue editing supported text, controls and layouts in Axure. Deliver pages, variables, panels and navigation together, alongside source, previews and verification reports.
+
+| Continue in | What stays with you |
 | :--- | :--- |
-| Start with a brief | Native pages, shared styling, variables and cross-page navigation |
-| Reconstruct a screenshot | OCR and layout detection; supported text/geometry as native objects, photos as separate images |
-| Edit an existing project | Version-aware RP9 / RP11 tools for text, names, styles and interactions |
-| Revise the design | `revise_prototype`, plus bounded native/source merging with `sync_prototype` |
-| Check the result | Separate layout, structure, runtime preview and save/reopen evidence |
+| **Studio** | A shared design document, transactions and undo history |
+| **Axure** | Native objects and supported interactions to keep editing |
+| **The browser** | Runnable previews, plus standalone HTML / CSS / JS export |
 
-### Starting from a screenshot
+[Native export and sync](docs/studio-native-roundtrip.md)　↗　[Code export](docs/studio-code-export.md)　↗　[40-second workflow animation](https://github.com/LilZeeCN/zee-rp/releases/download/v0.2.1/zee-rp-zhixu-1080p60.mp4)
 
-<img src="examples/screenshot/comparison.png" alt="Original geometric demo and reconstructed layout" width="100%">
+<br>
 
-Reconstruction produces an editable layout and comparison images. Business logic absent from the screenshot must be authored separately. [Screenshot workflow](references/screenshot-workflow.md).
+<a id="quickstart"></a>
 
-## Edit together in Studio
+## Get started
 
-Studio is a free canvas backed by the same design document your agent edits. Start with RP/1 or commands, query layers, revise a selection and verify interactions. In the browser, select, edit text, drag and undo, then export an editable `.rp`.
-
-After connecting MCP, call `studio_open_project`:
-
-```json
-{
-  "projectDir": "/absolute/path/design-project",
-  "sourcePath": "/absolute/path/birding.rp1"
-}
-```
-
-Open the returned `url` in a browser. Omit `sourcePath` for a blank project. Agents can start with `studio_describe({"topic":"workflow"})`; local RP/1 authoring and full native generation have separately documented scopes.
-
-- **Shared editing:** RP/1 and commands use the same transactions, revision identity and undo/redo, with components, variables, panels and data lists.
-- **Verify before delivery:** inspect real screenshots, run interaction scenarios, export native `.rp` or an offline HTML/CSS/JS app, and move projects with bundles. Native edits can be synced within the documented scope.
-- **Direct controls:** double-click text, Shift-drag a marquee, hold Option/Alt and hover to measure spacing. Click the zoom percentage for 100%, or fit one or all boards.
-- **Larger projects and themes:** neighboring boards mount as they enter view; `modern-dark` and custom palettes are supported. Asynchronous native generation and revision expose phase progress.
-
-[AI authoring](docs/studio-ai-authoring.md) · [Studio workflow](docs/studio-design-workflow.md) · [Native roundtrip](docs/studio-native-roundtrip.md) · [Troubleshooting](references/troubleshooting.md)
-
-Fractional-zoom text sharpness, very large single boards and native widget/host support remain bounded. [Capabilities](references/capabilities.md) distinguish implementation, browser checks and Axure host evidence; regression tests are not independent AI design ratings.
-
-## Connect your agent
-
-Install **Node.js 18+** and **Python 3.10+**. Native generation also requires your local **Axure** installation and a **single-page blank project saved in RP9**. Screenshot OCR uses macOS Vision and Swift.
+Install **Node.js 18+** and **Python 3.10+**. Native generation additionally needs local Axure resources and your own single-page blank project saved in RP9.
 
 ```sh
 git clone https://github.com/LilZeeCN/zee-rp.git
@@ -117,7 +91,10 @@ python -m pip install -r requirements.txt
 npm ci
 ```
 
-Add this service to your MCP client and replace the three paths:
+<details>
+<summary><b>Connect your MCP client</b> · Expand configuration</summary>
+
+Replace the absolute paths with your installation, Python environment and RP9 blank project:
 
 ```json
 {
@@ -134,40 +111,35 @@ Add this service to your MCP client and replace the three paths:
 }
 ```
 
-`PATH` must include the Python environment with the image dependencies. If Node is not on the default path, use its absolute path for `command`. The Agent entry point is [SKILL.md](SKILL.md).
-
-<details>
-<summary><strong>Prefer the terminal?</strong></summary>
-
-```sh
-export AXURE_BLANK_TEMPLATE_RP9=/absolute/path/my-rp9-blank.rp
-node scripts/proto.mjs check --spec examples/rp-language/counter.json
-node scripts/proto.mjs generate --spec examples/rp-language/counter.json --out-dir outputs/counter --out-rp outputs/counter/counter.rp
-node bin/axure.mjs rp-read outputs/counter/counter.rp --json
-```
-
-Use new output names. See the [command table](references/commands-generated.md).
+`PATH` must include Python with the installed dependencies. Use an absolute Node path in `command` if needed. Reconnect MCP after updates.
 
 </details>
 
-## Verify each step of the delivery
+Call `studio_open_project` and open the returned `url`:
 
-Parsing a file, opening it in Axure, exercising browser interactions and reopening a saved file require separate evidence. A passing `strictAudit` covers the compiled layout/style gates for that case.
-
-Native generation targets **RP9**; file tools handle **RP9 / RP11** by version. Recent host behavior has been tested on specific **macOS + Axure RP9** cases. [Capabilities](references/capabilities.md) · [Verification](docs/verification.md).
-
-RP/1 currently has no `fontFamily` property; offline fonts and host fallback may differ. Image corners, shadows and gradients are embedded raster effects. See [visual authoring](references/visual-authoring.md) for alignment, tracking, tab styles, state sizing and available native font-editing tools.
-
-## Explore further
-
-[Agent Skill](SKILL.md) · [RP/1 reference](references/rp-language.md) · [Visual authoring](references/visual-authoring.md) · [Existing custom styles](references/custom-styles.md) · [Contributing](CONTRIBUTING.md) · [Changelog](CHANGELOG.md)
-
-```sh
-npm test
-npm run test:language
-npm run test:polish
+```json
+{ "projectDir": "/absolute/path/my-first-prototype" }
 ```
 
-Source and original demo artwork are [MIT](LICENSE); third-party case photography has separate credits and licenses. Independently built by **LilZee**, unaffiliated with Axure. Native templates, official libraries, fonts and runtimes come from the user's local installation.
+Then give your agent a brief:
 
-<div align="center"><sub>Your ideas in source. Your design in your hands.</sub></div>
+> Design a birdwatching app with discovery, species details and a journal. Start in the canvas, verify navigation and saved observations, then export an editable `.rp`.
+
+<details>
+<summary><b>Agent entry points and scope</b></summary>
+
+Agents start with `studio_describe({"topic":"workflow"})`. Use `sourcePath` in `studio_open_project` to import RP/1, and `generate_prototype` for full native generation. Local authoring and full compilation have separately documented scopes.
+
+Native generation targets RP9; file tools handle RP9 / RP11 by version. Host evidence mainly covers macOS + Axure RP9. Some effects use embedded raster assets; fonts and previews depend on the host. Fractional-zoom sharpness and very large single boards remain bounded.
+
+Structure, browser behavior and Axure save/reopen are separate checks. [Capabilities](references/capabilities.md) · [Acceptance layers](docs/studio-acceptance.md) · [Troubleshooting](references/troubleshooting.md)
+
+</details>
+
+<br>
+
+---
+
+[Agent Skill](SKILL.md)　/　[Contributing](CONTRIBUTING.md)　/　[Changelog](CHANGELOG.md)　/　[MIT License](LICENSE)
+
+<sub>Independently built by LilZee · Unaffiliated with Axure · Third-party photography retains its own credits and licenses</sub>
