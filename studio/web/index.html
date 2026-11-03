@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#15171b" />
+  <title>zee-rp Studio · 自由画布</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <svg id="workspace-icons" aria-hidden="true" xmlns="http://www.w3.org/2000/svg"><symbol id="ui-cursor" viewBox="0 0 24 24"><path d="m5 3 14 10-7 1-3 7z"/></symbol>
+<symbol id="ui-hand" viewBox="0 0 24 24"><path d="M8 12V5a2 2 0 0 1 4 0v6-7a2 2 0 0 1 4 0v8-5a2 2 0 0 1 4 0v8c0 5-3 7-7 7-3 0-5-2-7-5l-3-4a2 2 0 0 1 3-2l2 2"/></symbol>
+<symbol id="ui-frame" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 2v4m8-4v4M8 18v4m8-4v4M2 8h4m12 0h4M2 16h4m12 0h4"/></symbol>
+<symbol id="ui-text" viewBox="0 0 24 24"><path d="M4 5h16M12 5v15M8 20h8M4 5v3m16-3v3"/></symbol>
+<symbol id="ui-button" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="4"/><path d="M8 12h8"/></symbol>
+<symbol id="ui-component" viewBox="0 0 24 24"><path d="m12 2 4 4-4 4-4-4zm-6 6 4 4-4 4-4-4zm12 0 4 4-4 4-4-4zm-6 6 4 4-4 4-4-4z"/></symbol>
+<symbol id="ui-undo" viewBox="0 0 24 24"><path d="m8 4-5 5 5 5M3 9h10a7 7 0 0 1 0 14"/></symbol>
+<symbol id="ui-redo" viewBox="0 0 24 24"><path d="m16 4 5 5-5 5m5-5H11a7 7 0 0 0 0 14"/></symbol>
+<symbol id="ui-play" viewBox="0 0 24 24"><path d="m8 4 12 8-12 8z"/></symbol>
+<symbol id="ui-export" viewBox="0 0 24 24"><path d="M12 3v12m-4-8 4-4 4 4M4 14v6h16v-6"/></symbol>
+<symbol id="ui-left" viewBox="0 0 24 24"><path d="M4 3v18M8 6h12v4H8zm0 9h8v4H8z"/></symbol>
+<symbol id="ui-center" viewBox="0 0 24 24"><path d="M12 2v20M4 5h16v4H4zm4 10h8v4H8z"/></symbol>
+<symbol id="ui-top" viewBox="0 0 24 24"><path d="M3 4h18M6 8h4v12H6zm9 0h4v8h-4z"/></symbol>
+<symbol id="ui-distribute" viewBox="0 0 24 24"><path d="M3 3v18m18-18v18M8 7h8v10H8z"/></symbol>
+<symbol id="ui-minus" viewBox="0 0 24 24"><path d="M5 12h14"/></symbol>
+<symbol id="ui-plus" viewBox="0 0 24 24"><path d="M5 12h14m-7-7v14"/></symbol>
+<symbol id="ui-fit" viewBox="0 0 24 24"><path d="M8 3H3v5m13-5h5v5M3 16v5h5m13-5v5h-5"/></symbol>
+<symbol id="ui-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5zm-9 9 9 5 9-5m-18 5 9 5 9-5"/></symbol>
+<symbol id="ui-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="ui-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V6a4 4 0 0 1 8 0v4"/></symbol>
+<symbol id="ui-page" viewBox="0 0 24 24"><rect x="5" y="3" width="14" height="18" rx="2"/><path d="M9 7h6m-6 5h6m-6 5h4"/></symbol>
+<symbol id="ui-image" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8" cy="8" r="2"/><path d="m3 17 5-5 4 4 4-6 5 7"/></symbol>
+<symbol id="ui-arrow" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+<symbol id="ui-chevron" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></symbol>
+<symbol id="ui-history" viewBox="0 0 24 24"><path d="M3 11a9 9 0 1 1 1 6M3 4v7h7m2-5v6l4 2"/></symbol>
+<symbol id="ui-ai" viewBox="0 0 24 24"><path d="m12 2 3 7 7 3-7 3-3 7-3-7-7-3 7-3z"/></symbol></svg>
+  <div id="app-shell">
+    <header id="topbar" data-workspace-chrome>
+      <div class="topbar-group document-group">
+        <span class="brand-badge">zee-rp<b>.</b></span>
+        <div class="document-heading"><span class="document-location">工作空间 / 原型设计</span><span id="project-title">正在连接工程</span></div>
+        <div class="history-tools">
+          <button id="btn-undo" title="撤销 (⌘Z)" aria-label="撤销 (⌘Z)" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-undo"></use></svg></button>
+          <button id="btn-redo" title="重做 (⌘⇧Z)" aria-label="重做 (⌘⇧Z)" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-redo"></use></svg></button>
+          <button id="btn-versions" title="命名版本与恢复">版本</button>
+          <button id="btn-operations" title="查看导出与其他操作">操作</button>
+          <button id="btn-history" title="最近修改与版本" aria-label="最近修改与版本" aria-pressed="false"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-history"></use></svg></button>
+        </div>
+      </div>
+      <div class="topbar-group" id="mode-switcher" aria-label="工作模式">
+        <button id="mode-design-btn" class="active" data-mode="design" aria-pressed="true">设计</button>
+        <button id="mode-interact-btn" data-mode="interact" aria-pressed="false"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-play"></use></svg>预览</button>
+        <button id="mode-explore-btn" data-mode="explore" aria-pressed="false">方案</button>
+      </div>
+      <div class="topbar-group delivery-group">
+        <div class="status-pill" id="status-pill" role="status"><span class="status-dot" id="conn-dot"></span><span id="save-status">正在连接</span><span id="rev-readout" class="visually-hidden">rev 0 / dur 0 / ren 0</span></div>
+        <button id="btn-review-compare" title="记录当前画面，并与上次记录对照" aria-label="画面对照"><svg class="ui-icon" aria-hidden="true"><use href="#ui-eye"></use></svg>对照</button>
+        <button id="btn-export-code" title="导出独立可运行 HTML/CSS/JS 代码包" aria-label="导出代码">导出代码</button>
+        <button id="btn-export-rp" class="primary"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-export"></use></svg>导出 .rp</button>
+      </div>
+    </header>
+    <aside id="left-sidebar" data-workspace-chrome aria-label="项目资源">
+      <div class="side-heading"><strong>项目资源</strong><span id="page-count" class="muted"></span></div>
+      <div class="sidebar-tabs" aria-label="资源类型">
+        <button class="sidebar-tab active" data-tab="pages" aria-pressed="true">图层</button>
+        <button class="sidebar-tab" data-tab="components" aria-pressed="false">组件</button>
+        <button class="sidebar-tab" data-tab="tokens" aria-pressed="false">样式</button>
+      </div>
+      <div class="tree-search" id="tree-search"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-layers"></use></svg><input id="layer-search" type="search" placeholder="查找图层" aria-label="按名称、内容或标识查找图层" /></div>
+      <div class="sidebar-section" id="sidebar-content"></div>
+    </aside>
+    <main id="canvas-viewport" tabindex="0" aria-label="设计画布">
+      <div id="canvas-stage"></div>
+      <div id="overlay-layer"></div>
+      <div id="marquee-box"></div>
+      <textarea id="inline-text-editor" spellcheck="false" aria-label="编辑图层文字"></textarea>
+      <div class="canvas-tools" id="tool-bar" data-workspace-chrome aria-label="画布工具">
+        <button id="tool-select" title="选择工具 (V)" aria-label="选择工具 (V)" class="tool active" data-tool="select" aria-pressed="true"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-cursor"></use></svg></button>
+        <button id="tool-hand" title="移动画布 (H)" aria-label="移动画布 (H)" class="tool" data-tool="pan" aria-pressed="false"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-hand"></use></svg></button>
+        <span class="tool-divider" aria-hidden="true"></span>
+        <button id="btn-add-box" title="新建容器" aria-label="新建容器" class="tool"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-frame"></use></svg></button>
+        <button id="btn-add-text" title="新建文本" aria-label="新建文本" class="tool"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-text"></use></svg></button>
+        <button id="btn-add-btn" title="新建按钮" aria-label="新建按钮" class="tool"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-button"></use></svg></button>
+        <button id="btn-make-comp" title="创建组件" aria-label="创建组件" class="tool"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-component"></use></svg></button>
+      </div>
+      <div class="zoom-control" data-workspace-chrome aria-label="画布缩放">
+        <button id="btn-zoom-out" title="缩小" aria-label="缩小" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-minus"></use></svg></button>
+        <button id="zoom-label" title="实际大小 (100%)" aria-label="实际大小 (100%)">100%</button>
+        <button id="btn-zoom-in" title="放大" aria-label="放大" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-plus"></use></svg></button>
+        <span class="tool-divider" aria-hidden="true"></span>
+        <button id="btn-zoom-fit" title="适应当前画板" aria-label="适应当前画板" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-fit"></use></svg></button>
+        <button id="btn-zoom-all" title="适应全部画板" aria-label="适应全部画板"><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-layers"></use></svg></button>
+      </div>
+      <span class="canvas-note" data-workspace-chrome><kbd>空格</kbd> 平移 <span>Shift 拖动框选 · Option 悬停测距</span></span>
+    </main>
+    <aside id="inspector-shell" data-workspace-chrome aria-label="属性面板">
+      <div class="inspector-head"><strong>属性</strong><span id="inspector-selection">画板设置</span></div>
+      <div class="alignment-tools" aria-label="对齐与分布">
+        <button id="btn-align-left" title="左对齐" aria-label="左对齐" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-left"></use></svg></button>
+        <button id="btn-align-center" title="水平居中" aria-label="水平居中" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-center"></use></svg></button>
+        <button id="btn-align-top" title="顶对齐" aria-label="顶对齐" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-top"></use></svg></button>
+        <button id="btn-distribute-h" title="水平等距分布" aria-label="水平等距分布" ><svg class="ui-icon" aria-hidden="true" focusable="false"><use href="#ui-distribute"></use></svg></button>
+      </div>
+      <div id="inspector-panel"></div>
+      <div class="inspector-foot"><span>可编辑图层</span><button id="btn-all-properties" aria-pressed="false">所有属性</button></div>
+    </aside>
+    <div id="studio-toast" class="studio-toast" role="status" data-workspace-chrome style="display:none;"></div>
+  </div>
+  <section id="narrow-notice" data-workspace-chrome aria-label="桌面工作空间提示"><h1>在大屏幕上展开创作</h1><p>这是一款桌面画布工具。建议在电脑上打开，完整体验图层与属性编辑。</p><button id="narrow-continue" class="primary">缩小查看画布</button></section>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+{
+  "assets": [
+    {
+      "id": "kingfisher",
+      "path": "examples/studio/qiyu-field-notes/assets/original/kingfisher.jpg",
+      "relativeTo": "sourceRoot",
+      "sha256": "99e26f98213f836b79c0202ca134d571a75c3245ee05284f507025553253611a",
+      "license": "CC0-1.0",
+      "creditsPath": "examples/studio/qiyu-field-notes/CREDITS.md"
+    }
+  ]
+}

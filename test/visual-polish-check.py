@@ -6,11 +6,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from PIL import Image
+from PIL import Image, ImageChops
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from proto import (expand_declarative_tree, measure_node, layout_node, emit_tree_to_axvg,
-                   compose_device_shell, measure_text, THEMES)
+                   compose_device_shell, measure_text, render_flat_children_png, audit_prototype, THEMES)
 from rp_language import compile_language, LanguageError
 from rp_dsl import dsl_to_spec
 
@@ -53,7 +53,8 @@ class VisualPolish(unittest.TestCase):
         mask = next((c for c in shell['flatChildren'] if 'screen-mask' in c['name']), None)
         self.assertIsNotNone(mask)
         im = Image.open(io.BytesIO(base64.b64decode(shell['axvg']['imageMap'][mask['imageKey']]))).convert('RGBA')
-        self.assertEqual(im.getpixel((0, 0))[3], 0)
+        # Outside the bezel the mask repaints the white frame, so square content corners stay hidden.
+        self.assertEqual(im.getpixel((0, 0)), (255, 255, 255, 255))
         self.assertEqual(im.getpixel((0, im.height//2))[3], 255)
         self.assertEqual(im.getpixel((im.width//2, im.height//2))[3], 0)
 
@@ -83,6 +84,59 @@ page #home [402x874]
         invalid = copy.deepcopy(spec)
         invalid['pages'][0]['root']['activeIndicator'] = 'wrong'
         with self.assertRaises(LanguageError): compile_language(invalid)
+
+    def test_tab_labels_stay_centered_for_both_active_pages(self):
+        spec = dsl_to_spec('''rp/1 target=9 domain=mobile theme=mobile-hifi
+tab-bar:
+  item home "今日"
+  item detail "录入"
+page #home name="首页" device=iphone-17
+  phone-shell #shell title="A" gap=12
+page #detail name="详情" device=iphone-17
+  phone-shell #shell2 title="B" gap=12
+''')
+        lowered, _ = compile_language(spec)
+        for page in lowered['pages']:
+            node = expand_declarative_tree(copy.deepcopy(page['root']))
+            measure_node(node)
+            layout_node(node, 0, 0, page['canvas']['w'], page['canvas']['h'])
+            emitted = emit_tree_to_axvg(node, THEMES['mobile-hifi'])
+            buttons = []
+            def collect(item):
+                if item.get('name', '').startswith('btn-tab_'):
+                    buttons.append(item)
+                for child in item.get('scene', {}).get('items', []): collect(child)
+            for item in emitted['axvg']['scene']['items']: collect(item)
+            self.assertEqual(len(buttons), 2)
+            self.assertEqual([item['textAlignment'] for item in buttons], [1, 1], page['slug'])
+
+    def test_offline_preview_honors_explicit_vertical_alignment(self):
+        positions = []
+        for alignment in (0, 1, 2):
+            image = render_flat_children_png(100, 50, '#FFFFFF', [{
+                'kind': 'text', 'name': 'btn-label', 'text': '今日', 'size': 12,
+                'x': 0, 'y': 0, 'w': 100, 'h': 50, 'color': '#000000',
+                'align': 'center', 'textAlignment': alignment,
+            }])
+            bbox = ImageChops.difference(image, Image.new('RGB', image.size, 'white')).getbbox()
+            self.assertIsNotNone(bbox)
+            positions.append(bbox)
+        self.assertLessEqual(positions[0][1], 1)
+        self.assertAlmostEqual((positions[1][1] + positions[1][3]) / 2, 25, delta=1)
+        self.assertGreaterEqual(positions[2][3], 49)
+
+    def test_audit_detects_native_alignment_even_when_preview_metadata_is_centered(self):
+        node, emitted = render({'type': 'button', 'name': 'btn-check', 'text': '今日', 'w': 120, 'h': 38})
+        plan = {'pageName': 'test', 'widgetNames': ['btn-check']}
+        self.assertTrue(audit_prototype(node, emitted, plan)['structural_gates']['button_text_alignment_ok'])
+        def break_alignment(item):
+            if item.get('name') == 'btn-check': item['textAlignment'] = 0
+            for child in item.get('scene', {}).get('items', []): break_alignment(child)
+        for item in emitted['axvg']['scene']['items']: break_alignment(item)
+        broken = audit_prototype(node, emitted, plan)
+        self.assertFalse(broken['structural_gates']['button_text_alignment_ok'])
+        self.assertTrue(any(f['gate'] == 'button_text_alignment_ok' and f['widget'] == 'btn-check'
+                            for f in broken['failures']))
 
 
 if __name__ == '__main__': unittest.main()

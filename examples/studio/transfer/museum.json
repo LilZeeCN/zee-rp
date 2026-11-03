@@ -1,0 +1,593 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "翼间 · 自然观察特展",
+  "device": "iphone-17-pro",
+  "palette": {
+    "bg": "#F4F1E9",
+    "ink": "#272B24",
+    "brand": "#A63E2D"
+  },
+  "pages": [
+    {
+      "id": "museum_home",
+      "name": "01 翼间 展览",
+      "device": "iphone-17-pro",
+      "root": {
+        "id": "museum_home_shell",
+        "type": "phone-shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#F4F1E9",
+        "children": [
+          {
+            "id": "museum_home_screen",
+            "type": "box",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "fill": "#F4F1E9",
+            "children": [
+              {
+                "id": "museum_home_time",
+                "type": "label",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 24,
+                "fontSize": 16,
+                "color": "#272B24",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "museum_home_signal",
+                "type": "label",
+                "text": "5G  ▰",
+                "x": 302,
+                "y": 15,
+                "w": 70,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#272B24",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "museum_wordmark",
+                "type": "label",
+                "text": "翼间  /  WINGSPACE",
+                "x": 28,
+                "y": 68,
+                "w": 310,
+                "h": 28,
+                "fontSize": 16,
+                "color": "#272B24",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "museum_issue",
+                "type": "label",
+                "text": "自然观察特展     VOL. 06",
+                "x": 28,
+                "y": 112,
+                "w": 340,
+                "h": 24,
+                "fontSize": 11,
+                "color": "#6C7166",
+                "lineHeight": 19,
+                "fontFamily": "PingFang SC",
+                "letterSpacing": 1
+              },
+              {
+                "id": "museum_title",
+                "type": "paragraph",
+                "text": "把目光，\n交给自然。",
+                "x": 28,
+                "y": 146,
+                "w": 340,
+                "h": 116,
+                "fontSize": 42,
+                "color": "#272B24",
+                "lineHeight": 53,
+                "fontFamily": "Songti SC",
+                "wrap": true
+              },
+              {
+                "id": "museum_photo",
+                "type": "image",
+                "src": "assets/sp_photo.jpg",
+                "x": 28,
+                "y": 280,
+                "w": 346,
+                "h": 362
+              },
+              {
+                "id": "museum_caption_bg",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 592,
+                "w": 346,
+                "h": 50,
+                "fill": "#272B24"
+              },
+              {
+                "id": "museum_caption",
+                "type": "label",
+                "text": "01    普通翠鸟：蓝色的一瞬",
+                "x": 43,
+                "y": 605,
+                "w": 316,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#F4F1E9",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "museum_date",
+                "type": "label",
+                "text": "10.26—12.08",
+                "x": 28,
+                "y": 666,
+                "w": 240,
+                "h": 36,
+                "fontSize": 25,
+                "color": "#272B24",
+                "lineHeight": 33,
+                "fontFamily": "Georgia"
+              },
+              {
+                "id": "museum_venue",
+                "type": "label",
+                "text": "城市自然馆 · 二层临展厅",
+                "x": 28,
+                "y": 710,
+                "w": 346,
+                "h": 26,
+                "fontSize": 13,
+                "color": "#6C7166",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "museum_open",
+                "type": "button",
+                "text": "看看这场展览    ↗",
+                "x": 28,
+                "y": 770,
+                "w": 346,
+                "h": 54,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "fill": "#A63E2D",
+                "color": "#FFFFFF",
+                "radius": 14,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "museum_detail"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "museum_detail",
+      "name": "02 展览 导览",
+      "device": "iphone-17-pro",
+      "root": {
+        "id": "museum_detail_shell",
+        "type": "phone-shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#F4F1E9",
+        "children": [
+          {
+            "id": "museum_detail_screen",
+            "type": "box",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "fill": "#F4F1E9",
+            "children": [
+              {
+                "id": "museum_detail_time",
+                "type": "label",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 24,
+                "fontSize": 16,
+                "color": "#272B24",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "museum_detail_signal",
+                "type": "label",
+                "text": "5G  ▰",
+                "x": 302,
+                "y": 15,
+                "w": 70,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#272B24",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "museum_back",
+                "type": "label",
+                "text": "←  展览",
+                "x": 28,
+                "y": 68,
+                "w": 140,
+                "h": 28,
+                "fontSize": 15,
+                "color": "#272B24",
+                "lineHeight": 23,
+                "fontFamily": "PingFang SC",
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "museum_home"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "museum_detail_no",
+                "type": "label",
+                "text": "FIELD NOTES  /  01",
+                "x": 28,
+                "y": 124,
+                "w": 340,
+                "h": 24,
+                "fontSize": 11,
+                "color": "#A63E2D",
+                "lineHeight": 19,
+                "fontFamily": "PingFang SC",
+                "letterSpacing": 1
+              },
+              {
+                "id": "museum_detail_title",
+                "type": "paragraph",
+                "text": "蓝色，并不只在天空。",
+                "x": 28,
+                "y": 160,
+                "w": 346,
+                "h": 94,
+                "fontSize": 34,
+                "color": "#272B24",
+                "lineHeight": 45,
+                "fontFamily": "Songti SC",
+                "wrap": true
+              },
+              {
+                "id": "museum_detail_photo",
+                "type": "image",
+                "src": "assets/jr_photo.jpg",
+                "x": 28,
+                "y": 266,
+                "w": 346,
+                "h": 228
+              },
+              {
+                "id": "museum_story",
+                "type": "paragraph",
+                "text": "沿着河流、芦苇与城市边缘，认识那些与我们共享日常的飞羽。慢一点，才能看见它们。",
+                "x": 28,
+                "y": 516,
+                "w": 346,
+                "h": 96,
+                "fontSize": 16,
+                "color": "#272B24",
+                "lineHeight": 29,
+                "fontFamily": "PingFang SC",
+                "wrap": true
+              },
+              {
+                "id": "museum_line",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 634,
+                "w": 346,
+                "h": 1,
+                "fill": "#D8D9CE"
+              },
+              {
+                "id": "museum_time_label",
+                "type": "label",
+                "text": "参观时间",
+                "x": 28,
+                "y": 656,
+                "w": 100,
+                "h": 26,
+                "fontSize": 12,
+                "color": "#6C7166",
+                "lineHeight": 20,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "museum_time_value",
+                "type": "label",
+                "text": "10月26日  14:00—16:00",
+                "x": 128,
+                "y": 653,
+                "w": 246,
+                "h": 32,
+                "fontSize": 16,
+                "color": "#272B24",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "museum_cost",
+                "type": "label",
+                "text": "免费入场 · 预约后获得电子凭证",
+                "x": 28,
+                "y": 706,
+                "w": 346,
+                "h": 26,
+                "fontSize": 13,
+                "color": "#6C7166",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "museum_book",
+                "type": "button",
+                "text": "预约这一场参观",
+                "x": 28,
+                "y": 770,
+                "w": 346,
+                "h": 54,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "fill": "#A63E2D",
+                "color": "#FFFFFF",
+                "radius": 14,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "museum_done"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "museum_done",
+      "name": "03 预约 已完成",
+      "device": "iphone-17-pro",
+      "root": {
+        "id": "museum_done_shell",
+        "type": "phone-shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#272B24",
+        "children": [
+          {
+            "id": "museum_done_screen",
+            "type": "box",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "fill": "#272B24",
+            "children": [
+              {
+                "id": "museum_done_time",
+                "type": "label",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 24,
+                "fontSize": 16,
+                "color": "#FFFFFF",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "museum_done_signal",
+                "type": "label",
+                "text": "5G  ▰",
+                "x": 302,
+                "y": 15,
+                "w": 70,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#FFFFFF",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "museum_done_brand",
+                "type": "label",
+                "text": "WINGSPACE",
+                "x": 28,
+                "y": 72,
+                "w": 340,
+                "h": 28,
+                "fontSize": 13,
+                "color": "#B9C0AF",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC",
+                "letterSpacing": 3
+              },
+              {
+                "id": "museum_done_title",
+                "type": "label",
+                "text": "把这一天，留给自然。",
+                "x": 28,
+                "y": 154,
+                "w": 346,
+                "h": 98,
+                "fontSize": 34,
+                "color": "#F4F1E9",
+                "lineHeight": 46,
+                "fontFamily": "Songti SC",
+                "wrap": true
+              },
+              {
+                "id": "museum_ticket",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 292,
+                "w": 346,
+                "h": 372,
+                "fill": "#F4F1E9",
+                "radius": 4
+              },
+              {
+                "id": "museum_ticket_label",
+                "type": "label",
+                "text": "预约成功  /  ADMIT ONE",
+                "x": 52,
+                "y": 320,
+                "w": 298,
+                "h": 28,
+                "fontSize": 12,
+                "color": "#A63E2D",
+                "lineHeight": 20,
+                "fontFamily": "PingFang SC",
+                "letterSpacing": 1
+              },
+              {
+                "id": "museum_ticket_title",
+                "type": "label",
+                "text": "翼间 · 自然观察特展",
+                "x": 52,
+                "y": 372,
+                "w": 298,
+                "h": 32,
+                "fontSize": 22,
+                "color": "#272B24",
+                "lineHeight": 30,
+                "fontFamily": "Songti SC"
+              },
+              {
+                "id": "museum_ticket_date",
+                "type": "label",
+                "text": "10 / 26",
+                "x": 52,
+                "y": 432,
+                "w": 298,
+                "h": 62,
+                "fontSize": 48,
+                "color": "#272B24",
+                "lineHeight": 56,
+                "fontFamily": "Georgia"
+              },
+              {
+                "id": "museum_ticket_time",
+                "type": "label",
+                "text": "14:00—16:00   ·   1人",
+                "x": 52,
+                "y": 512,
+                "w": 298,
+                "h": 28,
+                "fontSize": 16,
+                "color": "#272B24",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "museum_ticket_rule",
+                "type": "box",
+                "layout": "stack",
+                "x": 52,
+                "y": 566,
+                "w": 298,
+                "h": 1,
+                "fill": "#CACDC2"
+              },
+              {
+                "id": "museum_ticket_place",
+                "type": "label",
+                "text": "城市自然馆 · 二层临展厅",
+                "x": 52,
+                "y": 592,
+                "w": 298,
+                "h": 26,
+                "fontSize": 14,
+                "color": "#6C7166",
+                "lineHeight": 22,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "museum_ticket_hint",
+                "type": "label",
+                "text": "到馆出示此凭证即可入场",
+                "x": 28,
+                "y": 696,
+                "w": 346,
+                "h": 28,
+                "fontSize": 13,
+                "color": "#B9C0AF",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "museum_home_back",
+                "type": "button",
+                "text": "回到展览",
+                "x": 28,
+                "y": 770,
+                "w": 346,
+                "h": 54,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "fill": "#F4F1E9",
+                "color": "#272B24",
+                "radius": 14,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "museum_home"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

@@ -25,8 +25,23 @@ function run(file, args = []) {
   return spawnSync(process.execPath, [file, ...args], { cwd: root, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
 }
 try {
+  // 设计质量层的套件以前只能手动跑，CI 看不到；这里聚合进来。
+  check('design quality suites (studio)', () => {
+    const suites = [
+      'test/studio-design-metrics-check.mjs',
+      'test/studio-pixel-contrast-check.mjs',
+      'test/studio-anti-gaming-check.mjs',
+      'test/studio-consistency-check.mjs',
+      'test/studio-fix-plan-check.mjs',
+      'test/studio-content-plan-check.mjs',
+    ];
+    for (const file of suites) {
+      const result = run(file);
+      assert.equal(result.status, 0, `${file}: ${(result.stderr || result.stdout || '').slice(-400)}`);
+    }
+  });
   check('all public JavaScript sources parse', () => {
-    for (const dir of ['bin', 'scripts', 'test', 'examples']) {
+    for (const dir of ['bin', 'scripts', 'test', 'examples', 'studio']) {
       for (const file of readdirSync(join(root, dir)).filter(f => f.endsWith('.mjs'))) {
         const result = run('--check', [join(root, dir, file)]);
         assert.equal(result.status, 0, `${dir}/${file}: ${result.stderr}`);

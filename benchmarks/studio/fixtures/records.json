@@ -1,0 +1,114 @@
+{
+  "records": [
+    {
+      "id": "R01",
+      "title": "雨量传感器校准",
+      "status": "待处理",
+      "owner": "林溪",
+      "amount": 480,
+      "date": "2026-10-12"
+    },
+    {
+      "id": "R02",
+      "title": "河岸样本整理",
+      "status": "完成",
+      "owner": "陈禾",
+      "amount": 120,
+      "date": "2026-10-13"
+    },
+    {
+      "id": "R03",
+      "title": "东桥积水复查",
+      "status": "待处理",
+      "owner": "周青",
+      "amount": 860,
+      "date": "2026-10-14"
+    },
+    {
+      "id": "R04",
+      "title": "设备归还核验",
+      "status": "进行中",
+      "owner": "林溪",
+      "amount": 360,
+      "date": "2026-10-15"
+    },
+    {
+      "id": "R05",
+      "title": "观察地图更新",
+      "status": "完成",
+      "owner": "陈禾",
+      "amount": 240,
+      "date": "2026-10-16"
+    },
+    {
+      "id": "R06",
+      "title": "夜间噪声复测",
+      "status": "待处理",
+      "owner": "周青",
+      "amount": 720,
+      "date": "2026-10-17"
+    },
+    {
+      "id": "R07",
+      "title": "图像档案备份",
+      "status": "进行中",
+      "owner": "林溪",
+      "amount": 150,
+      "date": "2026-10-18"
+    },
+    {
+      "id": "R08",
+      "title": "无障碍通道记录",
+      "status": "完成",
+      "owner": "陈禾",
+      "amount": 620,
+      "date": "2026-10-19"
+    },
+    {
+      "id": "R09",
+      "title": "长标题：桥下连续降雨后的临时绕行与搬运路径共同复查",
+      "status": "待处理",
+      "owner": "周青",
+      "amount": 980,
+      "date": "2026-10-20"
+    },
+    {
+      "id": "R10",
+      "title": "现场记录复核",
+      "status": "完成",
+      "owner": "林溪",
+      "amount": 310,
+      "date": "2026-10-21"
+    },
+    {
+      "id": "R11",
+      "title": "步道照明检查",
+      "status": "进行中",
+      "owner": "陈禾",
+      "amount": 540,
+      "date": "2026-10-22"
+    },
+    {
+      "id": "R12",
+      "title": "开放数据目录整理",
+      "status": "完成",
+      "owner": "周青",
+      "amount": 210,
+      "date": "2026-10-23"
+    }
+  ],
+  "expected": {
+    "totalCount": 12,
+    "pendingCount": 4,
+    "sumAmount": 5590,
+    "pendingDescendingIds": [
+      "R09",
+      "R03",
+      "R06",
+      "R01"
+    ],
+    "searchUnique": "无障碍",
+    "searchUniqueId": "R08",
+    "searchEmpty": "不存在的记录XYZ"
+  }
+}

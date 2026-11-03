@@ -158,6 +158,42 @@ export function replaceRecord(file, record, raw) {
     file.subarray(record.offset + record.compressedSize)]);
 }
 
+// Commit a document edit once. Offsets are still those of the original file;
+// unchanged packages keep their exact compressed bytes.
+export function replaceRecords(file, replacements) {
+  if (!replacements.length) return file;
+  const manifest = readManifest(file);
+  const edits = replacements.map(({ record, raw }) => {
+    const compressed = gzipSync(raw), length = Buffer.alloc(4);
+    length.writeUInt32LE(compressed.length);
+    return { record, compressed, length, relative: record.offset - 8 - manifest.dataStart,
+      delta: compressed.length - record.compressedSize, found: 0 };
+  }).sort((a, b) => a.record.offset - b.record.offset);
+  for (let i = 1; i < edits.length; i++) if (edits[i].record.offset <= edits[i - 1].record.offset + edits[i - 1].record.compressedSize)
+    throw new Error('Overlapping record replacements');
+  const prefix = [0];
+  for (const edit of edits) prefix.push(prefix.at(-1) + edit.delta);
+  const update = node => {
+    for (const [key, offset] of Object.entries(node.parts ?? {})) {
+      let lo = 0, hi = edits.length;
+      while (lo < hi) { const mid = (lo + hi) >>> 1; if (edits[mid].relative < offset) lo = mid + 1; else hi = mid; }
+      if (edits[lo]?.relative === offset) edits[lo].found++;
+      node.parts[key] = offset + prefix[lo];
+    }
+    for (const child of Object.values(node.children ?? {})) update(child);
+  };
+  update(manifest.value.root);
+  if (edits.some(edit => edit.found !== 1)) throw new Error('Each replacement must have exactly one manifest reference');
+  const chunks = [encodeManifest(file, manifest.value)];
+  let cursor = manifest.dataStart;
+  for (const { record, length, compressed } of edits) {
+    chunks.push(file.subarray(cursor, record.offset - 4), length, compressed);
+    cursor = record.offset + record.compressedSize;
+  }
+  chunks.push(file.subarray(cursor));
+  return Buffer.concat(chunks);
+}
+
 // 在一条已有记录之前插入一个新包（记录流中间插入），manifest 中插入点及之后的 parts
 // 偏移整体 +D，新条目指向插入点。用于「必须写在某条记录之前」的场景：
 // Axure 无论重存还是 UI 新建，PanelState 记录都写在拥有它的 Page 记录之前

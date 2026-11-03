@@ -1,0 +1,624 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "拾知 · 每日一张",
+  "device": "iphone-17-pro",
+  "palette": {
+    "bg": "#F7F3EA",
+    "ink": "#302938",
+    "brand": "#513F72"
+  },
+  "pages": [
+    {
+      "id": "learning_home",
+      "name": "01 拾知 今日",
+      "device": "iphone-17-pro",
+      "root": {
+        "id": "learning_home_shell",
+        "type": "phone-shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#F7F3EA",
+        "children": [
+          {
+            "id": "learning_home_screen",
+            "type": "box",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "fill": "#F7F3EA",
+            "children": [
+              {
+                "id": "learning_home_time",
+                "type": "label",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 24,
+                "fontSize": 16,
+                "color": "#302938",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "learning_home_signal",
+                "type": "label",
+                "text": "5G  ▰",
+                "x": 302,
+                "y": 15,
+                "w": 70,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#302938",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "learning_brand",
+                "type": "label",
+                "text": "拾知  /  DAILY RECALL",
+                "x": 28,
+                "y": 70,
+                "w": 346,
+                "h": 30,
+                "fontSize": 15,
+                "color": "#513F72",
+                "lineHeight": 23,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "learning_date",
+                "type": "label",
+                "text": "MONDAY, OCT 26",
+                "x": 28,
+                "y": 130,
+                "w": 346,
+                "h": 24,
+                "fontSize": 11,
+                "color": "#7F7589",
+                "lineHeight": 19,
+                "fontFamily": "PingFang SC",
+                "letterSpacing": 1.5
+              },
+              {
+                "id": "learning_head",
+                "type": "paragraph",
+                "text": "记住一点，\n就向前一点。",
+                "x": 28,
+                "y": 174,
+                "w": 346,
+                "h": 116,
+                "fontSize": 40,
+                "color": "#302938",
+                "lineHeight": 53,
+                "fontFamily": "Songti SC",
+                "wrap": true
+              },
+              {
+                "id": "learning_orbit",
+                "type": "box",
+                "layout": "stack",
+                "x": 242,
+                "y": 310,
+                "w": 130,
+                "h": 130,
+                "fill": "#E8DDC8",
+                "radius": 65
+              },
+              {
+                "id": "learning_orbit_inner",
+                "type": "box",
+                "layout": "stack",
+                "x": 277,
+                "y": 345,
+                "w": 60,
+                "h": 60,
+                "fill": "#F7F3EA",
+                "radius": 30
+              },
+              {
+                "id": "learning_count",
+                "type": "label",
+                "text": "01",
+                "x": 28,
+                "y": 326,
+                "w": 210,
+                "h": 94,
+                "fontSize": 68,
+                "color": "#513F72",
+                "lineHeight": 90,
+                "fontFamily": "Georgia"
+              },
+              {
+                "id": "learning_count_label",
+                "type": "label",
+                "text": "张待复习 · 约1分钟",
+                "x": 28,
+                "y": 432,
+                "w": 346,
+                "h": 26,
+                "fontSize": 14,
+                "color": "#7F7589",
+                "lineHeight": 22,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "learning_rule",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 500,
+                "w": 346,
+                "h": 1,
+                "fill": "#DDD3C4"
+              },
+              {
+                "id": "learning_subject",
+                "type": "label",
+                "text": "计算机网络",
+                "x": 28,
+                "y": 536,
+                "w": 346,
+                "h": 32,
+                "fontSize": 20,
+                "color": "#302938",
+                "lineHeight": 28,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "learning_preview",
+                "type": "paragraph",
+                "text": "今天，把“三次握手”\n讲给自己听。",
+                "x": 28,
+                "y": 588,
+                "w": 346,
+                "h": 80,
+                "fontSize": 23,
+                "color": "#513F72",
+                "lineHeight": 35,
+                "fontFamily": "Songti SC",
+                "wrap": true
+              },
+              {
+                "id": "learning_method",
+                "type": "label",
+                "text": "先回忆，再翻面。答错也没关系。",
+                "x": 28,
+                "y": 706,
+                "w": 346,
+                "h": 26,
+                "fontSize": 13,
+                "color": "#7F7589",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "learning_start",
+                "type": "button",
+                "text": "开始这张卡片    →",
+                "x": 28,
+                "y": 770,
+                "w": 346,
+                "h": 54,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "fill": "#513F72",
+                "color": "#FFFFFF",
+                "radius": 14,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "learning_card"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "learning_card",
+      "name": "02 回忆 与翻面",
+      "device": "iphone-17-pro",
+      "root": {
+        "id": "learning_card_shell",
+        "type": "phone-shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#F7F3EA",
+        "children": [
+          {
+            "id": "learning_card_screen",
+            "type": "box",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "fill": "#F7F3EA",
+            "children": [
+              {
+                "id": "learning_card_time",
+                "type": "label",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 24,
+                "fontSize": 16,
+                "color": "#302938",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "learning_card_signal",
+                "type": "label",
+                "text": "5G  ▰",
+                "x": 302,
+                "y": 15,
+                "w": 70,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#302938",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "learning_back",
+                "type": "label",
+                "text": "←  今日",
+                "x": 28,
+                "y": 70,
+                "w": 160,
+                "h": 28,
+                "fontSize": 15,
+                "color": "#513F72",
+                "lineHeight": 23,
+                "fontFamily": "PingFang SC",
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "learning_home"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "learning_progress",
+                "type": "label",
+                "text": "01 / 01",
+                "x": 278,
+                "y": 72,
+                "w": 96,
+                "h": 28,
+                "fontSize": 14,
+                "color": "#7F7589",
+                "lineHeight": 22,
+                "fontFamily": "PingFang SC",
+                "align": "right"
+              },
+              {
+                "id": "learning_progress_track",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 126,
+                "w": 346,
+                "h": 3,
+                "fill": "#DCD2E7"
+              },
+              {
+                "id": "learning_progress_done",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 126,
+                "w": 173,
+                "h": 3,
+                "fill": "#513F72"
+              },
+              {
+                "id": "learning_card_label",
+                "type": "label",
+                "text": "计算机网络   ·   连接管理",
+                "x": 28,
+                "y": 174,
+                "w": 346,
+                "h": 26,
+                "fontSize": 12,
+                "color": "#7F7589",
+                "lineHeight": 20,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "learning_question",
+                "type": "paragraph",
+                "text": "TCP 为什么需要\n三次握手？",
+                "x": 28,
+                "y": 228,
+                "w": 346,
+                "h": 120,
+                "fontSize": 34,
+                "color": "#302938",
+                "lineHeight": 48,
+                "fontFamily": "Songti SC",
+                "wrap": true
+              },
+              {
+                "id": "learning_answer_bg",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 390,
+                "w": 346,
+                "h": 238,
+                "fill": "#EAE2F0",
+                "radius": 20,
+                "visible": false
+              },
+              {
+                "id": "learning_answer",
+                "type": "paragraph",
+                "text": "确认双方的发送与接收能力，\n并同步初始序列号。\n\n第三次确认，使服务端知道：\n客户端已收到自己的响应。",
+                "x": 48,
+                "y": 414,
+                "w": 306,
+                "h": 190,
+                "fontSize": 17,
+                "color": "#513F72",
+                "lineHeight": 30,
+                "fontFamily": "PingFang SC",
+                "wrap": true,
+                "visible": false
+              },
+              {
+                "id": "learning_prompt",
+                "type": "paragraph",
+                "text": "先试着用自己的话回答。\n准备好后，翻开答案。",
+                "x": 28,
+                "y": 432,
+                "w": 346,
+                "h": 100,
+                "fontSize": 17,
+                "color": "#7F7589",
+                "lineHeight": 30,
+                "fontFamily": "PingFang SC",
+                "wrap": true
+              },
+              {
+                "id": "learning_flip",
+                "type": "button",
+                "text": "翻开答案",
+                "x": 28,
+                "y": 664,
+                "w": 346,
+                "h": 54,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "fill": "#EAE2F0",
+                "color": "#513F72",
+                "radius": 14,
+                "on": {
+                  "click": [
+                    {
+                      "type": "show",
+                      "target": "learning_answer_bg"
+                    },
+                    {
+                      "type": "show",
+                      "target": "learning_answer"
+                    },
+                    {
+                      "type": "hide",
+                      "target": "learning_prompt"
+                    },
+                    {
+                      "type": "show",
+                      "target": "learning_remember"
+                    },
+                    {
+                      "type": "hide",
+                      "target": "learning_flip"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "learning_remember",
+                "type": "button",
+                "text": "我记住了    ✓",
+                "x": 28,
+                "y": 770,
+                "w": 346,
+                "h": 54,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "fill": "#513F72",
+                "color": "#FFFFFF",
+                "radius": 14,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "learning_done"
+                    }
+                  ]
+                },
+                "visible": false
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "learning_done",
+      "name": "03 今日 完成",
+      "device": "iphone-17-pro",
+      "root": {
+        "id": "learning_done_shell",
+        "type": "phone-shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#513F72",
+        "children": [
+          {
+            "id": "learning_done_screen",
+            "type": "box",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "fill": "#513F72",
+            "children": [
+              {
+                "id": "learning_done_time",
+                "type": "label",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 24,
+                "fontSize": 16,
+                "color": "#F7F3EA",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "learning_done_signal",
+                "type": "label",
+                "text": "5G  ▰",
+                "x": 302,
+                "y": 15,
+                "w": 70,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#F7F3EA",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "learning_done_label",
+                "type": "label",
+                "text": "TODAY, WELL LEARNED.",
+                "x": 28,
+                "y": 74,
+                "w": 346,
+                "h": 26,
+                "fontSize": 11,
+                "color": "#D5C7E4",
+                "lineHeight": 19,
+                "fontFamily": "PingFang SC",
+                "letterSpacing": 1.5
+              },
+              {
+                "id": "learning_done_number",
+                "type": "label",
+                "text": "1",
+                "x": 28,
+                "y": 170,
+                "w": 346,
+                "h": 164,
+                "fontSize": 72,
+                "color": "#F7F3EA",
+                "lineHeight": 96,
+                "fontFamily": "Georgia"
+              },
+              {
+                "id": "learning_done_unit",
+                "type": "label",
+                "text": "张卡片，留在脑海里。",
+                "x": 28,
+                "y": 360,
+                "w": 346,
+                "h": 40,
+                "fontSize": 23,
+                "color": "#F7F3EA",
+                "lineHeight": 31,
+                "fontFamily": "Songti SC"
+              },
+              {
+                "id": "learning_done_rule",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 446,
+                "w": 346,
+                "h": 1,
+                "fill": "#817092"
+              },
+              {
+                "id": "learning_done_desc",
+                "type": "paragraph",
+                "text": "今天的复习完成了。\n合上页面，让知识慢慢生根。",
+                "x": 28,
+                "y": 488,
+                "w": 346,
+                "h": 92,
+                "fontSize": 21,
+                "color": "#E8DFF0",
+                "lineHeight": 37,
+                "fontFamily": "Songti SC",
+                "wrap": true
+              },
+              {
+                "id": "learning_done_hint",
+                "type": "label",
+                "text": "本次已完成：计算机网络 · 三次握手",
+                "x": 28,
+                "y": 696,
+                "w": 346,
+                "h": 28,
+                "fontSize": 13,
+                "color": "#D5C7E4",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "learning_home_back",
+                "type": "button",
+                "text": "回到今日",
+                "x": 28,
+                "y": 770,
+                "w": 346,
+                "h": 54,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "fill": "#F7F3EA",
+                "color": "#513F72",
+                "radius": 14,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "learning_home"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

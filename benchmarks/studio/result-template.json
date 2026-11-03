@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "studio-v1",
+  "taskId": "T01",
+  "runId": "T01-unexecuted-template",
+  "comparisonGroup": null,
+  "attempt": 1,
+  "outcome": "not-run",
+  "experience": {
+    "classification": "unclassified",
+    "readImplementation": null,
+    "priorSameTaskExposure": null,
+    "assistance": []
+  },
+  "fingerprint": {
+    "sourceTreeSha256": null,
+    "sourceManifestPath": null,
+    "toolSchemaSha256": null,
+    "runtimeFingerprint": null,
+    "model": {
+      "id": null,
+      "reasoningEffort": null,
+      "provider": null
+    },
+    "environment": {
+      "os": null,
+      "hardware": null,
+      "node": null,
+      "python": null,
+      "axureBuild": null
+    },
+    "briefSha256": null,
+    "assetsManifestSha256": null
+  },
+  "timestamps": {
+    "startedAt": null,
+    "finishedAt": null,
+    "wallClockMs": null
+  },
+  "budget": {
+    "maxToolCalls": 45,
+    "maxDiscoveryCallsBeforeFirstWrite": 5,
+    "maxWallClockSeconds": 900,
+    "maxModelTokens": null
+  },
+  "documentBinding": {
+    "documentId": null,
+    "revision": null,
+    "contentHash": null
+  },
+  "calls": {
+    "ledgerPath": null,
+    "total": null,
+    "timedOut": null,
+    "uncertain": null,
+    "discovery": null,
+    "creation": null,
+    "firstMutationCallId": null
+  },
+  "tokens": {
+    "measurement": "unavailable",
+    "input": null,
+    "output": null,
+    "total": null,
+    "sourceEvidenceIds": []
+  },
+  "evidence": {
+    "source-structure": {
+      "status": "not-run",
+      "evidenceIds": [],
+      "assertionCount": null,
+      "note": "尚未执行；不得由其他层级推定通过。"
+    },
+    "semantic": {
+      "status": "not-run",
+      "evidenceIds": [],
+      "assertionCount": null,
+      "note": "尚未执行；不得由其他层级推定通过。"
+    },
+    "browser-render": {
+      "status": "not-run",
+      "evidenceIds": [],
+      "assertionCount": null,
+      "note": "尚未执行；不得由其他层级推定通过。"
+    },
+    "browser-pointer": {
+      "status": "not-run",
+      "evidenceIds": [],
+      "assertionCount": null,
+      "note": "尚未执行；不得由其他层级推定通过。"
+    },
+    "axure-load": {
+      "status": "not-run",
+      "evidenceIds": [],
+      "assertionCount": null,
+      "note": "尚未执行；不得由其他层级推定通过。"
+    },
+    "axure-preview": {
+      "status": "not-run",
+      "evidenceIds": [],
+      "assertionCount": null,
+      "note": "尚未执行；不得由其他层级推定通过。"
+    },
+    "gui-edit": {
+      "status": "not-run",
+      "evidenceIds": [],
+      "assertionCount": null,
+      "note": "尚未执行；不得由其他层级推定通过。"
+    },
+    "gui-save-reopen": {
+      "status": "not-run",
+      "evidenceIds": [],
+      "assertionCount": null,
+      "note": "尚未执行；不得由其他层级推定通过。"
+    },
+    "independent-visual": {
+      "status": "not-run",
+      "evidenceIds": [],
+      "assertionCount": null,
+      "note": "尚未执行；不得由其他层级推定通过。"
+    },
+    "user-acceptance": {
+      "status": "not-run",
+      "evidenceIds": [],
+      "assertionCount": null,
+      "note": "尚未执行；不得由其他层级推定通过。"
+    }
+  },
+  "checks": [],
+  "ratings": [],
+  "failures": [],
+  "artifacts": [],
+  "limitations": [
+    "这是未执行模板，不是任务通过记录。"
+  ]
+}

@@ -39,6 +39,21 @@ def sugar_fixture():
 
 
 class LanguageContract(unittest.TestCase):
+    def test_strict_comparison_spelling_preserves_literals_and_type_checks(self):
+        spec = sugar_fixture()
+        spec["pages"][0]["root"]["children"][2]["onClick"] = {"cases": [
+            {"when": "=$count === 0", "actions": [{"set": {"$count": 1, "@status": "literal === and !=="}}]},
+            {"when": "=$count !== 0", "actions": [{"set": {"$count": 2}}]},
+        ]}
+        rt = ReferenceRuntime(compile_language(spec))
+        rt.trigger("apply", "click")
+        self.assertEqual(rt.variables["count"], 1)
+        self.assertEqual(rt.widgets[rt.resolve_trigger_name("status")]["text"], "literal === and !==")
+        rt.trigger("apply", "click")
+        self.assertEqual(rt.variables["count"], 2)
+        spec["pages"][0]["root"]["children"][2]["onClick"]["cases"][0]["when"] = "=$count === '0'"
+        self.reject(spec, "E_TYPE")
+
     def reject(self, spec, code, pointer=None):
         with self.assertRaises(LanguageError) as result:
             compile_language(spec)

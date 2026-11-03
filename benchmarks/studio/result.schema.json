@@ -1,0 +1,1021 @@
+{
+  "type": "object",
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "suiteId": {
+      "const": "studio-v1"
+    },
+    "taskId": {
+      "enum": [
+        "T01",
+        "T02",
+        "T03",
+        "T04",
+        "T05",
+        "T06",
+        "T07",
+        "T08"
+      ]
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "comparisonGroup": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "attempt": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "outcome": {
+      "enum": [
+        "not-run",
+        "completed",
+        "failed",
+        "blocked",
+        "budget-exceeded"
+      ]
+    },
+    "experience": {
+      "type": "object",
+      "properties": {
+        "classification": {
+          "enum": [
+            "independent",
+            "familiar",
+            "assisted",
+            "unclassified"
+          ]
+        },
+        "readImplementation": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "priorSameTaskExposure": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "assistance": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "classification",
+        "readImplementation",
+        "priorSameTaskExposure",
+        "assistance"
+      ],
+      "additionalProperties": false
+    },
+    "fingerprint": {
+      "type": "object",
+      "properties": {
+        "sourceTreeSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "sourceManifestPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolSchemaSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "runtimeFingerprint": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "model": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "reasoningEffort": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "provider": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "id",
+            "reasoningEffort",
+            "provider"
+          ],
+          "additionalProperties": false
+        },
+        "environment": {
+          "type": "object",
+          "properties": {
+            "os": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "hardware": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "node": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "python": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "axureBuild": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "os",
+            "hardware",
+            "node",
+            "python",
+            "axureBuild"
+          ],
+          "additionalProperties": false
+        },
+        "briefSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-f0-9]{64}$"
+        },
+        "assetsManifestSha256": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "sourceTreeSha256",
+        "sourceManifestPath",
+        "toolSchemaSha256",
+        "runtimeFingerprint",
+        "model",
+        "environment",
+        "briefSha256",
+        "assetsManifestSha256"
+      ],
+      "additionalProperties": false
+    },
+    "timestamps": {
+      "type": "object",
+      "properties": {
+        "startedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "finishedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "wallClockMs": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "startedAt",
+        "finishedAt",
+        "wallClockMs"
+      ],
+      "additionalProperties": false
+    },
+    "budget": {
+      "type": "object",
+      "properties": {
+        "maxToolCalls": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxDiscoveryCallsBeforeFirstWrite": {
+          "const": 5
+        },
+        "maxWallClockSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxModelTokens": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      },
+      "required": [
+        "maxToolCalls",
+        "maxDiscoveryCallsBeforeFirstWrite",
+        "maxWallClockSeconds",
+        "maxModelTokens"
+      ],
+      "additionalProperties": false
+    },
+    "documentBinding": {
+      "$ref": "#/$defs/binding"
+    },
+    "calls": {
+      "type": "object",
+      "properties": {
+        "ledgerPath": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "total": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "timedOut": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "uncertain": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "discovery": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "creation": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "firstMutationCallId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "ledgerPath",
+        "total",
+        "timedOut",
+        "uncertain",
+        "discovery",
+        "creation",
+        "firstMutationCallId"
+      ],
+      "additionalProperties": false
+    },
+    "tokens": {
+      "type": "object",
+      "properties": {
+        "measurement": {
+          "enum": [
+            "provider-usage",
+            "unavailable"
+          ]
+        },
+        "input": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "output": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "total": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sourceEvidenceIds": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "measurement",
+        "input",
+        "output",
+        "total",
+        "sourceEvidenceIds"
+      ],
+      "additionalProperties": false
+    },
+    "evidence": {
+      "type": "object",
+      "properties": {
+        "source-structure": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-run",
+                "passed",
+                "failed",
+                "blocked",
+                "unsupported",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assertionCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "evidenceIds",
+            "assertionCount",
+            "note"
+          ],
+          "additionalProperties": false
+        },
+        "semantic": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-run",
+                "passed",
+                "failed",
+                "blocked",
+                "unsupported",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assertionCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "evidenceIds",
+            "assertionCount",
+            "note"
+          ],
+          "additionalProperties": false
+        },
+        "browser-render": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-run",
+                "passed",
+                "failed",
+                "blocked",
+                "unsupported",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assertionCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "evidenceIds",
+            "assertionCount",
+            "note"
+          ],
+          "additionalProperties": false
+        },
+        "browser-pointer": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-run",
+                "passed",
+                "failed",
+                "blocked",
+                "unsupported",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assertionCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "evidenceIds",
+            "assertionCount",
+            "note"
+          ],
+          "additionalProperties": false
+        },
+        "axure-load": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-run",
+                "passed",
+                "failed",
+                "blocked",
+                "unsupported",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assertionCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "evidenceIds",
+            "assertionCount",
+            "note"
+          ],
+          "additionalProperties": false
+        },
+        "axure-preview": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-run",
+                "passed",
+                "failed",
+                "blocked",
+                "unsupported",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assertionCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "evidenceIds",
+            "assertionCount",
+            "note"
+          ],
+          "additionalProperties": false
+        },
+        "gui-edit": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-run",
+                "passed",
+                "failed",
+                "blocked",
+                "unsupported",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assertionCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "evidenceIds",
+            "assertionCount",
+            "note"
+          ],
+          "additionalProperties": false
+        },
+        "gui-save-reopen": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-run",
+                "passed",
+                "failed",
+                "blocked",
+                "unsupported",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assertionCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "evidenceIds",
+            "assertionCount",
+            "note"
+          ],
+          "additionalProperties": false
+        },
+        "independent-visual": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-run",
+                "passed",
+                "failed",
+                "blocked",
+                "unsupported",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assertionCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "evidenceIds",
+            "assertionCount",
+            "note"
+          ],
+          "additionalProperties": false
+        },
+        "user-acceptance": {
+          "type": "object",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-run",
+                "passed",
+                "failed",
+                "blocked",
+                "unsupported",
+                "unknown"
+              ]
+            },
+            "evidenceIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "assertionCount": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "note": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "status",
+            "evidenceIds",
+            "assertionCount",
+            "note"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "source-structure",
+        "semantic",
+        "browser-render",
+        "browser-pointer",
+        "axure-load",
+        "axure-preview",
+        "gui-edit",
+        "gui-save-reopen",
+        "independent-visual",
+        "user-acceptance"
+      ],
+      "additionalProperties": false
+    },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "not-run",
+              "passed",
+              "failed",
+              "blocked",
+              "unsupported",
+              "unknown"
+            ]
+          },
+          "evidenceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "note": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "evidenceIds",
+          "note"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "ratings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "source": {
+            "enum": [
+              "agent",
+              "user",
+              "independent-reviewer"
+            ]
+          },
+          "score": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 10
+          },
+          "reason": {
+            "type": "string"
+          },
+          "evidenceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        },
+        "required": [
+          "source",
+          "score",
+          "reason",
+          "evidenceIds"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "failures": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "phase": {
+            "type": "string"
+          },
+          "originalEvidenceIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "reason": {
+            "type": "string"
+          },
+          "resolution": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "phase",
+          "originalEvidenceIds",
+          "reason",
+          "resolution"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "artifacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string"
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1,
+            "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+"
+          },
+          "relativeTo": {
+            "enum": [
+              "runDir",
+              "sourceRoot",
+              "workspaceRoot"
+            ]
+          },
+          "sha256": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "pattern": "^[a-f0-9]{64}$"
+          },
+          "binding": {
+            "$ref": "#/$defs/binding"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "path",
+          "relativeTo",
+          "sha256",
+          "binding"
+        ],
+        "additionalProperties": false
+      }
+    },
+    "limitations": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "execution": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "enum": [
+            "model-agent",
+            "scripted-regression"
+          ]
+        },
+        "runner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "schemaVersion",
+    "suiteId",
+    "taskId",
+    "runId",
+    "comparisonGroup",
+    "attempt",
+    "outcome",
+    "experience",
+    "fingerprint",
+    "timestamps",
+    "budget",
+    "documentBinding",
+    "calls",
+    "tokens",
+    "evidence",
+    "checks",
+    "ratings",
+    "failures",
+    "artifacts",
+    "limitations"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zee-rp.local/benchmarks/studio/result.schema.json",
+  "$defs": {
+    "binding": {
+      "type": "object",
+      "properties": {
+        "documentId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "revision": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "contentHash": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "pattern": "^[a-f0-9]{64}$"
+        }
+      },
+      "required": [
+        "documentId",
+        "revision",
+        "contentHash"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

@@ -6,8 +6,8 @@ import { nativeRuntimeValue } from './runtime-expr.mjs';
 import { randomBytes, createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { extname } from 'node:path';
-import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
-import { parsePayload, encodePayload, field, walkNodes } from './parse-payload.mjs';
+import { readRecords as readFileRecords, encodeRecord, replaceRecord, replaceRecords } from './rp-records.mjs';
+import { parsePayload as parseRecordPayload, encodePayload, field, walkNodes } from './parse-payload.mjs';
 import { detectFileVersion, resolveTargetVersion } from './version.mjs';
 import { RP9_ENABLE_VALUES, RP11_ONLY_FCALLS, RP11_ONLY_EVENTS } from './version-fields.mjs';
 import { adaptNodesForVersion } from './version-adapt.mjs';
@@ -134,11 +134,13 @@ function pick(table, value, what) {
 // Resolve a page name (as shown in the sitemap) to its Axure:Page record.
 // Page names live in the DesignDocument's PackageInfo list; the package GUID links to the page record
 // (the page's own GUID list carries its package GUID at index 2).
-export function resolvePageRecord(file, pageName) {
-  const records = readRecords(file);
+export function resolvePageRecord(file, pageName, reader = null) {
+  if (reader?.pages.has(pageName)) return reader.pages.get(pageName);
+  const records = reader ? reader.records : readFileRecords(file);
+  const parse = reader ? reader.parse : parseRecordPayload;
   const doc = records.find(r => r.className === 'Axure:DesignDocument');
   if (!doc) throw new Error('No DesignDocument record');
-  const d = parsePayload(doc);
+  const d = parse(doc);
   const dg = d.roots.find(n => n.tag === 0x1e)?.values ?? [];
   const infos = [...d.objects.values()].filter(o => o.className === 'Axure:PackageInfo'
     && field(o.body, 'package-name')?.text === pageName
@@ -148,23 +150,26 @@ export function resolvePageRecord(file, pageName) {
   const packageGuid = dg[field(info.body, 'package-id').values[1] - 1];
   const rec = records.find(r => {
     if (r.className !== 'Axure:Page') return false;
-    let g; try { g = parsePayload(r); } catch { return false; }
+    let g; try { g = parse(r); } catch { return false; }
     const gl = g.roots.find(n => n.tag === 0x1e)?.values ?? [];
     const packageIndex = g.roots.find(n => n.tag === 0x12)?.value;
     return gl[packageIndex - 1] === packageGuid;
   });
   if (!rec) throw new Error(`Page record not found for "${pageName}"`);
+  reader?.pages.set(pageName, rec);
   return rec;
 }
 
 // The same page owns its root diagram and every reachable panel-state diagram.
 // Keep the owning record/graph with each widget so event owners and action paths
 // can live in different records without confusing local object IDs with GUIDs.
-export function pageWidgetContexts(file, pageName) {
-  const records = readRecords(file);
-  const root = resolvePageRecord(file, pageName);
+export function pageWidgetContexts(file, pageName, reader = null) {
+  if (reader?.contexts.has(pageName)) return reader.contexts.get(pageName);
+  const records = reader ? reader.records : readFileRecords(file);
+  const parse = reader ? reader.parse : parseRecordPayload;
+  const root = resolvePageRecord(file, pageName, reader);
   const parsed = records.filter(r => r.className === 'Axure:PanelState').map(r => {
-    const graph = parsePayload(r);
+    const graph = parse(r);
     const table = graph.roots.find(n => n.tag === 0x1e)?.values ?? [];
     const diagram = [...graph.objects.values()].find(o => o.className === 'Axure:PanelDiagram');
     return { r, graph, guid: diagram ? table[diagram.id - 1] : null };
@@ -174,7 +179,7 @@ export function pageWidgetContexts(file, pageName) {
     if (visited.has(r.index)) return;
     visited.add(r.index);
     const widgets = [...graph.objects.values()].filter(o => o.className.startsWith('Axure:DiagramObject:'));
-    result.push({ r, graph, widgets, container, pageName });
+    result.push({ r, graph, get widgets() { return [...graph.objects.values()].filter(o => o.className.startsWith('Axure:DiagramObject:')); }, container, pageName });
     const guids = graph.roots.find(n => n.tag === 0x1e)?.values ?? [];
     for (const panel of widgets.filter(o => o.className === 'Axure:DiagramObject:DynamicPanel')) {
       const name = field(field(panel.body, 'name-block') ?? {}, 'text')?.text;
@@ -187,11 +192,14 @@ export function pageWidgetContexts(file, pageName) {
       }
     }
   };
-  visit(root, parsePayload(root), []);
+  visit(root, parse(root), []);
+  reader?.contexts.set(pageName, result);
   return result;
 }
 
-export function addInteractions(file, target, interactions, { replaceEvent = false, version } = {}) {
+export function addInteractions(file, target, interactions, { replaceEvent = false, version, reader = null } = {}) {
+  const readRecords = reader ? () => reader.records : readFileRecords;
+  const parsePayload = reader ? reader.parse : parseRecordPayload;
   if (!Array.isArray(interactions) || !interactions.length) throw new Error('No interactions given');
   // 写侧编码必须跟随「这个文件自己的版本」，不是本机装的哪个 Axure。
   const targetVersion = version !== undefined ? resolveTargetVersion(version) : resolveTargetVersion(detectFileVersion(file));
@@ -217,10 +225,10 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
     })());
     if (!masterRecord) throw new Error(`Master package not found: ${masterName}`);
   }
-  const pageRecords = masterRecord ? [masterRecord] : pageName ? [resolvePageRecord(file, pageName)] : readRecords(file).filter(r => r.className === 'Axure:Page');
+  const pageRecords = masterRecord ? [masterRecord] : pageName ? [resolvePageRecord(file, pageName, reader)] : readRecords(file).filter(r => r.className === 'Axure:Page');
   // Legacy global-name lookup retains its root-only semantics. Page-scoped calls
   // explicitly opt into reachable panel-state lookup.
-  const contexts = !masterRecord && pageName && !pageOnly ? pageWidgetContexts(file, pageName)
+  const contexts = !masterRecord && pageName && !pageOnly ? pageWidgetContexts(file, pageName, reader)
     : pageRecords.map(r => ({ r, graph: parsePayload(r), container: [] }));
   for (const { r, graph, container } of contexts) {
     const pageObj = [...graph.objects.values()].find(o => o.className === (masterName ? 'Axure:Master' : 'Axure:Page'));
@@ -240,6 +248,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
 
   const { kind, r, graph, widget, pageObj } = matches[0];
   const strings = [...r.strings];
+  const previousStringCount = r.strings.length;
   const guidNode = graph.roots.find(n => n.tag === 0x1e);
   if (!guidNode) throw new Error('Record has no GUID list root');
   const guids = guidNode.values;
@@ -280,7 +289,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
     const candidates = [...graph.objects.values()].filter(o =>
       (o.className.startsWith('Axure:DiagramObject:') || o.className.startsWith('Axure:Repeater')) && nameOf(o) === name);
     if (!candidates.length && pageName) {
-      const external = pageWidgetContexts(file, pageName).flatMap(context => context.widgets
+      const external = pageWidgetContexts(file, pageName, reader).flatMap(context => context.widgets
         .filter(o => nameOf(o) === name).map(node => ({ node, context })));
       if (external.length !== 1) throw new Error(`Expected exactly one widget named "${name}" in page "${pageName}", found ${external.length}`);
       const { node, context } = external[0];
@@ -566,7 +575,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
           throw new Error('link window must be current or new');
         let pageTypeIndex = spec.pageTypeIndex ?? 1, pageGuidIndex = spec.pageGuidIndex ?? nullId;
         if (spec.page) {
-          const destination = parsePayload(resolvePageRecord(file, String(spec.page)));
+          const destination = parsePayload(resolvePageRecord(file, String(spec.page), reader));
           const table = destination.roots.find(n => n.tag === 0x1e).values;
           const pageGuid = table[destination.roots.find(n => n.tag === 0x12).value - 1];
           pageGuidIndex = guids.indexOf(pageGuid) + 1;
@@ -725,7 +734,8 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         const rot = info('Axure:RotateWidgetInfo', {
           Clockwise: bool(!(spec.clockwise === false || spec.clockwise === 'false')),
           Duration: f64(spec.duration ?? 1000), Degree: ref(literal(spec.degree ?? spec.degrees ?? 90).id),
-          RotateType: int(1), Easing: int(pick(EASE, spec.easing ?? 'linear', 'easing')),
+          // RP9 RotateType uses MoveBehavior: Location=0, Delta=1 (REA + oracle).
+          RotateType: int(pick({ location: 0, delta: 1 }, spec.rotateType ?? 'delta', 'rotateType')), Easing: int(pick(EASE, spec.easing ?? 'linear', 'easing')),
           OffsetX: ref(literal(0).id), OffsetY: ref(literal(0).id), Anchor: str(spec.anchor ?? 'center')
         });
         return obj(newGuid(), 'Axure:InteractionRotateWidgetAction', {
@@ -1726,15 +1736,51 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
   adaptNodesForVersion(defs, { version: targetVersion, str, log: m => versionAdaptations.push(m) });
 
   graph.roots.splice(graph.roots.length - 1, 0, ...defs);
-  const raw = encodeRecord(r, strings, encodePayload(graph.roots));
+  if (reader) {
+    r.strings = strings;
+    graph.objects = new Map();
+    walkNodes(graph.roots, node => { if (node.tag === 9) graph.objects.set(node.id, node); });
+    reader.dirty.set(r.index, { record: r, graph });
+  }
   return {
-    file: replaceRecord(file, r, raw),
+    file: reader ? file : replaceRecord(file, r, encodeRecord(r, strings, encodePayload(graph.roots))),
     report: {
       target: kind === 'widget' ? `widget:${widgetName}` : `page:${pageName}`,
       record: r.index, version: targetVersion, addedObjects: defs.length,
-      addedStrings: strings.length - r.strings.length,
+      addedStrings: strings.length - previousStringCount,
       versionAdaptations: [...new Set(versionAdaptations)],
       interactions: added
     }
+  };
+}
+
+
+// One transaction-scoped reader: no shared mutable cache across documents.
+export function createInteractionWriter(file) {
+  const graphs = new Map();
+  const reader = {
+    records: readFileRecords(file), pages: new Map(), contexts: new Map(), dirty: new Map(),
+    parse(record) {
+      if (!graphs.has(record.index)) graphs.set(record.index, parseRecordPayload(record));
+      return graphs.get(record.index);
+    },
+  };
+  let groups = 0, failure = null;
+  return {
+    add(target, interactions, options = {}) {
+      try {
+        const result = addInteractions(file, target, interactions, { ...options, reader });
+        groups++;
+        return result;
+      } catch (error) { failure = error; throw error; }
+    },
+    finish() {
+      if (failure) throw new Error('Cannot commit a failed interaction batch', { cause: failure });
+      return replaceRecords(file, [...reader.dirty.values()].map(({ record, graph }) => ({
+        record, raw: encodeRecord(record, record.strings, encodePayload(graph.roots)),
+      })));
+    },
+    stats() { return { interactionGroups: groups, recordsInflated: reader.records.length,
+      payloadsParsed: graphs.size, recordsEncoded: reader.dirty.size }; },
   };
 }

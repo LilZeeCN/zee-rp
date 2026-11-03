@@ -1,0 +1,80 @@
+rp/1 target=9 name="原生表单与状态样式" domain=web theme=enterprise-light
+var hovered: boolean = false
+var focused: boolean = false
+var q_ready: boolean = false
+var q_all: boolean = true
+var q_self: boolean = false
+var q_third: boolean = false
+var q_shipping: boolean = false
+var q_discount: boolean = false
+var q_price: text = "全部价格"
+
+page #tabs [720x560] name="多标签选项卡"
+  box #root [720x560] layout=column padding=24 gap=20 fill="#FFFFFF"
+    label #title [fillx32] "原生 Selected 与 MouseOver 样式" fontSize=22 fontWeight=600
+    box #bar [fillx44] layout=row gap=12
+      button #tab_0 [160x44] "商品" selected=true selectionGroup="tabs" fill="#F1F5F9" stroke="#CBD5E1" color="#334155" styles={"hover":{"fill":"#DBEAFE","color":"#1D4ED8"},"selected":{"fill":"#2563EB","color":"#FFFFFF"}}
+        +onClick [{"type":"set-selected","target":"tab_0","selected":true},{"type":"set-selected","target":"tab_1","selected":false},{"type":"set-selected","target":"tab_2","selected":false},{"type":"set-text","target":"tab_content","text":"商品内容"}]
+      button #tab_1 [160x44] "评价" selected=false selectionGroup="tabs" fill="#F1F5F9" stroke="#CBD5E1" color="#334155" styles={"hover":{"fill":"#DBEAFE","color":"#1D4ED8"},"selected":{"fill":"#2563EB","color":"#FFFFFF"}}
+        +onClick [{"type":"set-selected","target":"tab_0","selected":false},{"type":"set-selected","target":"tab_1","selected":true},{"type":"set-selected","target":"tab_2","selected":false},{"type":"set-text","target":"tab_content","text":"评价内容"}]
+      button #tab_2 [160x44] "详情" selected=false selectionGroup="tabs" fill="#F1F5F9" stroke="#CBD5E1" color="#334155" styles={"hover":{"fill":"#DBEAFE","color":"#1D4ED8"},"selected":{"fill":"#2563EB","color":"#FFFFFF"}}
+        +onClick [{"type":"set-selected","target":"tab_0","selected":false},{"type":"set-selected","target":"tab_1","selected":false},{"type":"set-selected","target":"tab_2","selected":true},{"type":"set-text","target":"tab_content","text":"详情内容"}]
+    label #tab_content [fillx80] "商品内容" fontSize=18
+    button #next [160x44] "图标输入框" goto="input"
+
+page #input [720x560] name="图标输入框"
+  box #root [720x560] layout=stack fill="#FFFFFF"
+    label #title [660x32] "原生输入框的悬停、聚焦与清空" x=24 y=24 fontSize=22 fontWeight=600
+    input #search [360x44] x=24 y=88 value="Axure" placeholder="请输入商品名称" fill="#FFFFFF" stroke="#CBD5E1" radius=6 styles={"hover":{"stroke":"#64748B"},"focused":{"stroke":"#2563EB","strokeWidth":2},"disabled":{"fill":"#F1F5F9","color":"#94A3B8"}}
+      +onMouseOver [{"type":"set-variable","variable":"hovered","value":true}]
+      +onMouseOut [{"type":"set-variable","variable":"hovered","value":false}]
+      +onFocus [{"type":"set-variable","variable":"focused","value":true}]
+      +onBlur [{"type":"set-variable","variable":"focused","value":false}]
+    button #clear [32x32] "×" x=344 y=94 variant=ghost when="=var.hovered || (length(@search) > 0 && var.focused)"
+      +onMouseOver [{"type":"set-variable","variable":"hovered","value":true}]
+      +onMouseOut [{"type":"set-variable","variable":"hovered","value":false}]
+      +onClick [{"type":"set-text","target":"search","text":""},{"type":"focus","target":"search"}]
+    button #disable_search [160x44] "禁用输入" x=24 y=160
+      +onClick [{"type":"disable","target":"search"}]
+    button #enable_search [160x44] "启用输入" x=204 y=160
+      +onClick [{"type":"enable","target":"search"}]
+    button #next [160x44] "商品查询表单" x=24 y=240 goto="query"
+
+page #query [720x880] name="商品查询表单"
+  box #root [720x880] layout=column padding=24 gap=16 fill="#FFFFFF"
+    label #title [fillx32] "原生单选、复选与下拉组合查询" fontSize=22 fontWeight=600
+    box #seller_row [fillx36] layout=row gap=12
+      radio #seller_all [160x32] "全部" group="seller" checked=true
+        +onChange [{"type":"set-text","target":"selection_status","text":"单选已变化"}]
+      radio #seller_self [160x32] "自营" group="seller" checked=false
+      radio #seller_third [160x32] "第三方" group="seller" checked=false
+    box #features [fillx36] layout=row gap=12
+      checkbox #shipping [160x32] "包邮" checked=false
+        +onChange [{"type":"set-text","target":"selection_status","text":"复选已变化"}]
+      checkbox #discount [160x32] "有折扣" checked=false
+    combobox #price [320x40] options=["全部价格","0-50","50-200","200以上"] selectedIndex=0
+      +onChange [{"type":"set-text","target":"selection_status","text":"下拉已变化"}]
+    label #selection_status [fillx24] "请选择查询条件"
+    box #actions [fillx44] layout=row gap=12
+      button #query [160x44] "查询"
+        +onClick [{"type":"set-variable","variable":"q_all","value":"=@seller_all"},{"type":"set-variable","variable":"q_self","value":"=@seller_self"},{"type":"set-variable","variable":"q_third","value":"=@seller_third"},{"type":"set-variable","variable":"q_shipping","value":"=@shipping"},{"type":"set-variable","variable":"q_discount","value":"=@discount"},{"type":"set-variable","variable":"q_price","value":"=@price"},{"type":"set-variable","variable":"q_ready","value":true},{"type":"set-text","target":"result","text":"='查询条件：全部=' + text(@seller_all) + '，自营=' + text(@seller_self) + '，第三方=' + text(@seller_third) + '；包邮=' + text(@shipping) + '；折扣=' + text(@discount) + '；价格=' + @price"}]
+      button #reset [160x44] "重置" variant=secondary
+        +onClick [{"type":"set-check","target":"seller_self","checked":false},{"type":"set-check","target":"seller_third","checked":false},{"type":"set-check","target":"seller_all","checked":true},{"type":"set-check","target":"shipping","checked":false},{"type":"set-check","target":"discount","checked":false},{"type":"set-option","target":"price","value":"全部价格"},{"type":"set-variable","variable":"q_ready","value":false},{"type":"set-text","target":"result","text":"请选择条件后点击查询"}]
+    label #result [fillx72] "请选择条件后点击查询" fontSize=14
+    label #result_heading [fillx28] "匹配商品" fontSize=18 fontWeight=600 when="=var.q_ready"
+    label #item_a [fillx36] "自营帆布袋 · 36元 · 包邮 · 有折扣" when="=var.q_ready && (var.q_all || var.q_self) && (var.q_price == '全部价格' || var.q_price == '0-50')"
+    label #item_b [fillx36] "第三方键盘 · 128元 · 不包邮 · 有折扣" when="=var.q_ready && (var.q_all || var.q_third) && not(var.q_shipping) && (var.q_price == '全部价格' || var.q_price == '50-200')"
+    label #item_c [fillx36] "自营耳机 · 260元 · 包邮 · 无折扣" when="=var.q_ready && (var.q_all || var.q_self) && not(var.q_discount) && (var.q_price == '全部价格' || var.q_price == '200以上')"
+    label #empty [fillx36] "没有符合条件的商品" when="=var.q_ready && not(((var.q_all || var.q_self) && (var.q_price == '全部价格' || var.q_price == '0-50')) || ((var.q_all || var.q_third) && not(var.q_shipping) && (var.q_price == '全部价格' || var.q_price == '50-200')) || ((var.q_all || var.q_self) && not(var.q_discount) && (var.q_price == '全部价格' || var.q_price == '200以上')))"
+    button #next [160x44] "列表框样例" goto="lists"
+
+page #lists [720x560] name="列表框与选项动作"
+  box #root [720x560] layout=column padding=24 gap=16 fill="#FFFFFF"
+    label #title [fillx32] "原生列表框与下拉别名" fontSize=22 fontWeight=600
+    listbox #single [280x100] options=["红","绿","蓝"] selectedIndex=1
+    listbox #multi [280x100] options=["一","二","三"] multiple=true selectedIndices=[0,2]
+    droplist #alias [280x40] options=["甲","乙","丙"] selectedIndex=2
+    button #choose [160x44] "设置选项"
+      +onClick [{"type":"set-option","target":"single","value":"蓝"},{"type":"set-option","target":"alias","value":"乙"},{"type":"set-text","target":"selection","text":"=@single + ' / ' + @alias"}]
+    label #selection [fillx32] "尚未设置"
+    button #next [160x44] "返回选项卡" goto="tabs"

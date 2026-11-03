@@ -266,10 +266,20 @@ def main():
                            if s["id"].startswith(page_part + "/")
                            and (s["id"].endswith("/" + leaf_norm) or s.get("label") == leaf_norm or s.get("display") == leaf_norm)]
             if len(matches) != 1:
+                # 页面级属性（name/canvas/device/domain…）直接命中页面记录，
+                # 不要逼调用方去猜 JSON Pointer。
+                page_hits = [i for i, pg in enumerate(spec.get("pages", []))
+                             if q_str in (pg.get("id"), pg.get("name"))]
+                if not matches and len(page_hits) == 1:
+                    pg = spec["pages"][page_hits[0]]
+                    return {"id": q_str, "name": q_str, "kind": "page",
+                            "pointer": f"/pages/{page_hits[0]}", "label": pg.get("name", q_str)}
                 cands = matches if matches else [s for s in ir["symbols"] if q_str.rsplit("/", 1)[-1] in s["id"]]
-                raise LanguageError("E_PATCH", f"/operations/{op_idx}/target",
-                                    f"Target '{q_str}' missing or ambiguous; use a page-qualified logical ID",
-                                    suggestions=[s["id"] for s in cands[:5]])
+                page_ids = [pg.get("id") for pg in spec.get("pages", []) if pg.get("id")]
+                raise LanguageError(
+                    "E_PATCH", f"/operations/{op_idx}/target",
+                    f"Target '{q_str}' missing or ambiguous; use a page-qualified logical ID",
+                    suggestions=[s["id"] for s in cands[:3]] + [f"page:{pid}" for pid in page_ids[:2]])
             return matches[0]
 
         def _coerce_node_value(val):

@@ -78,6 +78,7 @@ export function writeNativeScene(file, scene) {
     };
     const r = item.rect;
     put(101, xy(r.location.x, r.location.y));
+    if (item.rotation) put(50, f64(item.rotation)); // 原生旋转（度），Axure 保存/预览均消费
     if (kind !== 'Layer') {
       const fillColor = item.backgroundFills?.[0]?.type === 1 ? item.backgroundFills[0].color : null;
       const strokeColor = item.strokes?.[0]?.fill?.color;
@@ -152,8 +153,8 @@ export function writeNativeScene(file, scene) {
   function emit(item) {
     const fail = detail => { throw new Error(`Native scene ${item.name ?? item.id}: ${detail}`); };
     if (![0, 1, 2].includes(item.itemType)) fail(`unsupported itemType ${item.itemType}`);
-    if (item.rotation || item.textRotation || item.effects?.length || item.textShadows?.length || item.paths?.length || item.isMask || item.flippedHorizontal || item.flippedVertical)
-      fail('unsupported transform, effect or path');
+    if (item.textRotation || item.effects?.length || item.textShadows?.length || item.paths?.length || item.isMask || item.flippedHorizontal || item.flippedVertical)
+      fail('unsupported transform, effect or path'); // 2D rotation 已支持：DOA 50 (0xC0000000+50=3221225522，官方库 Menu Carat 180°/探针 15° 实证)
     const r = item.rect;
     if (!r || ![r.location?.x, r.location?.y, r.size?.width, r.size?.height].every(Number.isFinite)) fail('invalid rectangle');
     const group = item.itemType !== 1;

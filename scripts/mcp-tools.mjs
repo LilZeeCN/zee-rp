@@ -1,3 +1,5 @@
+import { validateInput } from '../studio/schema-validation.mjs';
+export { validateInput } from '../studio/schema-validation.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, readdirSync, renameSync, rmSync, unlinkSync, writeFileSync } from 'node:fs';
@@ -13,13 +15,14 @@ import { setRecordWidgetText } from './set-widget-text.mjs';
 import { setWidgetRichText } from './set-widget-richtext.mjs';
 import { setWidgetNames } from './name-widget.mjs';
 import { EVENTS } from './ix-actions.mjs';
-import { compilePrototype, buildInteractiveRp } from './proto.mjs';
+import { compilePrototype, buildInteractiveRp, reportPrototypeProgress } from './proto.mjs';
 import { expandSpec, pasteAxvg } from './axvg.mjs';
 import { createBlankProject } from './create-blank-project.mjs';
 import { writeNativeScene } from './native-scene.mjs';
 import { mergePages } from './merge-pages.mjs';
 import { authoringTools, recipeSource, runWorkflow, pythonEnvironment } from './authoring-workflow.mjs';
 import { reviewImageStructure } from './image-structure.mjs';
+import { studioTools } from '../studio/mcp-adapter.mjs';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 const TRACE_PY = join(SCRIPTS_DIR, 'trace.py');
@@ -34,36 +37,6 @@ if (!config) throw new Error('mcp-tools.mjs 未在注册表登记');
 export const toolName = command => command.replaceAll(/[ -]/g, '_');
 
 // 低层 SDK 不自动执行 JSON Schema 校验；本表只使用这些 JSON Schema 关键字。
-export function validateInput(schema, value, at = 'arguments') {
-  if (schema.oneOf) {
-    const matches = schema.oneOf.filter(branch => { try { validateInput(branch, value, at); return true; } catch { return false; } });
-    if (matches.length !== 1) throw new Error(at === 'arguments' ? `${at} 必须选择具名参数或 args，不能混用` : `${at} 格式或类型不匹配`);
-    return;
-  }
-  if (!schema.type) return; // Unrestricted JSON values in source patch operations.
-  if (schema.type === 'object') {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error(`${at} 必须是对象`);
-    for (const key of schema.required ?? []) if (!Object.hasOwn(value, key)) throw new Error(`${at}.${key} 缺失`);
-    for (const [key, field] of Object.entries(value)) {
-      const sub = schema.properties?.[key];
-      if (!sub && schema.additionalProperties === false) throw new Error(`${at}.${key} 未登记`);
-      if (sub) validateInput(sub, field, `${at}.${key}`);
-    }
-  } else if (schema.type === 'array') {
-    if (!Array.isArray(value)) throw new Error(`${at} 必须是数组`);
-    if (schema.minItems !== undefined && value.length < schema.minItems) throw new Error(`${at} 至少需要 ${schema.minItems} 项`);
-    if (schema.maxItems !== undefined && value.length > schema.maxItems) throw new Error(`${at} 最多允许 ${schema.maxItems} 项`);
-    value.forEach((item, i) => validateInput(schema.items, item, `${at}[${i}]`));
-  } else {
-    if (schema.type === 'integer' ? !Number.isInteger(value) : typeof value !== schema.type) throw new Error(`${at} 必须是 ${schema.type}`);
-    if (schema.minimum !== undefined && value < schema.minimum) throw new Error(`${at} 不能小于 ${schema.minimum}`);
-    if (schema.maximum !== undefined && value > schema.maximum) throw new Error(`${at} 不能大于 ${schema.maximum}`);
-    if (schema.minLength !== undefined && value.length < schema.minLength) throw new Error(`${at} 不能为空`);
-    if (schema.pattern && !new RegExp(schema.pattern).test(value)) throw new Error(`${at} 格式错误`);
-    if (schema.enum && !schema.enum.includes(value)) throw new Error(`${at} 不在允许值内`);
-  }
-}
-
 // RP 工具的宿主输入与输出位置；多源导入的第一个参数仍由调用方提供。
 function commandIO(command) {
   if (command.command === 'rp-read') return { source: 'file', readOnly: true };
@@ -97,7 +70,13 @@ function commandSchema(commandName) {
   return config.rawArgs ? { type: 'object', oneOf: [named, raw] } : named;
 }
 
-const toolResult = (value, isError = false) => ({ isError, structuredContent: value, content: [{ type: 'text', text: JSON.stringify(value) }] });
+const toolResult = (value, isError = false) => {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return { isError, structuredContent: value, content: [{ type: 'text', text: JSON.stringify(value) }] };
+  const { mcpImages, ...payload } = value;
+  const images = Array.isArray(mcpImages) ? mcpImages.filter(i => i.mimeType === 'image/png' && typeof i.data === 'string').slice(0, 4) : [];
+  return { isError, structuredContent: payload, content: [{ type: 'text', text: JSON.stringify(payload) },
+    ...images.map(i => ({ type: 'image', mimeType: i.mimeType, data: i.data }))] };
+};
 const countsOf = rp => ({ pages: rp.counts.pages, widgets: rp.counts.widgets, interactions: rp.counts.interactions, actions: rp.counts.actions, containedWidgets: rp.containedWidgets.length, masters: rp.counts.masters });
 
 function commandArgs(command, input) {
@@ -1214,14 +1193,26 @@ export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sour
     source = join(artifactDir, 'source.json');
     writeFileSync(source, JSON.stringify(spec, null, 2) + '\n', { flag: 'wx' });
     stage = 'compile';
+    reportPrototypeProgress('compile', 0, 1);
     const compiled = compilePrototype(resolvedSourceFile ?? source, artifactDir, { strictAudit, autoHeal: Boolean(autoHeal) });
+    reportPrototypeProgress('compile', 1, 1);
     plan = JSON.parse(readFileSync(compiled.planPath, 'utf8'));
     if (!compiled.ok) {
       const error = new Error('原型未通过布局检查。');
-      error.diagnostics = (compiled.audit?.failures ?? []).map(f => ({
-        severity: 'error', code: 'E_LAYOUT', pointer: '/', pageName: f.page,
-        message: typeof f === 'string' ? f : JSON.stringify(f),
-      }));
+      error.diagnostics = (compiled.audit?.failures ?? []).map(f => {
+        if (typeof f === 'string') return { severity: 'error', code: 'E_LAYOUT', pointer: '/', message: f };
+        const readable = f?.message && typeof f.message === 'string' ? f.message : null;
+        const entry = {
+          severity: 'error',
+          code: 'E_LAYOUT',
+          pointer: '/',
+          pageName: f?.page,
+          message: readable || JSON.stringify(f),
+        };
+        if (f?.suggestion) entry.suggestion = f.suggestion;
+        if (readable) entry.data = f;
+        return entry;
+      });
       if (!error.diagnostics.length) error.diagnostics = (compiled.warnings ?? []).map(message => ({
         code: 'E_LAYOUT', pointer: '/', message, pageName: message.match(/^\[([^\]]+)\]/)?.[1],
       }));
@@ -2622,6 +2613,7 @@ export const sessionTools = [
     inputSchema: { type: 'object', properties: { path: { type: 'string', minLength: 1 }, rp: { type: 'string', minLength: 1 }, file: { type: 'string', minLength: 1 }, rpFile: { type: 'string', minLength: 1 }, deep: { type: 'boolean' }, includeCrossPageDuplicates: { type: 'boolean', description: '可选：deep=true 时是否返回跨页面共享组件同名元件列表，默认 false（仅返回同页内重名元件）。' } }, additionalProperties: false },
     handler: sessionHandlers.verify,
   },
+  ...studioTools,
 ];
 
 const sessionToolIndex = new Map(sessionTools.map(tool => [tool.name, input => {
@@ -2629,7 +2621,9 @@ const sessionToolIndex = new Map(sessionTools.map(tool => [tool.name, input => {
   const value = tool.handler(input);
   const finish = result => toolResult(result, result.ok === false || result.status === 'failed' || result.status === 'conflict');
   if (value && typeof value.then === 'function') return value.then(finish).catch(error => toolResult({ status: 'failed',
-    diagnostics: [{ code: error.code ?? 'E_TOOL_INPUT', message: error.message, nextAction: '检查参数、当前源码及浏览器控制权后重试。' }],
+    diagnostics: [{ code: error.code ?? 'E_TOOL_INPUT', message: error.message,
+      ...Object.fromEntries(['field', 'candidates', 'sourceSpan', 'line', 'column', 'snippet'].filter(key => error[key] !== undefined).map(key => [key, error[key]])),
+      nextAction: error.code === 'E_WRITE_OUTCOME_UNKNOWN' ? '先读取当前版本和实际内容，确认本次写入结果；不要盲目重发。' : '按返回字段与候选修正参数；用studio_describe按需读取公开契约。' }],
   }, true));
   return finish(value);
 }]));

@@ -244,11 +244,19 @@ RP/1 的 `set-panel-state` 不开放过渡参数；原生编辑工具有独立�
 
 `compile-plan.json` 保存布局路径、递归面板/行模板、变量、源码映射与语义哈希。`build-rp` 返回逻辑 ID 到原生 `record,id,container` 的映射、`backend` 和声明/写入 `eventCoverage`。行对象只映射一次且保留行模板容器。完整映射、零悬空引用或事件数相等是装配证据，行为仍须在 Axure 验证。
 
+## 原生表单与状态样式
+
+`radio`、`checkbox`、`combobox`（别名 `droplist`）、`listbox` 已接入完整 RP/1 原生生成。`@radio` / `@checkbox` 读布尔勾选态，`@combobox` / `@listbox` 读首个选项文字。`set-check`、普通元件 `set-selected`、列表 `set-option` 分别修改对应状态。`styles` 支持 hover/selected/disabled/focused 原生样式。精确字段、例子与验证范围见 [原生表单](native-forms.md)。Studio 局部 RP/1 和任意 GUI 修改导回不据此扩展。
+
 ## 后端与验证范围
+
+大工程可对 `generate_prototype` / `revise_prototype` 传 `async:true`，再用 `jobs_get({id})` 读取进度。重建时 `phase` 会区分 `compile`、`assemble-pages`、`merge-pages`、`bind-interactions`、`validate-native`；`progress` 包含当前阶段的 `completed/total/updatedAt`。这是阶段内工作量，不能把某一阶段100%当成整个任务完成；最终看 `status` 与验证结果。
+
+2026-11-03 写侧改用一次装配内的记录/页面/状态上下文缓存，全部交互绑定后按脏记录一次编码压缩并修正manifest偏移，保留完整三零、事件覆盖与基线。读取缓存不跨工程共享；失败的交互批次不能提交。独立编辑入口 `add_interaction` 的逐次事务语义保留。
 
 RP/1 默认 `native`；旧 Spec 默认 `gui`，可用 `--backend native|gui` 显式选择。原生路径直接构造 Layer、VectorShape、RichTextBlock 和内嵌 ImageBox，递归装配面板、原生 TextBox 和 Repeater，然后写入事件。
 
-生成依赖 Node、Python/Pillow、字体、本机 RP 9 空白模板；面板、输入和 Repeater 按需使用 RP 9 安装资源。生成不需要运行 Axure、剪贴板、Swift 或 Stage 缓存；真实预览和原生编辑仍使用 Axure。原生图形不是通用 Axvg 导入器，自定义路径、旋转、效果、渐变和不等角圆角拒绝。
+生成依赖 Node、Python/Pillow、字体、本机 RP 9 空白模板；面板、输入和 Repeater 按需使用 RP 9 安装资源。生成不需要运行 Axure、剪贴板、Swift 或 Stage 缓存；真实预览和原生编辑仍使用 Axure。原生图形不是通用 Axvg 导入器，任意自定义路径、效果、渐变和不等角圆角仍受对应后端限制。节点 `rotation`（度）已支持；TextBox 使用原生加载旋转动作，详见 [输入框旋转](native-forms.md#输入框旋转)。
 
 ```sh
 npm run test:language
@@ -400,3 +408,5 @@ python3 scripts/rp_oracle.py examples/rp-language/benchmark_1_smart_cart.json
 CLI `proto.mjs check` 的成功与失败诊断均为 stdout 上的单个 JSON；失败 exit code 为 1。事件值支持动作对象、动作数组、cases，以及文档列出的字符串简写（例如 `onClick: "goto home"`），字符串会先转换为动作并做引用校验；无法识别的字符串报 E_EVENT。
 
 2026-10-24 复测补丁：`fontSize`（含 `size`/`font` 简写和 spans 字号）必须满足 `0 < fontSize <= 72`，上限取自渲染器字号令牌表；超限报 `E_SIZE`。`letterSpacing` 必须非负。所有容器的 `after` 都先检查兄弟引用，不存在或指向自身报 `E_REFERENCE`；有效约束在非 stack 容器中仍由布局审计提示不生效。残缺表达式在源码末尾统一报告 `Unexpected end of expression`。
+
+2026-10-28 更新：当前普通文字与spans字号上限已统一为120；label/paragraph/button/badge支持fontFamily，导出保留实际字体。此前2026-10-24记录中的72是历史上限。

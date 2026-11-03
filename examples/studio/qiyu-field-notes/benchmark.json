@@ -1,0 +1,18 @@
+{
+  "id": "qiyu-field-notes-v1",
+  "name": "栖羽 · 自然观察手记",
+  "acceptedScope": "摄影主导、内容较少的自然观察手机应用；用户已认可视觉",
+  "referenceRole": "设计决定、构图与创作过程参考，不是通用页面模板",
+  "patterns": {
+    "home": "一张照片建立焦点，首屏只突出认识这只鸟这一主任务",
+    "species": "局部照片承担辨认解释，内容围绕识别任务组织",
+    "record": "照片、纸面与文案延续记录语气，收集最少必要信息",
+    "saved": "明暗和密度随完成状态变化，回显真实输入"
+  },
+  "doNotCopyUniversally": ["森林绿与纸色", "640px大幅照片", "所有详情都放三列圆图", "固定坐标", "单条会话记录"],
+  "engineeringLimits": ["手记只存一条且刷新清空", "两个单行输入框", "未证明任意长文本或其他平台", "未验证原生GUI手工编辑"],
+  "evidence": {"browser": "交付时77项，本次评审隔离复跑77项通过，负对照有效", "native": "核对交付者RP9保存重开与77项记录；评审没有重跑宿主"},
+  "palette": {"bg": "#F3EDE1", "brand": "#1C3328", "accent": "#C2602B"},
+  "typeRoles": {"headline": "Songti SC", "note": "Kaiti SC", "latin": "Georgia", "body": "PingFang SC"},
+  "antiPatterns": ["主次按钮同样抢眼", "不必要的多层卡片", "摄影主体被裁掉", "空态与正常列表同屏", "undefined等占位文案", "让装饰遮挡操作"]
+}

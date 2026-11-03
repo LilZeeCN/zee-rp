@@ -593,6 +593,7 @@ def _collect_rp_widgets(rp_data, visual_props=None, rec_remap=None):
                 "record": p_rec,
                 "rawRecord": raw_p_rec,
                 "id": wid,
+                "guid": w.get("guid"),
                 "order": w_order,
                 "pageIdx": p_idx,
                 "pageName": p_name,
@@ -629,6 +630,7 @@ def _collect_rp_widgets(rp_data, visual_props=None, rec_remap=None):
             "record": c_rec,
             "rawRecord": raw_c_rec,
             "id": cid,
+            "guid": cw.get("guid"),
             "order": 10000 + cw_order,
             "pageIdx": p_info[0],
             "pageName": p_info[1],
@@ -650,6 +652,34 @@ def _collect_rp_widgets(rp_data, visual_props=None, rec_remap=None):
             "interactions": cw.get("interactions") or [],
         }
     return widgets
+
+
+def _align_native_widget_identities(base_widgets, gui_widgets):
+    """Native save may renumber object IDs. GUIDs keep the real identity;
+    a new GUID must never impersonate a deleted widget by reusing its number.
+    Legacy parsed summaries without GUIDs retain their existing ID behavior.
+    """
+    base_by_guid = {}
+    for key, widget in base_widgets.items():
+        if widget.get("guid"):
+            identity = (widget.get("record"), widget["guid"])
+            if identity in base_by_guid:
+                raise ValueError("Ambiguous baseline native widget GUID")
+            base_by_guid[identity] = key
+    aligned = {}
+    seen_guids = set()
+    for key, widget in gui_widgets.items():
+        guid = widget.get("guid")
+        if guid:
+            identity = (widget.get("record"), guid)
+            if identity in seen_guids:
+                raise ValueError("Ambiguous edited native widget GUID")
+            seen_guids.add(identity)
+            key = base_by_guid.get(identity, f"native-guid:{widget.get('record')}:{guid}")
+        if key in aligned:
+            raise ValueError("Ambiguous native widget identity")
+        aligned[key] = {**widget, "key": key}
+    return aligned
 
 
 def _map_base_widgets_to_symbols(base_widgets, base_ir, lowered_spec, baseline_meta=None):
@@ -942,6 +972,42 @@ def _apply_prop_to_target(target, sym, prop, new_val, old_val=None, coordinate_s
                 "newValue": str(new_val),
                 "detail": f"Widget '{sym['id']}' uses computed expression '{cur_txt}'; overwriting with literal '{new_val}' would destroy formula semantics.",
             }
+        # 宏容器的内部文字不能直接写 text（宏节点没有该属性）。
+        # 能映射到宏参数（title）就提升为参数；映射不了就明确报 unsupported，
+        # 不能产出一个语义非法的 spec 让 merge 阶段炸掉。
+        try:
+            from rp_language import MACRO_PROPS as _MACRO_PROPS
+        except Exception:
+            _MACRO_PROPS = {}
+        node_type = ast_node.get("type")
+        if not node_type:
+            # 简写 JSON：{"detail-card": "detail", ...}，没有 type 键。
+            node_type = next((k for k in ast_node if isinstance(k, str) and k in _MACRO_PROPS), None)
+        if node_type in _MACRO_PROPS:
+            title_val = ast_node.get("title")
+            if prop == "text" and isinstance(title_val, str) and not title_val.startswith(("=", "$")):
+                ast_node["title"] = str(new_val)
+                return {
+                    "id": sym["id"],
+                    "property": "title",
+                    "promotedMacroParam": "title",
+                    "isMacroPromotion": True,
+                    "macroType": node_type,
+                    "oldValue": title_val,
+                    "newValue": str(new_val),
+                }
+            return {
+                "unsupported": True,
+                "kind": "macro-inner-text-edit",
+                "id": sym["id"],
+                "page": sym.get("pageName") or sym.get("pageId"),
+                "macroType": node_type,
+                "property": tkey,
+                "oldValue": old_val,
+                "newValue": str(new_val),
+                "detail": f"宏 '{node_type}' 的内部文字没有对应的宏参数，直接写 text 会让源码语义非法；"
+                          "请在源文件里改宏参数，或先把该宏展开（detach）再改。",
+            }
         ast_node[tkey] = str(new_val)
         return {"id": sym["id"], "property": tkey, "oldValue": old_val, "newValue": str(new_val)}
     if prop == "name":
@@ -987,7 +1053,7 @@ def _lift_rp_into_trace_spec(base_spec, base_rp, gui_rp, base_vis, gui_vis, gui_
     frame = frames[0] if frames else {"name": "图片还原页", "children": []}
     children = frame.setdefault("children", [])
     base_widgets = _collect_rp_widgets(base_rp, base_vis)
-    gui_widgets = _collect_rp_widgets(gui_rp, gui_vis)
+    gui_widgets = _align_native_widget_identities(base_widgets, _collect_rp_widgets(gui_rp, gui_vis))
 
     wkey_to_child = {}
     used_children = set()
@@ -1115,6 +1181,93 @@ def _lift_rp_into_trace_spec(base_spec, base_rp, gui_rp, base_vis, gui_vis, gui_
     }
 
 
+def _find_ast_node_by_id(spec, target_id):
+    """在 spec 里按 id 找节点（兼容宏简写 {"card": "c"} 与标准 {"type":"box","id":"c"}）。"""
+    found = {"node": None}
+
+    def walk(node):
+        if found["node"] is not None or not isinstance(node, dict):
+            return
+        for key, value in node.items():
+            if isinstance(value, str) and value == target_id and key not in ("name", "title", "body", "text"):
+                found["node"] = node
+                return
+        if node.get("id") == target_id:
+            found["node"] = node
+            return
+        for child in node.get("children") or []:
+            walk(child)
+        for state in node.get("states") or []:
+            if isinstance(state, dict):
+                walk(state.get("root"))
+        if node.get("template"):
+            walk(node["template"])
+
+    for page in spec.get("pages") or []:
+        walk(page.get("root"))
+    for comp in (spec.get("components") or {}).values():
+        if isinstance(comp, dict):
+            walk(comp.get("root"))
+    return found["node"]
+
+
+def _apply_macro_title_fallback(spec, sid, value):
+    """宏内部标题没有独立源节点，只有宏参数；按 "<macroId>_title" 约定回落。"""
+    sid = str(sid)
+    if not sid.endswith("_title"):
+        return None
+    macro_id = sid[: -len("_title")]
+    for cand in (macro_id, macro_id.rsplit("/", 1)[-1]):
+        node = _find_ast_node_by_id(spec, cand)
+        if isinstance(node, dict) and isinstance(node.get("title"), str) and not node["title"].startswith(("=", "$")):
+            old_val = node["title"]
+            node["title"] = str(value)
+            node.pop("text", None)
+            return {"id": sid, "property": "title", "promotedMacroParam": "title",
+                    "oldValue": old_val, "newValue": str(value)}
+    return None
+
+
+def _sanitize_macro_text(spec):
+    """宏节点没有 text 属性。任何 lift 路径把 text 写到宏上，都会产出语义非法的源码；
+    能映射成 title 参数就提升，映射不了就丢弃并记账。"""
+    from rp_language import MACRO_PROPS
+    promotions, dropped = [], []
+
+    def walk(node):
+        if not isinstance(node, dict):
+            return
+        # .rp1 解析结果是"简写 JSON"：宏节点写作 {"detail-card": "detail", ...}，没有 type 键。
+        # 这里必须把简写键也识别成类型，否则宏守卫永远不触发（正是 A5 的根因）。
+        node_type = node.get("type")
+        if not node_type:
+            node_type = next((k for k in node if isinstance(k, str) and k in MACRO_PROPS), None)
+        if node_type in MACRO_PROPS and "text" in node:
+            text_val = node.get("text")
+            title_val = node.get("title")
+            if isinstance(title_val, str) and not title_val.startswith(("=", "$")) and isinstance(text_val, str) and text_val:
+                node["title"] = text_val
+                promotions.append({"macroType": node_type, "id": node.get("id"), "param": "title", "value": text_val})
+            else:
+                dropped.append({"macroType": node_type, "id": node.get("id"), "value": text_val,
+                                "detail": "该宏没有可承接文字的 title 参数；请在源文件里改宏参数，或先 detach 宏再改内部文字。"})
+            node.pop("text", None)
+        for child in node.get("children") or []:
+            walk(child)
+        for state in node.get("states") or []:
+            if isinstance(state, dict):
+                walk(state.get("root"))
+        if node.get("template"):
+            walk(node["template"])
+
+    for page in spec.get("pages") or []:
+        walk(page.get("root"))
+    for comp in (spec.get("components") or {}).values():
+        if isinstance(comp, dict):
+            walk(comp.get("root"))
+    return promotions, dropped
+
+
 def lift_rp_into_spec(base_spec, base_rp_path_or_dict, gui_rp_path_or_dict=None, rp_json_override=None, baseline_meta=None, original_dsl_text=None):
     """
     3-Way Binary .rp Lifter:
@@ -1189,7 +1342,7 @@ def lift_rp_into_spec(base_spec, base_rp_path_or_dict, gui_rp_path_or_dict=None,
                     gui_rec_to_base_rec[g_rec] = base_pkg_by_id[(pk, pkg[pk])]
                     break
     base_widgets = _collect_rp_widgets(base_rp, base_vis)
-    gui_widgets = _collect_rp_widgets(gui_rp, gui_vis, rec_remap=gui_rec_to_base_rec)
+    gui_widgets = _align_native_widget_identities(base_widgets, _collect_rp_widgets(gui_rp, gui_vis, rec_remap=gui_rec_to_base_rec))
     wkey_to_sym, wkey_to_bg_sym = _map_base_widgets_to_symbols(base_widgets, base_ir, lowered_base, baseline_meta)
     use_instances = _index_use_instances(merged)
 
@@ -1379,6 +1532,10 @@ def lift_rp_into_spec(base_spec, base_rp_path_or_dict, gui_rp_path_or_dict=None,
             old_t = bw.get("text") if bw.get("text") is not None else ""
             new_t = gw.get("text") if gw.get("text") is not None else ""
             res = _apply_prop_to_target(target, sym, tprop, new_t, old_t)
+            if not res or (isinstance(res, dict) and res.get("unsupported")):
+                fallback = _apply_macro_title_fallback(merged, sym["id"], new_t)
+                if fallback:
+                    res = fallback
             if isinstance(res, dict) and res.get("unsupported"):
                 unsupported_native_changes.append(res)
             else:
@@ -1475,6 +1632,11 @@ def lift_rp_into_spec(base_spec, base_rp_path_or_dict, gui_rp_path_or_dict=None,
                 "name": bw.get("name"),
             })
 
+    macro_promotions, macro_drops = _sanitize_macro_text(merged)
+    if macro_drops:
+        unsupported_native_changes.extend([
+            {"unsupported": True, "kind": "macro-inner-text-edit", **drop} for drop in macro_drops
+        ])
     dsl_text = spec_to_dsl(merged)
     if original_dsl_text:
         dsl_text = preserve_rp1_comments(original_dsl_text, dsl_text)
@@ -1493,6 +1655,7 @@ def lift_rp_into_spec(base_spec, base_rp_path_or_dict, gui_rp_path_or_dict=None,
             "liftedInteractions": lifted_interactions,
             "componentInstanceChanges": lifted_component_instances,
             "unsupportedNativeChanges": unsupported_native_changes,
+            "macroTextPromotions": macro_promotions,
         },
         "liftedTextEdits": lifted_text_edits,
         "liftedRenames": lifted_renames,
@@ -1711,8 +1874,24 @@ def three_way_merge_rp(
                 target = _resolve_ast_target(merged_spec, merged_syms[sid], merged_uses)
                 applied = _apply_prop_to_target(target, merged_syms[sid], prop, chosen_val, nd["old"], coordinate_space="source")
                 if not applied or applied.get("unsupported"):
-                    conflicts.append({"id": sid, "pageId": sym_info.get("pageId"), "pageName": resolved_page_name, "property": prop, "reason": "Native change cannot be represented in the updated source.", "detail": applied})
-                    continue
+                    # 宏内部标题在原源码里没有独立节点，只有宏参数；
+                    # 按 "<macroId>_title" 命名约定回落到宏的 title 参数。
+                    fallback_done = False
+                    if prop in ("text", "value") and str(sid).endswith("_title"):
+                        macro_id = str(sid)[: -len("_title")]
+                        macro_node = None
+                        for cand in (macro_id, macro_id.rsplit("/", 1)[-1]):
+                            macro_node = _find_ast_node_by_id(merged_spec, cand)
+                            if macro_node is not None:
+                                break
+                        if isinstance(macro_node, dict) and isinstance(macro_node.get("title"), str):
+                            macro_node["title"] = str(chosen_val)
+                            applied = {"id": sid, "property": "title", "promotedMacroParam": "title",
+                                       "oldValue": nd.get("old"), "newValue": str(chosen_val)}
+                            fallback_done = True
+                    if not fallback_done:
+                        conflicts.append({"id": sid, "pageId": sym_info.get("pageId"), "pageName": resolved_page_name, "property": prop, "reason": "Native change cannot be represented in the updated source.", "detail": applied})
+                        continue
                 if prop in ("x", "y", "w", "h", "fill", "stroke", "color"):
                     visual_diffs.append({"id": sid, "nativeName": nd.get("nativeName"), "changes": {prop: chosen_val}})
                     if nd.get("nativeName"):

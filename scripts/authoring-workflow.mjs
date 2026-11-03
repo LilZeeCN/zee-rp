@@ -15,9 +15,16 @@ const fileHash = path => { assertNotProtected(path); return digest(readFileSync(
 const startedAt = new Date().toISOString();
 export const packageVersion = JSON.parse(readFileSync(join(ROOT, 'package.json'))).version;
 function implementation() {
-  const files = ['package.json', ...['scripts', 'bin', 'examples/authoring'].filter(dir => existsSync(join(ROOT, dir)))
-    .flatMap(dir => readdirSync(join(ROOT, dir)).filter(f => /\.(mjs|py|rp1)$/.test(f)).sort().map(f => `${dir}/${f}`))];
-  return Object.fromEntries(files.map(file => [file, fileHash(join(ROOT, file))]));
+  const files = ['package.json', 'references/rp-language.schema.json', ...['scripts', 'bin', 'studio', 'studio/web', 'examples/authoring'].filter(dir => existsSync(join(ROOT, dir)))
+    .flatMap(dir => readdirSync(join(ROOT, dir)).filter(f => /\.(mjs|js|py|rp1|html|css)$/.test(f)).sort().map(f => `${dir}/${f}`))];
+  const packsRoot = join(ROOT, 'examples/studio/reference-packs');
+  if (existsSync(packsRoot)) for (const name of readdirSync(packsRoot)) {
+    for (const file of ['manifest.json','source.json']) {
+      const relative = `examples/studio/reference-packs/${name}/${file}`;
+      if (existsSync(join(ROOT, relative))) files.push(relative);
+    }
+  }
+  return Object.fromEntries(files.sort().map(file => [file, fileHash(join(ROOT, file))]));
 }
 const loadedFiles = implementation();
 const loadedFingerprint = digest(JSON.stringify(loadedFiles));
@@ -118,7 +125,7 @@ export function runtimeInfo(toolList) {
     host: { platform: process.platform, node: process.version, nativeTarget: 9,
       axureInstalled: appExists(9), blankTemplate: templateCandidates(9).find(c => existsSync(c.path))?.path ?? null },
     nextAction: changedFiles.length ? '磁盘实现已变化，请重新连接 MCP 以加载一致版本；Python 子进程每次读取磁盘实现。'
-      : '当前服务与磁盘指纹一致（含 scripts/*.mjs 与 scripts/*.py 编译器）。若客户端缺少工具，重新连接以刷新工具清单。' };
+      : '当前服务与磁盘指纹一致（含编译器与 Studio 服务/前端）。若客户端缺少工具，重新连接以刷新工具清单。' };
 }
 
 export function pythonEnvironment() {

@@ -7,8 +7,17 @@ import { getCommand, listCommands } from '../scripts/registry.mjs';
 
 const argv = process.argv.slice(2);
 
+if (argv[0] === 'studio') {
+  const { spawnSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const cliPath = fileURLToPath(new URL('../studio/cli.mjs', import.meta.url));
+  const res = spawnSync(process.execPath, [cliPath, ...argv.slice(1)], { stdio: 'inherit' });
+  process.exit(res.status ?? 0);
+}
+
 function commandList() {
-  return listCommands().map(c => `  ${c.command.padEnd(24)} ${c.summary}`).join('\n');
+  const studioEntry = `  ${'studio'.padEnd(24)} 启动或操作 zee-rp Studio 自由画布 (start / context / screenshot / export)`;
+  return [studioEntry, ...listCommands().map(c => `  ${c.command.padEnd(24)} ${c.summary}`)].join('\n');
 }
 
 if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {

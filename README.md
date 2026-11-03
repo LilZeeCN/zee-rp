@@ -80,6 +80,30 @@ page #notes name="手记" device=iphone-17-pro
 
 重建会输出可编辑布局和对比图。图片无法透露的业务逻辑需要另行定义。[截图重建流程](references/screenshot-workflow.md)。
 
+## 在 Studio 里和 AI 一起改稿
+
+Studio 是和 Agent 共用设计文档的自由画布。AI 可以通过 RP/1 或命令起稿、查询图层、局部改稿和验证交互；你可以在浏览器里点选、改字、拖动和撤销，最后导出可编辑的 `.rp`。
+
+接好 MCP 后调用 `studio_open_project`：
+
+```json
+{
+  "projectDir": "/absolute/path/design-project",
+  "sourcePath": "/absolute/path/birding.rp1"
+}
+```
+
+浏览器打开返回的 `url`。省略 `sourcePath` 可创建空白工程。Agent 从 `studio_describe({"topic":"workflow"})` 开始；局部 RP/1 创作与完整原生生成的支持范围分别说明。
+
+- **一起编辑**：RP/1 与命令共用事务、版本身份和撤销重做；支持组件、变量、动态面板和数据列表。
+- **先验证再交付**：查看真实截图、运行交互场景，导出原生 `.rp` 或离线 HTML/CSS/JS；工程包可迁移，原生回填支持范围内的改稿。
+- **直接操作**：双击改字，Shift 拖动框选，Option/Alt 悬停测距；点击缩放百分比回到 100%，也能适配当前或全部画板。
+- **大工程与主题**：邻近画板按视口装载，支持 `modern-dark` 和自定义色板；异步原生生成/改稿提供分阶段进度。
+
+[AI 创作指南](docs/studio-ai-authoring.md) · [画室工作流](docs/studio-design-workflow.md) · [原生往返](docs/studio-native-roundtrip.md) · [故障排查](references/troubleshooting.md)
+
+小数缩放的文字锐度、单画板海量节点，以及不同原生元件/宿主的支持范围仍有边界。[能力说明](references/capabilities.md)区分代码支持、浏览器验证和 Axure 实测；不将回归测试当作独立 AI 设计评分。
+
 ## 把它接到你的 Agent
 
 本机需要 **Node.js 18+、Python 3.10+**；生成原生工程还需要 **Axure** 和自己保存的 **RP9 单页空白工程**。截图 OCR 使用 macOS Vision 与 Swift。

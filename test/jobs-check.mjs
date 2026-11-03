@@ -47,16 +47,19 @@ try {
     await until(active.id, 'running');
     const queued = await manager.startRoundtrip({ source, output: join(work, 'cancel-queued.rp') });
     assert.equal(manager.cancel(queued.id).status, 'cancelled');
+    assert.equal(existsSync(queued.output), false);
     await until(active.id, 'completed'); assert.equal(manager.get(queued.id).status, 'cancelled');
   });
   await check('运行任务取消终止子进程', async () => {
     const job = await manager.startRoundtrip({ source, output: join(work, 'cancel-running.rp') });
     await until(job.id, 'running'); assert.equal(manager.cancel(job.id).status, 'cancelled');
     await manager.close(); assert.equal(manager.active, null);
+    assert.equal(existsSync(job.output), true, '运行中取消可能已有待处理的原生打开请求，应保留副本');
   });
   await check('同名输出拒绝且已有内容原样保留', async () => {
     const file = join(work, 'a.rp'), before = readFileSync(file);
-    await assert.rejects(manager.startRoundtrip({ source, output: file })); assert.ok(before.equals(readFileSync(file)));
+    await assert.rejects(manager.startRoundtrip({ source, output: file }), error => error.code === 'EEXIST' && error.message.includes(file) && error.message.includes('未覆盖'));
+    assert.ok(before.equals(readFileSync(file)));
   });
   await check('白名单外输出与非法扩展拒绝', async () => {
     const output = join(work, '..', `axure-job-outside-${process.pid}.rp`);
@@ -79,6 +82,39 @@ try {
     const failed = new JobManager({ runner: () => spawn(process.execPath, ['-e', 'process.exit(1)']) });
     const job = await failed.startRoundtrip({ source, output: join(work, 'failed.rp'), wait: true });
     assert.equal(job.status, 'failed'); assert.equal(job.validation.guiSaved, false); await failed.close();
+  });
+  await check('首次未打开文档的失败清理本次副本，相同参数可直接重试', async () => {
+    let attempts = 0;
+    const retry = new JobManager({ runner: args => ++attempts === 1
+      ? spawn(process.execPath, ['-e', 'console.error(\'message("Owned job document is unavailable")\');process.exit(1)'])
+      : mockRunner(args) });
+    const output = join(work, 'first-open-failure.rp');
+    try {
+      const first = await retry.startRoundtrip({ source, output, wait: true });
+      assert.equal(first.status, 'failed');
+      assert.match(first.stderr, /Owned job document is unavailable/);
+      assert.equal(existsSync(output), false, '未进入 GUI 阶段的失败不应留下原样副本');
+      const second = await retry.startRoundtrip({ source, output, wait: true });
+      assert.equal(second.status, 'completed');
+      assert.ok(original.equals(readFileSync(source)));
+    } finally { await retry.close(); }
+  });
+  await check('已打开文档或已变化的输出不会被失败清理删除', async () => {
+    for (const [kind, script] of [
+      ['opened', 'console.error("AXURE_GUI_PHASE opened");process.exit(1)'],
+      ['observed', 'console.error("AXURE_GUI_DOCUMENT_OPENED");process.exit(1)'],
+      ['changed', 'require("fs").appendFileSync(process.argv[1],"changed");process.exit(1)'],
+      ['replaced', 'const f=require("fs"),p=process.argv[1];f.copyFileSync(p,p+".external");f.renameSync(p+".external",p);process.exit(1)'],
+    ]) {
+      const preserve = new JobManager({ runner: ([output]) => spawn(process.execPath, ['-e', script, output]) });
+      const output = join(work, `preserve-${kind}.rp`);
+      try {
+        const job = await preserve.startRoundtrip({ source, output, wait: true });
+        assert.equal(job.status, 'failed');
+        assert.equal(existsSync(output), true, kind);
+        if (kind === 'changed') assert(readFileSync(output).toString().endsWith('changed'));
+      } finally { await preserve.close(); }
+    }
   });
   await check('符号链接加 .. 保留真实输入与输出位置', async () => {
     const a = join(work, 'a'), b = join(work, 'b');

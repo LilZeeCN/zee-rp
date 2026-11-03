@@ -1,0 +1,140 @@
+{
+  "type": "object",
+  "properties": {
+    "callId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parentCallId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "eventKind": {
+      "enum": [
+        "attempt",
+        "nested-detail"
+      ]
+    },
+    "tool": {
+      "type": "string"
+    },
+    "phase": {
+      "enum": [
+        "discovery",
+        "creation"
+      ]
+    },
+    "authoredMutation": {
+      "type": "boolean"
+    },
+    "startedAt": {
+      "type": "string"
+    },
+    "endedAt": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "elapsedMs": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "status": {
+      "enum": [
+        "success",
+        "error",
+        "timeout",
+        "uncertain",
+        "cancelled"
+      ]
+    },
+    "timeoutMs": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "requestSha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "responseEvidenceId": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "usage": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "input": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "output": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "total": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "sourceEvidenceId": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "input",
+            "output",
+            "total",
+            "sourceEvidenceId"
+          ],
+          "additionalProperties": false
+        }
+      ]
+    }
+  },
+  "required": [
+    "callId",
+    "parentCallId",
+    "eventKind",
+    "tool",
+    "phase",
+    "authoredMutation",
+    "startedAt",
+    "endedAt",
+    "elapsedMs",
+    "status",
+    "timeoutMs",
+    "requestSha256",
+    "responseEvidenceId",
+    "usage"
+  ],
+  "additionalProperties": false,
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://zee-rp.local/benchmarks/studio/call-ledger.schema.json"
+}

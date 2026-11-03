@@ -80,6 +80,30 @@ The output includes the native file, source baseline, page previews, state sheet
 
 Reconstruction produces an editable layout and comparison images. Business logic absent from the screenshot must be authored separately. [Screenshot workflow](references/screenshot-workflow.md).
 
+## Edit together in Studio
+
+Studio is a free canvas backed by the same design document your agent edits. Start with RP/1 or commands, query layers, revise a selection and verify interactions. In the browser, select, edit text, drag and undo, then export an editable `.rp`.
+
+After connecting MCP, call `studio_open_project`:
+
+```json
+{
+  "projectDir": "/absolute/path/design-project",
+  "sourcePath": "/absolute/path/birding.rp1"
+}
+```
+
+Open the returned `url` in a browser. Omit `sourcePath` for a blank project. Agents can start with `studio_describe({"topic":"workflow"})`; local RP/1 authoring and full native generation have separately documented scopes.
+
+- **Shared editing:** RP/1 and commands use the same transactions, revision identity and undo/redo, with components, variables, panels and data lists.
+- **Verify before delivery:** inspect real screenshots, run interaction scenarios, export native `.rp` or an offline HTML/CSS/JS app, and move projects with bundles. Native edits can be synced within the documented scope.
+- **Direct controls:** double-click text, Shift-drag a marquee, hold Option/Alt and hover to measure spacing. Click the zoom percentage for 100%, or fit one or all boards.
+- **Larger projects and themes:** neighboring boards mount as they enter view; `modern-dark` and custom palettes are supported. Asynchronous native generation and revision expose phase progress.
+
+[AI authoring](docs/studio-ai-authoring.md) · [Studio workflow](docs/studio-design-workflow.md) · [Native roundtrip](docs/studio-native-roundtrip.md) · [Troubleshooting](references/troubleshooting.md)
+
+Fractional-zoom text sharpness, very large single boards and native widget/host support remain bounded. [Capabilities](references/capabilities.md) distinguish implementation, browser checks and Axure host evidence; regression tests are not independent AI design ratings.
+
 ## Connect your agent
 
 Install **Node.js 18+** and **Python 3.10+**. Native generation also requires your local **Axure** installation and a **single-page blank project saved in RP9**. Screenshot OCR uses macOS Vision and Swift.

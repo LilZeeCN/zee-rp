@@ -27,7 +27,20 @@ export function observeAxure({ names = [], variables = [] } = {}) {
             w.addEventListener('unhandledrejection', e => add(probe.errors, { message: String(e.reason) }));
           }
           const widgets = [...d.querySelectorAll('[data-label]')].filter(el => names.includes(el.getAttribute('data-label'))).map(el => {
-            const r = el.getBoundingClientRect(), input = el.matches('input,textarea,select') ? el : el.querySelector('input,textarea,select');
+            let r = el.getBoundingClientRect();
+            // Axure Layer wrappers have zero CSS size while their children are
+            // visible and receive the group's click. Measure actual children.
+            if ((!r.width || !r.height) && /^grp-/.test(el.getAttribute('data-label') || '')) {
+              const rects = [...el.querySelectorAll('[data-label]')].filter(child => {
+                for (let cur = child; cur && cur !== el; cur = cur.parentElement) {
+                  const cs = w.getComputedStyle(cur);
+                  if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+                }
+                return true;
+              }).map(child => child.getBoundingClientRect()).filter(rect => rect.width && rect.height);
+              if (rects.length) r = { width: Math.max(...rects.map(r => r.right)) - Math.min(...rects.map(r => r.left)), height: Math.max(...rects.map(r => r.bottom)) - Math.min(...rects.map(r => r.top)) };
+            }
+            const input = el.matches('input,textarea,select') ? el : el.querySelector('input,textarea,select');
             let visible = r.width > 0 && r.height > 0;
             for (let cur = el; cur; cur = cur.parentElement) {
               const cs = w.getComputedStyle(cur);

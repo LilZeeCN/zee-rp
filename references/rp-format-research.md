@@ -1,5 +1,25 @@
 # .rp 格式与研究入口
 
+## RP9 文字垂直对齐（2026-11-03）
+
+同版本程序集 oracle 确认 `Axure.Constants.PName.VERTICAL_ALIGNMENT=10`。MyStyle 的显式 DOAName 为 `0xC0000000 + 10 = 3221225482`，Value 是 Int32（tag5）；对应 `Axure.Axvg.Graphics.VerticalAlignment` 的 `Top=0`、`Center=1`、`Bottom=2`。不要与另一枚举 `Axure.Platform.Alignment` 的数字混用。它控制文字在元件内部的垂直位置，与元件矩形、横向对齐、填充和选中状态分别生效。
+
+按钮与 badge 现在独立于填充/描边显式居中；原来透明 ghost 按钮漏掉居中，导致共享 tab-bar 未激活项顶部对齐。两页样本在 Axure 保存关闭重开后，四个按钮均为1；真实预览切页返回，文字框中心偏移从未激活项−10.75px变为0px。离线预览消费显式 `textAlignment`，结构门禁 `button_text_alignment_ok` 直接检查原生场景，避免截图看似居中而原生属性错误。
+
+这是底层序列化字段说明；现有 `set_widget_style` 仍只接受其 schema 中的 fill/stroke/color/radius，不接受原始 DOAName 或 verticalAlign。已有原型应从源码重新生成以应用修复。
+
+## RP9 输入旋转：静态属性与原生动作分开验证（2026-11-02）
+
+本次沿用 REA 成员／IL 定位、项目 oracle 读取常量、原生文件对照与宿主验证的组合，不从一次失败推断整个能力不支持。
+
+- 目标 `Client.Mac.exe` SHA256：`0f40edf1b8f5e4db8f999abd76e186157a457056b14a161cf53f514b2646abe1`（本机 RP9，不能套用 RP11 token）。
+- `TextBox.get_Capabilities`（`0x060085d8`）返回 `3648407246430769055`；oracle 给出 `Capabilities.Rotation=274877906944`，按位检查为 false。静态 `MyStyle` DOA `3221225522`（f64，度）虽能持久化，但单独写它不能使 TextBox 预览旋转。
+- `RotateWidgetInfo.get_RotateType` 的返回类型是 `MoveBehavior`，oracle 常量 `Location=0`、`Delta=1`。居中、零偏移的原生旋转动作直接调用旋转；RP9 安装包 `action.js` / `move.js` 此路径没有排除 TextBox。`events.js` 会对元件触发 `onLoad`。
+- 因此编译器保留静态角度，并为输入框生成 `OnLoad` + `RotateType=0` 的绝对旋转，背景使用静态角度。绝对角度避免重新初始化时叠加；未修改 Axure 安装文件或生成的 HTML。
+- 实测最终导出样本：2 页、49 元件、结构三零；Axure 保存关闭重开后，25°／−30°／0° 预览正确，输入触发文字更新，跳页返回角度正确。此证据不等于编辑器提供静态旋转手柄，也不推广到所有控件或 RP11。
+
+REA 的 partial 覆盖与 oracle 枚举值分别记录。原始静态失败、动态面板包装失败、成功动作样本及浏览器记录保存在本机 `outputs/studio-native-ai-20261102/`；发行包只包含实现与回归，不携带厂商程序集或反编译结果。
+
 以当前 `rp-records.mjs`、`parse-payload.mjs` 和已留证样本为基础整理（2026-09-22）。这是当前接口说明；原始探索过程完整保存在 历史记录 (research reference not distributed)，其中含被推翻的结论。能力与未验证项见 [能力表](capabilities.md)。
 
 ## 文件与记录

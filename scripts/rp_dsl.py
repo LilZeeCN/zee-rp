@@ -559,12 +559,12 @@ def _parse_node_block(raw_lines, idx, base_indent, ptr_prefix, span_map):
         elif c_content in (":template", ":then", ":else", ":master", ":detail"):
             sub_k = c_content[1:]
             idx += 1
-            sub_node, idx = _parse_node_block(raw_lines, idx, c_indent, f"{ptr_prefix}/{sub_k}", span_map)
+            sub_node, idx = _parse_node_block(raw_lines, idx, raw_lines[idx][1], f"{ptr_prefix}/{sub_k}", span_map)
             node[sub_k] = sub_node
         elif c_content.startswith(":slot "):
             sk = c_content[len(":slot "):].strip()
             idx += 1
-            s_node, idx = _parse_node_block(raw_lines, idx, c_indent, f"{ptr_prefix}/slots/{sk}", span_map)
+            s_node, idx = _parse_node_block(raw_lines, idx, raw_lines[idx][1], f"{ptr_prefix}/slots/{sk}", span_map)
             node.setdefault("slots", {})[sk] = s_node
         elif c_content.startswith((":state ", "state ")):
             pfx_len = 7 if c_content.startswith(":state ") else 6
@@ -619,6 +619,12 @@ def _parse_node_block(raw_lines, idx, base_indent, ptr_prefix, span_map):
                 if len(st_children) == 1 and not has_box_overrides:
                     s_root = st_children[0]
                 else:
+                    old_prefix = f"{st_ptr}/root"
+                    new_prefix = f"{st_ptr}/root/children/0"
+                    for k in list(span_map.keys()):
+                        if (k == old_prefix or k.startswith(old_prefix + "/")) and not k.startswith(f"{st_ptr}/root/children/"):
+                            span_map[new_prefix + k[len(old_prefix):]] = span_map.pop(k)
+                    span_map[old_prefix] = span_map.get(st_ptr, {"line": c_line_no, "column": c_indent + 1})
                     s_root = {
                         "type": "box",
                         "id": f"{nid or 'panel'}_{sid}_root",

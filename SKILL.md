@@ -5,6 +5,34 @@ description: Reconstruct screenshots as editable Axure layouts, compile RP/1 spe
 
 # zee-rp（RP/1 零手算原型创作与原生编辑）
 
+完整 RP/1 原生表单与交互样式（2026-10-30 本机开发快照）：`radio` / `checkbox` / `combobox`（别名 `droplist`）/ `listbox`，支持勾选、互斥组、选项初值、原生取值和重置；`styles={"hover":{...},"selected":{...},"disabled":{...},"focused":{...}}` 写入原生状态样式。动作 `set-check`、普通元件 `set-selected`、列表 `set-option`，详情与完整四页例子见 [原生表单](references/native-forms.md)。使用 `generate_prototype` 完整编译；不要推定 Studio 局部入口也已支持。
+
+## Studio 新作品：先设计，再看图改稿
+
+新稿可用 `studio_get_design_context({stage:"planning",intent,platform,target:{pageId},brief})` 一次取得版本绑定目标、适合任务的完整参考和下一步；局部改字使用 `stage:"edit"` 与版本绑定的明确目标。设计决定通过普通命令 `recordDesignDecision` 与改稿一起持久化，保留反馈来源及过期/冲突状态。详见 [阶段创作与设计决定](docs/studio-stages.md)。
+
+自由画布的新阶段上下文提供[设计工艺与候选理由](docs/studio-craft.md)。[命名版本](docs/studio-versions.md)支持恢复前看差异与可撤销恢复；[长操作](docs/studio-operations.md)可在原候选/素材/导出入口传async/requestKey/baseRevision，断连后用studio_operations核对或取消。取消请求不等于已停，结果过期不提供当前稿提交建议。普通改属性不能修改id/type或内部源控制标记；创建节点仍需稳定ID。
+
+自由画布从 `studio_describe({topic:"workflow"})` 或 `{topic:"rp1"}` 开始，不必为画布创作通读下方完整原生 RP/1 参考。`studio_apply_commands` 接受 `rp1` 节点片段与 `sourceMode:"insert"|"update"`：插入子树或只更新显式字段，保留未写出的内容与交互，复用同一版本、幂等和撤销事务。每个节点写稳定 `#id`。精确语法、支持范围和示例按需发现；不要将此局部入口当成完整 `generate_prototype` 编译器。
+
+改稿前 `studio_query_nodes` 默认给8项可操作节点：`target` 指出源节点/实例覆盖/宏参数，`layoutContext` 说明父布局与 padding；使用 `role/within/fields` 精确查询，`cursor` 绑定当前版本。命令字段用 `studio_describe({topic:"command",name:"editNodes"})` 查一个契约。学习、任务、图文及 mobile/web 题材可通过 `studio_get_design_context({intent,platform,guideId?})` 取得原创配方；配方是创作材料，不是用户审美认可。回包未确认的写入不会自动重发，先读当前版本与实际内容。当前调用说明见 [AI与RP/1创作](docs/studio-ai-authoring.md)。
+- 节点/字段/消费面与行模板边界：[节点能力说明](docs/studio-node-capabilities.md)。
+
+自由构图探索可用 `studio_design_explore({pageId,baseRevision,candidates,states})`：提交1–4套 AI 自写命令，在隔离工程中真实点击并返回最多3态联系图，实际看图后用选稿的 `applyWith` 提交。默认保留内容与交互、源稿不变；仅初始态做像素检查。`studio_get_design_context` 的 `authoring` 返回节点、事件与验收签名。交互统一 `on.click`（兼容 onClick），隐藏父容器会隐藏后代；验收统一 `action/expect`，未知字段或零断言明确失败。完整可复制调用见 [自由构图与多状态预演](docs/studio-candidates-20261027.md)。
+
+自由画布已支持关系与批量改稿：`studio_apply_commands` 的 `editNodes` 可按 role/type/文字/容器/ID 集合选择节点，执行 set、move、align、place、distribute；支持同事务 token 绑定和撤销。常规样式优先使用 token 与语义 role，重复内容优先考虑已有组件和动态状态。改稿前记录一次 `studio_review_design`，改稿后传 `compareWithReviewId` 可一次取得前后真实图片、变更图层和指标变化。编辑器顶栏也有「对照」入口。完整命令示例与边界见 [关系编辑与画面对照](docs/studio-editing-20261027.md)。
+
+Studio 的完整用法见 [AI 创作流程](docs/studio-design-workflow.md)。当前源码含 `studio_describe`、命名版本与长操作入口，共87个MCP工具、28个 `studio_*`；功能分支未发行新版本，已运行连接须核对指纹。`studio_describe` 的 workflow/rp1 返回交互指南、可执行三词例子与验证剧本；条件错误写前拒绝，场景回包包含分支实际值。原生出口支持普通文字跨页更新；输入框旋转使用原生加载动作，保留可输入性。精确边界见 [AI 与 RP/1 创作](docs/studio-ai-authoring.md)。开始创作时先检查当前连接：若没有 `studio_open_project`，重新连接指向本安装目录 `bin/mcp.mjs` 的 MCP，或用 `node bin/axure.mjs studio start --project /abs/project --source /abs/source.json` 启动画布；旧连接里的59个工具不能代表已安装程序。
+
+1. 打开工程，调用 `studio_get_design_context` 选择 `editorial`、`task` 或 `learning`，明确每页的用户任务、必备内容、主操作和状态。栖羽仅是用户认可的摄影内容型参考；设备与学习应用尚无用户认可标杆。
+2. 先确定构图、字号角色、素材与文字留白，再用基础节点自由构建。现有三种探索模板是可选示例；不要把换色、替换标题当成完成设计。系统内容不得编造为默认示例条目。
+3. 摄影用 `studio_prepare_media` 保留原图、来源、焦点和裁切配方；返回的 `registerCommand` 与图片节点改动一起送入 `studio_apply_commands`，用当前 `baseRevision` 和唯一 `idempotencyKey`。先比较图框与原图比例；主体超出保护区时调整配方。
+4. 每次关键改稿后调用 `studio_review_design({pageId,baseRevision})`，**实际查看返回的图片**。随后用同一版本的 `reviewId` 提交具体 `observations`：涉及哪些节点、哪里有问题、怎样改。提交命令后重新截图。过期记录不能用于评价新版本。
+5. `findings` 只是机器检查，`agent-reviewed` 只是模型看图记录；不得把它们称为审美通过或用户认可。空态、无图、长文本、列表数量与连续操作分别验收，不支持的情况明确说明。
+6. 最后验证真实业务流并导出 `.rp`。分开报告浏览器、原生结构、Axure 加载/预览、GUI 手工编辑及用户视觉认可；不可用截图替代可编辑成品。
+
+Studio 开发版本的验收层级、真实浏览器/Axure操作与字体边界见 [Studio 验收说明](docs/studio-acceptance.md)。12个语义模板与已配置操作脚本的真实场景分别计数；缺少操作或不支持的断言不能记为通过。
+
 已有全局自定义样式可用 `list_custom_styles` 查询、`rename_custom_style` 级联改名、`rebind_widgets` 批量绑定。全局定义先在 Axure UI 创建并保存，不直接注入新 `StyleSheet.CustomStyles`；详见 [样式工作流](references/custom-styles.md)。
 
 > ⚡ **零跳读声明**：本文件已包含日常原型创作、单图视觉联审与增量改稿所需的**全部 RP/1 语法、宏属性表、完整范例与 MCP 调用模板**。日常从零做原型与改稿**只需读完本文件即可直接动手**，无需再翻阅 `references/` 子文档或 `scripts/` 源码！
@@ -43,7 +71,7 @@ description: Reconstruct screenshots as editable Axure layouts, compile RP/1 spe
 ## 二、RP/1 语法与全组件/宏属性速查表（零算高 `[fillxhug]` 模式）
 
 - **尺寸铁律**：纵向容器、卡片、多行文本、动态面板、中继器一律写 **`[fillxhug]`**（宽铺满、高按内容自动测量；`panel` 自动取最高 `:state` 高度），按钮/输入框写 **`[fillx44]`** 或 **`[120x44]`**。节点 ID 前的 `#` 可写可省略。
-- **属性边界与零静默丢参约定**：`fontSize` 范围为 `(0,72]`（含字号简写与 spans），`letterSpacing` 非负；`after` 必须引用同容器中的另一个节点，不存在会报 `E_REFERENCE`。未知属性、未知宏插槽名（`slots`）、`progress-bar` 同时声明 `percent` 与 `value`、以及对非 `enum` 字段声明 `filters: "auto"` 均返回 `E_PROPERTY` 错误，任何无法生效的声明或守卫（如 `wizard-card` 的 `nextWhen`）绝不静默丢弃。
+- **属性边界与零静默丢参约定**：`fontSize` 范围为 `(0,120]`（含字号简写与 spans），`letterSpacing` 非负；`after` 必须引用同容器中的另一个节点，不存在会报 `E_REFERENCE`。未知属性、未知宏插槽名（`slots`）、`progress-bar` 同时声明 `percent` 与 `value`、以及对非 `enum` 字段声明 `filters: "auto"` 均返回 `E_PROPERTY` 错误，任何无法生效的声明或守卫（如 `wizard-card` 的 `nextWhen`）绝不静默丢弃。
 - **设备画布**：页面声明 `device=iphone-17`（或顶层声明 `device="iphone-17"`）即可自动匹配 `402×874` 屏幕与 `442×914` 钛金属外壳，**推荐省略页面 `[WxH]`**。
 - **合规设计令牌（`strictAudit: true` 零警告值）**：
   - 间距 `gap` / `padding`：`0, 4, 6, 8, 10, 12, 16, 20, 24, 28, 32, 40, 48`

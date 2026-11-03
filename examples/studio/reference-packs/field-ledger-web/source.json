@@ -1,0 +1,2115 @@
+{
+  "language": "RP/1",
+  "target": 9,
+  "name": "材料档案 · Ledger",
+  "domain": "web",
+  "pages": [
+    {
+      "id": "ledger",
+      "name": "材料档案",
+      "canvas": {
+        "w": 1440,
+        "h": 960
+      },
+      "root": {
+        "type": "box",
+        "id": "ledger_root",
+        "x": 0,
+        "y": 0,
+        "w": 1440,
+        "h": 960,
+        "layout": "stack",
+        "fill": "#F4F5EF",
+        "children": [
+          {
+            "type": "box",
+            "id": "side_rail",
+            "x": 0,
+            "y": 0,
+            "w": 196,
+            "h": 960,
+            "layout": "stack",
+            "fill": "#252C25",
+            "children": [
+              {
+                "type": "label",
+                "id": "rail_brand",
+                "text": "F / L",
+                "x": 24,
+                "y": 28,
+                "w": 140,
+                "h": 44,
+                "fontFamily": "Georgia",
+                "fontSize": 28,
+                "color": "#E4EDCF"
+              },
+              {
+                "type": "label",
+                "id": "rail_caption",
+                "text": "FIELD LEDGER",
+                "x": 24,
+                "y": 80,
+                "w": 160,
+                "h": 24,
+                "fontFamily": "Arial",
+                "fontSize": 10,
+                "color": "#9FAE97",
+                "letterSpacing": 1
+              },
+              {
+                "type": "label",
+                "id": "rail_workspace",
+                "text": "材料研究室",
+                "x": 24,
+                "y": 156,
+                "w": 150,
+                "h": 26,
+                "fontFamily": "Arial",
+                "fontSize": 14,
+                "color": "#D6DFC8"
+              },
+              {
+                "type": "box",
+                "id": "rail_active",
+                "x": 12,
+                "y": 210,
+                "w": 172,
+                "h": 46,
+                "layout": "stack",
+                "fill": "#414B38",
+                "children": [
+                  {
+                    "type": "label",
+                    "id": "rail_active_copy",
+                    "text": "01   材料档案",
+                    "x": 12,
+                    "y": 12,
+                    "w": 150,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#F3F5E9"
+                  }
+                ]
+              },
+              {
+                "type": "label",
+                "id": "rail_secondary",
+                "text": "02   借阅记录\n\n03   分类索引",
+                "x": 24,
+                "y": 282,
+                "w": 150,
+                "h": 86,
+                "fontFamily": "Arial",
+                "fontSize": 13,
+                "color": "#9BA68F"
+              },
+              {
+                "type": "label",
+                "id": "rail_footer",
+                "text": "示例工作区\n2026 / AUTUMN",
+                "x": 24,
+                "y": 858,
+                "w": 150,
+                "h": 62,
+                "fontFamily": "Menlo",
+                "fontSize": 11,
+                "color": "#A4B19A",
+                "lineHeight": 24
+              }
+            ]
+          },
+          {
+            "type": "label",
+            "id": "crumb",
+            "text": "工作区   /   材料档案",
+            "x": 236,
+            "y": 28,
+            "w": 600,
+            "h": 24,
+            "fontFamily": "Arial",
+            "fontSize": 12,
+            "color": "#78816E"
+          },
+          {
+            "type": "label",
+            "id": "edition",
+            "text": "LOCAL COLLECTION   /   008",
+            "x": 1060,
+            "y": 28,
+            "w": 300,
+            "h": 24,
+            "fontFamily": "Menlo",
+            "fontSize": 11,
+            "color": "#78816E",
+            "align": "right"
+          },
+          {
+            "type": "box",
+            "id": "top_rule",
+            "x": 236,
+            "y": 72,
+            "w": 1144,
+            "h": 1,
+            "layout": "stack",
+            "fill": "#D5DBCD",
+            "children": []
+          },
+          {
+            "type": "label",
+            "id": "ledger_title",
+            "text": "每一种材料，都有迹可循。",
+            "x": 236,
+            "y": 106,
+            "w": 1000,
+            "h": 52,
+            "fontFamily": "Arial",
+            "fontSize": 32,
+            "color": "#232722"
+          },
+          {
+            "type": "label",
+            "id": "ledger_subtitle",
+            "text": "观察、取样、归还。在细密的记录中，重新认识日常。",
+            "x": 236,
+            "y": 170,
+            "w": 1000,
+            "h": 28,
+            "fontFamily": "Arial",
+            "fontSize": 14,
+            "color": "#69745C"
+          },
+          {
+            "type": "label",
+            "id": "metric_label_0",
+            "text": "馆藏材料",
+            "x": 236,
+            "y": 236,
+            "w": 220,
+            "h": 24,
+            "fontFamily": "Arial",
+            "fontSize": 12,
+            "color": "#6C785F"
+          },
+          {
+            "type": "label",
+            "id": "metric_value_0",
+            "text": "08",
+            "x": 236,
+            "y": 274,
+            "w": 190,
+            "h": 62,
+            "fontFamily": "Georgia",
+            "fontSize": 48,
+            "color": "#303C28"
+          },
+          {
+            "type": "label",
+            "id": "metric_unit_0",
+            "text": "种",
+            "x": 340,
+            "y": 306,
+            "w": 80,
+            "h": 24,
+            "fontFamily": "Arial",
+            "fontSize": 12,
+            "color": "#758369"
+          },
+          {
+            "type": "label",
+            "id": "metric_label_1",
+            "text": "可用样本",
+            "x": 620,
+            "y": 236,
+            "w": 220,
+            "h": 24,
+            "fontFamily": "Arial",
+            "fontSize": 12,
+            "color": "#6C785F"
+          },
+          {
+            "type": "label",
+            "id": "metric_value_1",
+            "text": "04",
+            "x": 620,
+            "y": 274,
+            "w": 190,
+            "h": 62,
+            "fontFamily": "Georgia",
+            "fontSize": 48,
+            "color": "#303C28"
+          },
+          {
+            "type": "label",
+            "id": "metric_unit_1",
+            "text": "种",
+            "x": 724,
+            "y": 306,
+            "w": 80,
+            "h": 24,
+            "fontFamily": "Arial",
+            "fontSize": 12,
+            "color": "#758369"
+          },
+          {
+            "type": "label",
+            "id": "metric_label_2",
+            "text": "借阅中",
+            "x": 1000,
+            "y": 236,
+            "w": 220,
+            "h": 24,
+            "fontFamily": "Arial",
+            "fontSize": 12,
+            "color": "#6C785F"
+          },
+          {
+            "type": "label",
+            "id": "metric_value_2",
+            "text": "04",
+            "x": 1000,
+            "y": 274,
+            "w": 190,
+            "h": 62,
+            "fontFamily": "Georgia",
+            "fontSize": 48,
+            "color": "#303C28"
+          },
+          {
+            "type": "label",
+            "id": "metric_unit_2",
+            "text": "种",
+            "x": 1104,
+            "y": 306,
+            "w": 80,
+            "h": 24,
+            "fontFamily": "Arial",
+            "fontSize": 12,
+            "color": "#758369"
+          },
+          {
+            "type": "box",
+            "id": "table_rule",
+            "x": 236,
+            "y": 368,
+            "w": 1144,
+            "h": 1,
+            "layout": "stack",
+            "fill": "#C8D1BC",
+            "children": []
+          },
+          {
+            "type": "label",
+            "id": "table_label",
+            "text": "馆藏目录",
+            "x": 236,
+            "y": 394,
+            "w": 200,
+            "h": 30,
+            "fontFamily": "Arial",
+            "fontSize": 18,
+            "color": "#232722"
+          },
+          {
+            "type": "label",
+            "id": "count_label",
+            "text": "8 RECORDS",
+            "x": 434,
+            "y": 398,
+            "w": 280,
+            "h": 24,
+            "fontFamily": "Menlo",
+            "fontSize": 11,
+            "color": "#7D866F"
+          },
+          {
+            "type": "button",
+            "id": "filter_available",
+            "text": "只看在库",
+            "x": 1096,
+            "y": 386,
+            "w": 138,
+            "h": 42,
+            "fontFamily": "Arial",
+            "fontSize": 13,
+            "fill": "#E3E8D7",
+            "color": "#475939",
+            "radius": 0,
+            "on": {
+              "click": [
+                {
+                  "type": "hide",
+                  "target": "all_records"
+                },
+                {
+                  "type": "show",
+                  "target": "available_records"
+                },
+                {
+                  "type": "hide",
+                  "target": "filter_available"
+                },
+                {
+                  "type": "show",
+                  "target": "reset_filter"
+                },
+                {
+                  "type": "set-text",
+                  "target": "count_label",
+                  "value": "4 RECORDS / 在库"
+                }
+              ]
+            }
+          },
+          {
+            "type": "button",
+            "id": "reset_filter",
+            "text": "显示全部",
+            "x": 1096,
+            "y": 386,
+            "w": 138,
+            "h": 42,
+            "fontFamily": "Arial",
+            "fontSize": 13,
+            "fill": "#E3E8D7",
+            "color": "#475939",
+            "radius": 0,
+            "on": {
+              "click": [
+                {
+                  "type": "show",
+                  "target": "all_records"
+                },
+                {
+                  "type": "hide",
+                  "target": "available_records"
+                },
+                {
+                  "type": "show",
+                  "target": "filter_available"
+                },
+                {
+                  "type": "hide",
+                  "target": "reset_filter"
+                },
+                {
+                  "type": "set-text",
+                  "target": "count_label",
+                  "value": "8 RECORDS"
+                }
+              ]
+            },
+            "visible": false
+          },
+          {
+            "type": "box",
+            "id": "header",
+            "x": 236,
+            "y": 452,
+            "w": 1144,
+            "h": 42,
+            "layout": "stack",
+            "fill": "#E8ECDF",
+            "children": [
+              {
+                "type": "label",
+                "id": "head_0",
+                "text": "编号",
+                "x": 16,
+                "y": 10,
+                "w": 180,
+                "h": 24,
+                "fontFamily": "Arial",
+                "fontSize": 11,
+                "color": "#68765A"
+              },
+              {
+                "type": "label",
+                "id": "head_1",
+                "text": "材料名称",
+                "x": 146,
+                "y": 10,
+                "w": 180,
+                "h": 24,
+                "fontFamily": "Arial",
+                "fontSize": 11,
+                "color": "#68765A"
+              },
+              {
+                "type": "label",
+                "id": "head_2",
+                "text": "类别",
+                "x": 408,
+                "y": 10,
+                "w": 180,
+                "h": 24,
+                "fontFamily": "Arial",
+                "fontSize": 11,
+                "color": "#68765A"
+              },
+              {
+                "type": "label",
+                "id": "head_3",
+                "text": "位置",
+                "x": 568,
+                "y": 10,
+                "w": 180,
+                "h": 24,
+                "fontFamily": "Arial",
+                "fontSize": 11,
+                "color": "#68765A"
+              },
+              {
+                "type": "label",
+                "id": "head_4",
+                "text": "状态",
+                "x": 746,
+                "y": 10,
+                "w": 180,
+                "h": 24,
+                "fontFamily": "Arial",
+                "fontSize": 11,
+                "color": "#68765A"
+              },
+              {
+                "type": "label",
+                "id": "head_5",
+                "text": "样本数",
+                "x": 1044,
+                "y": 10,
+                "w": 180,
+                "h": 24,
+                "fontFamily": "Arial",
+                "fontSize": 11,
+                "color": "#68765A"
+              }
+            ]
+          },
+          {
+            "type": "box",
+            "id": "table_body",
+            "x": 236,
+            "y": 494,
+            "w": 1144,
+            "h": 464,
+            "layout": "stack",
+            "fill": "#FFFFFF",
+            "children": [
+              {
+                "type": "box",
+                "id": "all_records",
+                "x": 0,
+                "y": 0,
+                "w": 1144,
+                "h": 464,
+                "layout": "stack",
+                "fill": "#FFFFFF",
+                "children": [
+                  {
+                    "type": "box",
+                    "id": "all_records_line_0",
+                    "x": 0,
+                    "y": 57,
+                    "w": 1144,
+                    "h": 1,
+                    "layout": "stack",
+                    "fill": "#E3E6E0",
+                    "children": []
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_0_0",
+                    "text": "P-103",
+                    "x": 16,
+                    "y": 18,
+                    "w": 110,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_0_1",
+                    "text": "手工棉纸",
+                    "x": 146,
+                    "y": 18,
+                    "w": 230,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_0_2",
+                    "text": "纸材",
+                    "x": 408,
+                    "y": 18,
+                    "w": 100,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_0_3",
+                    "text": "A-01",
+                    "x": 568,
+                    "y": 18,
+                    "w": 140,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_0_4",
+                    "text": "在库",
+                    "x": 746,
+                    "y": 18,
+                    "w": 190,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#4A673D"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_0_5",
+                    "text": "24",
+                    "x": 1044,
+                    "y": 18,
+                    "w": 70,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "button",
+                    "id": "all_records_view_0",
+                    "text": "查看",
+                    "x": 950,
+                    "y": 13,
+                    "w": 56,
+                    "h": 32,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "fill": "#F0F3EA",
+                    "color": "#394C2F",
+                    "radius": 0,
+                    "on": {
+                      "click": [
+                        {
+                          "type": "set-text",
+                          "target": "detail_eyebrow",
+                          "value": "MATERIAL / P-103"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_title",
+                          "value": "手工棉纸"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_note",
+                          "value": "手工棉纸\n\n用于观察纹理、触感与光线变化。\n取样后请按原位归还。\n\n此记录为可交互原型示例。"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_location",
+                          "value": "位置  A-01     在库  24 份"
+                        },
+                        {
+                          "type": "show",
+                          "target": "record_detail"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "box",
+                    "id": "all_records_line_1",
+                    "x": 0,
+                    "y": 115,
+                    "w": 1144,
+                    "h": 1,
+                    "layout": "stack",
+                    "fill": "#E3E6E0",
+                    "children": []
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_1_0",
+                    "text": "M-207",
+                    "x": 16,
+                    "y": 76,
+                    "w": 110,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_1_1",
+                    "text": "黄铜网片",
+                    "x": 146,
+                    "y": 76,
+                    "w": 230,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_1_2",
+                    "text": "金属",
+                    "x": 408,
+                    "y": 76,
+                    "w": 100,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_1_3",
+                    "text": "B-04",
+                    "x": 568,
+                    "y": 76,
+                    "w": 140,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_1_4",
+                    "text": "借阅中",
+                    "x": 746,
+                    "y": 76,
+                    "w": 190,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#8B6C42"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_1_5",
+                    "text": "08",
+                    "x": 1044,
+                    "y": 76,
+                    "w": 70,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "button",
+                    "id": "all_records_view_1",
+                    "text": "查看",
+                    "x": 950,
+                    "y": 71,
+                    "w": 56,
+                    "h": 32,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "fill": "#F0F3EA",
+                    "color": "#394C2F",
+                    "radius": 0,
+                    "on": {
+                      "click": [
+                        {
+                          "type": "set-text",
+                          "target": "detail_eyebrow",
+                          "value": "MATERIAL / M-207"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_title",
+                          "value": "黄铜网片"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_note",
+                          "value": "黄铜网片\n\n用于观察纹理、触感与光线变化。\n取样后请按原位归还。\n\n此记录为可交互原型示例。"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_location",
+                          "value": "位置  B-04     借阅中  08 份"
+                        },
+                        {
+                          "type": "show",
+                          "target": "record_detail"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "box",
+                    "id": "all_records_line_2",
+                    "x": 0,
+                    "y": 173,
+                    "w": 1144,
+                    "h": 1,
+                    "layout": "stack",
+                    "fill": "#E3E6E0",
+                    "children": []
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_2_0",
+                    "text": "W-018",
+                    "x": 16,
+                    "y": 134,
+                    "w": 110,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_2_1",
+                    "text": "白蜡木",
+                    "x": 146,
+                    "y": 134,
+                    "w": 230,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_2_2",
+                    "text": "木材",
+                    "x": 408,
+                    "y": 134,
+                    "w": 100,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_2_3",
+                    "text": "C-02",
+                    "x": 568,
+                    "y": 134,
+                    "w": 140,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_2_4",
+                    "text": "在库",
+                    "x": 746,
+                    "y": 134,
+                    "w": 190,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#4A673D"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_2_5",
+                    "text": "12",
+                    "x": 1044,
+                    "y": 134,
+                    "w": 70,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "button",
+                    "id": "all_records_view_2",
+                    "text": "查看",
+                    "x": 950,
+                    "y": 129,
+                    "w": 56,
+                    "h": 32,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "fill": "#F0F3EA",
+                    "color": "#394C2F",
+                    "radius": 0,
+                    "on": {
+                      "click": [
+                        {
+                          "type": "set-text",
+                          "target": "detail_eyebrow",
+                          "value": "MATERIAL / W-018"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_title",
+                          "value": "白蜡木"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_note",
+                          "value": "白蜡木\n\n用于观察纹理、触感与光线变化。\n取样后请按原位归还。\n\n此记录为可交互原型示例。"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_location",
+                          "value": "位置  C-02     在库  12 份"
+                        },
+                        {
+                          "type": "show",
+                          "target": "record_detail"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "box",
+                    "id": "all_records_line_3",
+                    "x": 0,
+                    "y": 231,
+                    "w": 1144,
+                    "h": 1,
+                    "layout": "stack",
+                    "fill": "#E3E6E0",
+                    "children": []
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_3_0",
+                    "text": "F-042",
+                    "x": 16,
+                    "y": 192,
+                    "w": 110,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_3_1",
+                    "text": "亚麻平纹",
+                    "x": 146,
+                    "y": 192,
+                    "w": 230,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_3_2",
+                    "text": "织物",
+                    "x": 408,
+                    "y": 192,
+                    "w": 100,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_3_3",
+                    "text": "D-03",
+                    "x": 568,
+                    "y": 192,
+                    "w": 140,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_3_4",
+                    "text": "在库",
+                    "x": 746,
+                    "y": 192,
+                    "w": 190,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#4A673D"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_3_5",
+                    "text": "16",
+                    "x": 1044,
+                    "y": 192,
+                    "w": 70,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "button",
+                    "id": "all_records_view_3",
+                    "text": "查看",
+                    "x": 950,
+                    "y": 187,
+                    "w": 56,
+                    "h": 32,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "fill": "#F0F3EA",
+                    "color": "#394C2F",
+                    "radius": 0,
+                    "on": {
+                      "click": [
+                        {
+                          "type": "set-text",
+                          "target": "detail_eyebrow",
+                          "value": "MATERIAL / F-042"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_title",
+                          "value": "亚麻平纹"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_note",
+                          "value": "亚麻平纹\n\n用于观察纹理、触感与光线变化。\n取样后请按原位归还。\n\n此记录为可交互原型示例。"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_location",
+                          "value": "位置  D-03     在库  16 份"
+                        },
+                        {
+                          "type": "show",
+                          "target": "record_detail"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "box",
+                    "id": "all_records_line_4",
+                    "x": 0,
+                    "y": 289,
+                    "w": 1144,
+                    "h": 1,
+                    "layout": "stack",
+                    "fill": "#E3E6E0",
+                    "children": []
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_4_0",
+                    "text": "G-125",
+                    "x": 16,
+                    "y": 250,
+                    "w": 110,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_4_1",
+                    "text": "磨砂玻璃",
+                    "x": 146,
+                    "y": 250,
+                    "w": 230,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_4_2",
+                    "text": "玻璃",
+                    "x": 408,
+                    "y": 250,
+                    "w": 100,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_4_3",
+                    "text": "B-06",
+                    "x": 568,
+                    "y": 250,
+                    "w": 140,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_4_4",
+                    "text": "借阅中",
+                    "x": 746,
+                    "y": 250,
+                    "w": 190,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#8B6C42"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_4_5",
+                    "text": "06",
+                    "x": 1044,
+                    "y": 250,
+                    "w": 70,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "button",
+                    "id": "all_records_view_4",
+                    "text": "查看",
+                    "x": 950,
+                    "y": 245,
+                    "w": 56,
+                    "h": 32,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "fill": "#F0F3EA",
+                    "color": "#394C2F",
+                    "radius": 0,
+                    "on": {
+                      "click": [
+                        {
+                          "type": "set-text",
+                          "target": "detail_eyebrow",
+                          "value": "MATERIAL / G-125"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_title",
+                          "value": "磨砂玻璃"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_note",
+                          "value": "磨砂玻璃\n\n用于观察纹理、触感与光线变化。\n取样后请按原位归还。\n\n此记录为可交互原型示例。"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_location",
+                          "value": "位置  B-06     借阅中  06 份"
+                        },
+                        {
+                          "type": "show",
+                          "target": "record_detail"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "box",
+                    "id": "all_records_line_5",
+                    "x": 0,
+                    "y": 347,
+                    "w": 1144,
+                    "h": 1,
+                    "layout": "stack",
+                    "fill": "#E3E6E0",
+                    "children": []
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_5_0",
+                    "text": "C-081",
+                    "x": 16,
+                    "y": 308,
+                    "w": 110,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_5_1",
+                    "text": "赤陶片",
+                    "x": 146,
+                    "y": 308,
+                    "w": 230,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_5_2",
+                    "text": "陶瓷",
+                    "x": 408,
+                    "y": 308,
+                    "w": 100,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_5_3",
+                    "text": "C-05",
+                    "x": 568,
+                    "y": 308,
+                    "w": 140,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_5_4",
+                    "text": "在库",
+                    "x": 746,
+                    "y": 308,
+                    "w": 190,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#4A673D"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_5_5",
+                    "text": "10",
+                    "x": 1044,
+                    "y": 308,
+                    "w": 70,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "button",
+                    "id": "all_records_view_5",
+                    "text": "查看",
+                    "x": 950,
+                    "y": 303,
+                    "w": 56,
+                    "h": 32,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "fill": "#F0F3EA",
+                    "color": "#394C2F",
+                    "radius": 0,
+                    "on": {
+                      "click": [
+                        {
+                          "type": "set-text",
+                          "target": "detail_eyebrow",
+                          "value": "MATERIAL / C-081"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_title",
+                          "value": "赤陶片"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_note",
+                          "value": "赤陶片\n\n用于观察纹理、触感与光线变化。\n取样后请按原位归还。\n\n此记录为可交互原型示例。"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_location",
+                          "value": "位置  C-05     在库  10 份"
+                        },
+                        {
+                          "type": "show",
+                          "target": "record_detail"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "box",
+                    "id": "all_records_line_6",
+                    "x": 0,
+                    "y": 405,
+                    "w": 1144,
+                    "h": 1,
+                    "layout": "stack",
+                    "fill": "#E3E6E0",
+                    "children": []
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_6_0",
+                    "text": "P-114",
+                    "x": 16,
+                    "y": 366,
+                    "w": 110,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_6_1",
+                    "text": "竹纤维纸",
+                    "x": 146,
+                    "y": 366,
+                    "w": 230,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_6_2",
+                    "text": "纸材",
+                    "x": 408,
+                    "y": 366,
+                    "w": 100,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_6_3",
+                    "text": "A-03",
+                    "x": 568,
+                    "y": 366,
+                    "w": 140,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_6_4",
+                    "text": "借阅中",
+                    "x": 746,
+                    "y": 366,
+                    "w": 190,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#8B6C42"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_6_5",
+                    "text": "32",
+                    "x": 1044,
+                    "y": 366,
+                    "w": 70,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "button",
+                    "id": "all_records_view_6",
+                    "text": "查看",
+                    "x": 950,
+                    "y": 361,
+                    "w": 56,
+                    "h": 32,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "fill": "#F0F3EA",
+                    "color": "#394C2F",
+                    "radius": 0,
+                    "on": {
+                      "click": [
+                        {
+                          "type": "set-text",
+                          "target": "detail_eyebrow",
+                          "value": "MATERIAL / P-114"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_title",
+                          "value": "竹纤维纸"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_note",
+                          "value": "竹纤维纸\n\n用于观察纹理、触感与光线变化。\n取样后请按原位归还。\n\n此记录为可交互原型示例。"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_location",
+                          "value": "位置  A-03     借阅中  32 份"
+                        },
+                        {
+                          "type": "show",
+                          "target": "record_detail"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "box",
+                    "id": "all_records_line_7",
+                    "x": 0,
+                    "y": 463,
+                    "w": 1144,
+                    "h": 1,
+                    "layout": "stack",
+                    "fill": "#E3E6E0",
+                    "children": []
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_7_0",
+                    "text": "F-063",
+                    "x": 16,
+                    "y": 424,
+                    "w": 110,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_7_1",
+                    "text": "羊毛毡",
+                    "x": 146,
+                    "y": 424,
+                    "w": 230,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_7_2",
+                    "text": "织物",
+                    "x": 408,
+                    "y": 424,
+                    "w": 100,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_7_3",
+                    "text": "D-07",
+                    "x": 568,
+                    "y": 424,
+                    "w": 140,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_7_4",
+                    "text": "借阅中",
+                    "x": 746,
+                    "y": 424,
+                    "w": 190,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#8B6C42"
+                  },
+                  {
+                    "type": "label",
+                    "id": "all_records_7_5",
+                    "text": "14",
+                    "x": 1044,
+                    "y": 424,
+                    "w": 70,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "button",
+                    "id": "all_records_view_7",
+                    "text": "查看",
+                    "x": 950,
+                    "y": 419,
+                    "w": 56,
+                    "h": 32,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "fill": "#F0F3EA",
+                    "color": "#394C2F",
+                    "radius": 0,
+                    "on": {
+                      "click": [
+                        {
+                          "type": "set-text",
+                          "target": "detail_eyebrow",
+                          "value": "MATERIAL / F-063"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_title",
+                          "value": "羊毛毡"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_note",
+                          "value": "羊毛毡\n\n用于观察纹理、触感与光线变化。\n取样后请按原位归还。\n\n此记录为可交互原型示例。"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_location",
+                          "value": "位置  D-07     借阅中  14 份"
+                        },
+                        {
+                          "type": "show",
+                          "target": "record_detail"
+                        }
+                      ]
+                    }
+                  }
+                ]
+              },
+              {
+                "type": "box",
+                "id": "available_records",
+                "x": 0,
+                "y": 0,
+                "w": 1144,
+                "h": 464,
+                "layout": "stack",
+                "fill": "#FFFFFF",
+                "children": [
+                  {
+                    "type": "box",
+                    "id": "available_records_line_0",
+                    "x": 0,
+                    "y": 57,
+                    "w": 1144,
+                    "h": 1,
+                    "layout": "stack",
+                    "fill": "#E3E6E0",
+                    "children": []
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_0_0",
+                    "text": "P-103",
+                    "x": 16,
+                    "y": 18,
+                    "w": 110,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_0_1",
+                    "text": "手工棉纸",
+                    "x": 146,
+                    "y": 18,
+                    "w": 230,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_0_2",
+                    "text": "纸材",
+                    "x": 408,
+                    "y": 18,
+                    "w": 100,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_0_3",
+                    "text": "A-01",
+                    "x": 568,
+                    "y": 18,
+                    "w": 140,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_0_4",
+                    "text": "在库",
+                    "x": 746,
+                    "y": 18,
+                    "w": 190,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#4A673D"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_0_5",
+                    "text": "24",
+                    "x": 1044,
+                    "y": 18,
+                    "w": 70,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "button",
+                    "id": "available_records_view_0",
+                    "text": "查看",
+                    "x": 950,
+                    "y": 13,
+                    "w": 56,
+                    "h": 32,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "fill": "#F0F3EA",
+                    "color": "#394C2F",
+                    "radius": 0,
+                    "on": {
+                      "click": [
+                        {
+                          "type": "set-text",
+                          "target": "detail_eyebrow",
+                          "value": "MATERIAL / P-103"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_title",
+                          "value": "手工棉纸"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_note",
+                          "value": "手工棉纸\n\n用于观察纹理、触感与光线变化。\n取样后请按原位归还。\n\n此记录为可交互原型示例。"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_location",
+                          "value": "位置  A-01     在库  24 份"
+                        },
+                        {
+                          "type": "show",
+                          "target": "record_detail"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "box",
+                    "id": "available_records_line_1",
+                    "x": 0,
+                    "y": 115,
+                    "w": 1144,
+                    "h": 1,
+                    "layout": "stack",
+                    "fill": "#E3E6E0",
+                    "children": []
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_1_0",
+                    "text": "W-018",
+                    "x": 16,
+                    "y": 76,
+                    "w": 110,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_1_1",
+                    "text": "白蜡木",
+                    "x": 146,
+                    "y": 76,
+                    "w": 230,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_1_2",
+                    "text": "木材",
+                    "x": 408,
+                    "y": 76,
+                    "w": 100,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_1_3",
+                    "text": "C-02",
+                    "x": 568,
+                    "y": 76,
+                    "w": 140,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_1_4",
+                    "text": "在库",
+                    "x": 746,
+                    "y": 76,
+                    "w": 190,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#4A673D"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_1_5",
+                    "text": "12",
+                    "x": 1044,
+                    "y": 76,
+                    "w": 70,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "button",
+                    "id": "available_records_view_1",
+                    "text": "查看",
+                    "x": 950,
+                    "y": 71,
+                    "w": 56,
+                    "h": 32,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "fill": "#F0F3EA",
+                    "color": "#394C2F",
+                    "radius": 0,
+                    "on": {
+                      "click": [
+                        {
+                          "type": "set-text",
+                          "target": "detail_eyebrow",
+                          "value": "MATERIAL / W-018"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_title",
+                          "value": "白蜡木"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_note",
+                          "value": "白蜡木\n\n用于观察纹理、触感与光线变化。\n取样后请按原位归还。\n\n此记录为可交互原型示例。"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_location",
+                          "value": "位置  C-02     在库  12 份"
+                        },
+                        {
+                          "type": "show",
+                          "target": "record_detail"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "box",
+                    "id": "available_records_line_2",
+                    "x": 0,
+                    "y": 173,
+                    "w": 1144,
+                    "h": 1,
+                    "layout": "stack",
+                    "fill": "#E3E6E0",
+                    "children": []
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_2_0",
+                    "text": "F-042",
+                    "x": 16,
+                    "y": 134,
+                    "w": 110,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_2_1",
+                    "text": "亚麻平纹",
+                    "x": 146,
+                    "y": 134,
+                    "w": 230,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_2_2",
+                    "text": "织物",
+                    "x": 408,
+                    "y": 134,
+                    "w": 100,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_2_3",
+                    "text": "D-03",
+                    "x": 568,
+                    "y": 134,
+                    "w": 140,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_2_4",
+                    "text": "在库",
+                    "x": 746,
+                    "y": 134,
+                    "w": 190,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#4A673D"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_2_5",
+                    "text": "16",
+                    "x": 1044,
+                    "y": 134,
+                    "w": 70,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "button",
+                    "id": "available_records_view_2",
+                    "text": "查看",
+                    "x": 950,
+                    "y": 129,
+                    "w": 56,
+                    "h": 32,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "fill": "#F0F3EA",
+                    "color": "#394C2F",
+                    "radius": 0,
+                    "on": {
+                      "click": [
+                        {
+                          "type": "set-text",
+                          "target": "detail_eyebrow",
+                          "value": "MATERIAL / F-042"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_title",
+                          "value": "亚麻平纹"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_note",
+                          "value": "亚麻平纹\n\n用于观察纹理、触感与光线变化。\n取样后请按原位归还。\n\n此记录为可交互原型示例。"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_location",
+                          "value": "位置  D-03     在库  16 份"
+                        },
+                        {
+                          "type": "show",
+                          "target": "record_detail"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": "box",
+                    "id": "available_records_line_3",
+                    "x": 0,
+                    "y": 231,
+                    "w": 1144,
+                    "h": 1,
+                    "layout": "stack",
+                    "fill": "#E3E6E0",
+                    "children": []
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_3_0",
+                    "text": "C-081",
+                    "x": 16,
+                    "y": 192,
+                    "w": 110,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_3_1",
+                    "text": "赤陶片",
+                    "x": 146,
+                    "y": 192,
+                    "w": 230,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_3_2",
+                    "text": "陶瓷",
+                    "x": 408,
+                    "y": 192,
+                    "w": 100,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_3_3",
+                    "text": "C-05",
+                    "x": 568,
+                    "y": 192,
+                    "w": 140,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_3_4",
+                    "text": "在库",
+                    "x": 746,
+                    "y": 192,
+                    "w": 190,
+                    "h": 24,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "color": "#4A673D"
+                  },
+                  {
+                    "type": "label",
+                    "id": "available_records_3_5",
+                    "text": "10",
+                    "x": 1044,
+                    "y": 192,
+                    "w": 70,
+                    "h": 24,
+                    "fontFamily": "Menlo",
+                    "fontSize": 13,
+                    "color": "#303A30"
+                  },
+                  {
+                    "type": "button",
+                    "id": "available_records_view_3",
+                    "text": "查看",
+                    "x": 950,
+                    "y": 187,
+                    "w": 56,
+                    "h": 32,
+                    "fontFamily": "Arial",
+                    "fontSize": 13,
+                    "fill": "#F0F3EA",
+                    "color": "#394C2F",
+                    "radius": 0,
+                    "on": {
+                      "click": [
+                        {
+                          "type": "set-text",
+                          "target": "detail_eyebrow",
+                          "value": "MATERIAL / C-081"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_title",
+                          "value": "赤陶片"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_note",
+                          "value": "赤陶片\n\n用于观察纹理、触感与光线变化。\n取样后请按原位归还。\n\n此记录为可交互原型示例。"
+                        },
+                        {
+                          "type": "set-text",
+                          "target": "detail_location",
+                          "value": "位置  C-05     在库  10 份"
+                        },
+                        {
+                          "type": "show",
+                          "target": "record_detail"
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "visible": false
+              }
+            ]
+          },
+          {
+            "type": "box",
+            "id": "record_detail",
+            "x": 894,
+            "y": 220,
+            "w": 434,
+            "h": 562,
+            "layout": "stack",
+            "fill": "#ECEEDC",
+            "children": [
+              {
+                "type": "label",
+                "id": "detail_eyebrow",
+                "text": "MATERIAL / P-103",
+                "x": 24,
+                "y": 24,
+                "w": 370,
+                "h": 24,
+                "fontFamily": "Menlo",
+                "fontSize": 12,
+                "color": "#59704A"
+              },
+              {
+                "type": "label",
+                "id": "detail_title",
+                "text": "手工棉纸",
+                "x": 24,
+                "y": 80,
+                "w": 370,
+                "h": 58,
+                "fontFamily": "Arial",
+                "fontSize": 34,
+                "color": "#232722"
+              },
+              {
+                "type": "label",
+                "id": "detail_note",
+                "text": "100% 棉纤维\n自然白 · 300 g/m²\n\n适合观察纤维结构、吸水性与侧光纹理。此记录为原型示例。",
+                "x": 24,
+                "y": 162,
+                "w": 366,
+                "h": 190,
+                "fontFamily": "Arial",
+                "fontSize": 16,
+                "color": "#46503D",
+                "lineHeight": 28
+              },
+              {
+                "type": "label",
+                "id": "detail_location",
+                "text": "位置  A-01     在库  24 份",
+                "x": 24,
+                "y": 380,
+                "w": 370,
+                "h": 28,
+                "fontFamily": "Menlo",
+                "fontSize": 13,
+                "color": "#3B4E30"
+              },
+              {
+                "type": "button",
+                "id": "close_record",
+                "text": "收起详情",
+                "x": 24,
+                "y": 472,
+                "w": 386,
+                "h": 52,
+                "fontFamily": "Arial",
+                "fontSize": 13,
+                "fill": "#292D29",
+                "color": "#FFFFFF",
+                "radius": 0,
+                "on": {
+                  "click": [
+                    {
+                      "type": "hide",
+                      "target": "record_detail"
+                    }
+                  ]
+                }
+              }
+            ],
+            "visible": false,
+            "stroke": "#C9D1BC",
+            "strokeWidth": 1
+          }
+        ]
+      }
+    }
+  ]
+}

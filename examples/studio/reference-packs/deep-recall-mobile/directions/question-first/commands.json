@@ -1,0 +1,370 @@
+[
+  {
+    "type": "setProperties",
+    "nodeId": "recall_shell",
+    "properties": {
+      "fill": "#E8ECD8"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "recall_screen",
+    "properties": {
+      "fill": "#E8ECD8"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "clock",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "signal",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "brand_dot",
+    "properties": {
+      "fill": "#E8ECD8"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "brand",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "session_label",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "session_count",
+    "properties": {
+      "color": "#34543E"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "session_rule",
+    "properties": {
+      "fill": "#34543E"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "word_kind",
+    "properties": {
+      "color": "#34543E"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "word",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "pronunciation",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "question",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "recall_prompt",
+    "properties": {
+      "fill": "#E8ECD8"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "recall_index",
+    "properties": {
+      "color": "#34543E"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "recall_instruction",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "reveal",
+    "properties": {
+      "fill": "#34543E",
+      "color": "#FFFFFF"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "recall_hint",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "answer",
+    "properties": {
+      "fill": "#E8ECD8"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "answer_rule",
+    "properties": {
+      "fill": "#34543E"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "meaning",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "definition",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "example",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "translation",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "remember",
+    "properties": {
+      "fill": "#34543E",
+      "color": "#FFFFFF"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "try_again",
+    "properties": {
+      "fill": "#E8ECD8",
+      "color": "#34543E",
+      "stroke": "#34543E"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "remembered",
+    "properties": {
+      "fill": "#E8ECD8"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "remembered_rule",
+    "properties": {
+      "fill": "#34543E"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "remembered_mark",
+    "properties": {
+      "color": "#34543E"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "remembered_title",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "remembered_copy",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "practice_again",
+    "properties": {
+      "fill": "#34543E",
+      "color": "#FFFFFF"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "retry_feedback",
+    "properties": {
+      "fill": "#E8ECD8"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "retry_rule",
+    "properties": {
+      "fill": "#34543E"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "retry_title",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "memory_cue",
+    "properties": {
+      "color": "#263A2B"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "review_answer",
+    "properties": {
+      "fill": "#34543E",
+      "color": "#FFFFFF"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "word_kind",
+    "properties": {
+      "y": 646,
+      "fontSize": 10
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "word",
+    "properties": {
+      "x": 28,
+      "y": 680,
+      "fontSize": 56,
+      "fontFamily": "Arial"
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "pronunciation",
+    "properties": {
+      "y": 776,
+      "fontSize": 14
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "question",
+    "properties": {
+      "y": 182,
+      "fontSize": 23,
+      "h": 40
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "recall_prompt",
+    "properties": {
+      "y": 248,
+      "h": 382
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "answer",
+    "properties": {
+      "y": 248,
+      "h": 382
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "remembered",
+    "properties": {
+      "y": 248,
+      "h": 382
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "retry_feedback",
+    "properties": {
+      "y": 248,
+      "h": 382
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "recall_index",
+    "properties": {
+      "x": 248,
+      "y": 24,
+      "w": 98,
+      "fontSize": 58
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "recall_instruction",
+    "properties": {
+      "x": 0,
+      "y": 34,
+      "w": 234,
+      "h": 160,
+      "fontSize": 21,
+      "lineHeight": 31
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "reveal",
+    "properties": {
+      "y": 260
+    }
+  },
+  {
+    "type": "setProperties",
+    "nodeId": "recall_hint",
+    "properties": {
+      "y": 332
+    }
+  }
+]

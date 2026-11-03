@@ -1,0 +1,1343 @@
+{
+  "schemaVersion": 1,
+  "suiteId": "studio-v1",
+  "status": "definition-only-not-executed",
+  "comparisonPolicy": {
+    "sameTaskSameBudget": true,
+    "sameModelAndReasoning": true,
+    "sameAssetsAndViewport": true,
+    "repeatCount": 3,
+    "blindVisualReview": true,
+    "discoveryVsCreation": "firstMutationCallId之前为discovery，其后（含失败/修复/截图/验收）为creation；两者相加必须等于实际调用总数。",
+    "callLedger": "每个实际工具/API尝试一行；超时与响应丢失保留且计数，嵌套调用可用parentCallId但不可重复计费。",
+    "tokens": "仅有提供方实际usage数据才填写；未知为null且measurement=unavailable，绝不能填0或由字节换算。",
+    "experience": "independent=未读实现且未获内部提示；familiar=读过实现或同题经验；assisted=收到额外人工/其他代理帮助。三者不混作独立成功率。",
+    "ratings": "agent、user与independent-reviewer分别记录；原始低分和失败不覆盖。",
+    "visualDirections": "需要探索时同brief至少三方向，至少在结构、阅读顺序、图文组织、字形、节奏中两项不同，并有真实截图。"
+  },
+  "tasks": [
+    {
+      "id": "T01",
+      "category": "vocabulary",
+      "title": "单词回忆与反馈",
+      "brief": "为三张固定单词卡设计手机学习流程。首屏不泄露释义和例句，揭示后可记住或再练。保留每题内容、明确进度与本轮完成态；长词和长例句不得裁掉。",
+      "platform": "mobile",
+      "viewport": {
+        "width": 402,
+        "height": 874,
+        "devicePixelRatio": 1
+      },
+      "inputs": {
+        "content": "fixtures/content.json#words",
+        "requiredNodeIds": [
+          "word",
+          "answer",
+          "reveal",
+          "remember",
+          "retry",
+          "feedback",
+          "complete"
+        ]
+      },
+      "requiredContent": [
+        "fixtures/content.json.words中3个词、音标、词性、释义、例句逐字保留",
+        "今日复习 3 张",
+        "揭示答案",
+        "记住了",
+        "再练一次",
+        "本轮完成"
+      ],
+      "requiredStates": [
+        "recall",
+        "revealed",
+        "remembered",
+        "retry",
+        "complete"
+      ],
+      "allowedScope": {
+        "mode": "new-project",
+        "pages": [
+          "home"
+        ],
+        "mustPreserve": [
+          "全部固定内容",
+          "回忆→揭示→反馈→下一题关系"
+        ]
+      },
+      "requiredOutputs": [
+        "editable-project-source",
+        "initial-state-screenshot",
+        "required-state-screenshots",
+        "scenario-trace",
+        "call-ledger",
+        "result.json"
+      ],
+      "optionalTrack": {
+        "axure-native": [
+          "exported.rp",
+          "compatibility-report",
+          "native-structure",
+          "axure-load",
+          "axure-preview",
+          "gui-save-close-reopen"
+        ],
+        "note": "Axure证据单列，不把未执行的宿主层记为失败或通过；通用设计评分不以专有格式决定胜负。"
+      },
+      "budget": {
+        "maxToolCalls": 45,
+        "maxDiscoveryCallsBeforeFirstWrite": 5,
+        "maxWallClockSeconds": 900,
+        "maxModelTokens": null,
+        "sameForComparedSystems": true,
+        "timeoutCallsCount": true,
+        "repairsCount": true,
+        "imageAndVerificationCallsCount": true
+      },
+      "scenarios": [
+        {
+          "id": "reveal-retry",
+          "startPageId": "home",
+          "reset": true,
+          "steps": [
+            {
+              "action": "expect",
+              "expect": {
+                "visible": {
+                  "answer": false
+                },
+                "text": {
+                  "word": "abandon"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "reveal",
+              "expect": {
+                "visible": {
+                  "answer": true
+                },
+                "text": {
+                  "answer": {
+                    "includes": "放弃"
+                  }
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "retry",
+              "expect": {
+                "text": {
+                  "feedback": {
+                    "includes": "再练"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "complete-three",
+          "startPageId": "home",
+          "reset": true,
+          "steps": [
+            {
+              "action": "click",
+              "target": "reveal",
+              "expect": {
+                "visible": {
+                  "answer": true
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "remember",
+              "expect": {
+                "text": {
+                  "word": "meticulous"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "reveal",
+              "expect": {
+                "visible": {
+                  "answer": true
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "remember",
+              "expect": {
+                "text": {
+                  "word": "counterrevolutionary"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "reveal",
+              "expect": {
+                "visible": {
+                  "answer": true
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "remember",
+              "expect": {
+                "visible": {
+                  "complete": true
+                },
+                "text": {
+                  "complete": {
+                    "includes": "本轮完成"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "sourceChecks": [
+        "所有requiredContent原文保留；不能用截图替代源文本检查",
+        "必须由真实可交互节点承担操作，不以静态截图伪装",
+        "源ID、文案、事件与资源的最终版本须绑定到证据"
+      ]
+    },
+    {
+      "id": "T02",
+      "category": "long-reading",
+      "title": "长文阅读与注释",
+      "brief": "为固定长文做手机阅读页，保留全部段落。目录可展开和关闭，注释按需展开，收藏和取消收藏有明确反馈。导航和操作不能遮挡正文末尾。",
+      "platform": "mobile",
+      "viewport": {
+        "width": 402,
+        "height": 874,
+        "devicePixelRatio": 1
+      },
+      "inputs": {
+        "content": "fixtures/content.json#article",
+        "requiredNodeIds": [
+          "article-title",
+          "section-1",
+          "section-2",
+          "section-3",
+          "section-4",
+          "toggle-contents",
+          "contents",
+          "show-footnote",
+          "footnote",
+          "save",
+          "save-status"
+        ]
+      },
+      "requiredContent": [
+        "fixtures/content.json.article的标题、作者、日期、来源、4节8段及注释原文",
+        "目录",
+        "阅读注释",
+        "收藏",
+        "已收藏"
+      ],
+      "requiredStates": [
+        "reading",
+        "contents-open",
+        "footnote-open",
+        "saved",
+        "unsaved"
+      ],
+      "allowedScope": {
+        "mode": "new-project",
+        "pages": [
+          "home"
+        ],
+        "mustPreserve": [
+          "文章全部文字与段落次序"
+        ]
+      },
+      "requiredOutputs": [
+        "editable-project-source",
+        "initial-state-screenshot",
+        "required-state-screenshots",
+        "scenario-trace",
+        "call-ledger",
+        "result.json"
+      ],
+      "optionalTrack": {
+        "axure-native": [
+          "exported.rp",
+          "compatibility-report",
+          "native-structure",
+          "axure-load",
+          "axure-preview",
+          "gui-save-close-reopen"
+        ],
+        "note": "Axure证据单列，不把未执行的宿主层记为失败或通过；通用设计评分不以专有格式决定胜负。"
+      },
+      "budget": {
+        "maxToolCalls": 50,
+        "maxDiscoveryCallsBeforeFirstWrite": 5,
+        "maxWallClockSeconds": 1500,
+        "maxModelTokens": null,
+        "sameForComparedSystems": true,
+        "timeoutCallsCount": true,
+        "repairsCount": true,
+        "imageAndVerificationCallsCount": true
+      },
+      "scenarios": [
+        {
+          "id": "reading-controls",
+          "startPageId": "home",
+          "reset": true,
+          "steps": [
+            {
+              "action": "expect",
+              "expect": {
+                "visible": {
+                  "contents": false,
+                  "footnote": false
+                },
+                "text": {
+                  "article-title": "在城市边缘，重新学会观察一条河",
+                  "section-4": {
+                    "includes": "共同材料"
+                  }
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "toggle-contents",
+              "expect": {
+                "visible": {
+                  "contents": true
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "toggle-contents",
+              "expect": {
+                "visible": {
+                  "contents": false
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "show-footnote",
+              "expect": {
+                "visible": {
+                  "footnote": true
+                },
+                "text": {
+                  "footnote": "注：本文只用于界面阅读与交互验收，不是环境监测结论。"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "save",
+              "expect": {
+                "text": {
+                  "save-status": "已收藏"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "save",
+              "expect": {
+                "text": {
+                  "save-status": "未收藏"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "sourceChecks": [
+        "所有requiredContent原文保留；不能用截图替代源文本检查",
+        "必须由真实可交互节点承担操作，不以静态截图伪装",
+        "源ID、文案、事件与资源的最终版本须绑定到证据"
+      ]
+    },
+    {
+      "id": "T03",
+      "category": "data-dashboard",
+      "title": "真实数据工作区",
+      "brief": "用固定12条记录设计桌面数据页，展示总条数、金额合计、待处理数与明细。待处理筛选、金额降序和重置必须改变同一数据来源；不要编造趋势。",
+      "platform": "web",
+      "viewport": {
+        "width": 1440,
+        "height": 1000,
+        "devicePixelRatio": 1
+      },
+      "inputs": {
+        "data": "fixtures/records.json",
+        "requiredNodeIds": [
+          "total-count",
+          "amount-total",
+          "pending-count",
+          "result-count",
+          "first-record",
+          "filter-pending",
+          "sort-amount-desc",
+          "search",
+          "apply-search",
+          "reset",
+          "empty"
+        ]
+      },
+      "requiredContent": [
+        "总记录数 12",
+        "金额合计 5590",
+        "待处理 4",
+        "fixtures/records.json所有字段和12条记录",
+        "筛选待处理",
+        "按金额降序",
+        "重置"
+      ],
+      "requiredStates": [
+        "all",
+        "pending",
+        "sorted",
+        "empty",
+        "reset"
+      ],
+      "allowedScope": {
+        "mode": "new-project",
+        "pages": [
+          "home"
+        ],
+        "mustPreserve": [
+          "固定数据值",
+          "字段含义",
+          "数据来源说明：原型演示数据"
+        ]
+      },
+      "requiredOutputs": [
+        "editable-project-source",
+        "initial-state-screenshot",
+        "required-state-screenshots",
+        "scenario-trace",
+        "call-ledger",
+        "result.json"
+      ],
+      "optionalTrack": {
+        "axure-native": [
+          "exported.rp",
+          "compatibility-report",
+          "native-structure",
+          "axure-load",
+          "axure-preview",
+          "gui-save-close-reopen"
+        ],
+        "note": "Axure证据单列，不把未执行的宿主层记为失败或通过；通用设计评分不以专有格式决定胜负。"
+      },
+      "budget": {
+        "maxToolCalls": 70,
+        "maxDiscoveryCallsBeforeFirstWrite": 5,
+        "maxWallClockSeconds": 1500,
+        "maxModelTokens": null,
+        "sameForComparedSystems": true,
+        "timeoutCallsCount": true,
+        "repairsCount": true,
+        "imageAndVerificationCallsCount": true
+      },
+      "scenarios": [
+        {
+          "id": "filter-sort-reset",
+          "startPageId": "home",
+          "reset": true,
+          "steps": [
+            {
+              "action": "expect",
+              "expect": {
+                "text": {
+                  "total-count": "12",
+                  "amount-total": "5590",
+                  "pending-count": "4"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "filter-pending",
+              "expect": {
+                "text": {
+                  "result-count": "4"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "sort-amount-desc",
+              "expect": {
+                "text": {
+                  "first-record": "R09"
+                }
+              }
+            },
+            {
+              "action": "input",
+              "target": "search",
+              "value": "不存在的记录XYZ"
+            },
+            {
+              "action": "click",
+              "target": "apply-search",
+              "expect": {
+                "visible": {
+                  "empty": true
+                },
+                "text": {
+                  "result-count": "0"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "reset",
+              "expect": {
+                "visible": {
+                  "empty": false
+                },
+                "text": {
+                  "result-count": "12"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "sourceChecks": [
+        "所有requiredContent原文保留；不能用截图替代源文本检查",
+        "必须由真实可交互节点承担操作，不以静态截图伪装",
+        "源ID、文案、事件与资源的最终版本须绑定到证据"
+      ]
+    },
+    {
+      "id": "T04",
+      "category": "validated-form",
+      "title": "借用申请与校验",
+      "brief": "为手机设备借用做有标签的表单。姓名必填，手机号须11位数字，设备固定为便携相机，归还说明必填。空提交和非法手机号给字段附近错误且保留输入；成功后展示实际填写摘要，再返回仍保留原值。",
+      "platform": "mobile",
+      "viewport": {
+        "width": 402,
+        "height": 874,
+        "devicePixelRatio": 1
+      },
+      "inputs": {
+        "values": {
+          "name": "林溪",
+          "phone": "13800138000",
+          "note": "10月30日下午归还，镜头与充电线一并检查。"
+        },
+        "requiredNodeIds": [
+          "name",
+          "phone",
+          "note",
+          "name-error",
+          "phone-error",
+          "note-error",
+          "submit",
+          "receipt-name",
+          "receipt-phone",
+          "receipt-note",
+          "edit"
+        ]
+      },
+      "requiredContent": [
+        "设备：便携相机",
+        "姓名",
+        "手机号",
+        "归还说明",
+        "提交申请",
+        "姓名不能为空",
+        "手机号须为11位数字",
+        "归还说明不能为空",
+        "申请已提交"
+      ],
+      "requiredStates": [
+        "initial",
+        "required-error",
+        "invalid-phone",
+        "filled",
+        "submitted",
+        "return-edit"
+      ],
+      "allowedScope": {
+        "mode": "new-project",
+        "pages": [
+          "home",
+          "receipt"
+        ],
+        "mustPreserve": [
+          "输入值",
+          "校验规则与错误位置关联"
+        ]
+      },
+      "requiredOutputs": [
+        "editable-project-source",
+        "initial-state-screenshot",
+        "required-state-screenshots",
+        "scenario-trace",
+        "call-ledger",
+        "result.json"
+      ],
+      "optionalTrack": {
+        "axure-native": [
+          "exported.rp",
+          "compatibility-report",
+          "native-structure",
+          "axure-load",
+          "axure-preview",
+          "gui-save-close-reopen"
+        ],
+        "note": "Axure证据单列，不把未执行的宿主层记为失败或通过；通用设计评分不以专有格式决定胜负。"
+      },
+      "budget": {
+        "maxToolCalls": 65,
+        "maxDiscoveryCallsBeforeFirstWrite": 5,
+        "maxWallClockSeconds": 1500,
+        "maxModelTokens": null,
+        "sameForComparedSystems": true,
+        "timeoutCallsCount": true,
+        "repairsCount": true,
+        "imageAndVerificationCallsCount": true
+      },
+      "scenarios": [
+        {
+          "id": "validation-and-return",
+          "startPageId": "home",
+          "reset": true,
+          "steps": [
+            {
+              "action": "click",
+              "target": "submit",
+              "expect": {
+                "visible": {
+                  "name-error": true,
+                  "phone-error": true,
+                  "note-error": true
+                }
+              }
+            },
+            {
+              "action": "input",
+              "target": "name",
+              "value": "林溪"
+            },
+            {
+              "action": "input",
+              "target": "phone",
+              "value": "123"
+            },
+            {
+              "action": "input",
+              "target": "note",
+              "value": "10月30日下午归还，镜头与充电线一并检查。"
+            },
+            {
+              "action": "click",
+              "target": "submit",
+              "expect": {
+                "visible": {
+                  "phone-error": true
+                },
+                "text": {
+                  "name": "林溪",
+                  "note": {
+                    "includes": "充电线"
+                  }
+                }
+              }
+            },
+            {
+              "action": "input",
+              "target": "phone",
+              "value": "13800138000"
+            },
+            {
+              "action": "click",
+              "target": "submit",
+              "expect": {
+                "page": "receipt",
+                "text": {
+                  "receipt-name": "林溪",
+                  "receipt-phone": "13800138000",
+                  "receipt-note": {
+                    "includes": "充电线"
+                  }
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "edit",
+              "expect": {
+                "page": "home",
+                "text": {
+                  "name": "林溪",
+                  "phone": "13800138000",
+                  "note": {
+                    "includes": "充电线"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "sourceChecks": [
+        "所有requiredContent原文保留；不能用截图替代源文本检查",
+        "必须由真实可交互节点承担操作，不以静态截图伪装",
+        "源ID、文案、事件与资源的最终版本须绑定到证据"
+      ]
+    },
+    {
+      "id": "T05",
+      "category": "editorial-landing",
+      "title": "图文活动落地页",
+      "brief": "设计桌面自然观察活动页，图文主次由内容决定。固定摄影主体不得裁掉；展示时间地点、行程、名额和说明，报名可展开信息区并提交，成功保留活动上下文。另验缺图时文字重排。",
+      "platform": "web",
+      "viewport": {
+        "width": 1440,
+        "height": 1000,
+        "devicePixelRatio": 1
+      },
+      "inputs": {
+        "assets": [
+          "kingfisher"
+        ],
+        "assetManifest": "fixtures/assets.json",
+        "boundaryVariant": {
+          "id": "missing-image",
+          "setup": "同一最终源的隔离副本删除图片资源，重载后检查缺图明确诊断及文字可读；不得修改正式源",
+          "requiresVisualEvidence": true
+        },
+        "requiredNodeIds": [
+          "event-title",
+          "signup",
+          "signup-form",
+          "signup-name",
+          "confirm-signup",
+          "signup-success"
+        ]
+      },
+      "requiredContent": [
+        "活动：沿河慢行观察日",
+        "2026年11月7日 06:30—08:30",
+        "集合：旧桥东侧步道入口",
+        "名额：12人",
+        "行程：缓流记录→桥下通行→共同整理",
+        "携带纸笔与饮水；遇大雨改期",
+        "原型演示活动，不接受真实报名",
+        "摄影来源与CC0说明"
+      ],
+      "requiredStates": [
+        "initial",
+        "signup-open",
+        "signup-complete",
+        "missing-image"
+      ],
+      "allowedScope": {
+        "mode": "new-project",
+        "pages": [
+          "home"
+        ],
+        "mustPreserve": [
+          "固定时间地点及活动说明",
+          "素材原图与来源",
+          "图像主体"
+        ]
+      },
+      "requiredOutputs": [
+        "editable-project-source",
+        "initial-state-screenshot",
+        "required-state-screenshots",
+        "scenario-trace",
+        "call-ledger",
+        "result.json"
+      ],
+      "optionalTrack": {
+        "axure-native": [
+          "exported.rp",
+          "compatibility-report",
+          "native-structure",
+          "axure-load",
+          "axure-preview",
+          "gui-save-close-reopen"
+        ],
+        "note": "Axure证据单列，不把未执行的宿主层记为失败或通过；通用设计评分不以专有格式决定胜负。"
+      },
+      "budget": {
+        "maxToolCalls": 60,
+        "maxDiscoveryCallsBeforeFirstWrite": 5,
+        "maxWallClockSeconds": 1500,
+        "maxModelTokens": null,
+        "sameForComparedSystems": true,
+        "timeoutCallsCount": true,
+        "repairsCount": true,
+        "imageAndVerificationCallsCount": true
+      },
+      "scenarios": [
+        {
+          "id": "signup",
+          "startPageId": "home",
+          "reset": true,
+          "steps": [
+            {
+              "action": "expect",
+              "expect": {
+                "visible": {
+                  "signup-form": false
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "signup",
+              "expect": {
+                "visible": {
+                  "signup-form": true
+                }
+              }
+            },
+            {
+              "action": "input",
+              "target": "signup-name",
+              "value": "林溪"
+            },
+            {
+              "action": "click",
+              "target": "confirm-signup",
+              "expect": {
+                "visible": {
+                  "signup-success": true
+                },
+                "text": {
+                  "signup-success": {
+                    "includes": "林溪"
+                  },
+                  "event-title": "沿河慢行观察日"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "sourceChecks": [
+        "所有requiredContent原文保留；不能用截图替代源文本检查",
+        "必须由真实可交互节点承担操作，不以静态截图伪装",
+        "源ID、文案、事件与资源的最终版本须绑定到证据"
+      ]
+    },
+    {
+      "id": "T06",
+      "category": "complex-list",
+      "title": "筛选排序分页与局部详情",
+      "brief": "用固定12条记录设计桌面业务列表，每页5条，支持关键词、待处理筛选、金额降序、页码和选中详情。先到第3页再筛选仅4条待处理记录，必须回到有效页；0/1/N条均保留恢复入口。",
+      "platform": "web",
+      "viewport": {
+        "width": 1440,
+        "height": 1000,
+        "devicePixelRatio": 1
+      },
+      "inputs": {
+        "data": "fixtures/records.json",
+        "pageSize": 5,
+        "requiredNodeIds": [
+          "page-status",
+          "result-count",
+          "next-page",
+          "previous-page",
+          "filter-pending",
+          "sort-amount-desc",
+          "first-record",
+          "select-first",
+          "detail-id",
+          "detail-title",
+          "search",
+          "apply-search",
+          "reset",
+          "empty"
+        ]
+      },
+      "requiredContent": [
+        "fixtures/records.json全部记录和字段",
+        "每页 5 条",
+        "第 1 / 3 页",
+        "下一页",
+        "上一页",
+        "待处理",
+        "金额降序",
+        "结果数量与当前选择详情"
+      ],
+      "requiredStates": [
+        "all-page1",
+        "all-page3",
+        "filtered-valid-page",
+        "unique-result",
+        "empty",
+        "selected-detail",
+        "reset"
+      ],
+      "allowedScope": {
+        "mode": "new-project",
+        "pages": [
+          "home"
+        ],
+        "mustPreserve": [
+          "筛选与分页同一数据源",
+          "详情与选中行一致",
+          "长标题全文可达"
+        ]
+      },
+      "requiredOutputs": [
+        "editable-project-source",
+        "initial-state-screenshot",
+        "required-state-screenshots",
+        "scenario-trace",
+        "call-ledger",
+        "result.json"
+      ],
+      "optionalTrack": {
+        "axure-native": [
+          "exported.rp",
+          "compatibility-report",
+          "native-structure",
+          "axure-load",
+          "axure-preview",
+          "gui-save-close-reopen"
+        ],
+        "note": "Axure证据单列，不把未执行的宿主层记为失败或通过；通用设计评分不以专有格式决定胜负。"
+      },
+      "budget": {
+        "maxToolCalls": 80,
+        "maxDiscoveryCallsBeforeFirstWrite": 5,
+        "maxWallClockSeconds": 1500,
+        "maxModelTokens": null,
+        "sameForComparedSystems": true,
+        "timeoutCallsCount": true,
+        "repairsCount": true,
+        "imageAndVerificationCallsCount": true
+      },
+      "scenarios": [
+        {
+          "id": "pagination-filter",
+          "startPageId": "home",
+          "reset": true,
+          "steps": [
+            {
+              "action": "expect",
+              "expect": {
+                "text": {
+                  "page-status": "第 1 / 3 页",
+                  "result-count": "12"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "next-page",
+              "expect": {
+                "text": {
+                  "page-status": "第 2 / 3 页"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "next-page",
+              "expect": {
+                "text": {
+                  "page-status": "第 3 / 3 页"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "filter-pending",
+              "expect": {
+                "text": {
+                  "page-status": "第 1 / 1 页",
+                  "result-count": "4"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "sort-amount-desc",
+              "expect": {
+                "text": {
+                  "first-record": "R09"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "select-first",
+              "expect": {
+                "text": {
+                  "detail-id": "R09",
+                  "detail-title": {
+                    "includes": "共同复查"
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "id": "zero-one-many",
+          "startPageId": "home",
+          "reset": true,
+          "steps": [
+            {
+              "action": "input",
+              "target": "search",
+              "value": "无障碍"
+            },
+            {
+              "action": "click",
+              "target": "apply-search",
+              "expect": {
+                "text": {
+                  "result-count": "1",
+                  "first-record": "R08"
+                }
+              }
+            },
+            {
+              "action": "input",
+              "target": "search",
+              "value": "不存在的记录XYZ"
+            },
+            {
+              "action": "click",
+              "target": "apply-search",
+              "expect": {
+                "visible": {
+                  "empty": true
+                },
+                "text": {
+                  "result-count": "0"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "reset",
+              "expect": {
+                "visible": {
+                  "empty": false
+                },
+                "text": {
+                  "result-count": "12",
+                  "page-status": "第 1 / 3 页"
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "sourceChecks": [
+        "所有requiredContent原文保留；不能用截图替代源文本检查",
+        "必须由真实可交互节点承担操作，不以静态截图伪装",
+        "源ID、文案、事件与资源的最终版本须绑定到证据"
+      ]
+    },
+    {
+      "id": "T07",
+      "category": "multi-page",
+      "title": "跨页选择与返回保留",
+      "brief": "设计手机三页借物流程：首页设备→详情→借用凭证，可返回。首页选择相机后，详情和凭证都显示同一设备；详情输入借用用途，凭证显示原值，返回修改后不丢失。连续页面维持已选字形、颜色含义和按钮语言。",
+      "platform": "mobile",
+      "viewport": {
+        "width": 402,
+        "height": 874,
+        "devicePixelRatio": 1
+      },
+      "inputs": {
+        "requiredNodeIds": [
+          "camera",
+          "device-name",
+          "purpose",
+          "borrow",
+          "receipt-device",
+          "receipt-purpose",
+          "back-edit",
+          "back-home"
+        ]
+      },
+      "requiredContent": [
+        "设备：便携相机；库存 2 台",
+        "设备：录音笔；库存 1 台",
+        "借用用途",
+        "确认借用",
+        "借用凭证",
+        "仅作原型演示，不连接真实库存"
+      ],
+      "requiredStates": [
+        "home",
+        "camera-detail",
+        "input-filled",
+        "receipt",
+        "return-filled"
+      ],
+      "allowedScope": {
+        "mode": "new-project",
+        "pages": [
+          "home",
+          "detail",
+          "receipt"
+        ],
+        "mustPreserve": [
+          "选择设备与用途的跨页关系",
+          "返回值",
+          "同一产品设计语言"
+        ]
+      },
+      "requiredOutputs": [
+        "editable-project-source",
+        "initial-state-screenshot",
+        "required-state-screenshots",
+        "scenario-trace",
+        "call-ledger",
+        "result.json"
+      ],
+      "optionalTrack": {
+        "axure-native": [
+          "exported.rp",
+          "compatibility-report",
+          "native-structure",
+          "axure-load",
+          "axure-preview",
+          "gui-save-close-reopen"
+        ],
+        "note": "Axure证据单列，不把未执行的宿主层记为失败或通过；通用设计评分不以专有格式决定胜负。"
+      },
+      "budget": {
+        "maxToolCalls": 65,
+        "maxDiscoveryCallsBeforeFirstWrite": 5,
+        "maxWallClockSeconds": 1500,
+        "maxModelTokens": null,
+        "sameForComparedSystems": true,
+        "timeoutCallsCount": true,
+        "repairsCount": true,
+        "imageAndVerificationCallsCount": true
+      },
+      "scenarios": [
+        {
+          "id": "borrow-return",
+          "startPageId": "home",
+          "reset": true,
+          "steps": [
+            {
+              "action": "expect",
+              "expect": {
+                "page": "home"
+              }
+            },
+            {
+              "action": "click",
+              "target": "camera",
+              "expect": {
+                "page": "detail",
+                "text": {
+                  "device-name": "便携相机"
+                }
+              }
+            },
+            {
+              "action": "input",
+              "target": "purpose",
+              "value": "河岸活动图像记录"
+            },
+            {
+              "action": "click",
+              "target": "borrow",
+              "expect": {
+                "page": "receipt",
+                "text": {
+                  "receipt-device": "便携相机",
+                  "receipt-purpose": "河岸活动图像记录"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "back-edit",
+              "expect": {
+                "page": "detail",
+                "text": {
+                  "device-name": "便携相机",
+                  "purpose": "河岸活动图像记录"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "back-home",
+              "expect": {
+                "page": "home"
+              }
+            }
+          ]
+        }
+      ],
+      "sourceChecks": [
+        "所有requiredContent原文保留；不能用截图替代源文本检查",
+        "必须由真实可交互节点承担操作，不以静态截图伪装",
+        "源ID、文案、事件与资源的最终版本须绑定到证据"
+      ]
+    },
+    {
+      "id": "T08",
+      "category": "local-edit",
+      "title": "精确局部文字改稿",
+      "brief": "打开固定工程，只把首页标题改为“本周观察”，宏卡片标题改为“现场记录”，instanceA中的caption改为“只改当前实例”。不可改位置、其他文字、宏正文、组件定义、instanceB或详情页；原跳转仍可用。简单修改不要求重新规划。",
+      "platform": "web",
+      "viewport": {
+        "width": 1440,
+        "height": 1000,
+        "devicePixelRatio": 1
+      },
+      "inputs": {
+        "source": "fixtures/local-edit.json",
+        "negativeVariants": [
+          {
+            "id": "empty-selection",
+            "setup": "向同一查询/编辑入口提供空nodeIds或无匹配筛选",
+            "expectation": "明确拒绝或空结果；源与版本不变，不扩大至整页"
+          },
+          {
+            "id": "stale-selection",
+            "setup": "读取绑定后用其他事务改一个节点，再提交旧baseRevision",
+            "expectation": "明确过期拒绝；保留已提交修改，不覆盖或扩大范围"
+          }
+        ],
+        "requiredNodeIds": [
+          "title",
+          "card_title",
+          "instanceA__caption",
+          "instanceB__caption",
+          "next",
+          "back"
+        ]
+      },
+      "requiredContent": [
+        "首页新标题：本周观察",
+        "宏卡片新标题：现场记录",
+        "实例A新文字：只改当前实例",
+        "原宏正文不得改动",
+        "instanceB仍为原实例文字",
+        "详情页原文不得改动"
+      ],
+      "requiredStates": [
+        "before",
+        "edited",
+        "undo",
+        "redo",
+        "reopened",
+        "empty-selection-rejected",
+        "stale-selection-rejected"
+      ],
+      "allowedScope": {
+        "mode": "existing-project",
+        "source": "fixtures/local-edit.json",
+        "allowedSourceFields": [
+          "home/title.text",
+          "home/card.title",
+          "home/instanceA.overrides.caption.text"
+        ],
+        "forbiddenChanges": [
+          "组件Caption定义",
+          "instanceB所有属性",
+          "详情页所有内容",
+          "任何几何",
+          "全部原有事件、数据、资源、ID"
+        ],
+        "atomicity": "三处文字修改同一事务；一次撤销恢复三处，再重做恢复新文字"
+      },
+      "requiredOutputs": [
+        "editable-project-source",
+        "initial-state-screenshot",
+        "required-state-screenshots",
+        "scenario-trace",
+        "call-ledger",
+        "result.json"
+      ],
+      "optionalTrack": {
+        "axure-native": [
+          "exported.rp",
+          "compatibility-report",
+          "native-structure",
+          "axure-load",
+          "axure-preview",
+          "gui-save-close-reopen"
+        ],
+        "note": "Axure证据单列，不把未执行的宿主层记为失败或通过；通用设计评分不以专有格式决定胜负。"
+      },
+      "budget": {
+        "maxToolCalls": 25,
+        "maxDiscoveryCallsBeforeFirstWrite": 5,
+        "maxWallClockSeconds": 900,
+        "maxModelTokens": null,
+        "sameForComparedSystems": true,
+        "timeoutCallsCount": true,
+        "repairsCount": true,
+        "imageAndVerificationCallsCount": true
+      },
+      "scenarios": [
+        {
+          "id": "text-and-navigation",
+          "startPageId": "home",
+          "reset": true,
+          "steps": [
+            {
+              "action": "expect",
+              "expect": {
+                "text": {
+                  "title": "本周观察",
+                  "card_title": "现场记录",
+                  "instanceA__caption": "只改当前实例",
+                  "instanceB__caption": "原实例文字"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "next",
+              "expect": {
+                "page": "detail",
+                "text": {
+                  "title": "详情页原文不得改动"
+                }
+              }
+            },
+            {
+              "action": "click",
+              "target": "back",
+              "expect": {
+                "page": "home"
+              }
+            }
+          ]
+        }
+      ],
+      "sourceChecks": [
+        "所有requiredContent原文保留；不能用截图替代源文本检查",
+        "必须由真实可交互节点承担操作，不以静态截图伪装",
+        "源ID、文案、事件与资源的最终版本须绑定到证据"
+      ]
+    }
+  ]
+}

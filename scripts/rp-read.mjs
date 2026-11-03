@@ -35,7 +35,9 @@ const guidsOf = graph => graph?.roots?.find(n => n.tag === 0x1e)?.values ?? [];
 const strOf = node => (node && node.tag === 8 ? node.text : undefined);
 const intOf = node => (node === undefined || node === null ? undefined : node.value);
 const pairValues = node => (node && Array.isArray(node.values) ? node.values : null);
-const isWidget = o => o.className.startsWith('Axure:DiagramObject:') || o.className.startsWith('Axure:Repeater');
+// RepeaterStyle is a style object created by native saves, not a diagram
+// widget. Keep the exact legacy Repeater name without matching its helpers.
+const isWidget = o => o.className.startsWith('Axure:DiagramObject:') || o.className === 'Axure:Repeater';
 const shortType = className => className.replace(/^Axure:(DiagramObject:)?/, '') || className;
 
 // MyStyle → Axure:Style → PropList 里的几何。
@@ -70,6 +72,29 @@ function textOf(node) {
 }
 
 const widgetName = widget => strOf(field(field(widget.body, 'name-block') ?? {}, 'text')) ?? '';
+
+function vectorOf(widget) {
+  if (widget.className !== 'Axure:DiagramObject:VectorShape') return null;
+  const shapeVal = intOf(field(widget.body, 'Shape'));
+  const cpList = field(widget.body, 'ControlPoints')?.items ?? [];
+  if (!shapeVal && !cpList.length) return null;
+  const readXY = node => ({
+    X: intOf(field(node ?? {}, 'X')),
+    Y: intOf(field(node ?? {}, 'Y')),
+  });
+  const controlPoints = cpList.map(subpath =>
+    (subpath.items ?? []).map(cp => ({
+      Path: readXY(field(cp, 'Path')),
+      LowerHandle: readXY(field(cp, 'LowerHandle')),
+      HigherHandle: readXY(field(cp, 'HigherHandle')),
+      HigherSegmentExists: Boolean(intOf(field(cp, 'HigherSegmentExists'))),
+    }))
+  );
+  return {
+    shape: shapeVal ?? 0,
+    controlPoints,
+  };
+}
 
 // Retain condition presence and content changes without claiming to decompile
 // arbitrary Axure expressions. References expand by value, not allocation IDs.
@@ -393,7 +418,7 @@ function rawDump(graph, node, depth = 0, seen = new Set()) {
 }
 
 // ---- 主分析 ----
-export function readRp(file, { full = false, path = null, includeMasterWidgets = false } = {}) {
+export function readRp(file, { full = false, path = null, includeMasterWidgets = false, includeVectors = false } = {}) {
   const problems = [];
   const problem = (kind, message, extra = {}) => problems.push({ kind, message, ...extra });
 
@@ -582,13 +607,16 @@ export function readRp(file, { full = false, path = null, includeMasterWidgets =
       const object = graph.objects.get(item.value);
       if (!object || !isWidget(object)) continue;
       const geo = geometryOf(graph, object);
+      const vec = includeVectors ? vectorOf(object) : null;
       containedWidgets.push({
         id: object.id,
+        guid: guidsOf(graph)[object.id - 1] || null,
         name: widgetName(object),
         type: shortType(object.className),
         className: object.className,
         text: textOf(field(object.body, 'RichTextBlock') ?? field(object.body, 'TextBlock')),
         x: geo.x, y: geo.y, w: geo.w, h: geo.h,
+        ...(vec ? vec : {}),
         container: containerPath,
         record: graphRecords.get(graph) ?? null,
         ...(includeMasterWidgets ? { interactions: readInteractions(graph, graph.objects.get(field(object.body, 'InteractionMap')?.value), version, widgetsByGuid) } : {})
@@ -673,13 +701,16 @@ export function readRp(file, { full = false, path = null, includeMasterWidgets =
       if (!isWidget(object)) continue;
       widgetCount++;
       const geo = geometryOf(graph, object);
+      const vec = includeVectors ? vectorOf(object) : null;
       const widget = {
         id: object.id,
+        guid: guids[object.id - 1] || null,
         name: widgetName(object),
         type: shortType(object.className),
         className: object.className,
         x: geo.x, y: geo.y, w: geo.w, h: geo.h,
-        text: textOf(field(object.body, 'RichTextBlock') ?? field(object.body, 'TextBlock'))
+        text: textOf(field(object.body, 'RichTextBlock') ?? field(object.body, 'TextBlock')),
+        ...(vec ? vec : {}),
       };
       // 动态面板：panel-diagrams = [strIdx('Axure:PanelState'), 页面 GUID 表下标]。
       const panel = field(object.body, 'panel-diagrams');

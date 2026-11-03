@@ -1,0 +1,671 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "岸线 / Shore Notes",
+  "domain": "web",
+  "theme": "mobile-hifi",
+  "palette": {
+    "bg": "#F1F2EA",
+    "surface": "#E0E6DD",
+    "ink": "#1F353E",
+    "muted": "#60706F",
+    "brand": "#97432E"
+  },
+  "pages": [
+    {
+      "id": "shore",
+      "name": "岸线 · 观察手记",
+      "canvas": {
+        "w": 1440,
+        "h": 1160
+      },
+      "root": {
+        "id": "shore_root",
+        "type": "box",
+        "layout": "stack",
+        "x": 0,
+        "y": 0,
+        "w": 1440,
+        "h": 1160,
+        "fill": "#F1F2EA",
+        "children": [
+          {
+            "id": "shore_brand",
+            "type": "label",
+            "text": "岸线 / SHORE NOTES",
+            "x": 72,
+            "y": 29,
+            "w": 520,
+            "h": 42,
+            "fontSize": 22,
+            "color": "#1F353E",
+            "lineHeight": 31,
+            "fontFamily": "Avenir Next",
+            "fontWeight": 600,
+            "letterSpacing": 1,
+            "role": "brand"
+          },
+          {
+            "id": "shore_issue",
+            "type": "label",
+            "text": "FIELD JOURNAL   /   NO. 001",
+            "x": 1030,
+            "y": 37,
+            "w": 338,
+            "h": 31,
+            "fontSize": 12,
+            "color": "#60706F",
+            "lineHeight": 17,
+            "fontFamily": "Menlo",
+            "textAlign": "right",
+            "role": "issue-label"
+          },
+          {
+            "id": "shore_header_rule",
+            "type": "box",
+            "layout": "stack",
+            "x": 72,
+            "y": 104,
+            "w": 1296,
+            "h": 1,
+            "fill": "#C5CEC6",
+            "children": [],
+            "role": "separator"
+          },
+          {
+            "id": "cover_eyebrow",
+            "type": "label",
+            "text": "01 / 沿岸观察",
+            "x": 72,
+            "y": 173,
+            "w": 480,
+            "h": 30,
+            "fontSize": 14,
+            "color": "#97432E",
+            "lineHeight": 20,
+            "fontFamily": "PingFang SC",
+            "role": "eyebrow"
+          },
+          {
+            "id": "cover_title",
+            "type": "paragraph",
+            "text": "把目光\n留在水边。",
+            "x": 68,
+            "y": 228,
+            "w": 498,
+            "h": 174,
+            "fontSize": 56,
+            "color": "#1F353E",
+            "lineHeight": 76,
+            "fontFamily": "Songti SC",
+            "wrap": true,
+            "fontWeight": 600,
+            "role": "protagonist"
+          },
+          {
+            "id": "cover_intro",
+            "type": "paragraph",
+            "text": "一束蓝色掠过，水面很快又恢复平静。\n我们沿着岸边慢慢走，把那些容易错过的\n颜色、声音与停顿，记在这里。",
+            "x": 72,
+            "y": 438,
+            "w": 480,
+            "h": 126,
+            "fontSize": 18,
+            "color": "#60706F",
+            "lineHeight": 32,
+            "fontFamily": "PingFang SC",
+            "wrap": true,
+            "role": "introduction"
+          },
+          {
+            "id": "read_story",
+            "type": "button",
+            "text": "阅读这篇手记   ↗",
+            "x": 72,
+            "y": 628,
+            "w": 252,
+            "h": 56,
+            "fontSize": 16,
+            "color": "#F1F2EA",
+            "lineHeight": 23,
+            "fontFamily": "PingFang SC",
+            "fill": "#1F353E",
+            "fontWeight": 600,
+            "textAlign": "center",
+            "role": "primary-action",
+            "on": {
+              "click": [
+                {
+                  "type": "link",
+                  "page": "field_note"
+                }
+              ]
+            }
+          },
+          {
+            "id": "cover_reading_time",
+            "type": "label",
+            "text": "一篇观察习作 / 约 3 分钟",
+            "x": 72,
+            "y": 712,
+            "w": 480,
+            "h": 30,
+            "fontSize": 13,
+            "color": "#60706F",
+            "lineHeight": 19,
+            "fontFamily": "PingFang SC",
+            "role": "reading-metadata"
+          },
+          {
+            "id": "cover_photo",
+            "type": "image",
+            "src": "assets/media-35d58bc6f9aa5f4e180b4d7b46ae4e589ac818d388d03bb6aefdec8e4b74c561.jpg",
+            "x": 620,
+            "y": 172,
+            "w": 748,
+            "h": 620,
+            "role": "content-image"
+          },
+          {
+            "id": "cover_caption",
+            "type": "label",
+            "text": "普通翠鸟 / ALCD. 001",
+            "x": 620,
+            "y": 814,
+            "w": 530,
+            "h": 28,
+            "fontSize": 12,
+            "color": "#60706F",
+            "lineHeight": 17,
+            "fontFamily": "Menlo",
+            "role": "image-caption"
+          },
+          {
+            "id": "cover_lower_rule",
+            "type": "box",
+            "layout": "stack",
+            "x": 72,
+            "y": 890,
+            "w": 1296,
+            "h": 1,
+            "fill": "#C5CEC6",
+            "children": [],
+            "role": "separator"
+          },
+          {
+            "id": "cover_section",
+            "type": "label",
+            "text": "在蓝色掠过之前",
+            "x": 72,
+            "y": 928,
+            "w": 480,
+            "h": 64,
+            "fontSize": 34,
+            "color": "#1F353E",
+            "lineHeight": 48,
+            "fontFamily": "Songti SC",
+            "fontWeight": 600,
+            "role": "section-heading"
+          },
+          {
+            "id": "cover_afterword",
+            "type": "paragraph",
+            "text": "观察并不总是为了认出一个名字。有时，我们只是多停留一会儿：看看枝条如何伸向水面，听听脚步停下以后，周围又出现了哪些声音。\n\n沿岸的每一处微小变化，都值得被认真看见。",
+            "x": 620,
+            "y": 926,
+            "w": 748,
+            "h": 166,
+            "fontSize": 17,
+            "color": "#60706F",
+            "lineHeight": 30,
+            "fontFamily": "PingFang SC",
+            "wrap": true,
+            "role": "long-content"
+          },
+          {
+            "id": "shore_footer",
+            "type": "label",
+            "text": "岸线 / 慢一点，看得更多。",
+            "x": 72,
+            "y": 1100,
+            "w": 900,
+            "h": 30,
+            "fontSize": 12,
+            "color": "#60706F",
+            "lineHeight": 17,
+            "fontFamily": "PingFang SC",
+            "role": "footer"
+          }
+        ],
+        "role": "page-content"
+      }
+    },
+    {
+      "id": "field_note",
+      "name": "一束蓝色的停顿",
+      "canvas": {
+        "w": 1440,
+        "h": 1400
+      },
+      "root": {
+        "id": "field_note_root",
+        "type": "box",
+        "layout": "stack",
+        "x": 0,
+        "y": 0,
+        "w": 1440,
+        "h": 1400,
+        "fill": "#F1F2EA",
+        "children": [
+          {
+            "id": "article_brand",
+            "type": "label",
+            "text": "岸线 / SHORE NOTES",
+            "x": 72,
+            "y": 29,
+            "w": 520,
+            "h": 42,
+            "fontSize": 22,
+            "color": "#1F353E",
+            "lineHeight": 31,
+            "fontFamily": "Avenir Next",
+            "fontWeight": 600,
+            "letterSpacing": 1,
+            "role": "brand"
+          },
+          {
+            "id": "article_issue",
+            "type": "label",
+            "text": "FIELD JOURNAL   /   NO. 001",
+            "x": 1030,
+            "y": 37,
+            "w": 338,
+            "h": 31,
+            "fontSize": 12,
+            "color": "#60706F",
+            "lineHeight": 17,
+            "fontFamily": "Menlo",
+            "textAlign": "right",
+            "role": "issue-label"
+          },
+          {
+            "id": "article_header_rule",
+            "type": "box",
+            "layout": "stack",
+            "x": 72,
+            "y": 104,
+            "w": 1296,
+            "h": 1,
+            "fill": "#C5CEC6",
+            "children": [],
+            "role": "separator"
+          },
+          {
+            "id": "back_top",
+            "type": "button",
+            "text": "← 返回岸线",
+            "x": 72,
+            "y": 144,
+            "w": 210,
+            "h": 48,
+            "fontSize": 16,
+            "color": "#1F353E",
+            "lineHeight": 23,
+            "fontFamily": "PingFang SC",
+            "fill": "#F1F2EA",
+            "fontWeight": 600,
+            "textAlign": "center",
+            "role": "back-action",
+            "stroke": "#C5CEC6",
+            "strokeWidth": 1,
+            "on": {
+              "click": [
+                {
+                  "type": "link",
+                  "page": "shore"
+                }
+              ]
+            }
+          },
+          {
+            "id": "article_kicker",
+            "type": "label",
+            "text": "观察手记 / 001",
+            "x": 360,
+            "y": 154,
+            "w": 620,
+            "h": 30,
+            "fontSize": 13,
+            "color": "#97432E",
+            "lineHeight": 19,
+            "fontFamily": "Menlo",
+            "role": "eyebrow"
+          },
+          {
+            "id": "article_title",
+            "type": "paragraph",
+            "text": "一束蓝色，\n在水面停了一秒。",
+            "x": 354,
+            "y": 214,
+            "w": 638,
+            "h": 164,
+            "fontSize": 50,
+            "color": "#1F353E",
+            "lineHeight": 70,
+            "fontFamily": "Songti SC",
+            "wrap": true,
+            "fontWeight": 600,
+            "role": "protagonist"
+          },
+          {
+            "id": "article_deck",
+            "type": "paragraph",
+            "text": "在一段安静的岸边，练习把目光放慢。\n不急着靠近，也不急着给这一刻下结论。",
+            "x": 360,
+            "y": 412,
+            "w": 620,
+            "h": 84,
+            "fontSize": 19,
+            "color": "#60706F",
+            "lineHeight": 32,
+            "fontFamily": "PingFang SC",
+            "wrap": true,
+            "role": "introduction"
+          },
+          {
+            "id": "article_byline",
+            "type": "label",
+            "text": "岸线编辑部  /  自然观察习作  /  约 3 分钟",
+            "x": 360,
+            "y": 524,
+            "w": 620,
+            "h": 30,
+            "fontSize": 13,
+            "color": "#60706F",
+            "lineHeight": 19,
+            "fontFamily": "PingFang SC",
+            "role": "byline"
+          },
+          {
+            "id": "article_body_rule",
+            "type": "box",
+            "layout": "stack",
+            "x": 360,
+            "y": 578,
+            "w": 620,
+            "h": 1,
+            "fill": "#C5CEC6",
+            "children": [],
+            "role": "separator"
+          },
+          {
+            "id": "body_heading_1",
+            "type": "label",
+            "text": "慢一点，才看得见",
+            "x": 360,
+            "y": 618,
+            "w": 620,
+            "h": 46,
+            "fontSize": 28,
+            "color": "#1F353E",
+            "lineHeight": 40,
+            "fontFamily": "Songti SC",
+            "fontWeight": 600,
+            "role": "section-heading"
+          },
+          {
+            "id": "body_paragraph_1",
+            "type": "paragraph",
+            "text": "刚停下脚步时，眼前只有一片水。等视线适应了岸边的层次，细枝、倒影与那些轻轻摇动的草，才逐渐从背景里显出来。\n\n那抹蓝色停在低处的枝条上。它没有占据很大的空间，却让整幅画面有了一个安静的重心。我们站在原处，用眼睛沿着枝条的方向看过去，没有再向前。",
+            "x": 360,
+            "y": 692,
+            "w": 620,
+            "h": 180,
+            "fontSize": 18,
+            "color": "#1F353E",
+            "lineHeight": 32,
+            "fontFamily": "PingFang SC",
+            "wrap": true,
+            "role": "long-content"
+          },
+          {
+            "id": "body_heading_2",
+            "type": "label",
+            "text": "给观察留一点余地",
+            "x": 360,
+            "y": 906,
+            "w": 620,
+            "h": 46,
+            "fontSize": 28,
+            "color": "#1F353E",
+            "lineHeight": 40,
+            "fontFamily": "Songti SC",
+            "fontWeight": 600,
+            "role": "section-heading"
+          },
+          {
+            "id": "body_paragraph_2",
+            "type": "paragraph",
+            "text": "一次短暂的相遇，不需要被写成完整的故事。记下当时看见的颜色、姿态与距离，也记下自己没有看清的部分。留白并不是遗漏，而是对现场的一种尊重。\n\n离开时，水面已经换了另一种光。回头再看，枝条空了，沿岸的声音却比来时更清楚。",
+            "x": 360,
+            "y": 980,
+            "w": 620,
+            "h": 224,
+            "fontSize": 18,
+            "color": "#1F353E",
+            "lineHeight": 32,
+            "fontFamily": "PingFang SC",
+            "wrap": true,
+            "role": "long-content"
+          },
+          {
+            "id": "article_photo",
+            "type": "image",
+            "src": "assets/media-8f14c0ecc494fa30e3cee582c6044bc224497d487af1afa1f402f7b02d07a78c.jpg",
+            "x": 1050,
+            "y": 154,
+            "w": 318,
+            "h": 450,
+            "role": "content-image"
+          },
+          {
+            "id": "article_photo_caption",
+            "type": "paragraph",
+            "text": "普通翠鸟\n照片：Frank-2.0 / CC0",
+            "x": 1050,
+            "y": 620,
+            "w": 318,
+            "h": 58,
+            "fontSize": 12,
+            "color": "#60706F",
+            "lineHeight": 22,
+            "fontFamily": "PingFang SC",
+            "wrap": true,
+            "role": "image-caption"
+          },
+          {
+            "id": "marginalia",
+            "type": "box",
+            "layout": "stack",
+            "x": 1050,
+            "y": 740,
+            "w": 318,
+            "h": 300,
+            "fill": "#E0E6DD",
+            "children": [
+              {
+                "id": "aside_label",
+                "type": "label",
+                "text": "观察旁注",
+                "x": 24,
+                "y": 22,
+                "w": 270,
+                "h": 28,
+                "fontSize": 13,
+                "color": "#97432E",
+                "lineHeight": 19,
+                "fontFamily": "PingFang SC",
+                "role": "aside-label"
+              },
+              {
+                "id": "aside_copy",
+                "type": "paragraph",
+                "text": "先看，再记。\n\n记录能够确认的细节，\n也允许自己保留疑问。\n\n把距离留给鸟，\n把时间留给观察。",
+                "x": 24,
+                "y": 76,
+                "w": 270,
+                "h": 202,
+                "fontSize": 16,
+                "color": "#1F353E",
+                "lineHeight": 28,
+                "fontFamily": "PingFang SC",
+                "wrap": true,
+                "role": "aside-copy"
+              }
+            ],
+            "role": "marginalia"
+          },
+          {
+            "id": "save_story",
+            "type": "button",
+            "text": "收藏这篇手记  +",
+            "x": 1050,
+            "y": 1090,
+            "w": 318,
+            "h": 52,
+            "fontSize": 16,
+            "color": "#F1F2EA",
+            "lineHeight": 23,
+            "fontFamily": "PingFang SC",
+            "fill": "#1F353E",
+            "fontWeight": 600,
+            "textAlign": "center",
+            "role": "save-action",
+            "on": {
+              "click": [
+                {
+                  "type": "hide",
+                  "target": "save_story"
+                },
+                {
+                  "type": "show",
+                  "target": "unsave_story"
+                },
+                {
+                  "type": "show",
+                  "target": "saved_note"
+                }
+              ]
+            }
+          },
+          {
+            "id": "unsave_story",
+            "type": "button",
+            "text": "已收藏  ✓  /  取消",
+            "x": 1050,
+            "y": 1090,
+            "w": 318,
+            "h": 52,
+            "fontSize": 16,
+            "color": "#1F353E",
+            "lineHeight": 23,
+            "fontFamily": "PingFang SC",
+            "fill": "#F1F2EA",
+            "fontWeight": 600,
+            "textAlign": "center",
+            "role": "save-action",
+            "visible": false,
+            "stroke": "#1F353E",
+            "strokeWidth": 1,
+            "on": {
+              "click": [
+                {
+                  "type": "hide",
+                  "target": "unsave_story"
+                },
+                {
+                  "type": "show",
+                  "target": "save_story"
+                },
+                {
+                  "type": "hide",
+                  "target": "saved_note"
+                }
+              ]
+            }
+          },
+          {
+            "id": "saved_note",
+            "type": "label",
+            "text": "已放入本次阅读的收藏。",
+            "x": 1050,
+            "y": 1160,
+            "w": 318,
+            "h": 30,
+            "fontSize": 13,
+            "color": "#97432E",
+            "lineHeight": 19,
+            "fontFamily": "PingFang SC",
+            "visible": false,
+            "role": "save-feedback"
+          },
+          {
+            "id": "article_footer_rule",
+            "type": "box",
+            "layout": "stack",
+            "x": 360,
+            "y": 1260,
+            "w": 1008,
+            "h": 1,
+            "fill": "#C5CEC6",
+            "children": [],
+            "role": "separator"
+          },
+          {
+            "id": "back_bottom",
+            "type": "button",
+            "text": "← 回到岸线",
+            "x": 360,
+            "y": 1292,
+            "w": 230,
+            "h": 52,
+            "fontSize": 16,
+            "color": "#1F353E",
+            "lineHeight": 23,
+            "fontFamily": "PingFang SC",
+            "fill": "#F1F2EA",
+            "fontWeight": 600,
+            "textAlign": "center",
+            "role": "back-action",
+            "stroke": "#C5CEC6",
+            "strokeWidth": 1,
+            "on": {
+              "click": [
+                {
+                  "type": "link",
+                  "page": "shore"
+                }
+              ]
+            }
+          },
+          {
+            "id": "article_left_note",
+            "type": "paragraph",
+            "text": "FIELD NOTE\n\n沿岸观察\n一束蓝色的停顿",
+            "x": 72,
+            "y": 256,
+            "w": 210,
+            "h": 132,
+            "fontSize": 13,
+            "color": "#60706F",
+            "lineHeight": 28,
+            "fontFamily": "Menlo",
+            "wrap": true,
+            "role": "section-index"
+          }
+        ],
+        "role": "page-content"
+      }
+    }
+  ]
+}

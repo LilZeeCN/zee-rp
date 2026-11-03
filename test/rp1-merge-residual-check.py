@@ -47,6 +47,43 @@ def run_merge(base, rp, edited, source, meta):
 
 
 class MergeResidualTests(unittest.TestCase):
+    def test_native_save_renumbering_uses_guid_without_delete_add_or_source_loss(self):
+        b, r, m = fixture()
+        for idx, page in enumerate(r['pages']):
+            page['widgets'][0]['guid'] = f'{idx+1:032x}'
+        e = copy.deepcopy(r)
+        for page in e['pages']:
+            page['widgets'][0]['id'] = 77
+        e['pages'][0]['widgets'][0].update(text='native edit', x=24, y=26)
+        result = D.lift_rp_into_spec(b, r, e, baseline_meta=m)
+        self.assertTrue(result['ok'], result)
+        title = result['spec']['pages'][0]['root']['children'][0]
+        self.assertEqual((title['id'], title['text'], title['x'], title['y']), ('title', 'native edit', 24, 26))
+        self.assertFalse(result['liftedNewWidgets'])
+        self.assertFalse(result['liftedDeletedWidgets'])
+        self.assertEqual(result['spec']['pages'][1], b['pages'][1])
+
+    def test_reused_object_number_with_new_guid_is_not_the_old_widget(self):
+        b, r, m = fixture()
+        r['pages'][0]['widgets'][0]['guid'] = 'a' * 32
+        e = copy.deepcopy(r)
+        e['pages'][0]['widgets'][0].update(guid='b' * 32, name='replacement', text='new widget')
+        result = D.lift_rp_into_spec(b, r, e, baseline_meta=m)
+        self.assertTrue(result['ok'], result)
+        self.assertEqual(len(result['liftedNewWidgets']), 1)
+        self.assertEqual(len(result['liftedDeletedWidgets']), 1)
+        self.assertFalse(result['liftedTextEdits'])
+
+    def test_duplicate_native_guid_rejects_without_mutating_source(self):
+        b, r, m = fixture()
+        r['pages'][0]['widgets'][0]['guid'] = 'a' * 32
+        e = copy.deepcopy(r)
+        e['pages'][0]['widgets'].append({**e['pages'][0]['widgets'][0], 'id': 99})
+        before = copy.deepcopy(b)
+        with self.assertRaisesRegex(ValueError, 'Ambiguous edited native widget GUID'):
+            D.lift_rp_into_spec(b, r, e, baseline_meta=m)
+        self.assertEqual(b, before)
+
     def test_source_delete_native_edit_refuses_output(self):
         b, r, m = fixture(); n, e = copy.deepcopy(b), copy.deepcopy(r)
         n['pages'][0]['root']['children'] = []
@@ -240,6 +277,14 @@ class NativeMergeResidualTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.scripts = Path(D.__file__).resolve().parent
+        capability = subprocess.run(['node', '--input-type=module', '-e',
+            'import {nativeTemplateSkipReason} from "./test/host-capabilities.mjs"; console.log(JSON.stringify({skip:nativeTemplateSkipReason()}));'],
+            cwd=cls.scripts.parent, capture_output=True, text=True)
+        if capability.returncode:
+            raise RuntimeError(capability.stderr or capability.stdout)
+        skip_reason = json.loads(capability.stdout).get('skip')
+        if skip_reason:
+            raise unittest.SkipTest(skip_reason)
         cls.temp = tempfile.TemporaryDirectory(prefix='rp1-residual-native-')
         cls.folder = Path(os.environ.get('RP1_MERGE_EVIDENCE_DIR', cls.temp.name))
         cls.folder.mkdir(parents=True, exist_ok=True)

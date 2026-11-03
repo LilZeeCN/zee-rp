@@ -21,6 +21,7 @@ import re
 import sys
 import base64
 import io
+from functools import lru_cache
 from rp_language import compile_language, LanguageError
 from rp_language_cli import read_source
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont
@@ -158,6 +159,7 @@ def resolve_glyph_font_path(ch):
     return None
 
 
+@lru_cache(maxsize=32768)
 def _measure_line_with_fallbacks(ln, font_size, font_weight):
     f_main = load_font(font_size, font_weight)
     if all(is_glyph_renderable_in_pingfang(c) for c in ln):
@@ -852,6 +854,7 @@ def make_button(name, text, variant="primary", w=None, h=32, size=13, radius=6, 
         "fontWeight": snap_token(st["weight"], FONT_WEIGHT_TOKENS),
         "radius": snap_token(radius, RADIUS_TOKENS),
         "align": kwargs.pop("align", "center"),
+        "_text_v_align": "middle",
     }
     node.update(kwargs)
     return node
@@ -1887,7 +1890,7 @@ def measure_node(node, base_dir=None, available_w=None):
         node["_mw"] = int(available_w) if (available_w is not None and (is_fill(node.get("w")) or node.get("w") is None)) else resolve_size(node.get("w"), 320, "w")
         node["_mh"] = resolve_size(node.get("h"), rep_def_h, "h")
         return node["_mw"], node["_mh"]
-    if ntype in ("shape-text", "native-input"):
+    if ntype in ("shape-text", "native-input", "native-form"):
         spans = node.get("spans")
         txt = "".join(str(s.get("text", "")) for s in spans) if isinstance(spans, list) and spans else node.get("text", node.get("content", node.get("placeholder", "")))
         fsz = node.get("fontSize", node.get("size", 13))
@@ -2309,7 +2312,7 @@ def _node_border_sides(node):
     return int(node.get("borderSides", 15))
 
 
-def make_axvg_vector_shape(item_id, name, x, y, w, h, fill_hex=None, stroke_hex=None, radius=0, text=None, font_size=14, font_weight=400, text_color_hex="#1E293B", align="left", alpha=1.0, v_align=None, stroke_width=1, border_sides=15, spans=None, italic=False, underline=False, strikethrough=False, letter_spacing=0, gradient=None):
+def make_axvg_vector_shape(item_id, name, x, y, w, h, fill_hex=None, stroke_hex=None, radius=0, text=None, font_size=14, font_weight=400, text_color_hex="#1E293B", align="left", alpha=1.0, v_align=None, stroke_width=1, border_sides=15, spans=None, italic=False, underline=False, strikethrough=False, letter_spacing=0, gradient=None, font_family="Inter", rotation=0):
     w = max(1, int(round(w)))
     h = max(1, int(round(h)))
     x = int(round(x))
@@ -2343,7 +2346,7 @@ def make_axvg_vector_shape(item_id, name, x, y, w, h, fill_hex=None, stroke_hex=
         "visible": True,
         "isLocked": False,
         "isNameDynamic": False,
-        "rotation": 0,
+        "rotation": float(rotation or 0),
         "opacity": float(alpha),
         "rect": {"location": {"x": x, "y": y}, "size": {"width": w, "height": h}},
         "resizingConstraints": {
@@ -2382,7 +2385,7 @@ def make_axvg_vector_shape(item_id, name, x, y, w, h, fill_hex=None, stroke_hex=
         return {
             "type": 0,
             "text": str(run_text),
-            "family": "Inter",
+            "family": str(font_family or "Inter"),
             "typeface": tf,
             "style": 2 if r_italic else 0,
             "weight": wv,
@@ -2422,7 +2425,7 @@ def make_axvg_vector_shape(item_id, name, x, y, w, h, fill_hex=None, stroke_hex=
     return item
 
 
-def make_axvg_image_shape(item_id, name, x, y, w, h, image_key):
+def make_axvg_image_shape(item_id, name, x, y, w, h, image_key, rotation=0):
     """创建支持透明 PNG 的 Axvg 图片元件 (backgroundFills type=3 + imageMap)。"""
     return {
         "itemType": 1,
@@ -2431,7 +2434,7 @@ def make_axvg_image_shape(item_id, name, x, y, w, h, image_key):
         "visible": True,
         "isLocked": False,
         "isNameDynamic": False,
-        "rotation": 0,
+        "rotation": float(rotation or 0),
         "opacity": 1,
         "resizingConstraints": {
             "hasFixedLeft": True,
@@ -2753,6 +2756,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
     dynamic_panels = []
     repeaters = []
     native_inputs = []
+    native_styles = []
     modal_targets = []
     image_map = {}
     emitted_names = set()
@@ -2807,6 +2811,13 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
         nx, ny, nw, nh = node["_x"], node["_y"], node["_w"], node["_h"]
         name = unique_emit_name(node.get("name") or f"grp-{ntype}")
         cur_modal = in_modal or bool(node.get("isModal", False))
+        state_fields = {key: copy.deepcopy(node[key]) for key in ("selected", "disabled", "selectionGroup") if key in node}
+        state_styles = {state: {key: resolve_color(value, theme_dict) if key in ("fill", "stroke", "color") else value
+                               for key, value in values.items()}
+                        for state, values in (node.get("styles") or {}).items()}
+        has_native_style = bool(state_styles or state_fields)
+        if has_native_style and ntype != "native-form":
+            native_styles.append({"name": name, **state_fields, **({"styles": state_styles} if state_styles else {})})
         if node.get("_master_instance") and not include_dynamic_panel_placeholders:
             master_instances.append({"master": node["_master_instance"], "x": nx, "y": ny, "w": nw, "h": nh})
             slot_items = []
@@ -2892,7 +2903,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 "kind": "image", "name": name, "x": nx, "y": ny, "w": nw, "h": nh,
                 "imageKey": img_key, "b64": img_b64, "inModal": cur_modal,
             })
-            return make_axvg_image_shape(next_id(), name, nx, ny, nw, nh, img_key)
+            return make_axvg_image_shape(next_id(), name, nx, ny, nw, nh, img_key, rotation=node.get("rotation"))
         if ntype == "image":
             src = node.get("src") or node.get("image") or node.get("file")
             img_info = load_image_asset(src, base_dir=base_dir)
@@ -2927,7 +2938,48 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 **({"b64": image_data} if radius or opacity != 1 else {"pngPath": img_info["path"]}),
                 "inModal": cur_modal,
             })
-            return make_axvg_image_shape(next_id(), name, nx, ny, nw, nh, image_key)
+            return make_axvg_image_shape(next_id(), name, nx, ny, nw, nh, image_key, rotation=node.get("rotation"))
+        if ntype == "native-form":
+            kind = node["kind"]
+            style = {
+                "fontSize": node.get("fontSize", node.get("size", 14)),
+                "fontWeight": node.get("fontWeight", node.get("weight", 400)),
+                "color": resolve_color(node.get("color", "$ink"), theme_dict),
+                "align": node.get("align", "left"),
+            }
+            for key in ("fill", "stroke"):
+                if key in node:
+                    style[key] = resolve_color(node[key], theme_dict)
+            for key in ("fontFamily", "radius", "strokeWidth", "opacity", "textPaddingX"):
+                if key in node:
+                    style[key] = node[key]
+            config = {"name": name, "kind": kind, "x": nx, "y": ny, "w": nw, "h": nh, "style": style,
+                      **{key: copy.deepcopy(node[key]) for key in ("text", "value", "placeholder", "checked", "group", "options", "selectedIndex", "multiple", "selectedIndices", "rotation") if key in node},
+                      **state_fields, **({"styles": state_styles} if state_styles else {})}
+            if active_when_ctx[0] and any(not ctx[2] for ctx in active_when_ctx[0]):
+                config["visible"] = False
+            native_inputs.append(config)
+            if cur_modal:
+                modal_targets.append(name)
+            if not include_dynamic_panel_placeholders:
+                slot_name = unique_emit_name(f"__native-slot-{name}")
+                config["slotName"] = slot_name
+                return make_axvg_vector_shape(next_id(), slot_name, nx, ny, nw, nh,
+                                              fill_hex=None, stroke_hex=None, radius=0)
+            preview_text = str(node.get("text", node.get("value", node.get("placeholder", ""))))
+            if kind in ("radio", "checkbox"):
+                preview_text = (("● " if node.get("checked") else "○ ") if kind == "radio" else ("☑ " if node.get("checked") else "□ ")) + preview_text
+            elif kind in ("combobox", "listbox"):
+                options = node.get("options", [])
+                indices = node.get("selectedIndices", [node.get("selectedIndex", 0)]) if kind == "listbox" else [node.get("selectedIndex", 0)]
+                preview_text = (" / ".join(options[i] for i in indices) if indices else "") + (" ▾" if kind == "combobox" else "")
+            flat_spec_children.append({"kind": "rect", "name": name, "x": nx, "y": ny, "w": nw, "h": nh,
+                                       "fill": style.get("fill"), "stroke": style.get("stroke"), "radius": style.get("radius", 0),
+                                       "text": preview_text, "size": style["fontSize"], "weight": style["fontWeight"],
+                                       "color": style["color"], "align": style["align"], "inModal": cur_modal})
+            return make_axvg_vector_shape(next_id(), name, nx, ny, nw, nh, fill_hex=style.get("fill"), stroke_hex=style.get("stroke"),
+                                          radius=style.get("radius", 0), text=preview_text, font_size=style["fontSize"], font_weight=style["fontWeight"],
+                                          text_color_hex=style["color"], align=style["align"], rotation=node.get("rotation"))
         if ntype == "native-input":
             fill_h = resolve_color(node.get("fill", "$surface-2"), theme_dict)
             stroke_h = resolve_color(node.get("stroke", "$line-strong"), theme_dict)
@@ -2947,6 +2999,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                     "color": resolve_color(node.get("color", "$ink"), theme_dict),
                     "align": node.get("align", "left"),
                     "textPaddingX": node.get("textPaddingX", 10),
+                    "rotation": node.get("rotation", 0),
                 },
             })
             if cur_modal:
@@ -2966,12 +3019,14 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 "stroke": stroke_h,
                 "radius": node.get("radius", 6),
                 "isNativeInputBg": True,
+                "rotation": float(node.get("rotation") or 0),
                 "inModal": cur_modal,
                 **({"previewText": inp_txt, "size": node.get("fontSize", node.get("size", 13)), "weight": node.get("fontWeight", node.get("weight", 400)), "color": inp_col, "align": node.get("align", "left")} if inp_txt else {}),
             })
             return make_axvg_vector_shape(
                 next_id(), bg_name, nx, ny, nw, nh,
                 fill_hex=fill_h, stroke_hex=stroke_h, radius=node.get("radius", 6),
+                rotation=node.get("rotation"),
             )
         if ntype in ("label", "shape-text"):
             fill_h = resolve_color(node.get("fill"), theme_dict)
@@ -3007,7 +3062,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
             sw_v = float(node.get("strokeWidth", 1))
             bs_v = _node_border_sides(node)
             has_opt = _has_optical_fx(node)
-            if (has_opt or ((fill_h or stroke_h) and aln in ("left", "right") and nw >= 36)) and txt is not None and str(txt) != "":
+            if not has_native_style and (has_opt or ((fill_h or stroke_h) and aln in ("left", "right") and nw >= 36)) and txt is not None and str(txt) != "":
                 tw, _ = measure_text(txt, fsz, fwt)
                 pad_x = 0 if aln == "center" else min(int(node.get("textPaddingX", 10)), max(0, (nw - max(1, tw - 8)) // 2))
                 if has_opt or pad_x >= 4:
@@ -3047,18 +3102,18 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                     txt_shape = make_axvg_vector_shape(
                         next_id(), name, tx, ny, tw_box, nh,
                         fill_hex=None, stroke_hex=None, radius=0,
-                        text=txt, font_size=fsz, font_weight=fwt, text_color_hex=txt_h, align=aln, alpha=alpha_v, v_align="middle",
+                        text=txt, font_size=fsz, font_weight=fwt, text_color_hex=txt_h, align=aln, alpha=alpha_v, v_align="middle", font_family=node.get("fontFamily", "Inter"),
                         spans=resolved_spans, italic=node.get("italic", False), underline=node.get("underline", False),
                         strikethrough=node.get("strikethrough", False), letter_spacing=node.get("letterSpacing", 0),
                     )
                     return {
                         "flippedHorizontal": False, "flippedVertical": False, "id": next_id(), "name": grp_box_name,
-                        "visible": True, "isLocked": False, "isNameDynamic": False, "rotation": 0,
+                        "visible": True, "isLocked": False, "isNameDynamic": False, "rotation": float(node.get("rotation") or 0),
                         "rect": {"location": {"x": nx, "y": ny}, "size": {"width": nw, "height": nh}},
                         "resizingConstraints": {"hasFixedLeft": True, "hasFixedRight": False, "hasFixedTop": True, "hasFixedBottom": False, "hasFixedWidth": True, "hasFixedHeight": True},
                         "itemType": 0, "effects": [], "scene": {"items": [bg_shape, txt_shape]},
                     }
-            if resolved_spans and len(resolved_spans) > 1 and not fill_h and not stroke_h:
+            if not has_native_style and resolved_spans and len(resolved_spans) > 1 and not fill_h and not stroke_h:
                 max_sp_sz = max(snap_token(sp.get("fontSize", sp.get("size", fsz)), FONT_SIZE_TOKENS) for sp in resolved_spans)
                 cur_sx = nx
                 span_shapes = []
@@ -3089,7 +3144,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                     span_shapes.append(make_axvg_vector_shape(
                         next_id(), s_name, sx_box, sy_box, sw_box, sh_box,
                         fill_hex=None, stroke_hex=None, radius=0,
-                        text=stxt, font_size=s_sz, font_weight=s_wt, text_color_hex=s_col, align="left",
+                        text=stxt, font_size=s_sz, font_weight=s_wt, text_color_hex=s_col, align="left", font_family=node.get("fontFamily", "Inter"),
                         alpha=alpha_v, v_align="middle",
                         italic=bool(sp.get("italic", node.get("italic", False))),
                         underline=bool(sp.get("underline", node.get("underline", False))),
@@ -3098,7 +3153,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 if span_shapes:
                     return {
                         "flippedHorizontal": False, "flippedVertical": False, "id": next_id(), "name": name,
-                        "visible": True, "isLocked": False, "isNameDynamic": False, "rotation": 0,
+                        "visible": True, "isLocked": False, "isNameDynamic": False, "rotation": float(node.get("rotation") or 0),
                         "rect": {"location": {"x": nx, "y": ny}, "size": {"width": nw, "height": nh}},
                         "resizingConstraints": {"hasFixedLeft": True, "hasFixedRight": False, "hasFixedTop": True, "hasFixedBottom": False, "hasFixedWidth": True, "hasFixedHeight": True},
                         "itemType": 0, "effects": [], "scene": {"items": span_shapes},
@@ -3115,14 +3170,17 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 **({"wrap": True} if node.get("wrap") else {}),
                 **({"spans": resolved_spans} if resolved_spans else {}),
                 **({"worstCase": node["_worst_case"]} if "_worst_case" in node else {}),
+                **({"textAlignment": 1, "_expectedTextAlignment": 1} if node.get("_text_v_align") == "middle" else {}),
             })
             return make_axvg_vector_shape(
                 next_id(), name, nx, ny, nw, nh,
                 fill_hex=fill_h, stroke_hex=stroke_h, radius=rad,
-                text=txt, font_size=fsz, font_weight=fwt, text_color_hex=txt_h, align=aln,
+                text=txt, font_size=fsz, font_weight=fwt, text_color_hex=txt_h, align=aln, font_family=node.get("fontFamily", "Inter"),
                 alpha=alpha_v, stroke_width=sw_v, border_sides=bs_v, spans=resolved_spans,
                 italic=node.get("italic", False), underline=node.get("underline", False),
                 strikethrough=node.get("strikethrough", False), letter_spacing=node.get("letterSpacing", 0),
+                rotation=node.get("rotation"),
+                v_align=node.get("_text_v_align"),
             )
         # Box / Container
         fill_h = resolve_color(node.get("fill"), theme_dict)
@@ -3175,6 +3233,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                     next_id(), bg_name, nx, ny, nw, nh,
                     fill_hex=fill_h, stroke_hex=stroke_h, radius=rad,
                     alpha=float(node.get("opacity", 1.0)), stroke_width=float(node.get("strokeWidth", 1)), border_sides=_node_border_sides(node),
+                    rotation=node.get("rotation"),
                 )
             )
         sub_items = []
@@ -3207,6 +3266,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                     next_id(), leaf_name, nx, ny, nw, nh,
                     fill_hex="#FFFFFF00", stroke_hex=None, radius=0,
                     alpha=float(node.get("opacity", 1.0)), stroke_width=0, border_sides=0,
+                    rotation=node.get("rotation"),
                 )
         if not child_items:
             return None
@@ -3219,7 +3279,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 "visible": True,
                 "isLocked": False,
                 "isNameDynamic": False,
-                "rotation": 0,
+                "rotation": float(node.get("rotation") or 0),
                 "rect": {"location": {"x": nx, "y": ny}, "size": {"width": nw, "height": nh}},
                 "resizingConstraints": {
                     "hasFixedLeft": True,
@@ -3300,6 +3360,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
         "dynamicPanels": dynamic_panels,
         "repeaters": repeaters,
         "nativeInputs": native_inputs,
+        "nativeStyles": native_styles,
         "modalTargets": modal_targets,
         "phoneShellOpts": shell_opts,
         "screenBgHex": resolve_color(root_node.get("fill", "$bg"), theme_dict) or "#F4F6F9",
@@ -3348,6 +3409,9 @@ def compose_device_shell(emitted, page_prefix, shell_name="iphone-x"):
     for dp in emitted.get("dynamicPanels", []):
         dp["x"] += sx
         dp["y"] += sy
+    for rep in emitted.get("repeaters", []):
+        rep["x"] += sx
+        rep["y"] += sy
     for ni in emitted.get("nativeInputs", []):
         ni["x"] += sx
         ni["y"] += sy
@@ -3406,13 +3470,21 @@ def compose_device_shell(emitted, page_prefix, shell_name="iphone-x"):
         })
         # Foreground fills are not clipped by a rounded parent in Axure.
         # Cover only the pixels outside the display, leaving every UI object editable.
-        screen_mask = Image.new("RGBA", (sw * 2, sh * 2), "#09090B")
-        ImageDraw.Draw(screen_mask).rounded_rectangle(
-            [0, 0, sw * 2 - 1, sh * 2 - 1], radius=88, fill=(0, 0, 0, 0))
-        bezel_clip = Image.new("L", screen_mask.size, 0)
-        ImageDraw.Draw(bezel_clip).rounded_rectangle(
-            [-20, -20, sw * 2 + 19, sh * 2 + 19], radius=104, fill=255)
-        screen_mask.putalpha(ImageChops.multiply(screen_mask.getchannel("A"), bezel_clip))
+        # The rim and bezel sit under the content, so the mask repaints them (and the white
+        # frame outside) instead of going transparent there; otherwise square content corners show.
+        screen_mask = Image.new("RGBA", (sw * 2, sh * 2), "#FFFFFF")
+        mask_draw = ImageDraw.Draw(screen_mask)
+        rim_o, bezel_o = (sx - 6) * 2, (sx - 10) * 2
+        mask_draw.rounded_rectangle(
+            [-rim_o, -rim_o, sw * 2 + rim_o - 1, sh * 2 + rim_o - 1], radius=112,
+            fill="#3F3F46", outline="#71717A", width=3)
+        mask_draw.rounded_rectangle(
+            [-bezel_o, -bezel_o, sw * 2 + bezel_o - 1, sh * 2 + bezel_o - 1], radius=104,
+            fill="#09090B", outline="#27272A", width=2)
+        screen_hole = Image.new("L", screen_mask.size, 255)
+        ImageDraw.Draw(screen_hole).rounded_rectangle(
+            [0, 0, sw * 2 - 1, sh * 2 - 1], radius=88, fill=0)
+        screen_mask.putalpha(screen_hole)
         for corner, cx, cy in (("tl", 0, 0), ("tr", sw - 44, 0),
                                ("bl", 0, sh - 44), ("br", sw - 44, sh - 44)):
             mask_key, mask_data = _encode_pil_png(screen_mask.crop(
@@ -3633,7 +3705,9 @@ def text_ink_geometry(child, scale=1):
         tx = x + width - ink_w - padding
     else:
         tx = x + padding
-    ty = y + (height - ink_h) // 2 - bbox[1]
+    vertical = child.get("textAlignment", 1)
+    offset = 0 if vertical == 0 else height - ink_h if vertical == 2 else (height - ink_h) // 2
+    ty = y + offset - bbox[1]
     return font, tx, ty, [tx + bbox[0], ty + bbox[1], ink_w, ink_h]
 
 
@@ -3869,6 +3943,18 @@ def ensure_unique_names(root_node, scope_prefix=""):
 def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False):
     """执行领域自适应的两级量化审计：结构与安全门禁 (硬失败) + 审美与令牌门禁 (默认告警，--strict-audit 下升级为硬失败)。"""
     flat = [c for c in emitted_preview["flatChildren"] if not c.get("inModal") and not c.get("_repeaterPreviewExtraRow")]
+    # Check the actual native scene, not just the offline text placement: a
+    # transparent button must retain the same centering as a filled button.
+    native_alignment = {}
+    def index_alignment(item):
+        if "textAlignment" in item:
+            native_alignment[item.get("name")] = item["textAlignment"]
+        for child in item.get("scene", {}).get("items", []):
+            index_alignment(child)
+    for item in emitted_preview.get("axvg", {}).get("scene", {}).get("items", []):
+        index_alignment(item)
+    alignment_mismatches = [c for c in flat if "_expectedTextAlignment" in c
+                            and native_alignment.get(c.get("name")) != c["_expectedTextAlignment"]]
     # 遮挡审计：文字墨迹被后续不透明图元大面积覆盖时告警（此前完全无检查，容易“全绿但难看”）
     _opaque_later = []
     for _idx, _ch in enumerate(flat):
@@ -4199,12 +4285,21 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
                 cx, cy, cw, ch_h = ch["_x"], ch["_y"], ch["_w"], ch["_h"]
                 if cx < nx - 2 or cy < ny - 2 or (cx + cw) > (nx + nw + 2) or (cy + ch_h) > (ny + nh + 2):
                     container_overflow_count += 1
+                    _ov = {"left": max(0, nx - cx), "top": max(0, ny - cy),
+                           "right": max(0, (cx + cw) - (nx + nw)),
+                           "bottom": max(0, (cy + ch_h) - (ny + nh))}
+                    _sides = "、".join(f"{_k}侧 {int(_v)}px" for _k, _v in _ov.items() if _v > 0)
+                    _cw = ch.get("name") or ch.get("id") or "子元素"
+                    _pn = node.get("name") or node.get("id") or "容器"
+                    _axis = "宽度" if (_ov["left"] or _ov["right"]) else "高度"
+                    _hint = ("收窄该子项的 w，或给同行兄弟子项设 flex=1 分配剩余宽度"
+                             if _axis == "宽度" else "减少该子项高度，或让容器改 h=hug/auto")
                     failures.append({"gate": "no_container_overflow", "severity": "structural",
                                      "widget": ch.get("name", ""), "box": [cx, cy, cw, ch_h],
                                      "container": node.get("name", ""), "containerBox": [nx, ny, nw, nh],
-                                     "overflow": {"left": max(0, nx - cx), "top": max(0, ny - cy),
-                                                  "right": max(0, (cx + cw) - (nx + nw)),
-                                                  "bottom": max(0, (cy + ch_h) - (ny + nh))},
+                                     "overflow": _ov,
+                                     "message": f"「{_cw}」超出容器「{_pn}」{_sides}（子 {int(cx)},{int(cy)} {int(cw)}×{int(ch_h)}；容器 {int(nx)},{int(ny)} {int(nw)}×{int(nh)}）。建议：{_hint}",
+                                     "suggestion": _hint,
                                      "detail": "子元件超出父容器边界 >2px"})
             for idx_a, ca in enumerate(children):
                 for cb in children[idx_a + 1:]:
@@ -4277,7 +4372,8 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
             known_names.update(inp["name"] for inp in st.get("nativeInputs", []))
     for inp in compile_plan.get("nativeInputs", []):
         known_names.add(inp["name"])
-        known_names.add(inp["bgName"])
+        if inp.get("bgName"):
+            known_names.add(inp["bgName"])
     known_pages = set(compile_plan.get("knownPageNames", []))
 
     dangling_targets = 0
@@ -4371,11 +4467,17 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
                          "target": _d.get("target", ""),
                          "similar": _d.get("similar", []),
                          "detail": "交互目标元件不存在" + (f"；页面内相似名：{', '.join(_d['similar'])}" if _d.get("similar") else "")})
+    for child in alignment_mismatches:
+        failures.append({"gate": "button_text_alignment_ok", "severity": "structural",
+                         "widget": child.get("name"), "expected": child["_expectedTextAlignment"],
+                         "actual": native_alignment.get(child.get("name")),
+                         "detail": "按钮原生文字必须垂直居中，与填充色及激活状态无关"})
     # 给每条明细补 pageName（由调用方注入或留空）
     for _f in failures:
         if not _f.get("page"):
             _f["page"] = compile_plan.get("pageName", "")
     structural_gates = {
+        "button_text_alignment_ok": not alignment_mismatches,
         "no_text_overlap": text_overlap_count == 0,
         "no_text_clip": text_clip_count == 0,
         "no_missing_glyphs": missing_glyph_count == 0,
@@ -4814,7 +4916,7 @@ def compile_prototype_bundle(out_dir, theme_name="enterprise-light", title_overr
             scene["audit"] = audit_prototype(st_tree, st_emitted, {
                 "domain": "web", "theme": theme_name, "auditScope": "container-local",
                 "allMainWidgets": st_emitted["flatChildren"], "dynamicPanels": [],
-                "nativeInputs": st_emitted["nativeInputs"],
+                "nativeInputs": st_emitted["nativeInputs"], "nativeStyles": st_emitted["nativeStyles"],
             }, strict_audit=strict_audit)
             scene.update({"axvgPath": st_axvg_path, "specPath": st_spec_path, "pngPath": st_png_path})
             state_entries.append({
@@ -5089,7 +5191,7 @@ def compile_prototype_bundle(out_dir, theme_name="enterprise-light", title_overr
         "mainAxvgPath": main_axvg_path,
         "mainSpecPath": main_spec_path,
         "dynamicPanels": panel_plans,
-        "nativeInputs": emitted_main["nativeInputs"],
+        "nativeInputs": emitted_main["nativeInputs"], "nativeStyles": emitted_main["nativeStyles"],
         "modalTargets": ordered_modal_targets,
         "allMainWidgets": emitted_main["flatChildren"],
         "interactions": [] if no_interactions else interactions,
@@ -5131,7 +5233,7 @@ def compile_prototype_bundle(out_dir, theme_name="enterprise-light", title_overr
             scenes.append(scene)
             scene["audit"] = audit_prototype(modal, emitted, {
                 "domain": "web", "theme": theme_name, "auditScope": "container-local",
-                "allMainWidgets": emitted["flatChildren"], "dynamicPanels": [], "nativeInputs": emitted["nativeInputs"],
+                "allMainWidgets": emitted["flatChildren"], "dynamicPanels": [], "nativeInputs": emitted["nativeInputs"], "nativeStyles": emitted["nativeStyles"],
             }, strict_audit=strict_audit)
             audit_modal_scenes(modal)
     audit_modal_scenes(root)
@@ -5923,6 +6025,8 @@ KNOWN_NODE_TYPES = {
     "sparkline",
     "input",
     "native-input",
+    "native-form",
+    "radio", "checkbox", "combobox", "listbox",
     "divider",
     "badge",
     "card",
@@ -5941,7 +6045,7 @@ KNOWN_NODE_TYPES = {
 }
 
 KNOWN_NODE_PROPS = {
-    "type", "name", "prefix", "x", "y", "w", "h", "flex", "layout", "padding", "gap",
+    "type", "name", "prefix", "x", "y", "w", "h", "flex", "layout", "padding", "gap", "rotation",
     "columnGap", "rowGap", "align", "justify", "equalHeight", "fill", "stroke", "color",
     "radius", "isGroup", "bgName", "isModal", "children", "text", "content", "fontSize",
     "size", "fontWeight", "weight", "lineHeight", "lineGap", "maxLines", "variant",
@@ -5962,6 +6066,7 @@ KNOWN_NODE_PROPS = {
     "wrap", "colSpan", "rowSpan", "right", "bottom", "anchor", "z", "after", "afterGap", "alignX", "pin", "pinGap",
     "spans", "italic", "underline", "strikethrough", "letterSpacing",
     "icon", "points", "smooth", "direction", "visible", "hidden", "adaptive",
+    "styles", "selected", "disabled", "selectionGroup", "checked", "group", "selectedIndex", "selectedIndices", "multiple", "kind",
     "centerAction", "_expanded", "_mw", "_mh", "_x", "_y", "_w", "_h",
 }
 
@@ -6005,7 +6110,7 @@ def validate_node_schema(node, warnings_out=None, path="root", allow_fallback=Fa
 
 def _preserve_when_attrs(src, dst):
     if isinstance(src, dict) and isinstance(dst, dict):
-        for k in ("_when_group", "_when_branch", "_when_default_visible", "_row_visibles", "visible", "hidden"):
+        for k in ("_when_group", "_when_branch", "_when_default_visible", "_row_visibles", "visible", "hidden", "styles", "selected", "disabled", "selectionGroup"):
             if k in src and k not in dst:
                 dst[k] = src[k]
         for coord_k in ("x", "y", "w", "h"):
@@ -6069,7 +6174,7 @@ def _expand_declarative_tree_core(node, prefix="p1"):
         btn_name = node.get("name", f"{pfx}-{'badge' if is_badge else 'button'}")
         btn_extra = {}
         for k in (
-            "fill", "stroke", "color", "align", "textPaddingX", "opacity", "strokeWidth",
+            "fill", "stroke", "color", "align", "textPaddingX", "opacity", "rotation", "strokeWidth",
             "borderSides", "borderTop", "borderBottom", "borderLeft", "borderRight",
             "backdropBlur", "innerGlow", "noise", "gradient", "shadow", "aurora",
             "x", "y", "right", "bottom", "anchor", "colSpan", "rowSpan",
@@ -6101,6 +6206,15 @@ def _expand_declarative_tree_core(node, prefix="p1"):
         if isinstance(node.get("id"), str):
             _btn_out.setdefault("id", node["id"])  # 保留逻辑 id，after/引用才能命中
         return _btn_out
+    if ntype in ("radio", "checkbox", "combobox", "listbox") or (ntype == "input" and node.get("native") is True and node.get("styles")):
+        out_form = {**node, "type": "native-form", "kind": ntype, "name": node.get("name", f"{pfx}-{ntype}")}
+        out_form.setdefault("h", 120 if ntype == "listbox" else 36)
+        out_form.setdefault("w", 240 if ntype in ("input", "combobox", "listbox") else 160)
+        if ntype in ("input", "combobox", "listbox"):
+            out_form.setdefault("fill", "$surface")
+            out_form.setdefault("stroke", "$line")
+            out_form.setdefault("strokeWidth", 1)
+        return _preserve_when_attrs(node, out_form)
     if ntype == "input":
         inp_name = node.get("name", f"{pfx}-input")
         ph = node.get("text", node.get("value", node.get("placeholder", "请输入...")))
@@ -6119,7 +6233,7 @@ def _expand_declarative_tree_core(node, prefix="p1"):
                 "stroke": node.get("stroke", "$line-strong"),
                 "radius": snap_token(node.get("radius", 6), RADIUS_TOKENS),
             }
-            for key in ("fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX", "x", "y", "right", "bottom", "anchor"):
+            for key in ("fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX", "rotation", "x", "y", "right", "bottom", "anchor"):
                 if key in node:
                     out_ni[key] = node[key]
             if "flex" in node:
@@ -7252,7 +7366,7 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
                     json.dump(em_m["axvg"], f, ensure_ascii=False, indent=2)
                 names = {c["name"] for c in em_m["flatChildren"]} | {n["name"] for n in em_m["nativeInputs"]}
                 master_plans.append({"id": mid, "name": master_defs[mid].get("name", mid), "w": mw, "h": mh,
-                    "axvgPath": m_path, "nativeInputs": em_m["nativeInputs"],
+                    "axvgPath": m_path, "nativeInputs": em_m["nativeInputs"], "nativeStyles": em_m["nativeStyles"],
                     "interactions": [ix for ix in p_spec.get("interactions", []) if ix["trigger"] in names]})
 
         collect_native_metadata(root_main)
@@ -7326,12 +7440,12 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
                 "pageName": p_name, "language": "rp/1" if language_ir else None,
                 "domain": p_domain, "theme": theme_name, "dynamicPanels": panels, "auditScope": "container-local",
                 "repeaters": repeaters, "allMainWidgets": emitted["flatChildren"],
-                "nativeInputs": emitted["nativeInputs"], "schemaWarnings": [],
+                "nativeInputs": emitted["nativeInputs"], "nativeStyles": emitted["nativeStyles"], "schemaWarnings": [],
             }, strict_audit=is_strict)
             scene.update({"axvgPath": axvg_path, "specPath": spec_path, "pngPath": png_path})
             compile_modal_scenes(stage_tree, tag)
             return {"sceneId": tag, "audit": scene["audit"], "axvgPath": axvg_path, "specPath": spec_path, "pngPath": png_path,
-                    "widgetNames": [c["name"] for c in emitted["flatChildren"]], "nativeInputs": emitted["nativeInputs"],
+                    "widgetNames": [c["name"] for c in emitted["flatChildren"]], "nativeInputs": emitted["nativeInputs"], "nativeStyles": emitted["nativeStyles"],
                     "dynamicPanels": panels, "repeaters": repeaters}
 
         def compile_modal_scenes(tree, tag):
@@ -7406,7 +7520,7 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
             "mainSpecPath": p_spec_path,
             "dynamicPanels": dp_plans,
             "repeaters": repeater_plans,
-            "nativeInputs": em_main["nativeInputs"],
+            "nativeInputs": em_main["nativeInputs"], "nativeStyles": em_main["nativeStyles"],
             "modalTargets": em_main["modalTargets"],
             "allMainWidgets": em_main["flatChildren"],
             "interactions": p_interactions,
@@ -7541,7 +7655,7 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
         "mainAxvgPath": first_page["mainAxvgPath"],
         "mainSpecPath": first_page["mainSpecPath"],
         "dynamicPanels": first_page["dynamicPanels"],
-        "nativeInputs": first_page["nativeInputs"],
+        "nativeInputs": first_page["nativeInputs"], "nativeStyles": first_page["nativeStyles"],
         "modalTargets": first_page["modalTargets"],
         "allMainWidgets": first_page["allMainWidgets"],
         "interactions": first_page["interactions"],
@@ -8064,14 +8178,18 @@ def _build_layout_diagnostics(bundle_res, ir):
                         if cand in by_name:
                             resolved_ptr = by_name[cand]
                             break
+        _readable = _f.get("message") if isinstance(_f, dict) else None
         _msg = _f if isinstance(_f, str) else json.dumps(_f, ensure_ascii=False)
-        fails.append({
+        _entry = {
             "severity": "error",
             "code": (_f.get("code") if isinstance(_f, dict) and _f.get("code") else "E_LAYOUT"),
             "pointer": resolved_ptr,
             "pageName": (_f.get("page") if isinstance(_f, dict) else None),
-            "message": _msg,
-        })
+            "message": _readable or _msg,
+        }
+        if _readable:
+            _entry["data"] = _f
+        fails.append(_entry)
     return fails
 
 

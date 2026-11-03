@@ -1,0 +1,90 @@
+{
+  "originalDir": "assets/original",
+  "crops": [
+    {
+      "src": "kingfisher.jpg",
+      "out": "home_photo.jpg",
+      "w": 402,
+      "h": 640,
+      "fx": 0.4026,
+      "fy": 0.5,
+      "fh": 1,
+      "fadeFrom": 450,
+      "fadeToToken": "bg"
+    },
+    {
+      "src": "kingfisher.jpg",
+      "out": "sp_photo.jpg",
+      "w": 402,
+      "h": 420,
+      "fx": 0.3946,
+      "fy": 0.5257,
+      "fh": 0.8,
+      "fadeFrom": 330,
+      "fadeToToken": "bg"
+    },
+    {
+      "src": "kingfisher.jpg",
+      "out": "sp_mark_back.jpg",
+      "w": 96,
+      "h": 96,
+      "fx": 0.262,
+      "fy": 0.57,
+      "fh": 0.2
+    },
+    {
+      "src": "kingfisher.jpg",
+      "out": "sp_mark_belly.jpg",
+      "w": 96,
+      "h": 96,
+      "fx": 0.395,
+      "fy": 0.47,
+      "fh": 0.2
+    },
+    {
+      "src": "kingfisher.jpg",
+      "out": "sp_mark_bill.jpg",
+      "w": 96,
+      "h": 96,
+      "fx": 0.4,
+      "fy": 0.36,
+      "fh": 0.19
+    },
+    {
+      "src": "kingfisher.jpg",
+      "out": "rec_photo.jpg",
+      "w": 322,
+      "h": 198,
+      "fx": 0.43,
+      "fy": 0.56,
+      "fh": 0.72
+    },
+    {
+      "src": "kingfisher.jpg",
+      "out": "ok_photo.jpg",
+      "w": 230,
+      "h": 310,
+      "fx": 0.37,
+      "fy": 0.567,
+      "fh": 0.75
+    },
+    {
+      "src": "kingfisher.jpg",
+      "out": "jr_photo.jpg",
+      "w": 282,
+      "h": 186,
+      "fx": 0.44,
+      "fy": 0.55,
+      "fh": 0.72
+    },
+    {
+      "src": "kingfisher.jpg",
+      "out": "jr_met_photo.jpg",
+      "w": 52,
+      "h": 52,
+      "fx": 0.4,
+      "fy": 0.36,
+      "fh": 0.19
+    }
+  ]
+}

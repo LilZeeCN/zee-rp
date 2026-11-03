@@ -1,0 +1,1201 @@
+{
+  "language": "rp/1",
+  "target": 9,
+  "name": "借物 · 实验室设备",
+  "device": "iphone-17-pro",
+  "palette": {
+    "bg": "#F4F6FA",
+    "ink": "#17203C",
+    "brand": "#1D3DCE"
+  },
+  "pages": [
+    {
+      "id": "equipment_home",
+      "name": "01 借物 设备",
+      "device": "iphone-17-pro",
+      "root": {
+        "id": "equipment_home_shell",
+        "type": "phone-shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#F4F6FA",
+        "children": [
+          {
+            "id": "equipment_home_screen",
+            "type": "box",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "fill": "#F4F6FA",
+            "children": [
+              {
+                "id": "equipment_home_time",
+                "type": "label",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 24,
+                "fontSize": 16,
+                "color": "#17203C",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "equipment_home_signal",
+                "type": "label",
+                "text": "5G  ▰",
+                "x": 302,
+                "y": 15,
+                "w": 70,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#17203C",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "equipment_wordmark",
+                "type": "label",
+                "text": "借物",
+                "x": 28,
+                "y": 70,
+                "w": 200,
+                "h": 38,
+                "fontSize": 27,
+                "color": "#17203C",
+                "lineHeight": 35,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "equipment_room",
+                "type": "label",
+                "text": "光学实验室   A302",
+                "x": 28,
+                "y": 118,
+                "w": 346,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#6C748B",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "equipment_summary",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 166,
+                "w": 346,
+                "h": 106,
+                "fill": "#1D3DCE",
+                "radius": 20
+              },
+              {
+                "id": "equipment_summary_label",
+                "type": "label",
+                "text": "今天有设备可借",
+                "x": 48,
+                "y": 186,
+                "w": 240,
+                "h": 24,
+                "fontSize": 14,
+                "color": "#DDE5FF",
+                "lineHeight": 22,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "equipment_count",
+                "type": "label",
+                "text": "03",
+                "x": 48,
+                "y": 218,
+                "w": 120,
+                "h": 42,
+                "fontSize": 34,
+                "color": "#FFFFFF",
+                "lineHeight": 40,
+                "fontFamily": "Georgia"
+              },
+              {
+                "id": "equipment_units",
+                "type": "label",
+                "text": "件 / 无需排队",
+                "x": 148,
+                "y": 232,
+                "w": 200,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#DDE5FF",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "equipment_list_title",
+                "type": "label",
+                "text": "可借设备",
+                "x": 28,
+                "y": 308,
+                "w": 250,
+                "h": 30,
+                "fontSize": 20,
+                "color": "#17203C",
+                "lineHeight": 28,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "equipment_row_0",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 362,
+                "w": 346,
+                "h": 122,
+                "fill": "#FFFFFF",
+                "radius": 16,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "equipment_detail"
+                    }
+                  ]
+                },
+                "children": [
+                  {
+                    "id": "equipment_tile_0",
+                    "type": "box",
+                    "layout": "stack",
+                    "x": 14,
+                    "y": 18,
+                    "w": 82,
+                    "h": 86,
+                    "fill": "#EDF0F7",
+                    "radius": 12
+                  },
+                  {
+                    "id": "equipment_icon_0",
+                    "type": "box",
+                    "layout": "stack",
+                    "x": 15,
+                    "y": 28,
+                    "w": 78,
+                    "h": 68,
+                    "fill": "#FFFFFF00",
+                    "children": [
+                      {
+                        "id": "equipment_icon_0_body",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 12,
+                        "y": 12,
+                        "w": 54,
+                        "h": 42,
+                        "fill": "#17203C",
+                        "radius": 10
+                      },
+                      {
+                        "id": "equipment_icon_0_top",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 23,
+                        "y": 6,
+                        "w": 24,
+                        "h": 12,
+                        "fill": "#17203C",
+                        "radius": 3
+                      },
+                      {
+                        "id": "equipment_icon_0_lens",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 26,
+                        "y": 17,
+                        "w": 35,
+                        "h": 35,
+                        "fill": "#8898E3",
+                        "radius": 18
+                      },
+                      {
+                        "id": "equipment_icon_0_glass",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 33,
+                        "y": 24,
+                        "w": 21,
+                        "h": 21,
+                        "fill": "#17203C",
+                        "radius": 11
+                      }
+                    ]
+                  },
+                  {
+                    "id": "equipment_name_0",
+                    "type": "label",
+                    "text": "索尼 A7 IV",
+                    "x": 114,
+                    "y": 22,
+                    "w": 210,
+                    "h": 32,
+                    "fontSize": 17,
+                    "color": "#17203C",
+                    "lineHeight": 25,
+                    "fontFamily": "PingFang SC",
+                    "fontWeight": 600
+                  },
+                  {
+                    "id": "equipment_code_0",
+                    "type": "label",
+                    "text": "CAM-008 · 全画幅相机",
+                    "x": 114,
+                    "y": 56,
+                    "w": 210,
+                    "h": 24,
+                    "fontSize": 11,
+                    "color": "#6C748B",
+                    "lineHeight": 19,
+                    "fontFamily": "PingFang SC"
+                  },
+                  {
+                    "id": "equipment_status_0",
+                    "type": "label",
+                    "text": "● 可借  ·  最长7天",
+                    "x": 114,
+                    "y": 85,
+                    "w": 210,
+                    "h": 23,
+                    "fontSize": 11,
+                    "color": "#20745D",
+                    "lineHeight": 19,
+                    "fontFamily": "PingFang SC"
+                  }
+                ]
+              },
+              {
+                "id": "equipment_row_1",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 504,
+                "w": 346,
+                "h": 122,
+                "fill": "#FFFFFF",
+                "radius": 16,
+                "children": [
+                  {
+                    "id": "equipment_tile_1",
+                    "type": "box",
+                    "layout": "stack",
+                    "x": 14,
+                    "y": 18,
+                    "w": 82,
+                    "h": 86,
+                    "fill": "#EDF0F7",
+                    "radius": 12
+                  },
+                  {
+                    "id": "equipment_icon_1",
+                    "type": "box",
+                    "layout": "stack",
+                    "x": 15,
+                    "y": 28,
+                    "w": 78,
+                    "h": 68,
+                    "fill": "#FFFFFF00",
+                    "children": [
+                      {
+                        "id": "equipment_icon_1_left",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 9,
+                        "y": 10,
+                        "w": 24,
+                        "h": 42,
+                        "fill": "#17203C",
+                        "radius": 9
+                      },
+                      {
+                        "id": "equipment_icon_1_right",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 45,
+                        "y": 10,
+                        "w": 24,
+                        "h": 42,
+                        "fill": "#17203C",
+                        "radius": 9
+                      },
+                      {
+                        "id": "equipment_icon_1_bridge",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 29,
+                        "y": 20,
+                        "w": 20,
+                        "h": 9,
+                        "fill": "#17203C"
+                      },
+                      {
+                        "id": "equipment_icon_1_lens_l",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 7,
+                        "y": 34,
+                        "w": 29,
+                        "h": 29,
+                        "fill": "#8898E3",
+                        "radius": 15
+                      },
+                      {
+                        "id": "equipment_icon_1_lens_r",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 43,
+                        "y": 34,
+                        "w": 29,
+                        "h": 29,
+                        "fill": "#8898E3",
+                        "radius": 15
+                      },
+                      {
+                        "id": "equipment_icon_1_glass_l",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 14,
+                        "y": 41,
+                        "w": 15,
+                        "h": 15,
+                        "fill": "#17203C",
+                        "radius": 8
+                      },
+                      {
+                        "id": "equipment_icon_1_glass_r",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 50,
+                        "y": 41,
+                        "w": 15,
+                        "h": 15,
+                        "fill": "#17203C",
+                        "radius": 8
+                      }
+                    ]
+                  },
+                  {
+                    "id": "equipment_name_1",
+                    "type": "label",
+                    "text": "尼康 10×42 望远镜",
+                    "x": 114,
+                    "y": 22,
+                    "w": 210,
+                    "h": 32,
+                    "fontSize": 17,
+                    "color": "#17203C",
+                    "lineHeight": 25,
+                    "fontFamily": "PingFang SC",
+                    "fontWeight": 600
+                  },
+                  {
+                    "id": "equipment_code_1",
+                    "type": "label",
+                    "text": "BIN-014 · 户外观察",
+                    "x": 114,
+                    "y": 56,
+                    "w": 210,
+                    "h": 24,
+                    "fontSize": 11,
+                    "color": "#6C748B",
+                    "lineHeight": 19,
+                    "fontFamily": "PingFang SC"
+                  },
+                  {
+                    "id": "equipment_status_1",
+                    "type": "label",
+                    "text": "● 可借  ·  最长7天",
+                    "x": 114,
+                    "y": 85,
+                    "w": 210,
+                    "h": 23,
+                    "fontSize": 11,
+                    "color": "#20745D",
+                    "lineHeight": 19,
+                    "fontFamily": "PingFang SC"
+                  }
+                ]
+              },
+              {
+                "id": "equipment_row_2",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 646,
+                "w": 346,
+                "h": 122,
+                "fill": "#FFFFFF",
+                "radius": 16,
+                "children": [
+                  {
+                    "id": "equipment_tile_2",
+                    "type": "box",
+                    "layout": "stack",
+                    "x": 14,
+                    "y": 18,
+                    "w": 82,
+                    "h": 86,
+                    "fill": "#EDF0F7",
+                    "radius": 12
+                  },
+                  {
+                    "id": "equipment_icon_2",
+                    "type": "box",
+                    "layout": "stack",
+                    "x": 15,
+                    "y": 28,
+                    "w": 78,
+                    "h": 68,
+                    "fill": "#FFFFFF00",
+                    "children": [
+                      {
+                        "id": "equipment_icon_2_mount",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 24,
+                        "y": 9,
+                        "w": 29,
+                        "h": 8,
+                        "fill": "#17203C",
+                        "radius": 3
+                      },
+                      {
+                        "id": "equipment_icon_2_shaft",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 36,
+                        "y": 17,
+                        "w": 5,
+                        "h": 43,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_l_0",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 34,
+                        "y": 25,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_r_0",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 38,
+                        "y": 25,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_l_1",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 31,
+                        "y": 29,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_r_1",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 41,
+                        "y": 29,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_l_2",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 28,
+                        "y": 33,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_r_2",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 44,
+                        "y": 33,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_l_3",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 25,
+                        "y": 37,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_r_3",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 47,
+                        "y": 37,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_l_4",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 22,
+                        "y": 41,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_r_4",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 50,
+                        "y": 41,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_l_5",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 19,
+                        "y": 45,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_r_5",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 53,
+                        "y": 45,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_l_6",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 16,
+                        "y": 49,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_r_6",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 56,
+                        "y": 49,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_l_7",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 13,
+                        "y": 53,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      },
+                      {
+                        "id": "equipment_icon_2_leg_r_7",
+                        "type": "box",
+                        "layout": "stack",
+                        "x": 59,
+                        "y": 53,
+                        "w": 5,
+                        "h": 7,
+                        "fill": "#17203C",
+                        "radius": 2
+                      }
+                    ]
+                  },
+                  {
+                    "id": "equipment_name_2",
+                    "type": "label",
+                    "text": "三脚架 190X",
+                    "x": 114,
+                    "y": 22,
+                    "w": 210,
+                    "h": 32,
+                    "fontSize": 17,
+                    "color": "#17203C",
+                    "lineHeight": 25,
+                    "fontFamily": "PingFang SC",
+                    "fontWeight": 600
+                  },
+                  {
+                    "id": "equipment_code_2",
+                    "type": "label",
+                    "text": "TRI-003 · 稳定支撑",
+                    "x": 114,
+                    "y": 56,
+                    "w": 210,
+                    "h": 24,
+                    "fontSize": 11,
+                    "color": "#6C748B",
+                    "lineHeight": 19,
+                    "fontFamily": "PingFang SC"
+                  },
+                  {
+                    "id": "equipment_status_2",
+                    "type": "label",
+                    "text": "● 可借  ·  最长7天",
+                    "x": 114,
+                    "y": 85,
+                    "w": 210,
+                    "h": 23,
+                    "fontSize": 11,
+                    "color": "#20745D",
+                    "lineHeight": 19,
+                    "fontFamily": "PingFang SC"
+                  }
+                ]
+              },
+              {
+                "id": "equipment_hint",
+                "type": "label",
+                "text": "点击相机，查看借用详情",
+                "x": 28,
+                "y": 810,
+                "w": 346,
+                "h": 24,
+                "fontSize": 12,
+                "color": "#6C748B",
+                "lineHeight": 20,
+                "fontFamily": "PingFang SC"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "equipment_detail",
+      "name": "02 相机 借用",
+      "device": "iphone-17-pro",
+      "root": {
+        "id": "equipment_detail_shell",
+        "type": "phone-shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#F4F6FA",
+        "children": [
+          {
+            "id": "equipment_detail_screen",
+            "type": "box",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "fill": "#F4F6FA",
+            "children": [
+              {
+                "id": "equipment_detail_time",
+                "type": "label",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 24,
+                "fontSize": 16,
+                "color": "#17203C",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "equipment_detail_signal",
+                "type": "label",
+                "text": "5G  ▰",
+                "x": 302,
+                "y": 15,
+                "w": 70,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#17203C",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "equipment_back",
+                "type": "label",
+                "text": "←  设备",
+                "x": 28,
+                "y": 68,
+                "w": 160,
+                "h": 28,
+                "fontSize": 15,
+                "color": "#17203C",
+                "lineHeight": 23,
+                "fontFamily": "PingFang SC",
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "equipment_home"
+                    }
+                  ]
+                }
+              },
+              {
+                "id": "equipment_detail_tile",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 124,
+                "w": 346,
+                "h": 190,
+                "fill": "#E4EAFB",
+                "radius": 22
+              },
+              {
+                "id": "equipment_detail_icon",
+                "type": "box",
+                "layout": "stack",
+                "x": 110,
+                "y": 140,
+                "w": 179.39999999999998,
+                "h": 156.39999999999998,
+                "fill": "#FFFFFF00",
+                "children": [
+                  {
+                    "id": "equipment_detail_icon_body",
+                    "type": "box",
+                    "layout": "stack",
+                    "x": 27.599999999999998,
+                    "y": 27.599999999999998,
+                    "w": 124.19999999999999,
+                    "h": 96.6,
+                    "fill": "#17203C",
+                    "radius": 23
+                  },
+                  {
+                    "id": "equipment_detail_icon_top",
+                    "type": "box",
+                    "layout": "stack",
+                    "x": 52.9,
+                    "y": 13.799999999999999,
+                    "w": 55.199999999999996,
+                    "h": 27.599999999999998,
+                    "fill": "#17203C",
+                    "radius": 6.8999999999999995
+                  },
+                  {
+                    "id": "equipment_detail_icon_lens",
+                    "type": "box",
+                    "layout": "stack",
+                    "x": 59.8,
+                    "y": 39.099999999999994,
+                    "w": 80.5,
+                    "h": 80.5,
+                    "fill": "#8496E9",
+                    "radius": 41.4
+                  },
+                  {
+                    "id": "equipment_detail_icon_glass",
+                    "type": "box",
+                    "layout": "stack",
+                    "x": 75.89999999999999,
+                    "y": 55.199999999999996,
+                    "w": 48.3,
+                    "h": 48.3,
+                    "fill": "#17203C",
+                    "radius": 25.299999999999997
+                  }
+                ]
+              },
+              {
+                "id": "equipment_detail_title",
+                "type": "label",
+                "text": "索尼 A7 IV",
+                "x": 28,
+                "y": 346,
+                "w": 346,
+                "h": 44,
+                "fontSize": 30,
+                "color": "#17203C",
+                "lineHeight": 38,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "equipment_detail_code",
+                "type": "label",
+                "text": "CAM-008    /    状态良好",
+                "x": 28,
+                "y": 400,
+                "w": 346,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#6C748B",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "equipment_rule",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 448,
+                "w": 346,
+                "h": 1,
+                "fill": "#DCE2ED"
+              },
+              {
+                "id": "equipment_spec",
+                "type": "label",
+                "text": "全画幅 · 3300万像素 · 含镜头与电池",
+                "x": 28,
+                "y": 474,
+                "w": 346,
+                "h": 28,
+                "fontSize": 14,
+                "color": "#17203C",
+                "lineHeight": 22,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "equipment_checkout",
+                "type": "label",
+                "text": "借用周期",
+                "x": 28,
+                "y": 538,
+                "w": 346,
+                "h": 28,
+                "fontSize": 13,
+                "color": "#6C748B",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "equipment_dates_bg",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 576,
+                "w": 346,
+                "h": 90,
+                "fill": "#FFFFFF",
+                "radius": 14
+              },
+              {
+                "id": "equipment_dates",
+                "type": "label",
+                "text": "10月26日    →    11月02日",
+                "x": 48,
+                "y": 604,
+                "w": 306,
+                "h": 32,
+                "fontSize": 19,
+                "color": "#17203C",
+                "lineHeight": 27,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 500
+              },
+              {
+                "id": "equipment_pickup",
+                "type": "label",
+                "text": "领取地点  A302器材室 · 今日17:00前",
+                "x": 28,
+                "y": 700,
+                "w": 346,
+                "h": 30,
+                "fontSize": 13,
+                "color": "#6C748B",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "equipment_borrow",
+                "type": "button",
+                "text": "确认借用  ·  7天",
+                "x": 28,
+                "y": 770,
+                "w": 346,
+                "h": 54,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "fill": "#1D3DCE",
+                "color": "#FFFFFF",
+                "radius": 14,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "equipment_done"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "id": "equipment_done",
+      "name": "03 借用 凭证",
+      "device": "iphone-17-pro",
+      "root": {
+        "id": "equipment_done_shell",
+        "type": "phone-shell",
+        "device": "iphone-17-pro",
+        "statusBar": false,
+        "padding": 0,
+        "gap": 0,
+        "fill": "#F4F6FA",
+        "children": [
+          {
+            "id": "equipment_done_screen",
+            "type": "box",
+            "layout": "stack",
+            "x": 0,
+            "y": 0,
+            "w": 402,
+            "h": 874,
+            "fill": "#F4F6FA",
+            "children": [
+              {
+                "id": "equipment_done_time",
+                "type": "label",
+                "text": "9:41",
+                "x": 34,
+                "y": 15,
+                "w": 56,
+                "h": 24,
+                "fontSize": 16,
+                "color": "#17203C",
+                "lineHeight": 24,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "equipment_done_signal",
+                "type": "label",
+                "text": "5G  ▰",
+                "x": 302,
+                "y": 15,
+                "w": 70,
+                "h": 24,
+                "fontSize": 13,
+                "color": "#17203C",
+                "lineHeight": 21,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "equipment_done_brand",
+                "type": "label",
+                "text": "借用已登记",
+                "x": 28,
+                "y": 70,
+                "w": 346,
+                "h": 34,
+                "fontSize": 18,
+                "color": "#17203C",
+                "lineHeight": 26,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "equipment_check_bg",
+                "type": "box",
+                "layout": "stack",
+                "x": 159,
+                "y": 154,
+                "w": 84,
+                "h": 84,
+                "fill": "#DEEEE7",
+                "radius": 42
+              },
+              {
+                "id": "equipment_check",
+                "type": "label",
+                "text": "✓",
+                "x": 176,
+                "y": 167,
+                "w": 50,
+                "h": 54,
+                "fontSize": 35,
+                "color": "#20745D",
+                "lineHeight": 43,
+                "fontFamily": "PingFang SC",
+                "align": "center"
+              },
+              {
+                "id": "equipment_done_title",
+                "type": "label",
+                "text": "准备好，出发观察。",
+                "x": 28,
+                "y": 280,
+                "w": 346,
+                "h": 44,
+                "fontSize": 28,
+                "color": "#17203C",
+                "lineHeight": 36,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "equipment_done_desc",
+                "type": "paragraph",
+                "text": "带上学生证，到器材室领取设备。\n请在归还前检查配件是否齐全。",
+                "x": 28,
+                "y": 344,
+                "w": 346,
+                "h": 70,
+                "fontSize": 15,
+                "color": "#6C748B",
+                "lineHeight": 29,
+                "fontFamily": "PingFang SC",
+                "wrap": true
+              },
+              {
+                "id": "equipment_receipt",
+                "type": "box",
+                "layout": "stack",
+                "x": 28,
+                "y": 464,
+                "w": 346,
+                "h": 236,
+                "fill": "#FFFFFF",
+                "radius": 20
+              },
+              {
+                "id": "equipment_receipt_label",
+                "type": "label",
+                "text": "BORROWING RECEIPT",
+                "x": 48,
+                "y": 488,
+                "w": 306,
+                "h": 24,
+                "fontSize": 11,
+                "color": "#6C748B",
+                "lineHeight": 19,
+                "fontFamily": "PingFang SC",
+                "letterSpacing": 1
+              },
+              {
+                "id": "equipment_receipt_item",
+                "type": "label",
+                "text": "索尼 A7 IV",
+                "x": 48,
+                "y": 534,
+                "w": 306,
+                "h": 34,
+                "fontSize": 21,
+                "color": "#17203C",
+                "lineHeight": 29,
+                "fontFamily": "PingFang SC",
+                "fontWeight": 600
+              },
+              {
+                "id": "equipment_due_label",
+                "type": "label",
+                "text": "请于以下时间归还",
+                "x": 48,
+                "y": 592,
+                "w": 306,
+                "h": 24,
+                "fontSize": 12,
+                "color": "#6C748B",
+                "lineHeight": 20,
+                "fontFamily": "PingFang SC"
+              },
+              {
+                "id": "equipment_due",
+                "type": "label",
+                "text": "11月02日  17:00",
+                "x": 48,
+                "y": 630,
+                "w": 306,
+                "h": 36,
+                "fontSize": 24,
+                "color": "#1D3DCE",
+                "lineHeight": 32,
+                "fontFamily": "Georgia"
+              },
+              {
+                "id": "equipment_home_back",
+                "type": "button",
+                "text": "回到设备",
+                "x": 28,
+                "y": 770,
+                "w": 346,
+                "h": 54,
+                "fontSize": 16,
+                "fontWeight": 600,
+                "fill": "#1D3DCE",
+                "color": "#FFFFFF",
+                "radius": 14,
+                "on": {
+                  "click": [
+                    {
+                      "type": "link",
+                      "page": "equipment_home"
+                    }
+                  ]
+                }
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ]
+}

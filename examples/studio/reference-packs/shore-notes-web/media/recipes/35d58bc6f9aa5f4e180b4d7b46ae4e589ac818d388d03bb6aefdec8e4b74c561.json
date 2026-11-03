@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "sourceSha256": "99e26f98213f836b79c0202ca134d571a75c3245ee05284f507025553253611a",
+  "originalPath": "assets/original-99e26f98213f836b79c0202ca134d571a75c3245ee05284f507025553253611a.jpg",
+  "recipe": {
+    "w": 748,
+    "h": 620,
+    "fx": 0.48,
+    "fy": 0.5,
+    "fh": 1,
+    "scale": 2
+  },
+  "geometry": {
+    "ok": true,
+    "crop": [
+      397,
+      0,
+      4334,
+      3264
+    ],
+    "originalSize": [
+      4928,
+      3264
+    ],
+    "width": 1496,
+    "height": 1240
+  },
+  "credit": "Frank-2.0 / Wikimedia Commons / CC0 1.0; https://commons.wikimedia.org/wiki/File:Eisvogel_kingfisher_less_saturated.jpg"
+}

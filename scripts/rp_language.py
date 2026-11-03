@@ -180,14 +180,42 @@ def validate_device(source, path):
             fail("E_PROPERTY", ptr(path, key), f"Expected device in {sorted(DEVICE_CANVAS_PRESETS)}")
 
 
+def _edit_distance(a, b):
+    if a == b:
+        return 0
+    if not a or not b:
+        return max(len(a), len(b))
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
 def fields(value, allowed, path):
     if not isinstance(value, dict):
         fail("E_OBJECT", path, "Expected an object")
     public_allowed = sorted(k for k in allowed if isinstance(k, str) and not k.startswith("_"))
     for key in value:
         if key not in allowed:
-            hint = difflib.get_close_matches(str(key), public_allowed, n=3, cutoff=0.68)
-            suffix = f"; did you mean '{hint[0]}'?" if hint else ""
+            raw_key = str(key)
+            # 只接受真正可信的相近候选：编辑距离 <= 2，或首字母相同。
+            # 宁可说"没有相近属性，可用的是..."，也不要给错误改名建议。
+            rough = difflib.get_close_matches(raw_key.lower(), [a.lower() for a in public_allowed], n=3, cutoff=0.62)
+            by_lower = {a.lower(): a for a in public_allowed}
+            hint = [by_lower[r] for r in rough
+                    if _edit_distance(raw_key.lower(), r) <= 2
+                    or (raw_key[:1].lower() == r[:1].lower() and _edit_distance(raw_key.lower(), r) <= 4)]
+            shown = public_allowed[:24]
+            more = "" if len(public_allowed) <= 24 else f" …（共 {len(public_allowed)} 项）"
+            if hint:
+                suffix = f"; did you mean '{hint[0]}'?"
+                tail = ""
+            else:
+                suffix = ""
+                tail = f"; 该类型允许的属性：{', '.join(shown)}{more}"
             cands = None
             if hint:
                 cands = [{
@@ -197,7 +225,8 @@ def fields(value, allowed, path):
                         {"op": "add", "path": ptr(path, h), "value": value[key]},
                     ],
                 } for h in hint[:2]]
-            fail("E_PROPERTY", ptr(path, key), f"Unknown property '{key}'{suffix}", suggestions=hint, candidate_patches=cands)
+            fail("E_PROPERTY", ptr(path, key), f"Unknown property '{key}'{suffix}{tail}",
+                 suggestions=hint or shown[:5], candidate_patches=cands)
 
 
 def ident(value, path):
@@ -220,7 +249,7 @@ THEMES = {"enterprise-light", "modern-dark", "cobalt-pro", "mobile-lowfi", "mobi
           "aurora-glass", "editorial-warm", "cyber-neon"}
 SPACING_TOKENS = [0, 1, 2, 3, 4] + list(range(6, 162, 2))
 RADIUS_TOKENS = [0, 1, 2, 3, 4] + list(range(6, 122, 2)) + [999]
-FONT_SIZE_TOKENS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 40, 44, 48, 56, 64, 72]
+FONT_SIZE_TOKENS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 20, 22, 24, 26, 28, 30, 32, 34, 36, 40, 44, 48, 56, 64, 72, 80, 96, 120]
 FONT_WEIGHT_TOKENS = [300, 400, 500, 600, 700, 800, 900]
 MAX_FONT_SIZE = max(FONT_SIZE_TOKENS)
 
@@ -247,9 +276,9 @@ COLOR_TOKENS = {"bg", "surface", "surface-2", "surface-3", "sidebar-bg", "sideba
                 "glass", "glass-strong", "glass-border", "glass-stroke", "glow", "glow-2"}
 GEOMETRY = {"x", "y", "w", "h", "flex", "colSpan", "rowSpan", "right", "bottom", "anchor", "z",
             "after", "afterGap", "alignX", "pin", "pinGap"}
-STYLE_EXTRAS = {"opacity", "strokeWidth", "borderSides", "borderTop", "borderBottom", "borderLeft", "borderRight",
+STYLE_EXTRAS = {"rotation", "opacity", "strokeWidth", "borderSides", "borderTop", "borderBottom", "borderLeft", "borderRight",
                 "backdropBlur", "shadow", "gradient", "aurora", "noise", "innerGlow"}
-TEXT = {"text", "fontSize", "size", "fontWeight", "weight", "color", "align", "letterSpacing", "italic", "underline", "strikethrough", "spans"}
+TEXT = {"text", "fontFamily", "fontSize", "size", "fontWeight", "weight", "color", "align", "letterSpacing", "italic", "underline", "strikethrough", "spans"}
 BOX = {"layout", "padding", "gap", "align", "justify", "wrap", "equalHeight", "columns",
        "columnGap", "rowGap", "children", "fill", "stroke", "radius"} | STYLE_EXTRAS
 NODE_PROPS = {
@@ -261,17 +290,17 @@ NODE_PROPS = {
     "badge": TEXT | {"variant", "fill", "stroke", "radius", "icon"} | STYLE_EXTRAS,
     "input": {"value", "placeholder", "native", "fill", "stroke", "radius", "fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX"} | STYLE_EXTRAS,
     "divider": {"direction", "color", "fill", "opacity"},
-    "image": {"src", "radius", "opacity", "shadow"},
+    "image": {"src", "radius", "opacity", "shadow", "rotation"},
     "icon": {"icon", "color", "fill", "stroke", "radius", "strokeWidth"} | STYLE_EXTRAS,
     "sparkline": {"points", "color", "fill", "stroke", "radius", "smooth", "strokeWidth"} | STYLE_EXTRAS,
     "dynamic-panel": {"states"},
-    "repeater": {"dataset", "key", "template", "rowGap", "rowHeight", "pageSize"},
+    "repeater": {"dataset", "key", "template", "rowGap", "rowHeight", "pageSize", "where"},
     "when": {"condition", "then", "else", "layout", "gap"},
 }
 EVENTS = {"click": "OnClick", "change": "OnTextChange", "load": "OnLoad",
           "mouseover": "OnMouseOver", "mouseout": "OnMouseOut",
           "focus": "OnFocus", "blur": "OnLostFocus",
-          "statechange": "OnPanelStateChange"}
+          "statechange": "OnPanelStateChange", "selectedchange": "OnSelectedChange", "selectionchange": "OnSelectionChange"}
 ACTION_PROPS = {
     "set-text": {"target", "text"},
     "set-variable": {"variable", "value"},
@@ -287,6 +316,15 @@ ACTION_PROPS = {
 }
 
 
+CARD_CONTENT_KEYS = ("title", "subtitle", "text", "body", "eyebrow", "tag", "badge", "rightBadge", "rightText", "meta", "actionText", "buttonText")
+CARD_CONTENT_OPTIONS = ("tagTone", "badgeVariant", "rightTone", "titleFontSize", "actionVariant")
+BOX_TEXT_STYLE_KEYS = ("fontSize", "fontWeight", "color")
+BOX_TEXT_CONTAINER_KEYS = ("layout", "padding", "gap", "justify", "columns")
+NODE_SOURCE_ALIASES = {
+    "bg": "fill", "background": "fill", "textColor": "color", "fg": "color",
+    "borderColor": "stroke", "borderWidth": "strokeWidth", "rounded": "radius", "borderRadius": "radius",
+}
+
 SHORTHAND_NODE_KINDS = {
     "box", "card", "row", "column", "grid", "stack", "label", "paragraph",
     "button", "badge", "input", "divider", "image", "icon", "sparkline", "dynamic-panel", "panel",
@@ -296,6 +334,20 @@ SHORTHAND_NODE_KINDS = {
     "tab-bar", "nav-bar", "progress-bar", "phone-shell",
     "stat-row", "list-item",
 }
+FORM_KINDS = {"input", "radio", "checkbox", "combobox", "listbox"}
+CHECK_KINDS = {"radio", "checkbox"}
+OPTION_KINDS = {"combobox", "listbox"}
+STATE_STYLE_KEYS = {"fill", "stroke", "color", "fontFamily", "fontSize", "fontWeight", "radius", "strokeWidth", "opacity"}
+FORM_STYLE = {"fill", "stroke", "color", "fontFamily", "fontSize", "fontWeight", "radius", "strokeWidth", "align", "textPaddingX"}
+for _kind in sorted(CHECK_KINDS):
+    NODE_PROPS[_kind] = FORM_STYLE | {"text", "checked"} | ({"group"} if _kind == "radio" else set())
+for _kind in sorted(OPTION_KINDS):
+    NODE_PROPS[_kind] = FORM_STYLE | {"options", "selectedIndex"} | ({"multiple", "selectedIndices"} if _kind == "listbox" else set())
+for _kind in FORM_KINDS | {"label", "paragraph", "button", "badge"}:
+    NODE_PROPS[_kind] |= {"styles", "selected", "disabled", "selectionGroup"}
+SHORTHAND_NODE_KINDS |= FORM_KINDS | {"droplist"}
+ACTION_PROPS.update({"set-check": {"target", "checked"}, "set-selected": {"target", "selected"}, "set-option": {"target", "value"}})
+
 EVENT_SHORTHANDS = {
     "onClick": "click", "onChange": "change", "onLoad": "load",
     "onMouseOver": "mouseover", "onMouseOut": "mouseout",
@@ -373,7 +425,7 @@ INLINE_EXPR_HINT_RE = re.compile(
 )
 TOKEN_RE = re.compile(
     r"""\s*(?:"""
-    r"""(?P<OP2>==|!=|>=|<=|&&|\|\|)|"""
+    r"""(?P<OP2>===|!==|==|!=|>=|<=|&&|\|\|)|"""
     r"""(?P<NUMBER>\d+(?:\.\d+)?)|"""
     r"""(?P<STRING>'(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*")|"""
     r"""(?P<SIGIL>@[A-Za-z_][A-Za-z0-9_-]*(?:[./][A-Za-z_][A-Za-z0-9_-]*)*|\$[A-Za-z_][A-Za-z0-9_-]*(?:\.[A-Za-z_][A-Za-z0-9_-]*)*)|"""
@@ -405,6 +457,10 @@ def tokenize_inline_expr(text, path):
             inner = raw[1:-1].replace(r"\'", "'").replace(r'\"', '"').replace(r"\\", "\\").replace(r"\n", "\n")
             tokens.append(("STRING", sanitize_dingbats(inner)))
         else:
+            # RP/1 compares statically matching operand types. Accept the
+            # browser's strict spelling without changing quoted literals.
+            if kind == "OP2":
+                raw = {"===": "==", "!==": "!="}.get(raw, raw)
             tokens.append((kind, raw))
     return tokens
 
@@ -2795,6 +2851,7 @@ class Frontend:
         self.row_conditionals = []
         self.page_conditionals = []
         self.initial_hidden_nodes = []
+        self.input_rotations = []
         self.passthrough_layers = {}
         self.source_origins = {}
         self.macro_calls = {}
@@ -3742,16 +3799,7 @@ class Frontend:
         elif source.get("type") == "panel":
             source["type"] = "dynamic-panel"
         # Intuitive property aliases (zero-guesswork for common CSS/UI naming)
-        for alias_k, canonical_k in (
-            ("bg", "fill"),
-            ("background", "fill"),
-            ("textColor", "color"),
-            ("fg", "color"),
-            ("borderColor", "stroke"),
-            ("borderWidth", "strokeWidth"),
-            ("rounded", "radius"),
-            ("borderRadius", "radius"),
-        ):
+        for alias_k, canonical_k in NODE_SOURCE_ALIASES.items():
             if alias_k in source:
                 val_a = source.pop(alias_k)
                 source.setdefault(canonical_k, val_a)
@@ -3770,7 +3818,7 @@ class Frontend:
         # Allow box with `text` and no `children` to gracefully act as a styled label/box
         if source.get("type") == "box" and "text" in source and "children" not in source:
             txt_val = source.pop("text")
-            if not any(k in source for k in ("layout", "padding", "gap", "justify", "columns")):
+            if not any(k in source for k in BOX_TEXT_CONTAINER_KEYS):
                 source["type"] = "label"
                 source["text"] = txt_val
             else:
@@ -3780,11 +3828,11 @@ class Frontend:
                     "text": txt_val,
                     "w": "fill",
                     "h": "hug",
-                    **({k: source.pop(k) for k in ("fontSize", "fontWeight", "color") if k in source}),
+                    **({k: source.pop(k) for k in BOX_TEXT_STYLE_KEYS if k in source}),
                 }]
         # Card content shorthand props (title, subtitle, body/text, tag/eyebrow/badge, rightBadge, rightText/meta, actionText/buttonText)
         if source.get("type") == "card" and any(
-            k in source for k in ("title", "subtitle", "text", "body", "eyebrow", "tag", "badge", "rightBadge", "rightText", "meta", "actionText", "buttonText")
+            k in source for k in CARD_CONTENT_KEYS
         ):
             cid = source.get("id", "card")
             c_tag = source.pop("tag", source.pop("eyebrow", source.pop("badge", None)))
@@ -4430,8 +4478,26 @@ class Frontend:
             path = path[:-5]
         source = self.desugar_node(source, path, scope)
         if not isinstance(source.get("type"), str):
-            fail("E_NODE_TYPE", ptr(path, "type"), "Node type must be text")
+            # 常见情况是把 @label 拼成 @lable：节点键名本身就是"类型"，但拼错后 type 为空。
+            reserved = {"id", "name", "children", "text", "states", "template", "w", "h", "x", "y",
+                        "padding", "gap", "fill", "stroke", "radius", "color", "on", "visible", "hidden"}
+            suspect = [k for k in source if isinstance(k, str) and k not in reserved and not k.startswith("_")]
+            known = sorted(set(NODE_PROPS.keys()) | set(MACRO_PROPS.keys())
+                           | {"use", "repeat", "when", "row", "column", "grid", "stack", "label", "paragraph",
+                              "button", "badge", "icon", "image", "input", "divider", "spacer"})
+            hints = []
+            for key in suspect:
+                hints.extend(difflib.get_close_matches(str(key), known, n=1, cutoff=0.6))
+            if hints:
+                fail("E_NODE_TYPE", ptr(path, "type"),
+                     f"节点缺少类型，疑似 '@{suspect[0]}' 拼写错误；did you mean '@{hints[0]}'?",
+                     suggestions=hints[:3])
+            fail("E_NODE_TYPE", ptr(path, "type"),
+                 f"Node type must be text；可用类型：{', '.join(known[:14])}")
         kind = source.get("type")
+        if kind == "droplist":
+            kind = "combobox"
+            source = {**source, "type": kind}
         if kind not in NODE_PROPS and kind not in {"use", "repeat", "when"}:
             known_types = sorted(set(NODE_PROPS.keys()) | set(MACRO_PROPS.keys()) | {"use", "repeat", "when", "row", "column", "grid", "stack"})
             hint = difflib.get_close_matches(str(kind), known_types, n=3, cutoff=0.5)
@@ -4600,7 +4666,7 @@ class Frontend:
             if kind not in {"label", "paragraph", "button", "badge"}:
                 fail("E_TARGET_TYPE", ptr(path, "text"), "Runtime text bindings need label/paragraph/button/badge")
             self.value_bindings.append((logical, scope, runtime_text, ptr(path, "text")))
-        if self.row_context(scope)[1] is not None and kind in {"input", "dynamic-panel"}:
+        if self.row_context(scope)[1] is not None and kind in FORM_KINDS | {"dynamic-panel"}:
             fail("E_ROW_CONTAINER", path, "Row templates currently support visual nodes and events")
         if "size" in source and "fontSize" not in source:
             source = {**source, "fontSize": source["size"]}
@@ -4613,6 +4679,8 @@ class Frontend:
                  suggestions=sorted(ICON_NAMES))
         if "fontWeight" in values:
             values["fontWeight"] = normalize_font_weight(values["fontWeight"])
+        if "fontFamily" in values and (not isinstance(values["fontFamily"], str) or not values["fontFamily"].strip()):
+            fail("E_TYPE", ptr(path, "fontFamily"), "fontFamily must be a non-empty family name")
         if "variant" in values and isinstance(values["variant"], str):
             v_norm = values["variant"].strip().lower()
             if v_norm in ("solid", "brand"):
@@ -4677,7 +4745,7 @@ class Frontend:
                     valid_rgba = bool(re.fullmatch(r"rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)", value))
                     if not (valid_token or valid_hex or valid_rgba or value == "transparent"):
                         fail("E_COLOR", pp, "Expected a known $color-token, #RGB, #RRGGBB, #RRGGBBAA, or rgba(...)")
-            elif key in {"native", "equalHeight", "wrap", "italic", "underline", "strikethrough", "smooth", "borderTop", "borderBottom", "borderLeft", "borderRight", "visible", "hidden"}:
+            elif key in {"native", "equalHeight", "wrap", "italic", "underline", "strikethrough", "smooth", "borderTop", "borderBottom", "borderLeft", "borderRight", "visible", "hidden", "checked", "selected", "disabled", "multiple"}:
                 self.typecheck(value, "boolean", pp)
             elif key == "columns":
                 if type(value) is not int or value < 1:
@@ -4721,6 +4789,52 @@ class Frontend:
             if values.get("native") is False:
                 fail("E_INPUT", path, "RP/1 inputs are native; use a box/label for decoration")
             values["native"] = True
+        if kind in CHECK_KINDS:
+            if "selected" in values and "checked" in values and values["selected"] != values["checked"]:
+                fail("E_PROPERTY", ptr(path, "selected"), "selected and checked must agree; use checked for checkbox/radio")
+            values.setdefault("checked", values.get("selected", False))
+            if "group" in values:
+                self.typecheck(values["group"], "text", ptr(path, "group"))
+                if not values["group"].strip():
+                    fail("E_PROPERTY", ptr(path, "group"), "Radio group must be nonempty")
+        if kind in OPTION_KINDS:
+            options = values.get("options")
+            if not isinstance(options, list) or not options or any(not isinstance(v, str) or not v for v in options):
+                fail("E_OPTIONS", ptr(path, "options"), "options must be a nonempty array of nonempty strings")
+            selected_index = values.get("selectedIndex", 0)
+            if type(selected_index) is not int or not 0 <= selected_index < len(options):
+                fail("E_OPTIONS", ptr(path, "selectedIndex"), "selectedIndex must address an existing option")
+            if "selectedIndices" in values:
+                indices = values["selectedIndices"]
+                if "selectedIndex" in values:
+                    fail("E_OPTIONS", path, "Use selectedIndex or selectedIndices, not both")
+                if not isinstance(indices, list) or any(type(i) is not int or not 0 <= i < len(options) for i in indices) or len(indices) != len(set(indices)):
+                    fail("E_OPTIONS", ptr(path, "selectedIndices"), "selectedIndices must contain distinct valid indices")
+                if not values.get("multiple", False) and len(indices) > 1:
+                    fail("E_OPTIONS", ptr(path, "selectedIndices"), "Single-select listbox accepts at most one selection")
+            else:
+                values["selectedIndex"] = selected_index
+            if kind == "listbox":
+                values.setdefault("multiple", False)
+        if "selectionGroup" in values:
+            self.typecheck(values["selectionGroup"], "text", ptr(path, "selectionGroup"))
+        if "styles" in values:
+            styles = values["styles"]
+            if not isinstance(styles, dict):
+                fail("E_TYPE", ptr(path, "styles"), "styles must be an object")
+            fields(styles, {"hover", "selected", "disabled", "focused"}, ptr(path, "styles"))
+            for state, overrides in styles.items():
+                sp = ptr(ptr(path, "styles"), state)
+                if not isinstance(overrides, dict):
+                    fail("E_TYPE", sp, "State style must be an object")
+                fields(overrides, STATE_STYLE_KEYS, sp)
+                self._check_color_tokens(overrides, sp)
+                for key, value in overrides.items():
+                    self.typecheck(value, "text" if key in {"fill", "stroke", "color", "fontFamily"} else "number", ptr(sp, key))
+                    if key == "fontSize":
+                        validate_font_size(value, ptr(sp, key))
+                    elif key not in {"fill", "stroke", "color", "fontFamily"} and value < 0:
+                        fail("E_SIZE", ptr(sp, key), "Style value must be nonnegative")
         if kind == "image" and not values.get("src"):
             fail("E_PROPERTY_REQUIRED", ptr(path, "src"), "Image requires src")
         if "name" in source:
@@ -4731,6 +4845,8 @@ class Frontend:
         if kind == "paragraph":
             values["_rp1_single_shape"] = True
         values["name"] = self.register(logical, kind, source, path)
+        if kind == "input" and values.get("rotation"):
+            self.input_rotations.append((logical, values["name"], values["rotation"], path))
         if "children" in source:
             if not isinstance(source["children"], list):
                 fail("E_TYPE", ptr(path, "children"), "Expected a node array")
@@ -4784,7 +4900,7 @@ class Frontend:
                 fail("E_EVENT", ptr(path, "on"), "on must be an event map")
             if any(event in source["on"] for event in ("load", "OnLoad")):
                 fail("E_EVENT_TARGET", ptr(path, "on"), "load events require a page target")
-            if kind != "input" and any(event in source["on"] for event in ("change", "focus", "blur", "OnTextChange", "OnFocus", "OnLostFocus")):
+            if kind not in FORM_KINDS and any(event in source["on"] for event in ("change", "focus", "blur", "OnTextChange", "OnFocus", "OnLostFocus")):
                 fail("E_EVENT_TARGET", ptr(path, "on"), "Input events require a native input")
             if kind != "dynamic-panel" and any(event in source["on"] for event in ("statechange", "OnPanelStateChange")):
                 fail("E_EVENT_TARGET", ptr(path, "on"), "State-change events require a dynamic panel")
@@ -4797,7 +4913,7 @@ class Frontend:
         if logical in self.symbols:
             fail("E_DUPLICATE_ID", ptr(path, "id"), f"Duplicate identity '{logical}'")
         prefix = {"box": "grp", "card": "grp", "label": "txt", "paragraph": "txt",
-                  "button": "btn", "badge": "badge", "input": "inp", "image": "img",
+                  "button": "btn", "badge": "badge", "input": "inp", "radio": "radio", "checkbox": "check", "combobox": "combo", "listbox": "list", "image": "img",
                   "icon": "img", "sparkline": "img",
                   "dynamic-panel": "panel", "repeater": "rep", "divider": "line"}[kind]
         name = prefix + "-" + re.sub(r"[^A-Za-z0-9_-]", "-", logical.rsplit("/", 1)[-1]) + "-" + hashlib.sha256(logical.encode()).hexdigest()[:12]
@@ -4982,6 +5098,10 @@ class Frontend:
         if kind == "variable": return self.variables[ast["name"]]["value"]
         if kind == "widget":
             node = self._native_nodes[ast["name"]]
+            if node["type"] in CHECK_KINDS: return node.get("checked", False)
+            if node["type"] in OPTION_KINDS:
+                indices = node.get("selectedIndices", [node.get("selectedIndex", 0)])
+                return node["options"][indices[0]] if indices else ""
             return node.get("value" if node["type"] == "input" else "text", "")
         if kind in ("item", "caller_item"):
             if row_override is not None and ast["field"] in row_override:
@@ -5383,7 +5503,7 @@ class Frontend:
             b_inputs = set().union(*(b["widgets"] for b in page_bindings if b["symbol"]["pageId"] == page["slug"])) if page_bindings else set()
             c_inputs = set().union(*(pc["widgets"] for pc in page_conditionals if pc["pageId"] == page["slug"])) if page_conditionals else set()
             for name in sorted(b_inputs | f_inputs | a_inputs | c_inputs):
-                if name in symbols_by_name and symbols_by_name[name]["pageId"] == page["slug"] and symbols_by_name[name]["kind"] == "input":
+                if name in symbols_by_name and symbols_by_name[name]["pageId"] == page["slug"] and symbols_by_name[name]["kind"] in FORM_KINDS:
                     page["interactions"].append({"trigger":name,"sourceId":symbols_by_name[name]["id"],
                         "sourcePointer":symbols_by_name[name]["pointer"],"events":[{"event":"OnTextChange","cases":[{
                         "description":"RP/1 input binding","isNewIfGroup":True,"when":{"left":True,"op":"==","right":True},
@@ -5559,12 +5679,15 @@ class Frontend:
             elif "widget" in value:
                 fields(value, {"widget"}, path)
                 symbol = self.resolve(value["widget"], scope, ptr(path, "widget"))
-                if symbol["pageId"] != scope.split("/")[0] or symbol["kind"] not in {"input", "label", "paragraph", "button", "badge"}:
+                if symbol["pageId"] != scope.split("/")[0] or symbol["kind"] not in FORM_KINDS | {"label", "paragraph", "button", "badge"}:
                     fail("E_TARGET_TYPE", path, "Runtime text read needs a text-capable widget in this page")
                 source_row = self.row_context(symbol["id"])[0]
                 if source_row and source_row != self.row_context(scope)[0]:
                     fail("E_ROW_SCOPE", path, "Row widget text belongs to its row instance")
-                typ, out = "text", {"kind": "widget", "name": symbol["name"], "valueType": "text"}
+                typ = "boolean" if symbol["kind"] in CHECK_KINDS else "text"
+                out = {"kind": "widget", "name": symbol["name"], "valueType": typ}
+                if symbol["kind"] in CHECK_KINDS: out["accessor"] = "checked"
+                elif symbol["kind"] in OPTION_KINDS: out["accessor"] = "value"
             elif "item" in value:
                 fields(value, {"item"}, path)
                 rid, context = row or self.row_context(scope)
@@ -5699,9 +5822,25 @@ class Frontend:
                    "rows": dataset["rows"], "key": key, "ownerScope": scope, "pageId": scope.split("/")[0],
                    "pageSize": source.get("pageSize", 0), "hiddenLookup": bool(source.get("_hidden_lookup"))}
         self.repeaters[logical] = context
+        # 编译期行过滤：repeater 自带 where 时，模板与行集合都用过滤后的结果。
+        # 与 Studio 的 repeaterSetFilter 是同一语义，只是发生在源码编译阶段。
+        if source.get("where") is not None:
+            wptr = ptr(path, "where")
+            try:
+                where_ast = self.runtime(
+                    self.expression(source["where"], {"_repeater_shadows_item": True}, wptr),
+                    logical + "/item", wptr, expected="boolean", row=(logical, context)
+                )
+                filtered = [row for row in dataset["rows"] if bool(self._eval_static_ast(where_ast, row))]
+            except Exception as err:
+                fail("E_WHERE", wptr, f"repeater where 求值失败：{err}")
+            context["rows"] = filtered
+            context["filteredBy"] = source["where"]
+        rows_for_render = context["rows"]
         template = self.node(source.get("template"), logical + "/item", {**env, "_repeater_shadows_item": True}, ptr(path, "template"), stack, panel_depth)
-        result = {"type": "repeater", "name": name, "template": template, "rows": dataset["rows"], "model": model,
+        result = {"type": "repeater", "name": name, "template": template, "rows": rows_for_render, "model": model,
                   "rowGap": source.get("rowGap", 0), "rowHeight": source.get("rowHeight", 48), "pageSize": source.get("pageSize", 0),
+                  **({"where": source["where"]} if source.get("where") is not None else {}),
                   **{k: source[k] for k in (GEOMETRY | {"adaptive", "_hidden_lookup", "_master_instance", "_master_slot"}) if k in source}}
         if "on" in source:
             fields(source["on"], source["on"], ptr(path, "on"))
@@ -5919,12 +6058,24 @@ class Frontend:
                 fail("E_ROW_SCOPE", path, "Row widgets are only accessible from their own row events")
             if kind == "set-text" and target["kind"] not in {"label", "paragraph", "button", "badge", "input"}:
                 fail("E_TARGET_TYPE", path, "set-text requires label/paragraph/button/badge/input")
-            if kind in {"focus", "enable", "disable"} and target["kind"] != "input":
+            if kind == "focus" and target["kind"] not in FORM_KINDS:
                 fail("E_TARGET_TYPE", path, f"{kind} requires a native input")
             if kind == "set-panel-state":
                 if target["kind"] != "dynamic-panel" or action.get("state") not in target.get("states", []):
                     fail("E_STATE", ptr(path, "state"), "State must belong to the target panel")
             out["target"] = target["name"]
+        if kind in {"set-check", "set-selected", "set-option"}:
+            expected_kinds = CHECK_KINDS if kind == "set-check" else OPTION_KINDS if kind == "set-option" else {"label", "paragraph", "button", "badge"}
+            if target["kind"] not in expected_kinds:
+                fail("E_TARGET_TYPE", path, f"{kind} target must be one of {sorted(expected_kinds)}")
+            key = {"set-check": "checked", "set-selected": "selected", "set-option": "value"}[kind]
+            value = self.runtime(action.get(key), scope, ptr(path, key), expected="text" if kind == "set-option" else "boolean")
+            out = {"type": "set-selected" if kind == "set-option" else "set-check", "target": target["name"]}
+            if value["kind"] != "literal": out["runtime"] = value
+            else:
+                out["value" if kind == "set-option" else "checked"] = value["value"]
+                if kind == "set-option" and value["value"] not in self._native_nodes[target["name"]]["options"]:
+                    fail("E_OPTIONS", ptr(path, key), "Selected option must exist on the target")
         if kind == "set-text":
             raw_act_text = action.get("text")
             if isinstance(raw_act_text, str) and (
@@ -5965,6 +6116,11 @@ class Frontend:
         for event, actions in declarations.items():
             ep = ptr(path, event)
             native = EVENTS.get(event, event if event in EVENTS.values() else None)
+            trigger_symbol = self.symbols.get(getattr(self, "current_trigger_id", ""), {})
+            if native == "OnTextChange":
+                trigger_kind = trigger_symbol.get("kind")
+                if trigger_kind in CHECK_KINDS: native = "OnSelectedChange"
+                elif trigger_kind in OPTION_KINDS: native = "OnSelectionChange"
             if not native or (page and event not in {"load", "OnLoad"}):
                 fail("E_EVENT", ep, f"Unsupported event '{event}'")
             if native in names:
@@ -6185,12 +6341,26 @@ class Frontend:
         for logical, scope, declarations, path in self.pending:
             symbol = self.symbols[logical]
             self.current_trigger_name = symbol["name"]
+            self.current_trigger_id = logical
             by_id[symbol["pageId"]]["interactions"].append({"trigger": symbol["name"],
                 "sourceId": logical, "sourcePointer": path,
                 "events": self.events(declarations, scope, path)})
+        # RP9 TextBox lacks static Rotation capability (REA get_Capabilities),
+        # but its native centered Rotate action works. Apply an absolute angle
+        # on widget load so panel/master instances keep their own initialization.
+        for logical, name, angle, path in self.input_rotations:
+            by_id[logical.split("/")[0]]["interactions"].append({
+                "trigger": name, "sourceId": logical, "sourcePointer": path,
+                "events": [{"event": "OnLoad", "cases": [{
+                    "description": "RP/1 input rotation", "isNewIfGroup": True,
+                    "actions": [{"type": "rotate", "target": name, "degree": angle,
+                                 "rotateType": "location", "duration": 0, "easing": "none"}],
+                }]}],
+            })
         for i, page in enumerate(pages):
             pid, pp = page["id"], ptr("/pages", i)
             self.current_trigger_name = "page"
+            self.current_trigger_id = None
             page_events = self.events(page.get("on", {}), pid, ptr(pp, "on"), page=True)
             load_cases = []
             bindings = page.get("bindings", [])
@@ -6546,7 +6716,18 @@ class ReferenceRuntime:
                 "text": str(node.get("value" if kind == "input" else "text", "")),
                 "visible": (node.get("visible", True) is not False) and not bool(node.get("hidden", False)), "enabled": True,
                 "parent": parent, "panelStates": list(panel_states),
+                "selected": node.get("selected", node.get("checked", False)),
+                "rotation": node.get("rotation", 0),
+                "checked": node.get("checked", False),
+                "group": node.get("group", ""), "selectionGroup": node.get("selectionGroup", ""),
+                "options": copy.deepcopy(node.get("options", [])),
+                "selectedIndices": copy.deepcopy(node.get("selectedIndices", [node.get("selectedIndex", 0)] if kind in OPTION_KINDS else [])),
             }
+        if name and kind in OPTION_KINDS:
+            indices = self.widgets[name]["selectedIndices"]
+            self.widgets[name]["text"] = node["options"][indices[0]] if indices else ""
+        if name and node.get("disabled", False):
+            self.widgets[name]["enabled"] = False
         if kind == "dynamic-panel":
             states = [s["name"] for s in node.get("states", [])]
             self.panels[name] = {"current": states[0] if states else "", "states": states, "page": page_slug}
@@ -6625,7 +6806,7 @@ class ReferenceRuntime:
             return self.variables.get(ast.get("name", ast.get("variable")), "")
         if kind == "widget":
             w = self.widgets.get(ast["name"], {})
-            return w.get("text", "")
+            return w.get("checked", w.get("selected", False)) if ast.get("accessor") in {"checked", "selected"} else w.get("text", "")
         if kind in ("item", "caller_item"):
             if row is not None and ast["field"] in row:
                 return row[ast["field"]]
@@ -6795,6 +6976,12 @@ class ReferenceRuntime:
                     rw = self._get_row_widget(rep_n, row_index, target)
                     if rw is not None:
                         rw["text"] = str(val)
+        elif kind == "set-check":
+            val = self.eval_expr(act["runtime"], row=row) if "runtime" in act else act.get("checked", False)
+            self._set_checked(target, bool(val))
+        elif kind == "set-selected":
+            val = self.eval_expr(act["runtime"], row=row) if "runtime" in act else act.get("value", "")
+            self._set_option(target, str(val))
         elif kind == "set-variable":
             val = self.eval_expr(act["runtime"], row=row) if "runtime" in act else act.get("value")
             self.variables[act["variable"]] = val
@@ -6827,6 +7014,10 @@ class ReferenceRuntime:
                 self.widgets[target]["enabled"] = (kind == "enable")
         elif kind == "focus":
             self.focused_widget = target
+        elif kind == "rotate" and target in self.widgets:
+            widget = self.widgets[target]
+            angle = act.get("degree", 90)
+            widget["rotation"] = angle if act.get("rotateType") == "location" else widget["rotation"] + angle
         elif kind == "link":
             dest_slug = self.pages_by_name.get(act.get("page"), act.get("page"))
             if dest_slug in self.pages_by_slug:
@@ -6870,18 +7061,51 @@ class ReferenceRuntime:
         if kind.startswith("data-") and not defer_refresh:
             self._refresh_repeater(target)
 
+    def _set_checked(self, name, checked):
+        widget = self.widgets[name]
+        if not widget["enabled"]: return []
+        group = widget.get("group") if widget["kind"] == "radio" else widget.get("selectionGroup")
+        if checked and group:
+            for other_name, other in self.widgets.items():
+                other_group = other.get("group") if other["kind"] == "radio" else other.get("selectionGroup")
+                same_kind = (other["kind"] == "radio") == (widget["kind"] == "radio")
+                if other_name != name and same_kind and other["page"] == widget["page"] and other_group == group:
+                    self._set_checked(other_name, False)
+        changed = widget["selected"] != checked
+        widget["selected"] = checked
+        if widget["kind"] in CHECK_KINDS: widget["checked"] = checked
+        return self.trigger(name, "OnSelectedChange") if changed else []
+
+    def _set_option(self, name, value):
+        widget = self.widgets[name]
+        if value not in widget["options"]:
+            fail("E_OPTIONS", "/", "Selected option must exist on the target")
+        changed = widget["text"] != value
+        widget["text"] = value
+        widget["selectedIndices"] = [widget["options"].index(value)]
+        return self.trigger(name, "OnSelectionChange") if changed else []
+
     def set_input(self, target_id_or_name, text):
         tname = self.resolve_trigger_name(target_id_or_name)
-        if tname not in self.widgets or self.widgets[tname]["kind"] != "input":
-            fail("E_TARGET_TYPE", "/", "Input step requires a native input")
+        if tname not in self.widgets or self.widgets[tname]["kind"] not in FORM_KINDS:
+            fail("E_TARGET_TYPE", "/", "Input step requires a native form control")
         if not self.is_operable(tname):
             return []
+        kind = self.widgets[tname]["kind"]
+        if kind in CHECK_KINDS:
+            if type(text) is not bool: fail("E_TYPE", "/", "Checkbox/radio input steps require boolean values")
+            return self._set_checked(tname, text)
+        if kind in OPTION_KINDS: return self._set_option(tname, str(text))
         self.widgets[tname]["text"] = str(text)
         return self.trigger(tname, "change")
 
     def trigger(self, target_id_or_name, event="click", row_index=0, row=None):
         native_ev = EVENTS.get(event, event)
         tname = self.resolve_trigger_name(target_id_or_name)
+        kind = self.widgets.get(tname, {}).get("kind")
+        if event == "change":
+            if kind in CHECK_KINDS: native_ev = "OnSelectedChange"
+            elif kind in OPTION_KINDS: native_ev = "OnSelectionChange"
         if native_ev not in EVENTS.values() and native_ev != "OnItemLoad":
             fail("E_EVENT", "/", f"Unsupported reference event '{event}'")
         page = self.pages_by_slug[self.current_page]
@@ -6893,6 +7117,10 @@ class ReferenceRuntime:
                 row = vrows[row_index]
             else:
                 return []
+        if native_ev == "OnClick" and kind in CHECK_KINDS:
+            self._set_checked(tname, True if kind == "radio" else not self.widgets[tname]["checked"])
+        if native_ev == "OnFocus": self.focused_widget = tname
+        elif native_ev == "OnLostFocus" and self.focused_widget == tname: self.focused_widget = None
         fired = []
         for ix in page["interactions"]:
             if ix["trigger"] == tname:
@@ -6912,7 +7140,10 @@ class ReferenceRuntime:
             "page": self.current_page,
             "variables": copy.deepcopy(self.variables),
             "panels": {k: v["current"] for k, v in self.panels.items() if v["page"] == self.current_page},
-            "widgets": {k: {"text": v["text"], "visible": v["visible"], "enabled": v["enabled"]}
+            "widgets": {k: {"text": v["text"], "visible": v["visible"], "enabled": v["enabled"],
+                            **({"checked": v["checked"]} if v["kind"] in CHECK_KINDS else {}),
+                            **({"selectedIndices": v["selectedIndices"]} if v["kind"] in OPTION_KINDS else {}),
+                            "selected": v["selected"]}
                         for k, v in self.widgets.items() if v["page"] == self.current_page},
             "repeaters": {k: self.visible_rows(k) for k, v in self.repeaters.items() if v["page"] == self.current_page},
         }

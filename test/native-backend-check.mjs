@@ -11,6 +11,8 @@ import { writeNativeScene } from '../scripts/native-scene.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { parsePayload, field } from '../scripts/parse-payload.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
+import { addInteractions, createInteractionWriter } from '../scripts/ix-actions.mjs';
+import { mergePages } from '../scripts/merge-pages.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const work = mkdtempSync(join(tmpdir(), 'rp-native-test-'));
@@ -39,6 +41,7 @@ try {
       assert.equal(report.eventCoverage.declared, report.eventCoverage.materialized);
       assert.deepEqual(report.threeZeros, { danglingRefs: 0, sentinelSlotsNonZero: 0, problems: 0 });
       assert.equal(summary.duplicates.length, 0);
+      assert(report.interactionAssembly.payloadsParsed <= report.interactionAssembly.recordsInflated);
     });
     const plan = JSON.parse(readFileSync(join(bundle, 'compile-plan.json')));
     const graphs = readRecords(readFileSync(report.outputRp)).filter(r => ['Axure:Page', 'Axure:PanelState'].includes(r.className)).map(parsePayload);
@@ -59,6 +62,7 @@ try {
       assert(field(style.body, 'PropList').items.length >= 49);
       const run = item.text?.paragraphs?.[0]?.inlines?.[0];
       if (run) {
+        assert.equal(prop(g, o, 10).value, item.textAlignment ?? 0);
         assert.equal(prop(g, o, 1).text, run.family);
         assert.equal(prop(g, o, 2).value, run.size * .75);
         const text = field(field(o.body, 'RichTextBlock'), 'attributed-string');
@@ -148,8 +152,45 @@ try {
   const blank = join(work, 'blank.rp'); createBlankProject(blank, { version: 9 });
   const seed = readFileSync(blank);
   const scene = { masters: {}, imageMap: {}, scene: { items: [{ itemType: 1, name: 'probe', type: 0, rect: { location: { x: 0, y: 0 }, size: { width: 10, height: 10 } }, corners: [0,0,0,0], backgroundFills: [], strokes: [] }] } };
+  check('batched events preserve sequential cross-page resolution and replacement without changing the input', () => {
+    const page = writeNativeScene(seed, scene);
+    const input = mergePages([{ buf: page, name: 'A' }, { buf: page, name: 'B' }]);
+    const before = Buffer.from(input);
+    const event = (name, actions) => [{ event: name, cases: [{ description: 'case', actions }] }];
+    const edits = [
+      [{ page: 'A', widget: 'probe' }, event('OnClick', [{ type: 'link', page: 'B' }])],
+      [{ page: 'A' }, event('OnLoad', [{ type: 'wait', ms: 5 }])],
+      [{ page: 'B', widget: 'probe' }, event('OnClick', [{ type: 'link', page: 'A' }])],
+      [{ page: 'A' }, event('OnLoad', [{ type: 'show', target: 'probe' }])],
+    ];
+    let sequential = input;
+    const writer = createInteractionWriter(input);
+    for (const [target, events] of edits) {
+      sequential = addInteractions(sequential, target, events, { replaceEvent: true, version: 9 }).file;
+      writer.add(target, events, { replaceEvent: true, version: 9 });
+    }
+    const describe = file => readRp(file).pages.map(p => ({ name: p.name,
+      events: p.interactions, widgets: p.widgets.map(w => ({ name: w.name, events: w.interactions })) }));
+    assert.deepEqual(describe(writer.finish()), describe(sequential));
+    assert(input.equals(before));
+    assert.equal(writer.stats().recordsEncoded, 2);
+    const rejected = createInteractionWriter(input);
+    rejected.add(...edits[0], { version: 9 });
+    assert.throws(() => rejected.add({ page: 'A', widget: 'missing' }, edits[0][1]));
+    assert.throws(() => rejected.finish(), /failed interaction batch/);
+    assert(input.equals(before));
+  });
+  check('rotation persists in the native style', () => {
+    const copy = structuredClone(scene); copy.scene.items[0].rotation = 45;
+    const record = readRecords(writeNativeScene(seed, copy)).find(r => r.className === 'Axure:Page');
+    const graph = parsePayload(record);
+    const widget = [...graph.objects.values()].find(o => o.className === 'Axure:DiagramObject:VectorShape');
+    const style = graph.objects.get(field(widget.body, 'MyStyle').value);
+    const rotation = field(style.body, 'PropList').items.find(p => (field(p, 'DOAName').value & 0x3fffffff) === 50);
+    assert.equal(field(rotation, 'Value').value, 45);
+  });
   for (const [label, edit] of [
-    ['rotation', n => n.rotation = 45], ['custom shape', n => n.type = 1],
+    ['custom shape', n => n.type = 1],
     ['effect', n => n.effects = [{}]], ['gradient', n => n.backgroundFills = [{ type: 2 }]],
     ['missing image', n => n.backgroundFills = [{ type: 3, image: 'absent' }]],
     ['asymmetric corners', n => n.corners[1] = 3],

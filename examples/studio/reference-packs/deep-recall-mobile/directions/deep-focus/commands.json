@@ -1,0 +1,9 @@
+[
+  {
+    "type": "setProperties",
+    "nodeId": "word",
+    "properties": {
+      "fontSize": 58
+    }
+  }
+]

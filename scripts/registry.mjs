@@ -769,6 +769,11 @@ const LIB_SCRIPTS = [
     "evidence": "internal"
   },
   {
+    "script": "native-forms.mjs",
+    "summary": "RP/1 原生表单控件、选项、初态与交互状态样式装配库",
+    "evidence": "internal"
+  },
+  {
     "script": "runtime-expr.mjs",
     "summary": "RP/1 有类型运行期 AST 到 Axure 原生变量、控件、行与目标行作用域表达式",
     "evidence": "internal"

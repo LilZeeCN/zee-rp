@@ -1,0 +1,157 @@
+{
+  "id": "daily-margin-mobile",
+  "version": "1.0.0",
+  "source": "source.json",
+  "name": "一页词记 · 温暖留白",
+  "intent": "learning",
+  "platform": "mobile",
+  "scenarios": [
+    {
+      "id": "read-reveal-keep",
+      "startPageId": "margin",
+      "steps": [
+        {
+          "expect": {
+            "visible": {
+              "margin_answer": false,
+              "margin_prompt": true
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "margin_reveal",
+          "expect": {
+            "visible": {
+              "margin_prompt": false,
+              "margin_answer": true
+            },
+            "text": {
+              "margin_meaning": "停留；迟迟不消散"
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "margin_done",
+          "expect": {
+            "visible": {
+              "margin_feedback": true,
+              "margin_answer": false
+            }
+          }
+        },
+        {
+          "action": "click",
+          "target": "margin_restart",
+          "expect": {
+            "visible": {
+              "margin_prompt": true,
+              "margin_feedback": false,
+              "margin_reveal": true
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "design": {
+    "protagonist": "一句有画面的例句与一个值得停留的词",
+    "readOrder": [
+      "日记品牌与日期",
+      "大词与音标",
+      "真实例句",
+      "先回忆再翻开释义",
+      "收好反馈"
+    ],
+    "typography": {
+      "families": [
+        "Georgia",
+        "Arial",
+        "Menlo"
+      ],
+      "display": 66,
+      "quote": 25,
+      "meaning": 23,
+      "body": 14,
+      "lineHeight": 25
+    },
+    "palette": {
+      "paper": "#F4EFE5",
+      "ink": "#5B4737",
+      "quote": "#E8DECA",
+      "action": "#9C503F"
+    },
+    "spacing": {
+      "edge": 28,
+      "sections": 30,
+      "readingLine": 38,
+      "actionHeight": 56
+    },
+    "materials": "暖纸、衬线正文与陶土动作色；使用留白而非装饰图片",
+    "directions": [
+      {
+        "name": "日记留白",
+        "structure": "词与句子纵向递进",
+        "typography": "衬线词与引句"
+      },
+      {
+        "name": "情景速写",
+        "structure": "图像占上半屏，释义贴于图片边缘",
+        "typography": "窄字与边注"
+      },
+      {
+        "name": "双面卡片",
+        "structure": "词与例句分左右面",
+        "typography": "无衬线大词与等宽进度"
+      }
+    ],
+    "limitations": [
+      "单词与一句例句的固定原型，不包含词库或持久学习进度",
+      "暖纸风格不适合密集数据或强警报任务"
+    ]
+  },
+  "pages": [
+    {
+      "id": "margin",
+      "name": "一页词记"
+    }
+  ],
+  "initialPageId": "margin",
+  "provenance": {
+    "source": "agent",
+    "status": "agent-reviewed",
+    "userAccepted": false,
+    "created": "2026-10-29",
+    "note": "虚构内容用于原型参考；未代表真实运营数据或用户认可"
+  },
+  "files": {
+    "previews/kept.png": "06f20e6a03c71bc4d7429601ce3974f1b19ae033234c8ea2291e4f8dbad86332",
+    "previews/margin-initial.png": "6a96bb101c09e996705a49549a89ddc17a4c17f8467a9dc97bc8c47c7ac958ad",
+    "previews/meaning.png": "c9ad071e0ec9e384c317945f02c8fa9123a20d897cc54e6e06d203b568b6f954",
+    "source.json": "2a553e08bbe7fe29b7380f84272206d1fce0fffe58c9de5bf0ee9b0d6322cb10"
+  },
+  "validation": {
+    "sourceSha256": "2a553e08bbe7fe29b7380f84272206d1fce0fffe58c9de5bf0ee9b0d6322cb10",
+    "revision": 1,
+    "contentHash": "44c18ca1aa73444ccd72e85e5f84c0006d7e064a62843eeeb269f98ceb1220f9",
+    "semanticPassed": true,
+    "browserPointerPassed": true,
+    "assertionCount": 10,
+    "nativeStructure": {
+      "pageCount": 1,
+      "widgetCount": 42,
+      "unparseable": 0,
+      "danglingRefs": 0,
+      "problems": 0,
+      "threeZerosPassed": true
+    },
+    "negativeControl": {
+      "semanticRejected": true,
+      "browserRejected": true
+    },
+    "hostSavedClosedReopened": true,
+    "nativePreviewPassed": true,
+    "userAccepted": false
+  }
+}
