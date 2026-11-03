@@ -2891,6 +2891,7 @@ function setupCanvasInteractions() {
       const nodeId = nodeEl.getAttribute('data-node-id');
       if (pageId && pageId !== state.activePageId) {
         state.activePageId = pageId;
+        gestureBinding.pageId = pageId;
         state.selectedIds = [];
         renderCanvasStage();
         nodeEl = document.querySelector(`.studio-node[data-page-id="${CSS.escape(pageId)}"][data-node-id="${CSS.escape(nodeId)}"]`);

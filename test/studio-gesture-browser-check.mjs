@@ -110,9 +110,15 @@ test('pan mounts visible neighbor boards and leaves offscreen pages out of the D
  await page.waitForFunction("!!document.querySelector('[data-node-id=n19_0]')");
  assert(await page.evaluate("document.querySelectorAll('.studio-node').length")<200);
  const p=await page.evaluate("(()=>{const r=document.querySelector('[data-node-id=n19_0]').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()");
- await page.send('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'left',buttons:1,clickCount:1});await page.send('Input.dispatchMouseEvent',{type:'mouseReleased',...p,button:'left',buttons:0,clickCount:1});
+ await page.send('Input.dispatchMouseEvent',{type:'mousePressed',...p,button:'left',buttons:1,clickCount:1});
+ assert.equal(await page.evaluate('window.__STUDIO_STATE__.dragSession?.pageId'),'p19');
+ const drop={x:p.x+30,y:p.y+20};
+ await page.send('Input.dispatchMouseEvent',{type:'mouseMoved',...drop,button:'left',buttons:1});
+ await page.send('Input.dispatchMouseEvent',{type:'mouseReleased',...drop,button:'left',buttons:0,clickCount:1});
+ await page.waitForFunction('window.__STUDIO_RENDERED_REVISION__===2');
  assert.equal(await page.evaluate("document.getElementById('screen-root').dataset.pageId"),'p19');
  assert.deepEqual(await page.evaluate('window.__STUDIO_STATE__.selectedIds'),['n19_0']);
+ assert(studio.store.doc.pages[19].root.children[0].x>20);
  assert.equal(page.scriptErrors.length,0);
 });
 
