@@ -47,7 +47,7 @@
 
 **2026-10-28 自由画布 AI 创作闭环已扩展（本地未发布）：** 新增按需 `studio_describe`、语义源目标查询、RP/1局部insert/update，复用事务/撤销/恢复/原生导出；修复日志覆盖、丢包重发、后代ID粘贴、跳页/目标引用、面板与文字hug、字号120/非默认字体/spacer。两轮独立试用保留原始5/10与7/10评分，原调用者复测12次正常回包给8/10（非盲测）；第二轮自主RP/1创作两页378词原型，写入失败0、语义12步33断言与浏览器三态10断言通过，2页87原生元件、77源节点native-editable。第二轮仍暴露的按钮默认配色、浏览器契约、导出超时及native_ahead已继续修复；新stdio同稿导出约3秒正常回包、deep verify为in_sync；另修复长短画板切换的截图合成帧截断。34项AI专项、62项画布回归通过；最终两页另完成RP9保存关闭重开、原生预览14步35断言。81工具/22 Studio工具、129文件指纹；旧连接须重连，原4326未重启。无任意工程无损双向、跨平台、GUI手工编辑或用户审美认可证据，不能称全面超过OpenPencil。 [公开用法](studio-ai-authoring.md)，本地证据 `/Users/lilzee/axure-exp/outputs/canvas-ai-moat-20261028/REPORT.md`。
 
-**2026-10-27 AI任意构图与多状态预演已落地（本机快照，未发布）：** 现有 `studio_design_explore` 接收AI自写 candidates/states，在隔离工程返回真实实点联系图，默认保护内容、事件与有效继承显隐；纯装饰显隐允许变化，看图后用选稿 applyWith 提交，源稿不变。修复隐藏后代泄漏、点击别名不一致、未知/零断言假通过和无中间断言的连续点击抢跑；公开schema与上下文补齐调用及padding坐标说明，Studio服务/前端纳入指纹。独立试用20次Studio调用完成三构图×三态，看图选稿并实点；最终1页46元件、27语义节点原生可编辑、三零，RP9保存重开和5次点击10条断言通过。相关回归64/64、核心18/18、stdio7/7、创作流程18/18。新stdio80工具/21个Studio工具、120文件指纹一致；旧连接需重连，原4326未重启。无GUI手工编辑/用户视觉认可，无RP/1同题效率A/B；更多构图探索的旧待办由本条覆盖。 见[调用与边界](studio-candidates-20261027.md)；证据 `/Users/lilzee/axure-exp/outputs/canvas-ceiling-20261027/REPORT.md`。
+**2026-10-27 AI任意构图与多状态预演已落地（本机快照，未发布）：** 现有 `studio_design(action:explore)` 接收AI自写 candidates/states，在隔离工程返回真实实点联系图，默认保护内容、事件与有效继承显隐；纯装饰显隐允许变化，看图后用选稿 applyWith 提交，源稿不变。修复隐藏后代泄漏、点击别名不一致、未知/零断言假通过和无中间断言的连续点击抢跑；公开schema与上下文补齐调用及padding坐标说明，Studio服务/前端纳入指纹。独立试用20次Studio调用完成三构图×三态，看图选稿并实点；最终1页46元件、27语义节点原生可编辑、三零，RP9保存重开和5次点击10条断言通过。相关回归64/64、核心18/18、stdio7/7、创作流程18/18。新stdio80工具/21个Studio工具、120文件指纹一致；旧连接需重连，原4326未重启。无GUI手工编辑/用户视觉认可，无RP/1同题效率A/B；更多构图探索的旧待办由本条覆盖。 见[调用与边界](studio-candidates-20261027.md)；证据 `/Users/lilzee/axure-exp/outputs/canvas-ceiling-20261027/REPORT.md`。
 
 **2026-10-27 编辑能力与画面对照已落地：** 本目录新增 `editNodes` 关系/批量编辑和版本绑定的截图对照，修复 padding 回写偏移、新页默认布局与自动适应、旧警告、文字结束编辑误拖及本地命令并发；小缩放下的边中点手柄不再盖住文字中心。新增专项10/10，核心18/18、像素14/14、stdio7/7、CSS9/9、工作流/修复21/21。拾词副本51处样式改稿52→2项命令、7141→1213字节，同为一次事务；重启后8步浏览器流程通过，9页361元件原生导出三零。新MCP80工具/21个Studio工具、restartRequired:false，当前旧连接须重连；原4326未重启，无新增Axure宿主/GUI编辑证据，未发布。原始试用中的拖拽、新页布局、警告与页面定位问题已由本轮修复覆盖；更多RP/1增量/构图探索仍未实现。见[本轮实现与验收说明](studio-editing-20261027.md)，原始证据在本目录 `outputs/canvas-editing-20261027/`。
 
@@ -117,14 +117,14 @@
 
 ### 1.3 建了「从诊断到开方」
 
-- `studio/fix-plan.mjs` + `studio_design_fix_plan`：只开确定性处方（网格吸附、补绑定空态、撑高文字回缩），**服务端试跑自己的命令**，整页阻塞项不严格减少就不下发，并给 `unfixable` 原因
-- `studio/content-plan.mjs` + `studio_design_content_plan`：空态/口号标题的槽位、模板、示例——**不假装会写文案**
+- `studio/fix-plan.mjs` + `studio_design(action:fix_plan)`：只开确定性处方（网格吸附、补绑定空态、撑高文字回缩），**服务端试跑自己的命令**，整页阻塞项不严格减少就不下发，并给 `unfixable` 原因
+- `studio/content-plan.mjs` + `studio_design(action:content_plan)`：空态/口号标题的槽位、模板、示例——**不假装会写文案**
 
 ### 1.4 最后一小时：换成像素真值
 
 - `studio/png-decode.mjs`：极简 PNG 解码（8 位、非隔行、RGB/RGBA）
 - `studio/pixel-truth.mjs`：按文字盒子取内缩边框环的**众数颜色**，用真实像素算对比度
-- `studio_design_pixel_contrast` 工具、`/api/design/pixel-contrast` 端点、`metrics({pixelTruth:true})`
+- `studio_design(action:pixel_contrast)` 工具、`/api/design/pixel-contrast` 端点、`metrics({pixelTruth:true})`
 
 实测 50% 黑遮罩 + 白字：
 

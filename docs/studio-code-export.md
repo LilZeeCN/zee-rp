@@ -2,7 +2,7 @@
 
 ## 1. 概述与设计原则
 
-`studio/export-code.mjs` (`studio_export_code` / `/api/export-code` / `node bin/axure.mjs studio export-code`) 将同一份 Studio 权威源文档导出为自包含、离线可运行的 `HTML/CSS/JS` 工程包：
+`studio/export-code.mjs` (`studio_export(format:code)` / `/api/export-code` / `node bin/axure.mjs studio export-code`) 将同一份 Studio 权威源文档导出为自包含、离线可运行的 `HTML/CSS/JS` 工程包：
 
 - **同一语义源复用**：直接复用 `resolveDocumentScene` 的解算布局、设计 Token、全局变量、动态面板全状态子树、多页导航、中继器数据/模板绑定（含筛选/排序/增删改）与 `V01` 可编辑矢量路径 (`<svg><path>`)。
 - **固定画板与已声明断点如实表达**：未声明 `adaptiveViews` 时显式标记为 `fixed-board`（绝不编造伪响应式行为）；声明了 `adaptiveViews` 或 `constraints` 时在 `styles.css` 与 `manifest.json` 中保留已声明断点与约束。

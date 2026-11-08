@@ -3,6 +3,11 @@
 给 AI 一张自由画布,把设计带回 Axure。本仓库是 npm 包 `zee-rp` 与同名 MCP 服务,
 也公开于 GitHub `LilZeeCN/zee-rp`。本文件是修改本仓库前必读的工程约定。
 
+## 开工先读
+
+**[docs/gaps.md](docs/gaps.md) 是当前真实缺口的活队列**(行为分级、宁低勿高)。
+无任务指派时从队列顶部认领;验证中发现新缺口随时追加;完成后更新状态。
+
 ## 核心纪律
 
 - **Check, then claim.** 动手前先搜:命令注册表(`studio/commands/taxonomy.mjs`)、

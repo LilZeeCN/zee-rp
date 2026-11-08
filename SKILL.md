@@ -9,25 +9,25 @@ description: Reconstruct screenshots as editable Axure layouts, compile RP/1 spe
 
 ## Studio 新作品：先设计，再看图改稿
 
-新稿可用 `studio_get_design_context({stage:"planning",intent,platform,target:{pageId},brief})` 一次取得版本绑定目标、适合任务的完整参考和下一步；局部改字使用 `stage:"edit"` 与版本绑定的明确目标。设计决定通过普通命令 `recordDesignDecision` 与改稿一起持久化，保留反馈来源及过期/冲突状态。详见 [阶段创作与设计决定](docs/studio-stages.md)。
+新稿可用 `studio_stage({stage:"planning",intent,platform,target:{pageId},brief})` 一次取得版本绑定目标、适合任务的完整参考和下一步；局部改字使用 `stage:"edit"` 与版本绑定的明确目标。设计决定通过普通命令 `recordDesignDecision` 与改稿一起持久化，保留反馈来源及过期/冲突状态。详见 [阶段创作与设计决定](docs/studio-stages.md)。
 
 自由画布的新阶段上下文提供[设计工艺与候选理由](docs/studio-craft.md)。[命名版本](docs/studio-versions.md)支持恢复前看差异与可撤销恢复；[长操作](docs/studio-operations.md)可在原候选/素材/导出入口传async/requestKey/baseRevision，断连后用studio_operations核对或取消。取消请求不等于已停，结果过期不提供当前稿提交建议。普通改属性不能修改id/type或内部源控制标记；创建节点仍需稳定ID。
 
-自由画布从 `studio_describe({topic:"workflow"})` 或 `{topic:"rp1"}` 开始，不必为画布创作通读下方完整原生 RP/1 参考。`studio_apply_commands` 接受 `rp1` 节点片段与 `sourceMode:"insert"|"update"`：插入子树或只更新显式字段，保留未写出的内容与交互，复用同一版本、幂等和撤销事务。每个节点写稳定 `#id`。精确语法、支持范围和示例按需发现；不要将此局部入口当成完整 `generate_prototype` 编译器。
+自由画布从 `studio_describe({topic:"workflow"})` 或 `{topic:"rp1"}` 开始，不必为画布创作通读下方完整原生 RP/1 参考。`studio_command` 接受 `rp1` 节点片段与 `sourceMode:"insert"|"update"`,并支持批处理步引用:命令带顶层 `as:"名字"` 命名产出,后续命令任意字段写 `{"$ref":"名字"}` 引用(整批一个 undo 步)：插入子树或只更新显式字段，保留未写出的内容与交互，复用同一版本、幂等和撤销事务。每个节点写稳定 `#id`。精确语法、支持范围和示例按需发现；不要将此局部入口当成完整 `generate_prototype` 编译器。
 
-改稿前 `studio_query_nodes` 默认给8项可操作节点：`target` 指出源节点/实例覆盖/宏参数，`layoutContext` 说明父布局与 padding；使用 `role/within/fields` 精确查询，`cursor` 绑定当前版本。命令字段用 `studio_describe({topic:"command",name:"editNodes"})` 查一个契约。学习、任务、图文及 mobile/web 题材可通过 `studio_get_design_context({intent,platform,guideId?})` 取得原创配方；配方是创作材料，不是用户审美认可。回包未确认的写入不会自动重发，先读当前版本与实际内容。当前调用说明见 [AI与RP/1创作](docs/studio-ai-authoring.md)。
+改稿前 `studio_inspect({view:"nodes"})` 默认给8项可操作节点：`target` 指出源节点/实例覆盖/宏参数，`layoutContext` 说明父布局与 padding；使用 `role/within/fields` 精确查询，`cursor` 绑定当前版本。命令字段用 `studio_describe({topic:"command",name:"editNodes"})` 查一个契约。学习、任务、图文及 mobile/web 题材可通过 `studio_stage({intent,platform,guideId?})` 取得原创配方；配方是创作材料，不是用户审美认可。回包未确认的写入不会自动重发，先读当前版本与实际内容。当前调用说明见 [AI与RP/1创作](docs/studio-ai-authoring.md)。
 - 节点/字段/消费面与行模板边界：[节点能力说明](docs/studio-node-capabilities.md)。
 
-自由构图探索可用 `studio_design_explore({pageId,baseRevision,candidates,states})`：提交1–4套 AI 自写命令，在隔离工程中真实点击并返回最多3态联系图，实际看图后用选稿的 `applyWith` 提交。默认保留内容与交互、源稿不变；仅初始态做像素检查。`studio_get_design_context` 的 `authoring` 返回节点、事件与验收签名。交互统一 `on.click`（兼容 onClick），隐藏父容器会隐藏后代；验收统一 `action/expect`，未知字段或零断言明确失败。完整可复制调用见 [自由构图与多状态预演](docs/studio-candidates-20261027.md)。
+自由构图探索可用 `studio_design({action:"explore",pageId,baseRevision,candidates,states})`：提交1–4套 AI 自写命令，在隔离工程中真实点击并返回最多3态联系图，实际看图后用选稿的 `applyWith` 提交。默认保留内容与交互、源稿不变；仅初始态做像素检查。`studio_stage` 的 `authoring` 返回节点、事件与验收签名。交互统一 `on.click`（兼容 onClick），隐藏父容器会隐藏后代；验收统一 `action/expect`，未知字段或零断言明确失败。完整可复制调用见 [自由构图与多状态预演](docs/studio-candidates-20261027.md)。
 
-自由画布已支持关系与批量改稿：`studio_apply_commands` 的 `editNodes` 可按 role/type/文字/容器/ID 集合选择节点，执行 set、move、align、place、distribute；支持同事务 token 绑定和撤销。常规样式优先使用 token 与语义 role，重复内容优先考虑已有组件和动态状态。改稿前记录一次 `studio_review_design`，改稿后传 `compareWithReviewId` 可一次取得前后真实图片、变更图层和指标变化。编辑器顶栏也有「对照」入口。完整命令示例与边界见 [关系编辑与画面对照](docs/studio-editing-20261027.md)。
+自由画布已支持关系与批量改稿：`studio_command` 的 `editNodes` 可按 role/type/文字/容器/ID 集合选择节点，执行 set、move、align、place、distribute；支持同事务 token 绑定和撤销。常规样式优先使用 token 与语义 role，重复内容优先考虑已有组件和动态状态。改稿前记录一次 `studio_design(action:"review")`，改稿后传 `compareWithReviewId` 可一次取得前后真实图片、变更图层和指标变化。编辑器顶栏也有「对照」入口。完整命令示例与边界见 [关系编辑与画面对照](docs/studio-editing-20261027.md)。
 
-Studio 的完整用法见 [AI 创作流程](docs/studio-design-workflow.md)。当前源码含 `studio_describe`、命名版本与长操作入口，共87个MCP工具、28个 `studio_*`；功能分支未发行新版本，已运行连接须核对指纹。`studio_describe` 的 workflow/rp1 返回交互指南、可执行三词例子与验证剧本；条件错误写前拒绝，场景回包包含分支实际值。原生出口支持普通文字跨页更新；输入框旋转使用原生加载动作，保留可输入性。精确边界见 [AI 与 RP/1 创作](docs/studio-ai-authoring.md)。开始创作时先检查当前连接：若没有 `studio_open_project`，重新连接指向本安装目录 `bin/mcp.mjs` 的 MCP，或用 `node bin/axure.mjs studio start --project /abs/project --source /abs/source.json` 启动画布；旧连接里的59个工具不能代表已安装程序。
+Studio 的完整用法见 [AI 创作流程](docs/studio-design-workflow.md)。2026-11-08 工具面收敛后,MCP 共 13 个 `studio_*` 工具(open_project/describe/command/inspect/screenshot/export/history/stage/design/scenario/media/merge/operations),总 72 个;功能分支未发行新版本，已运行连接须核对指纹。`studio_describe` 的 workflow/rp1 返回交互指南、可执行三词例子与验证剧本；条件错误写前拒绝，场景回包包含分支实际值。原生出口支持普通文字跨页更新；输入框旋转使用原生加载动作，保留可输入性。精确边界见 [AI 与 RP/1 创作](docs/studio-ai-authoring.md)。开始创作时先检查当前连接：若没有 `studio_open_project`，重新连接指向本安装目录 `bin/mcp.mjs` 的 MCP，或用 `node bin/axure.mjs studio start --project /abs/project --source /abs/source.json` 启动画布；旧连接里的59个工具不能代表已安装程序。
 
-1. 打开工程，调用 `studio_get_design_context` 选择 `editorial`、`task` 或 `learning`，明确每页的用户任务、必备内容、主操作和状态。栖羽仅是用户认可的摄影内容型参考；设备与学习应用尚无用户认可标杆。
+1. 打开工程，调用 `studio_stage` 选择 `editorial`、`task` 或 `learning`，明确每页的用户任务、必备内容、主操作和状态。栖羽仅是用户认可的摄影内容型参考；设备与学习应用尚无用户认可标杆。
 2. 先确定构图、字号角色、素材与文字留白，再用基础节点自由构建。现有三种探索模板是可选示例；不要把换色、替换标题当成完成设计。系统内容不得编造为默认示例条目。
-3. 摄影用 `studio_prepare_media` 保留原图、来源、焦点和裁切配方；返回的 `registerCommand` 与图片节点改动一起送入 `studio_apply_commands`，用当前 `baseRevision` 和唯一 `idempotencyKey`。先比较图框与原图比例；主体超出保护区时调整配方。
-4. 每次关键改稿后调用 `studio_review_design({pageId,baseRevision})`，**实际查看返回的图片**。随后用同一版本的 `reviewId` 提交具体 `observations`：涉及哪些节点、哪里有问题、怎样改。提交命令后重新截图。过期记录不能用于评价新版本。
+3. 摄影用 `studio_media` 保留原图、来源、焦点和裁切配方；返回的 `registerCommand` 与图片节点改动一起送入 `studio_command`，用当前 `baseRevision` 和唯一 `idempotencyKey`。先比较图框与原图比例；主体超出保护区时调整配方。
+4. 每次关键改稿后调用 `studio_design({action:"review",pageId,baseRevision})`，**实际查看返回的图片**。随后用同一版本的 `reviewId` 提交具体 `observations`：涉及哪些节点、哪里有问题、怎样改。提交命令后重新截图。过期记录不能用于评价新版本。
 5. `findings` 只是机器检查，`agent-reviewed` 只是模型看图记录；不得把它们称为审美通过或用户认可。空态、无图、长文本、列表数量与连续操作分别验收，不支持的情况明确说明。
 6. 最后验证真实业务流并导出 `.rp`。分开报告浏览器、原生结构、Axure 加载/预览、GUI 手工编辑及用户视觉认可；不可用截图替代可编辑成品。
 

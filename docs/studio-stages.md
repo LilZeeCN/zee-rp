@@ -5,8 +5,8 @@
 ## 三次调用开始创作
 
 1. `studio_open_project({projectDir:"/abs/project",domain:"mobile"})`，取得真实页面与版本。
-2. `studio_get_design_context({projectDir:"/abs/project",stage:"skeleton",intent:"learning",platform:"mobile",target:{pageId:"home"},brief:{task:"先回忆再揭示答案",content:["完整单词与例句"],states:["回忆","揭示","记住","重练"]}})`。
-3. 依据 `binding.revision`、`target.page.insertionParentId`、父 padding 与 `authoring.nextCall` 提交 `studio_apply_commands`。不要把示例稿直接当成用户要求。
+2. `studio_stage({projectDir:"/abs/project",stage:"skeleton",intent:"learning",platform:"mobile",target:{pageId:"home"},brief:{task:"先回忆再揭示答案",content:["完整单词与例句"],states:["回忆","揭示","记住","重练"]}})`。
+3. 依据 `binding.revision`、`target.page.insertionParentId`、父 padding 与 `authoring.nextCall` 提交 `studio_command`。不要把示例稿直接当成用户要求。
 
 `stage` 可为 `planning/skeleton/content/refine/review/edit`，是按需知识视角，不会自动改稿或强制依次经过每一步。`intent` 为 `learning/task/editorial`，`platform` 为 `mobile/web`。现有五套可编辑参考覆盖字形学习、精确表单、摄影长文、密集目录和温暖词记；读取 `availableReferencePacks`，通过 `referencePackId/referencePageId` 显式选择。旧顶层 `pageId` 仍是旧栖羽参考页；当前工程页放在 `target.pageId`。
 

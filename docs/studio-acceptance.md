@@ -25,7 +25,7 @@ Studio原场景用真实指针验证了热区下点选、双击文字、Option�
 
 ## 场景的证据层级
 
-`studio_run_acceptance_scenarios`、HTTP `/api/scenarios/run` 与 CLI `studio scenarios` 使用同一个执行器：
+`studio_scenario(acceptance:true)`、HTTP `/api/scenarios/run` 与 CLI `studio scenarios` 使用同一个执行器：
 
 | layer | 实际执行 | 不代表什么 |
 | --- | --- | --- |

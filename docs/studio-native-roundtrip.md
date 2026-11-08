@@ -1,10 +1,10 @@
 # 原生手工修改回到同一画布
 
-本地开发快照，2026-10-30。`studio_sync_native` 提供一键 `preview` / `apply` 双向收敛入口，复用同一 Studio 源文档、基线符号映射与原子事务。
+本地开发快照，2026-10-30。`studio_merge(kind:sync_native)` 提供一键 `preview` / `apply` 双向收敛入口，复用同一 Studio 源文档、基线符号映射与原子事务。
 
-1. 用 `studio_export_rp` 导出基准，保存 `.rp`、`.baseline.json`、`.rp.source/source.json` 和兼容报告。出口同时保存带 SHA 的 `.rp.source/studio-document.json` 完整作者源，包含原始布局、宏、组件实例、面板状态和中继器模板绑定。
+1. 用 `studio_export(format:rp)` 导出基准，保存 `.rp`、`.baseline.json`、`.rp.source/source.json` 和兼容报告。出口同时保存带 SHA 的 `.rp.source/studio-document.json` 完整作者源，包含原始布局、宏、组件实例、面板状态和中继器模板绑定。
 2. 复制或直接在 Axure RP 9 中改字、改几何、改样式并保存关闭重开。读取和同步以原生 GUID 与基线 `sourceMap` 保持身份，自动映射到 Studio `scopedId` 与真实作者 `target` / `propertyMap` / 父内容盒坐标。
-3. 使用 `studio_sync_native` 预览或回填原生差异：
+3. 使用 `studio_merge(kind:sync_native)` 预览或回填原生差异：
 
 ```json
 {

@@ -14,7 +14,7 @@ node bin/axure.mjs studio describe --topic node --name repeater --fields rows,te
 
 `sourceWrite` 区分允许保存、只读、拒绝和未知。各消费面独立标记 `implemented/partial/unsupported/unverified/metadata/separate-entry`。存在消费者不等于真实画面或Axure宿主验证通过；完整RP/1保留独立原生创作入口，不能从同名字段推断Studio已支持。
 
-`studio_query_nodes` 默认带精简 `capabilities`，说明当前对象的常用字段与后续精确查询。宏展开内容回到所属参数，组件沿用实例覆盖。卡片可用已有RP/1字段titleFontSize调整标题，统计行可用valueFontSize调整数值，单项可覆盖；这些字号参数接受(0,120]的数值。卡片标题的target.propertyMap把text映射到title、fontSize映射到titleFontSize，诊断也返回同一映射。
+`studio_inspect` 默认带精简 `capabilities`，说明当前对象的常用字段与后续精确查询。宏展开内容回到所属参数，组件沿用实例覆盖。卡片可用已有RP/1字段titleFontSize调整标题，统计行可用valueFontSize调整数值，单项可覆盖；这些字号参数接受(0,120]的数值。卡片标题的target.propertyMap把text映射到title、fontSize映射到titleFontSize，诊断也返回同一映射。
 
 改card容器fontSize仍不会改变标题：普通属性修改、setText附带样式和editNodes命中这类已确认无效改稿会拒绝整个事务，并建议实际参数。显式子节点仍可正常修改字体。此检查尚未代表所有高级组件路径与全部创建字段均已审计。
 
@@ -30,7 +30,7 @@ node bin/axure.mjs studio describe --topic node --name repeater --fields rows,te
 
 `datasetOp` 按repeater节点修改真实rows或绑定数据集。`repeaterSetFilter/repeaterSetSort` 决定当前视图，数字按数值排序；共享数据和运行态数据参与同一解算。没有25行静默截断，但当前没有列表虚拟化，规模性能仍须验收。
 
-行模板已参与画布和运行预览：逐行绑定 `=item.field` 或 `${item.field}` 文字后度量，保留模板布局、字体、表面和静态素材。`studio_query_nodes` 可找到唯一模板源，如 `home/words/template/word_label`；改此源更新全部行，绑定公式保留，支持普通事务与撤销。行内独立动作、任意表达式和动态图片字段绑定仍未打通；预览行点击沿用数据行选择。
+行模板已参与画布和运行预览：逐行绑定 `=item.field` 或 `${item.field}` 文字后度量，保留模板布局、字体、表面和静态素材。`studio_inspect` 可找到唯一模板源，如 `home/words/template/word_label`；改此源更新全部行，绑定公式保留，支持普通事务与撤销。行内独立动作、任意表达式和动态图片字段绑定仍未打通；预览行点击沿用数据行选择。
 
 原生出口保留可编辑Repeater与行模板、导出真实行数据。静态filter/sort和容器on目前没有完整等价的原生转换，兼容报告明确记unsupported；结构三零不能当作这些行为通过。不同页的隐式同名数据集行值冲突会明确拒绝导出，避免后一个覆盖前一个；这不代表所有运行态数据命名问题已经关闭。
 

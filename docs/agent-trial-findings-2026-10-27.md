@@ -99,7 +99,7 @@
 ### S2 单实例单端口：切工程会顶掉当前工程，已打开画布直接「连接已断开」（P0，ST）
 
 - **复现**：`studio_open_project(projectDir: studio-try)` 后 `studio_open_project(projectDir: studio-web, port: 4311)`。
-- **实际**：返回 `url: http://127.0.0.1:4310`（`port` 被忽略），`projectDir` 变成 studio-web；用 studio-try 的 projectDir 调 `studio_get_context` 返回的仍是 studio-web；Chrome 里原画布标签头部显示「连接已断开」。
+- **实际**：返回 `url: http://127.0.0.1:4310`（`port` 被忽略），`projectDir` 变成 studio-web；用 studio-try 的 projectDir 调 `studio_inspect(view:context)` 返回的仍是 studio-web；Chrome 里原画布标签头部显示「连接已断开」。
 - **根因**：`studio/server.mjs` 单例 + `mcp-adapter` 复用 `instanceId`，`port` 只在首次 start 生效。
 - **修复建议**：① `open_project` 增加 `mode:"switch"|"fork"`，`fork` 时真正另起端口；② 或按 `projectDir` 维护 `Map<projectDir, instance>`，同进程多工程；③ `port` 与现有实例不一致时**报错**而不是静默忽略。
 - **验收**：`test/studio-design-check.mjs` 增双工程用例。
@@ -108,7 +108,7 @@
 
 - **证据**：`studio-try/document.json` 仅 2 页 8 节点就 29KB；scene 里每个节点 50+ 字段（含 `firstBaselineOffset/ascentPx/descentPx/measurementMode/…`）。`open_project`、`apply_commands`、`get_context` 三个调用各回传一次，三次就吃掉数万 token。
 - **根因**：`studio/mcp-adapter.mjs:53` 直出 `JSON.stringify(body)`；`studio/server.mjs:176/590` 无条件带 `scene`，body 里同时含 `doc`。
-- **修复建议**：① MCP 层默认 `compact:true`：只回 `appliedRevision/contentHash/affectedNodeIds/humanReadableSummary/diagnostics` + 变更节点的**精简投影**（去掉测量字段）；② `include:{doc:false, scene:false}` 开关，调试时才全量；③ 提供 `studio_query_nodes` 作为按需查询（已有，但现在没人需要用它，因为 context 全给了）；④ 大文档改分页/游标。
+- **修复建议**：① MCP 层默认 `compact:true`：只回 `appliedRevision/contentHash/affectedNodeIds/humanReadableSummary/diagnostics` + 变更节点的**精简投影**（去掉测量字段）；② `include:{doc:false, scene:false}` 开关，调试时才全量；③ 提供 `studio_inspect` 作为按需查询（已有，但现在没人需要用它，因为 context 全给了）；④ 大文档改分页/游标。
 - **验收**：`test/studio-design-check.mjs` 断言 compact 响应字节数上限（如 <8KB）。
 
 ### S4 命令字段名 `type` 与错误提示不列合法值（P1，ST）
@@ -187,7 +187,7 @@
 | S3 | 响应预算：MCP 层默认 compact（实测 32KB → 2.2KB，14.5×），带 8KB–12KB 字节上限与逐级降级记录，`verbose` 可回全量 | `studio/mcp-adapter.mjs` | 同上 |
 | S4 | 命令 `cmd` 作为 `type` 别名；未知类型错误列出全部可用类型与相近候选 | `studio/commands.mjs` | `test:studio-repairs`（18/18） |
 | S7 | Studio 导入 `.rp1` 报 `cannot import name 'parse_dsl'`：API 已改名 `dsl_to_spec` | `studio/document.mjs` | 手工验证 |
-| — | 新增 `studio_design_metrics`：L1 代理指标 + 反 slop 规则 | `studio/design-metrics.mjs`（新） | `test/studio-design-metrics-check.mjs` |
+| — | 新增 `studio_design(action:metrics)`：L1 代理指标 + 反 slop 规则 | `studio/design-metrics.mjs`（新） | `test/studio-design-metrics-check.mjs` |
 
 ## 新发现（未修）
 
@@ -208,7 +208,7 @@
 
 ## 新增能力：设计度量层
 
-`studio_design_metrics` 返回：
+`studio_design(action:metrics)` 返回：
 - 字阶比（合并相差 <8% 的字号后再算）、4px 栅格一致性、留白占比（排除背景层）、文本对比度（沿父链找真实底色）、主色相数
 - 反 slop 规则：`equal-card-grid`、`purple-gradient`、`vague-centered-hero`、`icon-in-rounded-square`、`hero-without-media`、`over-rounded`
 - **不返回审美总分**，只给 `meets-l1-bar / below-l1-bar` 与逐条改法
@@ -359,17 +359,17 @@
 
 代码级缺陷已清零，本轮补"抬高上限"的两根支柱。
 
-### `studio_design_explore`（批量探索 + 自动收敛）
+### `studio_design(action:explore)`（批量探索 + 自动收敛）
 
 - 轴：密度（紧凑/常规/疏朗）× 字阶（收/常规/放）× 圆角（直角/柔/大）× 配色（mono/warm/cool/ink）
 - 每个变体：克隆文档 → 应用参数 → 真实解析 scene → 跑同一套指标 → 打分
 - 排序：**未达标项数 → 反 slop 硬伤 → 提示数 → 改动量**（同分偏好少改动，防止为指标大改版式）
-- 输出：每个变体的 `commands` 可直接 `studio_apply_commands` 提交；`advice` 会区分「参数能修」与「必须改版式/补素材」
+- 输出：每个变体的 `commands` 可直接 `studio_command` 提交；`advice` 会区分「参数能修」与「必须改版式/补素材」
 - 不写文档（纯预演），不给审美总分
 
 实测（看板页）：12 个组合中 `blocking` 全为 2 → 结论直接说"参数级调整无法再减少未达标项"，而不是硬推一个"更优"变体。
 
-### `studio_design_anchors`（锚点驱动参考）
+### `studio_design(action:anchors)`（锚点驱动参考）
 
 - `extract`：把已认可的页面提炼成配方（字阶 sizes/bodyRatios、栅格率、留白、色相、主次比、构图三分占比），写入 `<project>/design-anchors.json`
 - `compare`：其它页面与锚点均值比对，输出 `{key, current, anchor, delta, meaningful}`，结论是数字句
@@ -471,7 +471,7 @@
 
 ### compare 现在给方向，不只给偏离
 
-`studio_design_anchors({action:"compare"})` 新增 `suggestions`：
+`studio_design(action:anchors)({action:"compare"})` 新增 `suggestions`：
 
 ```
 留白占比 | 减少留白 | 留白比锚点多 10.8 个百分点：把主内容列加宽或把主图放大占位（锚点均值 62.3%）
@@ -622,7 +622,7 @@
 
 ### 新增 `metrics.exportBudget`
 
-按元素投影三类结果（与 `studio_export_rp` 的分类口径一致）：
+按元素投影三类结果（与 `studio_export(format:rp)` 的分类口径一致）：
 
 | 分类 | 触发 | 后果 |
 |---|---|---|
@@ -640,7 +640,7 @@
 
 ### 边界诚实声明
 
-`note` 明写「静态投影，按元素计数；真实保真度以 `studio_export_rp` 的报告为准」——不冒充导出器。
+`note` 明写「静态投影，按元素计数；真实保真度以 `studio_export(format:rp)` 的报告为准」——不冒充导出器。
 
 ### 回归
 
@@ -658,7 +658,7 @@
 
 **真实导出把 `filter` 栅格化了，不是丢弃。** 说明静态阶段无法确知这类效果的去向（同一效果在不同结构下既可能被栅格化也可能被省略）。
 
-处理：把 `filter / mask / backdrop / mixBlendMode / transform / clipPath` 从 `dropped` 改为 **`uncertain`**，并在提示与 `note` 里明说「可能被栅格化也可能被省略，以 studio_export_rp 报告为准」。
+处理：把 `filter / mask / backdrop / mixBlendMode / transform / clipPath` 从 `dropped` 改为 **`uncertain`**，并在提示与 `note` 里明说「可能被栅格化也可能被省略，以 studio_export(format:rp) 报告为准」。
 
 **不做假精度**：预测错了就降级成"不确定"，而不是继续宣称能预测导出器。
 
@@ -786,7 +786,7 @@ note 改为明说**"本投影独立于导出器，可能与导出报告不完全
 
 `studio-metrics` 新增 4 条（未绑定不通过、绑定后转正、热区不足判出、补齐热区转正）。`npm test 17/17`、studio 全套通过。
 
-## 第二十一轮：从"诊断"到"开方"（studio_design_fix_plan）
+## 第二十一轮：从"诊断"到"开方"（studio_design(action:fix_plan)）
 
 试用者一直的抱怨是"工具说得出哪里错，但不给可执行修法"。新增修复计划工具，只开**确定性处方**：
 
@@ -797,7 +797,7 @@ note 改为明说**"本投影独立于导出器，可能与导出报告不完全
 | 补绑定空态 | 列表无 `for` 绑定的空态 | `addNode{role:"empty-state", for:"<listId>"}`，位置按列表下缘 +16 |
 | 撑高文字回缩 | `stretchedText` 命中 | `setProperties{h: contentH}` |
 
-**不做的事**：字阶、配色、构图——这些是取舍，留给 `studio_design_explore` 与锚点对比。测试里有断言禁止计划改 `fontSize/fill/color/stroke`。
+**不做的事**：字阶、配色、构图——这些是取舍，留给 `studio_design(action:explore)` 与锚点对比。测试里有断言禁止计划改 `fontSize/fill/color/stroke`。
 
 实测（一页四个阻塞项）：
 
@@ -861,7 +861,7 @@ after : type-scale（唯一剩下的，属内容层问题）
 
 试用者把剩余扣分拆成"能修没修 45% / 内容层 55%"。脚手架是内容层里**唯一能确定性地做**的部分。
 
-### `studio_design_content_plan`
+### `studio_design(action:content_plan)`
 
 扫描两类"只有结构没有文案"的位置：
 
@@ -1187,7 +1187,7 @@ after : type-scale（唯一剩下的，属内容层问题）
 
 1. `studio/png-decode.mjs` —— 极简 PNG 解码（8 位、非隔行、RGB/RGBA），只为读回 Chrome 截图的真实像素
 2. `studio/pixel-truth.mjs` —— 按文字盒子取内缩边框环的众数颜色作底色，用真实像素算对比度
-3. `studio_design_pixel_contrast` 工具 + `/api/design/pixel-contrast` 端点 + `metrics({pixelTruth:true})`
+3. `studio_design(action:pixel_contrast)` 工具 + `/api/design/pixel-contrast` 端点 + `metrics({pixelTruth:true})`
 
 ### 实测（50% 黑遮罩 + 白字）
 

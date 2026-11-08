@@ -1,6 +1,6 @@
 # 从认可的作品到可重复的 AI 创作流程
 
-2026-10-28：AI局部创作入口、语义查询和按需帮助见 [RP/1画布创作](studio-ai-authoring.md)。`studio_run_scenario` 是隔离语义执行（`hitTest:true` 可加真实指针遮挡校验，被遮挡返回 `E_SCENARIO_OCCLUDED`）；`studio_design_explore` 的 states 是单独的浏览器指针证据。
+2026-10-28：AI局部创作入口、语义查询和按需帮助见 [RP/1画布创作](studio-ai-authoring.md)。`studio_scenario` 是隔离语义执行（`hitTest:true` 可加真实指针遮挡校验，被遮挡返回 `E_SCENARIO_OCCLUDED`）；`studio_design(action:explore)` 的 states 是单独的浏览器指针证据。
 
 本流程适用于包含 Studio 的 zee-rp 程序。它让当前调用工具的模型读取参考、准备素材、看图、记录问题和改稿；服务端不会暗中调用另一个模型，也不产生审美分数。
 
@@ -24,7 +24,7 @@
 
 ## 1. 选择参考，写清任务
 
-调用 `studio_get_design_context({intent:"editorial",pageId:"home"})`。返回真实参考图、冻结源文件位置、单页节点源、设计决定、素材配方与当前工程版本。`task` 和 `learning` 返回相应指导，并明确 `reference:null`。不把摄影型作品强加到设备检索或学习阅读中。
+调用 `studio_stage({intent:"editorial",pageId:"home"})`。返回真实参考图、冻结源文件位置、单页节点源、设计决定、素材配方与当前工程版本。`task` 和 `learning` 返回相应指导，并明确 `reference:null`。不把摄影型作品强加到设备检索或学习阅读中。
 
 每页在动手前写清：用户要做什么、必须看到什么、主操作是什么、完成/空/错误状态如何出现。保留品牌和内容事实。可以从基础节点自由构图，不强制选三种模板。
 
@@ -32,7 +32,7 @@
 
 ## 比较自由构图
 
-起稿后，使用 `studio_design_explore` 的 candidates 模式对同一任务提出不同的信息组织方式，在隔离副本中看回忆、揭示、完成等状态。AI 自写任意命令，工具返回实际浏览器联系图；选稿后才提交一个事务。完整参数、行为保留与证据边界见 [自由构图与多状态预演](studio-candidates-20261027.md)。
+起稿后，使用 `studio_design(action:explore)` 的 candidates 模式对同一任务提出不同的信息组织方式，在隔离副本中看回忆、揭示、完成等状态。AI 自写任意命令，工具返回实际浏览器联系图；选稿后才提交一个事务。完整参数、行为保留与证据边界见 [自由构图与多状态预演](studio-candidates-20261027.md)。
 
 ## 2. 准备摄影素材
 
@@ -63,16 +63,16 @@
 
 ## 3. 用真实截图评审与改稿
 
-批量样式优先绑定设计 token，精细位置优先用 `editNodes` 的 align/place/move/distribute 表达关系。它编译为现有原子命令，失败时整批回滚，不隐式切换流式布局。修改后可在 `studio_review_design` 中传 `compareWithReviewId`，一次查看前后真实截图、变化图层范围和检查项变化；编辑器顶栏「对照」提供同一能力。示例和限制见 [关系编辑与画面对照](studio-editing-20261027.md)。
+批量样式优先绑定设计 token，精细位置优先用 `editNodes` 的 align/place/move/distribute 表达关系。它编译为现有原子命令，失败时整批回滚，不隐式切换流式布局。修改后可在 `studio_design(action:review)` 中传 `compareWithReviewId`，一次查看前后真实截图、变化图层范围和检查项变化；编辑器顶栏「对照」提供同一能力。示例和限制见 [关系编辑与画面对照](studio-editing-20261027.md)。
 
-1. `studio_review_design({pageId:"home",baseRevision:8})` 创建版本截图及机器检查，状态为 `awaiting-visual-review`。工具返回真正的 MCP 图片块，供当前模型直接看图。
+1. `studio_design(action:review)({pageId:"home",baseRevision:8})` 创建版本截图及机器检查，状态为 `awaiting-visual-review`。工具返回真正的 MCP 图片块，供当前模型直接看图。
 2. 检查主次、构图、图片主体、图文比例、阅读层级和状态。每个问题给出节点 ID、问题和下一步决定。不能只写“更加高级”。
-3. `studio_review_design({pageId:"home",baseRevision:8,reviewId:"…",observations:[{nodeIds:["hero"],issue:"照片主体被按钮遮住",decision:"将按钮移到照片下方"}]})` 将模型观察另存。原始截图记录保持不变，标记 `agent-reviewed`、`userAccepted:false`。
+3. `studio_design(action:review)({pageId:"home",baseRevision:8,reviewId:"…",observations:[{nodeIds:["hero"],issue:"照片主体被按钮遮住",decision:"将按钮移到照片下方"}]})` 将模型观察另存。原始截图记录保持不变，标记 `agent-reviewed`、`userAccepted:false`。
 4. 提交原子改稿，再创建新评审。旧版本返回 `E_STALE_REVIEW`；不会把旧图复用成新版本的完成证据。已提交的观察记录不可覆盖。
 
 `findings` 包含文字裁切、越界、缺图和衍生图底色过期等机器结果，不覆盖审美、所有视觉重叠或业务正确性。装饰性背景可延伸到安全区；正文、导航和操作从60px以下开始。不要把状态栏误当页面正文。
 
-`studio_capture_screenshot` 默认也直接返回图片。截图附有版本、内容哈希、渲染器版本与图片 SHA。需要纯文本元数据时可设 `includeImage:false`；HTTP/CLI 的普通截图路径保持兼容。
+`studio_screenshot` 默认也直接返回图片。截图附有版本、内容哈希、渲染器版本与图片 SHA。需要纯文本元数据时可设 `includeImage:false`；HTTP/CLI 的普通截图路径保持兼容。
 
 ## 4. 验收
 

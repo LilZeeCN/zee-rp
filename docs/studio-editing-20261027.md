@@ -6,7 +6,7 @@
 
 ## 关系与批量编辑
 
-在 `studio_apply_commands.commands` 中使用 `editNodes`，仍然提交当前 `baseRevision` 和唯一 `idempotencyKey`。选择器支持 `pageId`、`nodeIds`、`role`、`type`、`textContains`、`within`，多个条件取交集。只传 pageId 或没有匹配节点会明确报错；有歧义时返回候选 scopedId。跨页批量属性修改可用完整 scopedId。
+在 `studio_command.commands` 中使用 `editNodes`，仍然提交当前 `baseRevision` 和唯一 `idempotencyKey`。选择器支持 `pageId`、`nodeIds`、`role`、`type`、`textContains`、`within`，多个条件取交集。只传 pageId 或没有匹配节点会明确报错；有歧义时返回候选 scopedId。跨页批量属性修改可用完整 scopedId。
 
 ```json
 [
@@ -46,7 +46,7 @@
 
 编辑器顶栏新增「对照」。首次记录当前画面；改稿后再次点击，显示此前记录与当前画面，以及变更图层边框。可关闭弹窗继续编辑。对照记录保存在工程的 design-reviews 目录。
 
-AI 先创建一次 `studio_review_design`，之后使用当前版本与此前的 `compareWithReviewId`：
+AI 先创建一次 `studio_design(action:review)`，之后使用当前版本与此前的 `compareWithReviewId`：
 
 ```json
 {
