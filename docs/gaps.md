@@ -11,7 +11,7 @@
 
 | # | 缺口(行为级) | 验收口径 | 来源 | 状态 |
 |---|---|---|---|---|
-| 1 | **真实模型在新 13 工具面上的试用未收口**:T01 `complete-three` 第 4 步曾停在 `meticulous`(旧 28 工具面,自评 3/10);工具面收敛后须重跑。`toolSchemaSha256` 已变,历史 result 不可比 | 新面上 T01 全流程 `completed` 且作者自评 ≥7/10;T02 至少跑完并分级 | PROJECT-STATUS 2026-11-02 收口 | **open**(本批改面后的首选) |
+| 1 | **新 13 工具面作者试用已完成,独立外部模型盲测仍缺**:T01 子代理作者试用全过(2 场景 12/12 断言,27 调用,ease 7/10;outputs/agent-surface-t01-retry-20261108/)——但经旧名兼容层执行(本机 MCP 进程未重启,新名对客户端不可见,#12);`toolSchemaSha256` 已变,历史 result 不可比 | 外部独立模型在新面上 T01 全流程 `completed` 且自评 ≥7/10(需用户准备模型凭据;用户明确暂不烧外部模型) | PROJECT-STATUS 2026-11-02 收口;2026-11-08 子代理试用 | **partial**:面可用性已验,独立盲测待用户准备 |
 | 2 | ~~scripted 基线链与 validate 脱节~~ | run-trials --out 全绿通过 validate | 2026-11-08 | **closed(同日)**:validate.py 按 `execution.kind` 分要求——scripted 走四层 evidence passed + 引用存在检查,真实模型路径语义逐字保留(新旧对照同一真模 result 均 resultValidated:true);回归门禁 `test:scripted-validate`(T01 no-gui 端到端 5s + validate)进 CI |
 | 3 | **T02 未跑完**(旧面),只作视觉样本不计通过 | 新面上 T02 跑完并按 scenario 分级 | 2026-11-02 收口 | **open** |
 | 4 | **纯文本元件旋转在 RP9 预览发布不渲染**(.rp 持久化、编辑器保留)——平台行为 | Axure 平台若开放能力位则接入;否则保持声明边界 | 2026-11-02 逆向 | **won't-fix(平台边界)** |
@@ -19,7 +19,10 @@
 | 6 | ~~RP/1 编译链巨石~~ | 语言 51 + runtime/backend/sync/npm-test 等 12 门禁全绿 | 2026-11-08 架构盘点 | **closed(同日)**:proto.py→`scripts/proto_engine/` 七模块(fonts/tokens/expander/layout/audit/builder/compiler,依赖矩阵严格单向零环),rp_language.py→`scripts/rplang/` 四模块(core/frontend/runtime/tail;pointer 三工具挪 core 断 frontend↔tail 环,compile_language 归 frontend);两 facade 保持 `import proto`/`from rp_language import X`/`python3 scripts/proto.py` 消费面逐名不变 |
 | 7 | **测试双轨**:61 个自写 runner vs 43 个 node --test | 统一 node --test,脚本式仅保留有特殊进程语义的 | 2026-11-08 工程盘点 | **open** |
 | 8 | **扫荡门禁发现的存量候选**:`computeCommandImpactAndDiff` 在事务 catch 之外(提交段抛错会穿透为 E_INTERNAL_ERROR 而非命令信封) | 挪进 try 或单独兜底;由 sweep 扩展用例固化 | 2026-11-08 M-SWEEP | **open(小)** |
-| 9 | 素材出处台账(ATTRIBUTION 模式)+ assets 校验进 CI | assets/ 每文件一行来源与许可,CI 校验 | figcraft 借鉴盘点 | **open(小)** |
+| 9 | ~~素材出处台账~~ | assets/ 每文件一行来源与许可,CI 校验 | figcraft 借鉴盘点 | **closed(2026-11-08)**:ATTRIBUTION.md + test:attribution 进 CI |
+| 10 | `E_STACK_CHILDREN_UNPLACED` 是 error 级诊断却出现在 `ok:true` 回包里,作者易把带错回包当成功 | stack 容器缺 x/y 子节点的命令批应拒写(E_ 信封)或诊断置顶强提示 | 2026-11-08 T01 子代理试用 friction | **open(小)** |
+| 11 | `editNodes` 改 visible 的回包标签「已写入但无视觉效果(已忽略属性)」误导——值实际已生效 | 回包文案改为如实描述(值已写入且生效) | 2026-11-08 T01 子代理试用 friction | **open(小)** |
+| 12 | 本机 MCP 服务进程陈旧检测:studio_open_project 复用旧实例时,旧代码静态路由缺 /src/ 导致渲染 404,作者侧难自查 | open_project 回包带 sourceFingerprint 与 runtime_info 同款新旧对照提示 | 2026-11-08 T01 子代理试用 friction(根因=进程陈旧,非代码缺陷) | **open(中)** |
 
 ## 已关闭(近期)
 

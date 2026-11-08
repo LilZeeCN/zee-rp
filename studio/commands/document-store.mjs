@@ -314,17 +314,32 @@ export class StudioDocumentStore {
     resolvedScene.contentHash = workingDoc.contentHash;
     this.lastScene = resolvedScene;
 
-    const stackUnplaced = stackUnplacedChildDiagnostics(resolvedCommands, request.pageId);
-    const impactReport = computeCommandImpactAndDiff({
-      beforeDoc,
-      afterDoc: workingDoc,
-      beforeScene,
-      afterScene: resolvedScene,
-      commands: resolvedCommands,
-      directAffectedIds: [...allAffected],
-      contractEvolutionResults,
-      extraDiagnostics: stackUnplaced,
-    });
+    // 影响计算此刻尚未写入 this.doc(workingDoc 原子性未破坏);若病态输入使其抛错,
+    // 必须转成干净信封而不是让裸 RangeError/TypeError 穿透 applyTransaction(M-SWEEP 姊妹防护)。
+    let stackUnplaced, impactReport;
+    try {
+      stackUnplaced = stackUnplacedChildDiagnostics(resolvedCommands, request.pageId);
+      impactReport = computeCommandImpactAndDiff({
+        beforeDoc,
+        afterDoc: workingDoc,
+        beforeScene,
+        afterScene: resolvedScene,
+        commands: resolvedCommands,
+        directAffectedIds: [...allAffected],
+        contractEvolutionResults,
+        extraDiagnostics: stackUnplaced,
+      });
+    } catch (err) {
+      return {
+        ok: false,
+        status: 'failed',
+        code: err.code || 'E_IMPACT_FAILED',
+        message: `影响计算失败(文档未写入): ${err.message}`,
+        suggestion: '请附最小复现命令批上报;该错误意味着影响扩散器遇到了未设防的输入形态',
+        currentRevision: this.doc.revision,
+        currentContentHash: this.doc.contentHash,
+      };
+    }
     const fullAffectedIds = impactReport.transitiveImpact.allAffectedNodeIds.length > 0
       ? impactReport.transitiveImpact.allAffectedNodeIds
       : [...allAffected];
