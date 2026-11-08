@@ -6,7 +6,7 @@
 
 编辑器左上角「版本」中填写名字保存；选择「查看差异」，核对涉及页面、图层和字段后再恢复。恢复后可撤销回到后续分支。版本名称不是用户审美批准。
 
-公开工具 `studio_project_versions` 使用同一接口：
+公开工具 `studio_history` 使用同一接口：
 
 ```json
 {"projectDir":"/abs/project","action":"create","name":"完整学习流程","baseRevision":8,"idempotencyKey":"name-draft-8"}
@@ -34,6 +34,6 @@ CLI：`node bin/axure.mjs studio versions --project /abs/project --input /abs/re
 
 多个客户端有选择时，明确 `target.clientId`；断开的画布不继续提供活跃选择。空、过期、无法回写或未完整返回的选择不会扩大范围。可写宏参数与实例覆盖仍通过原有作者目标返回。
 
-把 `binding.selectionId` 与 `binding.revision` 交给 `studio_apply_commands`。该身份同时检查选择是否已变和源修改是否超出选区；超出范围整批拒绝，即使同批还有合法改动。需要改父容器或全局token时，先明确取得相应更大范围。源变化导致的正常布局影响另见影响报告，不将截图坐标当源坐标。
+把 `binding.selectionId` 与 `binding.revision` 交给 `studio_command`。该身份同时检查选择是否已变和源修改是否超出选区；超出范围整批拒绝，即使同批还有合法改动。需要改父容器或全局token时，先明确取得相应更大范围。源变化导致的正常布局影响另见影响报告，不将截图坐标当源坐标。
 
 输入组合、真实浏览器操作、Axure GUI编辑、保存恢复分别记录。本页API说明不能替代这些层级的实际验收。

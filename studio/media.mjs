@@ -117,5 +117,5 @@ export async function prepareMedia({ projectDir, sourcePath, crops, tokens = {},
   }
   return { ok: true, documentChanged: false, sourceSha256, originalPath, results,
     ...(failures.length ? { failures } : {}), warnings,
-    next: '把 registerCommand 与 image 节点的 src/w/h 修改一起提交给 studio_apply_commands；资源登记与挂载可共同撤销。' };
+    next: '把 registerCommand 与 image 节点的 src/w/h 修改一起提交给 studio_command；资源登记与挂载可共同撤销。' };
 }

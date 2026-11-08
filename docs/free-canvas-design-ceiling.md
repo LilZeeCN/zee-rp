@@ -88,15 +88,15 @@ AI 的手不是鼠标，是关系：`align left to #title`、`move by [0,8]`、`
 
 | 支柱 | 工具 | 状态 |
 |---|---|---|
-| P1 可评判性 | `studio_design_metrics`：字阶比 / 4px 栅格 / 留白 / 色相 / 主次比 / 6 条反 slop | ✅ 有回归 |
-| P1 锚点驱动 | `studio_design_anchors`：`extract` 只锚达标页，配方含结构量（主图占比/栏宽/对齐基线/间距节奏）；`compare` 输出百分比正确的偏离 | ✅ 有回归 |
-| P3 批量与收敛 | `studio_design_explore`：四轴**铺开采样**（非循环前缀），按「未达标项→硬伤→离门槛距离→提示→命令条数」排序，入选变体直接给可提交 commands | ✅ 有回归 |
+| P1 可评判性 | `studio_design(action:metrics)`：字阶比 / 4px 栅格 / 留白 / 色相 / 主次比 / 6 条反 slop | ✅ 有回归 |
+| P1 锚点驱动 | `studio_design(action:anchors)`：`extract` 只锚达标页，配方含结构量（主图占比/栏宽/对齐基线/间距节奏）；`compare` 输出百分比正确的偏离 | ✅ 有回归 |
+| P3 批量与收敛 | `studio_design(action:explore)`：四轴**铺开采样**（非循环前缀），按「未达标项→硬伤→离门槛距离→提示→命令条数」排序，入选变体直接给可提交 commands | ✅ 有回归 |
 | P2 语义约束 | `role` + 三项关系检查（主操作唯一 / 点击区 / 空态覆盖） | ✅ 有回归 |
 | A3 行过滤 | RP/1 `@repeater where=`（编译期）+ Studio `repeaterSetFilter`（运行时） | ✅ 有回归 |
 | P4 关系谓词编辑 | `align/move by` 等 | ⬜ 未做（已有空间定位后端的 `W_LAYOUT_IGNORES_POSITION` 提示） |
 | P5 导出预算前置 | 保真预算 | ⬜ 未做（导出报告已有分类，未前置到画布） |
 
-判断标准没变：**工具只能说"哪里错了、怎么改"，不能说"我觉得好看"**。`studio_design_explore` 的排序规则写在返回里，任何人都能复算。
+判断标准没变：**工具只能说"哪里错了、怎么改"，不能说"我觉得好看"**。`studio_design(action:explore)` 的排序规则写在返回里，任何人都能复算。
 
 ## 4. RSI 闭环（递归自我改进）
 

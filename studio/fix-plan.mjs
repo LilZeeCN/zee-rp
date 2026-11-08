@@ -131,7 +131,7 @@ export function buildFixPlan(scenePage, metrics, doc = null) {
     notes,
     manual,
     deterministic: true,
-    caveat: '只包含可直接计算的修复（网格/空态/撑高文字），并在服务端试跑验证。字阶、配色、构图属于取舍，交给 studio_design_explore 与锚点对比；热区需要渲染层支持，列为 manual。',
+    caveat: '只包含可直接计算的修复（网格/空态/撑高文字），并在服务端试跑验证。字阶、配色、构图属于取舍，交给 studio_design(action:explore) 与锚点对比；热区需要渲染层支持，列为 manual。',
   };
 }
 

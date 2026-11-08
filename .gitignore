@@ -9,3 +9,4 @@ __pycache__/
 outputs/
 release/
 gui-jobs-check/
+benchmarks/studio/trials-local/

@@ -31,7 +31,7 @@ server.setRequestHandler(CallToolRequestSchema, request => {
   const operation = async () => {
     const { name, arguments: args = {} } = request.params;
     const callId = `mcp-${++counter}`, startedAt = new Date().toISOString(), start = performance.now();
-    const authoredMutation = ['studio_apply_commands', 'studio_undo', 'studio_redo'].includes(name)
+    const authoredMutation = name === 'studio_command' || (name === 'studio_history' && ['undo', 'redo', 'restore'].includes(args?.action))
       || name === 'studio_project_versions' && args.action === 'restore';
     if (authoredMutation && !firstMutation) firstMutation = callId;
     const row = { callId, parentCallId: null, eventKind: 'attempt', tool: name, phase: firstMutation ? 'creation' : 'discovery', authoredMutation,
@@ -46,7 +46,7 @@ server.setRequestHandler(CallToolRequestSchema, request => {
       if (!tool) throw new Error('Tool unavailable in this trial');
       validateInput(tool.inputSchema, args);
       if (counter > config.maxToolCalls) throw Object.assign(new Error('Trial call budget exhausted'), { code: 'E_TRIAL_BUDGET' });
-      if (config.track === 'low-level' && name === 'studio_apply_commands' && (args.rp1 || args.sourceMode)) throw Object.assign(new Error('This track uses commands; RP/1 authoring is the compared track.'), { code: 'E_TRIAL_TRACK' });
+      if (config.track === 'low-level' && name === 'studio_command' && (args.rp1 || args.sourceMode)) throw Object.assign(new Error('This track uses commands; RP/1 authoring is the compared track.'), { code: 'E_TRIAL_TRACK' });
       for (const field of ['outPath', 'outRpPath', 'outDir', 'outputDir']) if (args[field] && !resolve(args[field]).startsWith(resolve(config.workDir) + '/')) throw new Error('Trial outputs must stay inside its own work directory');
       if (name === 'studio_open_project' && args.sourcePath && !resolve(args.sourcePath).startsWith(resolve(config.workDir) + '/')) throw new Error('Only this trial project can be opened');
       value = await studioHandlers[name]({ ...args, url: studio.url, projectDir: studio.projectDir });

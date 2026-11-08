@@ -16,6 +16,49 @@ import { SAFE_NODE_CACHE_COMMANDS, INTERACTION_MUTATING_COMMANDS, NON_STRUCTURAL
 import { cmdError, stackUnplacedChildDiagnostics, validateInteractionAssignments } from './helpers.mjs';
 import { applySingleCommand } from './apply.mjs';
 
+// ---- 批处理步引用($ref,figcraft batch 语义) ----
+// 命令可携带顶层 `as: "name"` 命名本步产出(scoped id 数组);同事务中后续步骤的
+// 任意字段可写 {"$ref":"name"} 引用该 id(单产出解析为字符串)。解析发生在
+// validateCommandFields 之前,契约层零豁免;事务/undo 语义不变(整批仍是一步)。
+// WAL 重放消费 txRecord.commands 里的"解析后命令"(不含 as/$ref),重放路径零改动。
+function commandHasStepRef(value) {
+  if (Array.isArray(value)) return value.some(item => commandHasStepRef(item));
+  if (value === null || typeof value !== 'object') return false;
+  for (const key of Object.keys(value)) {
+    if (key === '$ref' || key === 'as') return true;
+    if (commandHasStepRef(value[key])) return true;
+  }
+  return false;
+}
+
+function resolveStepRefs(value, stepRefs, cmdIdx, isRoot) {
+  if (Array.isArray(value)) return value.map(item => resolveStepRefs(item, stepRefs, cmdIdx, false));
+  if (value === null || typeof value !== 'object') return value;
+  const keys = Object.keys(value);
+  if (keys.length === 1 && keys[0] === '$ref' && typeof value.$ref === 'string') {
+    const produced = stepRefs.get(value.$ref);
+    if (!produced || produced.length === 0) {
+      throw cmdError('E_REF_NOT_FOUND', `步引用 $ref:"${value.$ref}" 未命中:该名字不存在,或对应步骤没有产出节点`, {
+        commandIndex: cmdIdx, field: '$ref',
+        suggestion: 'as 名必须来自本事务中更早的步骤,且该步骤产出了节点(如 addNode);同一事务内先命名后引用',
+      });
+    }
+    if (produced.length > 1) {
+      throw cmdError('E_REF_AMBIGUOUS', `步引用 $ref:"${value.$ref}" 命中 ${produced.length} 个产出(${produced.join(', ')}),无法唯一解析`, {
+        commandIndex: cmdIdx, field: '$ref', extra: { candidates: produced },
+        suggestion: '让被命名的步骤只产出一个节点,或直接写明确的 nodeId',
+      });
+    }
+    return produced[0];
+  }
+  const out = {};
+  for (const key of keys) {
+    if (isRoot && key === 'as') continue; // as 是事务层元数据,不进入命令校验与 WAL
+    out[key] = resolveStepRefs(value[key], stepRefs, cmdIdx, false);
+  }
+  return out;
+}
+
 export class StudioDocumentStore {
   constructor(initialDoc, { onCommit = null, maxSnapshots = 120, maxHistoryBytes = 8 * 1024 * 1024, projectDir = null } = {}) {
     this.projectDir = projectDir;
@@ -127,10 +170,24 @@ export class StudioDocumentStore {
     }
 
     const idempotencyKey = request.idempotencyKey ? String(request.idempotencyKey) : null;
-    const reqHash = this.requestHash(request);
-
-    // 2. Check idempotency store BEFORE baseRevision check (Section 7.2 rule!)
-    const replay = this.getIdempotentResult(request);
+    // requestHash/幂等查重在 try 之外:超深嵌套等病态输入会让 canonicalJson 栈溢出,
+    // 必须在此处转成干净信封而不是让 RangeError 穿透 applyTransaction(M-SWEEP)。
+    let reqHash, replay;
+    try {
+      reqHash = this.requestHash(request);
+      // 2. Check idempotency store BEFORE baseRevision check (Section 7.2 rule!)
+      replay = this.getIdempotentResult(request);
+    } catch (err) {
+      return {
+        ok: false,
+        status: 'failed',
+        code: err.code || 'E_COMMAND_VALUE',
+        message: `请求无法参与幂等指纹计算: ${err.message}`,
+        suggestion: '命令对象疑似过深或含不可序列化结构,请简化后重新提交',
+        currentRevision: this.doc.revision,
+        currentContentHash: this.doc.contentHash,
+      };
+    }
     if (replay) return replay;
 
     // 3. Check baseRevision precondition
@@ -176,6 +233,8 @@ export class StudioDocumentStore {
     const allAffected = new Set();
     const contractEvolutionResults = [];
     const interactionValidationQueue = [];
+    const stepRefs = new Map(); // as 名 → 本步 affectedIds(scoped id)
+    const resolvedCommands = new Array(request.commands.length); // 实际应用的命令(as/$ref 已解析)
     let resolvedScene = null;
 
     try {
@@ -183,10 +242,14 @@ export class StudioDocumentStore {
       let needsInteractionNormalize = false;
       let canInheritNodeCache = true;
       for (let i = 0; i < request.commands.length; i++) {
-        const cmd = request.commands[i];
+        const raw = request.commands[i];
+        const asName = raw && typeof raw === 'object' && typeof raw.as === 'string' && raw.as ? raw.as : null;
+        const cmd = (asName !== null || commandHasStepRef(raw)) ? resolveStepRefs(raw, stepRefs, i, true) : raw;
+        resolvedCommands[i] = cmd;
         if (!cachedIndex) cachedIndex = buildNodeIndex(workingDoc);
         const affected = applySingleCommand(workingDoc, cmd, i, request.pageId || null, cachedIndex, contractEvolutionResults, { projectDir: this.projectDir, interactionValidationQueue });
         for (const id of affected) allAffected.add(id);
+        if (asName !== null) stepRefs.set(asName, affected);
         const props = cmd.properties || cmd.props;
         if (
           INTERACTION_MUTATING_COMMANDS.has(cmd.type) ||
@@ -251,13 +314,13 @@ export class StudioDocumentStore {
     resolvedScene.contentHash = workingDoc.contentHash;
     this.lastScene = resolvedScene;
 
-    const stackUnplaced = stackUnplacedChildDiagnostics(request.commands, request.pageId);
+    const stackUnplaced = stackUnplacedChildDiagnostics(resolvedCommands, request.pageId);
     const impactReport = computeCommandImpactAndDiff({
       beforeDoc,
       afterDoc: workingDoc,
       beforeScene,
       afterScene: resolvedScene,
-      commands: request.commands,
+      commands: resolvedCommands,
       directAffectedIds: [...allAffected],
       contractEvolutionResults,
       extraDiagnostics: stackUnplaced,
@@ -295,9 +358,9 @@ export class StudioDocumentStore {
       idempotencyKey,
       requestHash: reqHash,
       actor: request.actor || { kind: request.source || 'unknown', id: request.clientId || 'default' },
-      label: request.label || impactReport.humanReadableSummary?.whatChanged || `${request.commands[0].type} (${request.commands.length} 项操作)`,
+      label: request.label || impactReport.humanReadableSummary?.whatChanged || `${resolvedCommands[0].type} (${resolvedCommands.length} 项操作)`,
       timestamp: workingDoc.updatedAt,
-      commands: structuredClone(request.commands),
+      commands: structuredClone(resolvedCommands),
       affectedNodeIds: fullAffectedIds,
       directAffectedNodeIds: [...allAffected],
       transitiveImpact: impactReport.transitiveImpact,

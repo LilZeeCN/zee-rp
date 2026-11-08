@@ -88,8 +88,8 @@ if (flags.resume) {
 
 function promptFor(task, track, workDir) {
   return `你是首次使用 Studio 自由画布的独立设计者。请实际创建可编辑、高完成度的原型。不要只给建议。\n
-仅使用 studio-trial 提供的公开 MCP 工具。禁止读取产品实现、测试、旧成果、task-builders、其他试用结果；禁止调用其他 MCP、浏览器或 shell 工具。你已打开自己的隔离工程（home 空白页，给定画板与固定素材；T08为给定旧工程）。你可以按需查询公开 studio_describe/get_context/get_design_context。studio_open_project({})只会重新打开自己的工程。不要操作其他工程。\n
-本路线：${track === 'rp1-authoring' ? '主要视觉结构请用 studio_apply_commands 的 rp1/sourceMode 创作；变量、数据、页面、组件覆盖与精确编辑可结合公开 commands。' : '仅使用 studio_apply_commands 的 commands 创作；不使用 rp1/sourceMode。可自由选择嵌套节点与任意合法完整批次，没有人为分批上限。'}\n
+仅使用 studio-trial 提供的公开 MCP 工具。禁止读取产品实现、测试、旧成果、task-builders、其他试用结果；禁止调用其他 MCP、浏览器或 shell 工具。你已打开自己的隔离工程（home 空白页，给定画板与固定素材；T08为给定旧工程）。你可以按需查询公开 studio_describe / studio_inspect(view:context 或 view:nodes) / studio_stage。studio_open_project({})只会重新打开自己的工程。不要操作其他工程。\n
+本路线：${track === 'rp1-authoring' ? '主要视觉结构请用 studio_command 的 rp1/sourceMode 创作；变量、数据、页面、组件覆盖与精确编辑可结合公开 commands。' : '仅使用 studio_command 的 commands 创作；不使用 rp1/sourceMode。可自由选择嵌套节点与任意合法完整批次，没有人为分批上限。'}\n
 预算：${task.budget.maxToolCalls} 次实际工具尝试（含错误、截图、验收、撤销），首次改稿前最多 ${task.budget.maxDiscoveryCallsBeforeFirstWrite} 次发现，${task.budget.maxWallClockSeconds} 秒。要及时开始写入，再看实际截图精修。一旦收到 E_TRIAL_BUDGET，立即停止所有工具调用并输出当前真实结果与摩擦。根据业务选择有辨识度的构图、字形、阅读顺序和留白，避免把所有信息塞成同一种小卡片。内容、交互及范围全部遵守下面固定任务；没有额外设计范例或内部提示。\n
 工具中的截图/审阅会返回真实图片。至少亲自看一次成稿，执行任务给定的实际交互场景并修复自己发现的问题。保留失败回包，不要自己说完成就当作验收通过。给出真实易用性分数和具体阻碍，低分也如实记录。工程源码自动保存；call-ledger和result.json由外部记录器根据真实调用生成，结束后外部验证器也会新进程重开检查。你负责创作、看图和交互验证，不需要手写这些记录。所有输出路径只在 ${workDir} 内。\n
 ${task.id === 'T08' ? 'T08证据硬要求：必须在第一次改稿事务之前拍 before 截图；改稿后拍 edited；撤销后拍 undo；重做后拍 redo；重新打开后拍 reopened。空选择和过期选择负向验证保留真实错误回包。requiredOutputs和requiredStates属于验收条件，不是建议。\n' : ''}
@@ -178,7 +178,7 @@ async function trial(task, track, repeat) {
   const rows = attempts.map((event, i) => {
     const item = event.item, official = item.type === 'mcp_tool_call' && item.server === 'studio-trial';
     const receipt = official && receipts[receiptIndex]?.request.name === item.tool ? receipts[receiptIndex++] : null;
-    const authoredMutation = receipt?.row.authoredMutation || official && ['studio_apply_commands', 'studio_undo', 'studio_redo'].includes(item.tool) || item.type === 'file_change';
+    const authoredMutation = receipt?.row.authoredMutation || official && item.tool === 'studio_command' || (item.tool === 'studio_history' && ['undo', 'redo', 'restore'].includes(item.arguments?.action || item.args?.action)) || item.type === 'file_change';
     if (authoredMutation) creating = true;
     const end = completed.get(item.id), timeout = /timed? out|timeout/i.test(JSON.stringify(end?.error || ''));
     const status = !official ? 'error' : !end ? 'uncertain' : timeout ? authoredMutation ? 'uncertain' : 'timeout' : end.status === 'failed' ? 'error' : receipt?.row.status || 'uncertain';

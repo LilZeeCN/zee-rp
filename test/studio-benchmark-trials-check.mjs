@@ -189,16 +189,16 @@ test('T06 runtime paging copy is delegated to its mandatory scenario', () => {
 test('actor evidence requires the author screenshot, scenario and T08 atomic undo/redo', () => {
   const receipt = (name, result, args = {}, images = []) => ({ request: { name, args }, row: { status: result.ok === false ? 'error' : 'success' }, result, images });
   const rows = [
-    receipt('studio_capture_screenshot', { ok:true, contentHash:'before' }, {}, ['before.png']),
-    receipt('studio_apply_commands', { ok:true, txId:'tx1', contentHash:'after', directAffectedNodeIds:['home/title','home/card','home/instanceA'] }),
-    receipt('studio_capture_screenshot', { ok:true, contentHash:'after' }, {}, ['edited.png']),
-    receipt('studio_undo', { ok:true, undoneTxId:'tx1', contentHash:'before' }),
-    receipt('studio_capture_screenshot', { ok:true, contentHash:'before' }, {}, ['undo.png']),
-    receipt('studio_redo', { ok:true, redoneTxId:'tx1', contentHash:'after' }),
-    receipt('studio_apply_commands', { ok:false, code:'E_COMMAND_VALUE', message:'command.select.nodeIds 至少需要 1 项' }, { commands:[{ type:'editNodes', select:{ nodeIds:[] } }] }),
-    receipt('studio_apply_commands', { ok:false, code:'E_STALE_REVISION', currentContentHash:'after' }),
-    receipt('studio_capture_screenshot', { ok:true, contentHash:'after' }, {}, ['after.png']),
-    receipt('studio_run_scenario', { ok:true, assertionCount:4 }, { startPageId:'home', steps:[{action:'click',target:'next',expect:{page:'detail'}}] }),
+    receipt('studio_screenshot', { ok:true, contentHash:'before' }, {}, ['before.png']),
+    receipt('studio_command', { ok:true, txId:'tx1', contentHash:'after', directAffectedNodeIds:['home/title','home/card','home/instanceA'] }),
+    receipt('studio_screenshot', { ok:true, contentHash:'after' }, {}, ['edited.png']),
+    receipt('studio_history', { ok:true, undoneTxId:'tx1', contentHash:'before' }, { action: 'undo' }),
+    receipt('studio_screenshot', { ok:true, contentHash:'before' }, {}, ['undo.png']),
+    receipt('studio_history', { ok:true, redoneTxId:'tx1', contentHash:'after' }, { action: 'redo' }),
+    receipt('studio_command', { ok:false, code:'E_COMMAND_VALUE', message:'command.select.nodeIds 至少需要 1 项' }, { commands:[{ type:'editNodes', select:{ nodeIds:[] } }] }),
+    receipt('studio_command', { ok:false, code:'E_STALE_REVISION', currentContentHash:'after' }),
+    receipt('studio_screenshot', { ok:true, contentHash:'after' }, {}, ['after.png']),
+    receipt('studio_scenario', { ok:true, assertionCount:4 }, { startPageId:'home', steps:[{action:'click',target:'next',expect:{page:'detail'}}] }),
   ];
   const scenarios = [{startPageId:'home',steps:[{action:'click',target:'next',expect:{page:'detail'}}]}];
   assert.equal(checkActorEvidence('T08', rows, { easeScore:8 }, 'after', scenarios, {contentHash:'before'}).passed, true);
@@ -211,15 +211,15 @@ test('actor evidence requires the author screenshot, scenario and T08 atomic und
     : row);
   assert.equal(checkActorEvidence('T08', emptyCommands, { easeScore:8 }, 'after', scenarios, {contentHash:'before'}).passed, true);
   const emptyQuery = rows.map(row => row.result?.code === 'E_COMMAND_VALUE'
-    ? receipt('studio_query_nodes', { ok:true, empty:true, contentHash:'after', message:'没有匹配节点' }, { pageId:'home', textContains:'不存在' })
+    ? receipt('studio_inspect', { ok:true, empty:true, contentHash:'after', message:'没有匹配节点' }, { pageId:'home', textContains:'不存在' })
     : row);
   assert.equal(checkActorEvidence('T08', emptyQuery, { easeScore:8 }, 'after', scenarios, {contentHash:'before'}).passed, true);
   const staleAfterTemporaryEdit = rows.map(row => row.result?.code === 'E_STALE_REVISION'
     ? { ...row, result: { ...row.result, currentContentHash:'temporary' } }
     : row);
   assert.equal(checkActorEvidence('T08', staleAfterTemporaryEdit, { easeScore:8 }, 'after', scenarios, {contentHash:'before'}).passed, true);
-  const reviewed = rows.map(row => row.request.name === 'studio_capture_screenshot'
-    ? { ...row, request: { ...row.request, name: 'studio_review_design' } }
+  const reviewed = rows.map(row => row.request.name === 'studio_screenshot'
+    ? { ...row, request: { ...row.request, name: 'studio_design', args: { ...(row.request.args || {}), action: 'review' } } }
     : row);
   assert.equal(checkActorEvidence('T08', reviewed, { easeScore:8 }, 'after', scenarios, {contentHash:'before'}).passed, true);
   for (const index of [0,1,2,3,4,5,6,7,8,9]) assert.equal(checkActorEvidence('T08', rows.filter((_, i) => i !== index), { easeScore:8 }, 'after', scenarios, {contentHash:'before'}).passed, false, `missing receipt ${index}`);

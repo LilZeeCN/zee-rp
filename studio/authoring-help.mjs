@@ -7,9 +7,9 @@ import {nodePropertyCapability,nodeCapabilitySummary,NODE_CAPABILITY_SURFACES,ST
 
 export const AUTHORING_ENTRY = {
   discover: 'studio_describe(topic:workflow|rp1|command|node|design|craft)；新起稿用get_design_context(stage:planning)',
-  create: 'studio_apply_commands：rp1/sourceMode 或 commands 二选一；同一版本事务、撤销与持久化',
-  inspect: 'studio_query_nodes：语义筛选、可编辑目标、父布局与源坐标；默认8项，可用cursor续取',
-  verify: 'studio_review_design → studio_run_scenario（默认语义层；hitTest:true 加真实指针遮挡校验，被遮挡返回E_SCENARIO_OCCLUDED） → studio_export_rp → studio_sync_native → studio_export_code → studio_project_bundle / studio_merge_document；视觉、行为、原生往返、可运行代码出口、工程包与并发合并分别验证',
+  create: 'studio_command：rp1/sourceMode 或 commands 二选一；同一版本事务、撤销与持久化',
+  inspect: 'studio_inspect：语义筛选、可编辑目标、父布局与源坐标；默认8项，可用cursor续取',
+  verify: 'studio_design(action:review) → studio_scenario（默认语义层；hitTest:true 加真实指针遮挡校验，被遮挡返回E_SCENARIO_OCCLUDED） → studio_export(format:rp) → studio_merge(kind:sync_native) → studio_export(format:code) → studio_export(format:bundle) / studio_merge(kind:merge)；视觉、行为、原生往返、可运行代码出口、工程包与并发合并分别验证',
 };
 const sample = 'column #lesson w=350 h=hug gap=24\n  label #word "serendipity" fontFamily=Georgia fontSize=44\n  paragraph #answer [fillxhug] "意外发现美好事物的能力。" visible=false fontSize=16 lineHeight=25\n  button #reveal [fillx48] "揭示答案"\n    +onClick [{"type":"show","target":"answer"}]';
 const INTERACTION_GUIDE = {
@@ -56,7 +56,7 @@ export function describeAuthoring({ topic = 'workflow', name = null, names = nul
     updateExample: { pageId: 'home', parentId: 'lesson', sourceMode: 'update', baseRevision: 2, idempotencyKey: 'word-copy-v2', rp1: 'label #word "a beautiful coincidence" fontSize=32' },
     supported: ['column/row/stack/grid、hug/fill与内容测量', '普通节点、已登记素材和工程已有组件/颜色令牌；fontSize/gap/padding可引用已声明的标量数值令牌', 'click动作词表：show、hide、toggle、set-text、set-var(别名set-variable)、set-panel-state、link(别名goto，跳页)、navigate、dataset-*/repeater-*（增删改选与筛选排序）', '行列号/源码片段诊断、ID与依赖检查、同一原子命令事务'],
     boundaries: ['局部入口不新增顶层变量/数据/组件/product声明，请用现有命令或完整generate_prototype工作流。', '不替换整页，不把省略内容、事件或节点当成删除。', '非click事件与无法表示的完整RP/1语义明确拒绝；不等同于整个原生编译器。', 'open-link（打开外部URL）不受Studio运行态支持：提交被拒且不写入（E_INTERACTION_ACTION），外链交互走完整原生RP/1流程。', 'x/y相对父内容盒，手机home_screen默认已有顶部padding；先查询再定位。注意产物路径差异：addPage生成的是裸box根（layout=stack、padding=0、无phone-shell与顶部安全区），子节点y=0会顶到屏幕顶，安全距离需自行留出。'],
-    next: ['studio_query_nodes读取source与layoutContext', 'studio_describe(topic:command,name:editNodes)', 'studio_get_component_contracts获取组件参数'] };
+    next: ['studio_inspect读取source与layoutContext', 'studio_describe(topic:command,name:editNodes)', 'studio_inspect(view:contracts)获取组件参数'] };
   if (topic === 'command') {
     if (names) {
       if (name || !Array.isArray(names) || !names.length || names.length > 8) fail('E_COMMAND_HELP', 'names 需为1–8个命令名，不能与name混用', Object.keys(COMMAND_CONTRACTS));

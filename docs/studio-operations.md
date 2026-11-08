@@ -6,7 +6,7 @@
 {"projectDir":"/abs/project","pageId":"home","baseRevision":3,"requestKey":"recall-options-01","async":true,"candidates":[{"id":"reading","label":"问题先行","designIntent":{"reason":"以问题作为第一阅读焦点","tradeoff":"次要信息延后","axes":["reading-order","typography"]},"commands":[{"type":"setProperties","nodeId":"word","properties":{"fontSize":44}}]}]}
 ```
 
-上例传给 `studio_design_explore`。`studio_prepare_media` 和 `studio_export_rp` 也接受相同的 `async/requestKey/baseRevision`。异步导出保存在该操作独立目录；需要自定义输出路径的覆盖式导出沿用同步入口。`baseRevision` 必须仍为当前版，不暗中选择历史版或最新稿替代。
+上例传给 `studio_design(action:explore)`。`studio_media` 和 `studio_export(format:rp)` 也接受相同的 `async/requestKey/baseRevision`。异步导出保存在该操作独立目录；需要自定义输出路径的覆盖式导出沿用同步入口。`baseRevision` 必须仍为当前版，不暗中选择历史版或最新稿替代。
 
 返回 `id/binding/status/phase` 后，用 `studio_operations`：
 

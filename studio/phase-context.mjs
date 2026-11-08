@@ -106,10 +106,10 @@ export function getPhaseContext(args, { doc, scene = null, selections = null } =
       ...(rejected.has(selectedId) ? { warning: '该参考已被本工程拒绝；显式读取仅供比较，不作为默认采用依据。' } : {}) } : null,
     availableReferencePacks: (stage === 'edit' ? [] : catalog).map(pack => ({ id: pack.id, name: pack.name, intent: pack.intent, platform: pack.platform, version: pack.version,
       eligible: pack.intent === intent && pack.platform === platform && !rejected.has(pack.id) })),
-    authoring: { tool: 'studio_apply_commands', contract, ...(stage !== 'edit' ? {decisionContract: COMMAND_CONTRACTS.recordDesignDecision} : {}),
-      nextCall: stage === 'edit' ? {tool:'studio_apply_commands',arguments:{baseRevision:doc.revision,idempotencyKey:'填写本次唯一修改ID',...(sharedSelection?{selectionId:sharedSelection.selectionId}:{})},note:'commands取自target.nodes的suggestedEdit.command；仅替换意图修改的字段。此处只给公共参数，不重复返回完整正文。'} : {tool:'studio_apply_commands',arguments:{baseRevision:doc.revision,idempotencyKey:'填写本次唯一修改ID',pageId:selection?.page.id,parentId:selection?.page.insertionParentId,sourceMode:'insert'},note:'用rp1添加有明确稳定ID的区域；复用已有工程/页面，不根据参考图坐标回写。'},
+    authoring: { tool: 'studio_command', contract, ...(stage !== 'edit' ? {decisionContract: COMMAND_CONTRACTS.recordDesignDecision} : {}),
+      nextCall: stage === 'edit' ? {tool:'studio_command',arguments:{baseRevision:doc.revision,idempotencyKey:'填写本次唯一修改ID',...(sharedSelection?{selectionId:sharedSelection.selectionId}:{})},note:'commands取自target.nodes的suggestedEdit.command；仅替换意图修改的字段。此处只给公共参数，不重复返回完整正文。'} : {tool:'studio_command',arguments:{baseRevision:doc.revision,idempotencyKey:'填写本次唯一修改ID',pageId:selection?.page.id,parentId:selection?.page.insertionParentId,sourceMode:'insert'},note:'用rp1添加有明确稳定ID的区域；复用已有工程/页面，不根据参考图坐标回写。'},
       next: '用binding.revision提交同一事务；局部目标沿用target.nodes.suggestedEdit，只替换意图修改的值。设计决定命令与视觉修改可在同批提交。' },
-    checks: stage === 'review' ? ['studio_review_design看当前图片', 'studio_run_scenario隔离语义断言', 'studio_design_explore.states浏览器指针', 'studio_export_rp兼容报告与原生核对'] : [],
+    checks: stage === 'review' ? ['studio_design(action:review)看当前图片', 'studio_scenario隔离语义断言', 'studio_design(action:explore).states浏览器指针', 'studio_export(format:rp)兼容报告与原生核对'] : [],
     budget: { maxBytes, textBytes: 0, imageBytes: (mcpImages || []).reduce((total, item) => total + Buffer.byteLength(item.data, 'base64'), 0), omitted: [] } };
   if(!payload.ready){delete payload.authoring.nextCall;payload.blockers={decisionConflicts:decisions.conflicts.length,empty:selection?.empty||false,incomplete:selection? !selection.complete:false,unwritable:selection?.nodes.filter(node=>!node.target?.editable||node.requiresFullSource).map(node=>node.scopedId)||[]};}
   const omit = (section, reason) => payload.budget.omitted.push({ section, reason, retrieveWith: { stage, maxBytes: 48000, ...(args.referencePackId ? { referencePackId: args.referencePackId } : {}) } });
@@ -125,7 +125,7 @@ export function getPhaseContext(args, { doc, scene = null, selections = null } =
       targetSummary: selection ? {pageId:selection.pageId,total:selection.total,returned:selection.returned,nodeIds:selection.nodes.map(node=>node.scopedId)} : null,
       decisionSummary:{total:decisions.total,conflicts:decisions.conflicts.map(item=>({subject:item.subject,decisionIds:item.decisionIds}))},
       budget:{maxBytes,requiredTextBytes,imageBytes:0,omitted:[{section:'authoring payload',reason:'关键数据不能完整放入预算；没有生成可直接提交的截断建议'}]},
-      next:{tool:'studio_get_design_context',arguments:{stage,intent,platform,maxBytes:48000,includeImages:false,...(args.target?{target:args.target}:{})},note:'重发原brief且保留全部硬约束；可缩小明确的目标，或用studio_query_nodes(full)读取完整源值。不要把摘要写回。'} };
+      next:{tool:'studio_stage',arguments:{stage,intent,platform,maxBytes:48000,includeImages:false,...(args.target?{target:args.target}:{})},note:'重发原brief且保留全部硬约束；可缩小明确的目标，或用studio_inspect(full)读取完整源值。不要把摘要写回。'} };
   }
   // Include the final byte counter itself in the reported JSON size.
   for (let i = 0; i < 4; i++) payload.budget.textBytes = bytes(payload);

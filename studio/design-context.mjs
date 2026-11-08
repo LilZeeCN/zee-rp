@@ -44,7 +44,7 @@ function getLegacyDesignContext({ intent = 'editorial', pageId = 'home', include
       events: { canonical: { on: { click: [{ type: 'show', target: 'answer' }] } }, aliases: ['onClick'], note: '隐藏容器默认隐藏后代；显示容器恢复各后代自己的显隐。' },
       scenario: { steps: [{ expect: { visible: { answer: false } } }, { action: 'click', target: 'reveal', expect: { visible: { answer: true } } }],
         actions: ['click', 'input', 'navigate', 'dataset', 'expect'], rule: '使用 action/expect；未知字段、空断言与没有断言的场景均拒绝。' },
-      layout: { modes: ['stack', 'free', 'row', 'column', 'grid'], coordinates: 'x/y 是父内容盒坐标；row/column/grid 用顺序、gap、hug/fill 排版；任意构图可混合嵌套。空白手机的 home_screen 默认 padding=[60,0,0,0]，其子节点 y=0 已是屏幕 y=60；先查父 padding，勿再次加60。全屏装饰可将该容器 padding 设为0，再自行保留顶部60px安全区。注意产物路径差异：这条安全区规则只适用 generate_prototype/空白模板的 phone-shell+home_screen；studio_apply_commands 的 addPage 生成的是裸 box 根（layout=stack、padding=0、无 phone-shell 与顶部安全区），其子节点 y=0 会顶进状态栏/灵动岛，顶部安全距离需自行留出。',
+      layout: { modes: ['stack', 'free', 'row', 'column', 'grid'], coordinates: 'x/y 是父内容盒坐标；row/column/grid 用顺序、gap、hug/fill 排版；任意构图可混合嵌套。空白手机的 home_screen 默认 padding=[60,0,0,0]，其子节点 y=0 已是屏幕 y=60；先查父 padding，勿再次加60。全屏装饰可将该容器 padding 设为0，再自行保留顶部60px安全区。注意产物路径差异：这条安全区规则只适用 generate_prototype/空白模板的 phone-shell+home_screen；studio_command 的 addPage 生成的是裸 box 根（layout=stack、padding=0、无 phone-shell 与顶部安全区），其子节点 y=0 会顶进状态栏/灵动岛，顶部安全距离需自行留出。',
         example: { type: 'addNode', parentId: '页面根节点 ID', node: { id: 'region', type: 'box', layout: 'column', w: 340, h: 'hug', gap: 16, children: [{ id: 'heading', type: 'label', text: '具体内容', w: 'fill', h: 'hug' }] } } },
       iteration: '先检查真实初始态与交互态，再比较候选；原生结构成功不等于浏览器业务通过。',
     },

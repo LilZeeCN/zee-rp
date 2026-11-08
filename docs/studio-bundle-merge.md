@@ -1,6 +1,6 @@
 # Studio 自包含工程包 (`P02`) 与三方结构化安全合并 (`M01`)
 
-## 1. 自包含可迁移工程包 (`studio_project_bundle` / `studio/project-bundle.mjs`)
+## 1. 自包含可迁移工程包 (`studio_export(format:bundle)` / `studio/project-bundle.mjs`)
 
 - **目标**：将自由画布工程打包为无宿主机绝对路径泄漏、可在任意新目录独立打开、编辑、截图、运行交互并导出 `.rp` 的自包含工程包。
 - **包结构**：
@@ -15,7 +15,7 @@
   - 自动统计 `tokens`（已用/未用/未定义引用 `W_UNRESOLVED_TOKEN`）、`components`（已用/未用/缺失定义 `E_MISSING_COMPONENT_DEFINITION` + 契约版本与 SHA-256）、`assets`（已用/缺失文件 `W_ASSET_FILE_MISSING`）、`fonts`（已用/缺失本地字体 `W_FONT_FILE_MISSING` + fallback 链）。
   - 当导入更高 `schemaVersion` 或携带未知扩展字段的工程包时，通过 `migrateAndPreserveSchema` 将未知顶层或节点字段保留在 `readonlyUnknownFields` / `_readonlyPreservedFields` 并产生 `W_UNKNOWN_FIELDS_READONLY` 警告，绝不静默丢弃。
 
-## 2. 三方结构化安全合并 (`studio_merge_document` / `studio/document-merge.mjs`)
+## 2. 三方结构化安全合并 (`studio_merge(kind:merge)` / `studio/document-merge.mjs`)
 
 - **合并基准 (`base`)**：支持显式 `baseDoc`、历史修订号 `baseRevision`（从事务历史自动重构基准快照）或命名版本 `baseVersionId`。
 - **合并来源 (`theirs`)**：支持人类画布 / AI 并发命令集 (`theirsCommands`)、RP/1 片段 (`theirsRp1`)、外部文档对象 (`theirsDoc`) 或磁盘外部 `.json` / `.rp1` 文件 (`externalSourcePath`)。

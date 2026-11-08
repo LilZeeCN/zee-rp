@@ -35,14 +35,14 @@ Studio 原生出口会把跨页 `set-text`（普通 label / paragraph / button /
 ## 两种 RP/1 用法
 
 - 直接交付完整原生 Axure 原型：现有 `generate_prototype` / `revise_prototype` 支持完整语言、业务模型、变量、数据、组件与原生编译，参见 [RP/1 手册](../references/rp-language.md)。
-- 在正在编辑的自由画布中创作：`studio_apply_commands` 的 `rp1` 是明确受限的节点片段入口。它解析为原有命令，保留文档、版本检查、幂等、撤销、持久化及影响追踪。需要的顶层共享定义先通过既有文档命令准备。
+- 在正在编辑的自由画布中创作：`studio_command` 的 `rp1` 是明确受限的节点片段入口。它解析为原有命令，保留文档、版本检查、幂等、撤销、持久化及影响追踪。需要的顶层共享定义先通过既有文档命令准备。
 
 同一个请求中 `commands` 和 `rp1` 二选一。原有 `source` 参数仍表示调用来源，不承载片段，避免破坏旧调用。
 
 ## 从空白开始
 
 1. `studio_open_project({projectDir:"/abs/project"})`，记住返回的版本与真实页面ID。
-2. `studio_get_design_context({stage:"skeleton",intent:"learning",platform:"mobile",target:{pageId:"home"},brief:"先回忆，再揭示与反馈"})`。按任务选择设计理由：问题与答案如何组织、谁是主角、字体与素材如何配合、哪些状态必须检查。配方是创作材料；模型评分或机器检查不代表审美认可。
+2. `studio_stage({stage:"skeleton",intent:"learning",platform:"mobile",target:{pageId:"home"},brief:"先回忆，再揭示与反馈"})`。按任务选择设计理由：问题与答案如何组织、谁是主角、字体与素材如何配合、哪些状态必须检查。配方是创作材料；模型评分或机器检查不代表审美认可。
 3. 查询父布局与内容盒，再插入片段。默认手机 `home_screen` 已有60px顶部 padding，子节点 y=0 已经在安全区下方，不要重复加60。
 
 ```json
@@ -79,7 +79,7 @@ Studio 原生出口会把跨页 `set-text`（普通 label / paragraph / button /
 {"pageId":"home","role":"primary-action","fields":["target","layoutContext","controls"]}
 ```
 
-`studio_query_nodes` 默认返回8项 authoring 节点，可按 `nodeId/nodeIds/role/type/textContains/within` 选择；`fields` 精确投影，`cursor` 绑定文档、版本和查询，过期后重新查询。`view:"full"` 返回完整解算节点。
+`studio_inspect` 默认返回8项 authoring 节点，可按 `nodeId/nodeIds/role/type/textContains/within` 选择；`fields` 精确投影，`cursor` 绑定文档、版本和查询，过期后重新查询。`view:"full"` 返回完整解算节点。
 
 - `target` / `editableTargetId`：权威源节点、实例覆盖或可映射宏参数。找不到确定映射时不给虚构的可写目标。
 - `layoutContext`：父布局、padding与源局部坐标。流式布局的子项应改顺序与间距，不能靠屏幕坐标猜回写位置。
@@ -93,9 +93,9 @@ Studio 原生出口会把跨页 `set-text`（普通 label / paragraph / button /
 
 截图评审默认返回图片、具体问题和摘要；完整指标与节点快照保存在 `reportPath`，可用 `verbose:true` 读取。语义剧本默认省去整页重复场景，保留每步断言与最终状态；同样可用 `verbose:true` 展开。
 
-关键改稿后调用 `studio_review_design` 并实际查看图片，记录具体节点与问题；前后对照用 `compareWithReviewId`。候选探索使用现有 `candidates/states`，从信息结构、字形、素材与主次关系提出不同方向；不能只用颜色数量表示设计多样性。
+关键改稿后调用 `studio_design(action:review)` 并实际查看图片，记录具体节点与问题；前后对照用 `compareWithReviewId`。候选探索使用现有 `candidates/states`，从信息结构、字形、素材与主次关系提出不同方向；不能只用颜色数量表示设计多样性。
 
-至少验证初始态、操作后的反馈、长内容与返回；运行 `studio_run_scenario` 的 `action/expect`，返回明确的 `executionLayer:studio-semantic`；这是隔离语义执行，且默认语义层不做遮挡/hitTest 校验——通过 ≠ 真实可点。需要遮挡/命中结论时：`hitTest:true` 先用真实浏览器指针重放校验每个点击目标，被遮挡返回 `E_SCENARIO_OCCLUDED`（含 nodeId/occludedBy 遮挡者/stepIndex，语义层不执行该步），浏览器不可用返回 `E_SCENARIO_HITTEST_UNAVAILABLE`（不静默降级），含 navigate/dataset 等浏览器层无法重放的步骤返回 `E_SCENARIO_HITTEST_UNSUPPORTED`；多状态联系图仍用 `studio_design_explore` 的 states（真实浏览器指针）。未知断言与零断言不能算成功。最后 `studio_export_rp` 检查可编辑节点、交互及装饰降级；结构检查、Axure加载、预览、GUI编辑分别记录。
+至少验证初始态、操作后的反馈、长内容与返回；运行 `studio_scenario` 的 `action/expect`，返回明确的 `executionLayer:studio-semantic`；这是隔离语义执行，且默认语义层不做遮挡/hitTest 校验——通过 ≠ 真实可点。需要遮挡/命中结论时：`hitTest:true` 先用真实浏览器指针重放校验每个点击目标，被遮挡返回 `E_SCENARIO_OCCLUDED`（含 nodeId/occludedBy 遮挡者/stepIndex，语义层不执行该步），浏览器不可用返回 `E_SCENARIO_HITTEST_UNAVAILABLE`（不静默降级），含 navigate/dataset 等浏览器层无法重放的步骤返回 `E_SCENARIO_HITTEST_UNSUPPORTED`；多状态联系图仍用 `studio_design(action:explore)` 的 states（真实浏览器指针）。未知断言与零断言不能算成功。最后 `studio_export(format:rp)` 检查可编辑节点、交互及装饰降级；结构检查、Axure加载、预览、GUI编辑分别记录。
 
 ## 失败与恢复
 

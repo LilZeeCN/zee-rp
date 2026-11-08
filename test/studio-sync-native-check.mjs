@@ -508,9 +508,9 @@ test(
     setNativeTextInPlace(rpPath, sublineLoc.record, sublineLoc.id, 'Native Subline');
 
     // Validate MCP schema
-    const syncTool = studioTools.find(tool => tool.name === 'studio_sync_native');
+    const syncTool = studioTools.find(tool => tool.name === 'studio_merge');
     assert(syncTool);
-    validateInput(syncTool.inputSchema, { rpPath, mode: 'preview', prefer: 'fail' });
+    validateInput(syncTool.inputSchema, { kind: 'sync_native', rpPath, mode: 'preview', prefer: 'fail' });
 
     // 1. Default prefer: 'fail' on apply rejects without mutating Studio document
     const conflictRes = await (

@@ -78,18 +78,18 @@ test('fresh MCP transport delivers images, atomic media history and revision-bou
     ({ studio } = await startStudioServer({ projectDir: join(dir, 'project'), sourcePath: path, port: 0 }));
     await client.connect(transport);
     const { tools } = await client.listTools();
-    for (const name of ['studio_get_design_context', 'studio_prepare_media', 'studio_review_design']) assert.ok(tools.some(t => t.name === name));
+    for (const name of ['studio_stage', 'studio_media', 'studio_design']) assert.ok(tools.some(t => t.name === name));
     async function call(name, args = {}) {
       const raw = await client.callTool({ name, arguments: { url: studio.url, ...args } });
       return { raw, value: JSON.parse(raw.content[0].text) };
     }
     await call('studio_open_project', { projectDir: studio.projectDir });
-    const context = await call('studio_get_design_context');
+    const context = await call('studio_stage');
     assert.equal(context.raw.content.filter(c => c.type === 'image').length, 1);
     assert.ok(!context.raw.content[0].text.includes('mcpImages'));
-    const media = (await call('studio_prepare_media', { sourcePath: join(benchmarkRoot, 'assets/original/kingfisher.jpg'), crops: [{ w: 320, h: 240, fadeFrom: 190, fadeToToken: 'bg' }] })).value.results[0];
+    const media = (await call('studio_media', { sourcePath: join(benchmarkRoot, 'assets/original/kingfisher.jpg'), crops: [{ w: 320, h: 240, fadeFrom: 190, fadeToToken: 'bg' }] })).value.results[0];
     let rev = studio.store.appliedRevision;
-    const patch = (await call('studio_apply_commands', { baseRevision: rev, idempotencyKey: 'attach-media', pageId: 'home', commands: [media.registerCommand,
+    const patch = (await call('studio_command', { baseRevision: rev, idempotencyKey: 'attach-media', pageId: 'home', commands: [media.registerCommand,
       { type: 'setProperties', nodeId: 'photo', properties: { src: media.src } }] })).value;
     assert.equal(patch.ok, true, JSON.stringify(patch)); rev = patch.appliedRevision;
     assert.ok(studio.store.doc.assetsManifest[media.src]);
@@ -97,49 +97,49 @@ test('fresh MCP transport delivers images, atomic media history and revision-bou
     const fork = importToStudioDocument(studio.store.doc, { projectDir: forkDir, baseDir: studio.projectDir });
     assert.equal(fork.assetsManifest[media.src].media.recipeHash, media.asset.media.recipeHash);
     assert.equal(sha256(readFileSync(join(forkDir, media.asset.media.originalPath))), media.asset.media.sourceSha256);
-    await call('studio_undo');
+    await call('studio_history', { action: 'undo' });
     assert.equal(studio.store.doc.assetsManifest[media.src], undefined);
-    await call('studio_redo'); rev = studio.store.appliedRevision;
+    await call('studio_history', { action: 'redo' }); rev = studio.store.appliedRevision;
     assert.ok(studio.store.doc.assetsManifest[media.src]);
-    const invalid = await call('studio_apply_commands', { baseRevision: rev, idempotencyKey: 'bad-asset-bytes', pageId: 'home', commands: [
+    const invalid = await call('studio_command', { baseRevision: rev, idempotencyKey: 'bad-asset-bytes', pageId: 'home', commands: [
       { type: 'registerAsset', asset: { ...media.asset, sha256: '0'.repeat(64) } },
       { type: 'setText', nodeId: 'title', text: '不可部分应用' },
     ] });
     assert.equal(invalid.value.code, 'E_ASSET_BYTES_MISMATCH');
     assert.equal(studio.store.appliedRevision, rev);
-    const review = await call('studio_review_design', { baseRevision: rev, pageId: 'home' });
+    const review = await call('studio_design', { action: 'review',  baseRevision: rev, pageId: 'home' });
     assert.equal(review.raw.content.filter(c => c.type === 'image').length, 1, JSON.stringify(review.value));
     assert.equal(review.value.status, 'awaiting-visual-review');
-    const recorded = (await call('studio_review_design', { baseRevision: rev, pageId: 'home', reviewId: review.value.reviewId,
+    const recorded = (await call('studio_design', { action: 'review',  baseRevision: rev, pageId: 'home', reviewId: review.value.reviewId,
       observations: [{ nodeIds: ['title'], issue: '标题语气过于通用', consequence:'读者看不出下一步观察什么',decision: '改成具体的观察邀请',preserve:'保留正文和照片焦点' }] })).value;
     assert.equal(recorded.status, 'agent-reviewed'); assert.equal(recorded.userAccepted, false);
     assert.equal(recorded.observations[0].consequence,'读者看不出下一步观察什么');assert.equal(JSON.parse(readFileSync(recorded.reportPath)).observations[0].preserve,'保留正文和照片焦点');
-    const change = (await call('studio_apply_commands', { baseRevision: rev, idempotencyKey: 'repaint-screen', pageId: 'home', commands: [
+    const change = (await call('studio_command', { baseRevision: rev, idempotencyKey: 'repaint-screen', pageId: 'home', commands: [
       { type: 'setProperties', nodeId: 'home_screen', properties: { fill: '#112233' } },
       { type: 'setProperties', nodeId: 'photo', properties: { x: 30 } },
     ] })).value;
     assert.equal(change.ok, true); rev = change.appliedRevision;
-    const stale = await call('studio_review_design', { baseRevision: recorded.revision, pageId: 'home', reviewId: recorded.reviewId, observations: [{ nodeIds: [], issue: '旧图' }] });
+    const stale = await call('studio_design', { action: 'review',  baseRevision: recorded.revision, pageId: 'home', reviewId: recorded.reviewId, observations: [{ nodeIds: [], issue: '旧图' }] });
     assert.equal(stale.value.code, 'E_STALE_REVIEW');
-    const shot = await call('studio_capture_screenshot', { revision: rev, pageId: 'home' });
+    const shot = await call('studio_screenshot', { revision: rev, pageId: 'home' });
     assert.equal(shot.raw.content.filter(c => c.type === 'image').length, 1);
     assert.equal(sha256(Buffer.from(shot.raw.content.find(c => c.type === 'image').data, 'base64')), shot.value.sha256);
     const page = await studio.ensureManagedBrowserPage();
     const style = await page.evaluate(`(() => { const root=document.querySelector('[data-node-id="home_screen"]'); const img=document.querySelector('[data-node-id="photo"]'); return { fill:getComputedStyle(root).backgroundColor, x:img.offsetLeft, island:document.querySelector('.artboard-island').offsetWidth }; })()`);
     assert.deepEqual(style, { fill: 'rgb(17, 34, 51)', x: 30, island: 122 });
-    await call('studio_apply_commands', { baseRevision: rev, idempotencyKey: 'change-paper-token', commands: [
+    await call('studio_command', { baseRevision: rev, idempotencyKey: 'change-paper-token', commands: [
       { type: 'setToken', name: 'bg', value: '#FFFFFF' },
     ] }); rev = studio.store.appliedRevision;
-    const tokenReview = await call('studio_review_design', { pageId: 'home', baseRevision: rev });
+    const tokenReview = await call('studio_design', { action: 'review',  pageId: 'home', baseRevision: rev });
     assert.ok(tokenReview.value.findings.some(f => f.code === 'W_MEDIA_TOKEN_STALE'));
-    const refreshed = (await call('studio_prepare_media', { sourcePath: join(benchmarkRoot, 'assets/original/kingfisher.jpg'), crops: [{ w: 320, h: 240, fadeFrom: 190, fadeToToken: 'bg' }] })).value.results[0];
-    await call('studio_apply_commands', { baseRevision: rev, idempotencyKey: 'refresh-paper-photo', pageId: 'home', commands: [refreshed.registerCommand,
+    const refreshed = (await call('studio_media', { sourcePath: join(benchmarkRoot, 'assets/original/kingfisher.jpg'), crops: [{ w: 320, h: 240, fadeFrom: 190, fadeToToken: 'bg' }] })).value.results[0];
+    await call('studio_command', { baseRevision: rev, idempotencyKey: 'refresh-paper-photo', pageId: 'home', commands: [refreshed.registerCommand,
       { type: 'setProperties', nodeId: 'photo', properties: { src: refreshed.src } },
     ] }); rev = studio.store.appliedRevision;
-    const refreshedReview = await call('studio_review_design', { pageId: 'home', baseRevision: rev });
+    const refreshedReview = await call('studio_design', { action: 'review',  pageId: 'home', baseRevision: rev });
     assert.ok(!refreshedReview.value.findings.some(f => f.code === 'W_MEDIA_TOKEN_STALE'));
     await page.evaluate(`document.getElementById('mode-interact-btn').click()`);
-    const second = await call('studio_capture_screenshot', { revision: rev, pageId: 'second' });
+    const second = await call('studio_screenshot', { revision: rev, pageId: 'second' });
     assert.equal(second.value.pageId, 'second', JSON.stringify(second.value));
     assert.equal(await page.evaluate('window.__STUDIO_APP__.state.mode'), 'design');
     assert.deepEqual(await page.evaluate(`(() => { const list=document.querySelector('[data-node-id="inventory_list"]'); list.scrollTop=list.scrollHeight; return { count:list.children.length, last:list.lastElementChild.innerText, scrollable:list.scrollHeight>list.clientHeight }; })()`),

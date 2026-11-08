@@ -126,12 +126,12 @@ test('real screenshot comparisons retain immutable prior pixels and track delete
     try {
       await client.connect(transport);
       const listed = await client.listTools();
-      assert.ok(listed.tools.find(t => t.name === 'studio_review_design').inputSchema.properties.compareWithReviewId);
-      const raw = await client.callTool({ name: 'studio_review_design', arguments: { url: studio.url, pageId: 'home', baseRevision: studio.store.appliedRevision, compareWithReviewId: before.reviewId } });
+      assert.ok(listed.tools.find(t => t.name === 'studio_design').inputSchema.properties.compareWithReviewId);
+      const raw = await client.callTool({ name: 'studio_design', arguments: { action: 'review', url: studio.url, pageId: 'home', baseRevision: studio.store.appliedRevision, compareWithReviewId: before.reviewId } });
       after = JSON.parse(raw.content[0].text);
       assert.equal(raw.content.filter(c => c.type === 'image').length, 2);
       assert.equal(raw.content.filter(c => c.type === 'image')[0].data, initialBytes.toString('base64'));
-      const batch = await client.callTool({ name: 'studio_apply_commands', arguments: { url: studio.url, baseRevision: studio.store.appliedRevision, idempotencyKey: 'mcp-edit-selection', commands: [edit('move', ['a'], { dx: 1 })] } });
+      const batch = await client.callTool({ name: 'studio_command', arguments: { url: studio.url, baseRevision: studio.store.appliedRevision, idempotencyKey: 'mcp-edit-selection', commands: [edit('move', ['a'], { dx: 1 })] } });
       assert.ok(JSON.parse(batch.content[0].text).ok);
       assert.ok(!after.findings.some(f => f.check === 'grid-alignment' && f.severity === 'error'));
     } finally { await client.close(); }
