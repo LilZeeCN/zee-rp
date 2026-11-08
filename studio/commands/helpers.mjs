@@ -378,3 +378,11 @@ export function markExplicitWidth(node) {
     Object.defineProperty(node, '_explicitWSet', { value: true, enumerable: false, configurable: true });
   } catch {}
 }
+
+// 以自有数据属性写入用户可控键名(令牌名/变量名/组件 id/数据集名/数据行键)。
+// 普通赋值 `target[key] = value` 在 key === '__proto__' 时走继承 setter,会把目标对象
+// 的原型改写为 value(局部原型污染:内容哈希看不到、运行期读取被劫持)。
+// defineProperty 恒为自有属性,JSON 序列化与内容哈希一致。扫荡门禁 M-SWEEP 固化该性质。
+export function defineRecordEntry(target, key, value) {
+  Object.defineProperty(target, key, { value, enumerable: true, writable: true, configurable: true });
+}

@@ -2,7 +2,7 @@
 // 从 commands.mjs 的 switch 原样迁移;ctx 协议见 ../apply.mjs。
 import { assertKnownNodeEffects } from '../../node-capabilities.mjs';
 import { validateComponentInstanceAgainstContract } from '../../component-contracts.mjs';
-import { cmdError, validatePropertiesObject, resolveTargetOrSubnode } from '../helpers.mjs';
+import { cmdError, validatePropertiesObject, resolveTargetOrSubnode, defineRecordEntry } from '../helpers.mjs';
 
 function setToken({ doc, cmd, cmdIdx, affectedIds }) {
       const cat = cmd.category || 'color';
@@ -15,13 +15,13 @@ function setToken({ doc, cmd, cmdIdx, affectedIds }) {
           throw cmdError('E_INVALID_COLOR', `颜色令牌 "${name}" 的值 "${cmd.value}" 必须是 #RRGGBB 或 #RRGGBBAA`, { commandIndex: cmdIdx, field: 'value' });
         }
         doc.palette = doc.palette || {};
-        doc.palette[name] = cmd.value;
+        defineRecordEntry(doc.palette ||= {}, name, cmd.value);
         doc.tokens = doc.tokens || {};
         doc.tokens.colors = doc.tokens.colors || {};
-        doc.tokens.colors[name] = cmd.value;
+        defineRecordEntry(doc.tokens.colors, name, cmd.value);
       } else {
         doc.tokens = doc.tokens || {};
-        doc.tokens[name] = cmd.value;
+        defineRecordEntry(doc.tokens, name, cmd.value);
       }
       affectedIds.push(`token:${cat}:${name}`);
 }
@@ -37,8 +37,8 @@ function setTokens({ doc, cmd, cmdIdx, affectedIds }) {
         if (!/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(val)) {
           throw cmdError('E_INVALID_COLOR', `颜色令牌 "${name}" 的值 "${val}" 必须是 #RRGGBB 或 #RRGGBBAA`, { commandIndex: cmdIdx, field: name });
         }
-        doc.palette[name] = val;
-        doc.tokens.colors[name] = val;
+        defineRecordEntry(doc.palette, name, val);
+        defineRecordEntry(doc.tokens.colors, name, val);
         affectedIds.push(`token:color:${name}`);
       };
       if (tokensObj.colors && typeof tokensObj.colors === 'object') {
@@ -49,7 +49,7 @@ function setTokens({ doc, cmd, cmdIdx, affectedIds }) {
         if (typeof v === 'string' && v.startsWith('#')) {
           applyColor(k, v);
         } else {
-          doc.tokens[k] = v;
+          defineRecordEntry(doc.tokens, k, v);
           affectedIds.push(`token:general:${k}`);
         }
       }
@@ -61,7 +61,7 @@ function setVariable({ doc, cmd, cmdIdx, affectedIds }) {
       if (!name) {
         throw cmdError('E_INVALID_VARIABLE', `setVariable 需要提供变量名称 name`, { commandIndex: cmdIdx, field: 'name' });
       }
-      doc.variables[name] = cmd.value;
+      defineRecordEntry(doc.variables ||= {}, name, cmd.value);
       affectedIds.push(`variable:${name}`);
 }
 
@@ -71,10 +71,10 @@ function datasetOp({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
       if(op==='sort' && !cmd.sort?.field && !cmd.field) throw cmdError('E_SORT_FIELD','排序需要field或sort.field',{commandIndex:cmdIdx,field:'sort'});
       let rows,writeRows;
       const bindDataset=name=>{
-        doc.datasets=doc.datasets||{};doc.datasets[name]=doc.datasets[name]||{columns:[],rows:[]};
+        doc.datasets=doc.datasets||{};defineRecordEntry(doc.datasets,name,doc.datasets[name]||{columns:[],rows:[]});
         const dataset=doc.datasets[name];
         rows=Array.isArray(dataset)?dataset:Array.isArray(dataset.rows)?dataset.rows:[];
-        writeRows=value=>{if(Array.isArray(dataset))doc.datasets[name]=value;else dataset.rows=value;};
+        writeRows=value=>{if(Array.isArray(dataset))defineRecordEntry(doc.datasets,name,value);else dataset.rows=value;};
         affectedIds.push(`dataset:${name}`);
       };
       if(cmd.dataset)bindDataset(cmd.dataset);
@@ -92,7 +92,7 @@ function datasetOp({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
       else if(op==='replace-all')next=structuredClone(cmd.rows||[]);
       else if(op==='update'){
         const key=cmd.matchKey||'id';
-        for(const row of next)if(cmd.matchValue===undefined||String(row[key])===String(cmd.matchValue))Object.assign(row,structuredClone(cmd.patch||cmd.row||{}));
+        for(const row of next)if(cmd.matchValue===undefined||String(row[key])===String(cmd.matchValue)){const patch=structuredClone(cmd.patch||cmd.row||{});for(const [pk,pv] of Object.entries(patch))defineRecordEntry(row,pk,pv);}
       }else if(op==='delete'){
         const key=cmd.matchKey||'id';next=next.filter(row=>String(row[key])!==String(cmd.matchValue));
       }else if(op==='sort'){

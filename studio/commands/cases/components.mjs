@@ -9,7 +9,7 @@ import {
 } from '../../component-contracts.mjs';
 import { assertKnownNodeEffects } from '../../node-capabilities.mjs';
 import { resolveDocumentScene } from '../../scene-resolver.mjs';
-import { cmdError, validatePropertiesObject, resolveTargetOrSubnode } from '../helpers.mjs';
+import { cmdError, validatePropertiesObject, resolveTargetOrSubnode, defineRecordEntry } from '../helpers.mjs';
 
 function createComponent({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
       const compId = cmd.componentId || cmd.id;
@@ -24,14 +24,14 @@ function createComponent({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
         throw cmdError('E_INVALID_COMPONENT', `createComponent 需要 componentId 与 root (或 nodeId)`, { commandIndex: cmdIdx, field: 'componentId' });
       }
       doc.components = doc.components || {};
-      doc.components[compId] = {
+      defineRecordEntry(doc.components ||= {}, compId, {
         id: compId,
         name: cmd.name || compId,
         params: structuredClone(cmd.params || {}),
         variants: structuredClone(cmd.variants || {}),
         defaultVariant: cmd.defaultVariant || 'default',
         root: rootNode,
-      };
+      });
       if (srcEntry && cmd.replaceWithInstance && srcEntry.parent && Array.isArray(srcEntry.parent.children)) {
         const srcNode = srcEntry.node;
         const pos = srcEntry.parent.children.indexOf(srcNode);
@@ -65,7 +65,7 @@ function upsertComponent({ doc, cmd, cmdIdx, affectedIds }) {
         throw cmdError('E_INVALID_COMPONENT', `upsert-component 需要提供 componentId 与 component 定义`, { commandIndex: cmdIdx, field: 'componentId' });
       }
       doc.components = doc.components || {};
-      doc.components[compId] = structuredClone(cmd.component);
+      defineRecordEntry(doc.components, compId, structuredClone(cmd.component));
       doc.components[compId].id = compId;
       affectedIds.push(`component:${compId}`);
 }
