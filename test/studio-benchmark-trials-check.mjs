@@ -14,6 +14,7 @@ import { parseTrialFeedback, selectModelConfiguration } from '../benchmarks/stud
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolve(__dirname, '..');
 const VALIDATE_PY = resolve(REPO_ROOT, 'benchmarks/studio/validate.py');
+import {nativeTemplateSkipReason} from './host-capabilities.mjs';
 const REPLAY_MJS = resolve(REPO_ROOT, 'benchmarks/studio/replay.mjs');
 
 test('model feedback accepts fenced JSON and ignores malformed ratings', () => {
@@ -186,7 +187,7 @@ test('T06 runtime paging copy is delegated to its mandatory scenario', () => {
   assert.equal(result.missingContent.includes('第 1 / 3 页'), false);
 });
 
-test('scripted baseline T01 runs end-to-end and passes current validate (M-GAPS#2 regression)', () => {
+test('scripted baseline T01 runs end-to-end and passes current validate (M-GAPS#2 regression)', { skip: nativeTemplateSkipReason() }, () => {
   const outDir = mkdtempSync(join(tmpdir(), 'scripted-gate-'));
   try {
   const runProc = spawnSync(process.execPath, [
