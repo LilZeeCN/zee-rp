@@ -24,7 +24,7 @@ export const COMMAND_CONTRACTS = {
   createInstance: schema('createInstance', { parentId: string, componentId: string, component: string, instanceId: string, id: string, name: string, variant: string, state: string, props: object, overrides: object, slots: object, x: number, y: number, w: {}, h: {} }),
   addNode: schema('addNode', { parentId: string, index: { type: 'integer', minimum: 0 }, node: object }, ['node']),
   setProperties: schema('setProperties', { nodeId: string, properties: object, props: object, directInstanceProps: { type: 'boolean' } }, ['nodeId']),
-  setText: schema('setText', { nodeId: string, text: { type: 'string' }, autoSize: { type: 'boolean', description: '默认 false，只改文字并保留现有几何；显式 true 才按文字测量自动调整 label/button 宽度。' }, fontFamily: string, fontSize: number, fontWeight: number, letterSpacing: number, lineHeight: number, align: string, color: string }, ['nodeId', 'text']),
+  setText: schema('setText', { nodeId: string, text: { type: 'string' }, spans: { type: 'array', items: { type: 'object', properties: { text: string, fontFamily: string, fontSize: number, fontWeight: number, letterSpacing: number, color: string, italic: { type: 'boolean' }, underline: { type: 'boolean' }, strikethrough: { type: 'boolean' } }, required: ['text'] }, description: '每段富文本 span;提供时 text 自动取拼接结果' }, autoSize: { type: 'boolean', description: '默认 false，只改文字并保留现有几何；显式 true 才按文字测量自动调整 label/button 宽度。' }, fontFamily: string, fontSize: number, fontWeight: number, letterSpacing: number, lineHeight: number, align: string, color: string }, ['nodeId', 'text']),
   moveNode: schema('moveNode', { nodeId: string, x: number, y: number, deltaX: number, deltaY: number, targetIndex: { type: 'integer' } }, ['nodeId']),
   resizeNode: schema('resizeNode', { nodeId: string, w: {}, h: {}, x: number, y: number }, ['nodeId']),
   setLayout: schema('setLayout', { nodeId: string, mode: string, layout: { anyOf: [string, object] }, gap: {}, padding: {}, align: string, justify: string, minW: number, maxW: number, minH: number, maxH: number, w: {}, h: {}, wrap: { type: 'boolean' } }, ['nodeId']),
@@ -33,6 +33,13 @@ export const COMMAND_CONTRACTS = {
   pasteNodes: schema('pasteNodes', { nodes: { type: 'array', minItems: 1, items: object }, parentId: string, anchorId: string, index: { type: 'integer', minimum: 0 }, offset: object, sourcePageId: string, sourceDocumentId: string }, ['nodes']),
   setInstanceOverride: schema('setInstanceOverride', { nodeId: string, subNodeId: string, targetPath: string, properties: object }, ['nodeId', 'properties']),
   swapInstance: schema('swapInstance', { nodeId: string, componentId: string, preserveOverrides: { type: 'boolean', description: '默认 true;保留新组件树中也存在的子节点 ID 覆盖' } }, ['nodeId', 'componentId']),
+};
+
+// M-SURFACE: setText 放宽为 text 与 spans 二选一(required 降为 nodeId)
+COMMAND_CONTRACTS.setText = {
+  ...COMMAND_CONTRACTS.setText,
+  required: COMMAND_CONTRACTS.setText.required.filter(k => k !== 'text'),
+  anyOf: [{ required: ['text'] }, { required: ['spans'] }],
 };
 COMMAND_CONTRACTS['set-props'] = { ...COMMAND_CONTRACTS.setProperties, properties: { ...COMMAND_CONTRACTS.setProperties.properties, type: { const: 'set-props' } } };
 

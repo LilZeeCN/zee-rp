@@ -68,8 +68,10 @@ function setProperties({ doc, cmd, cmdIdx, index, pageScope, checkInteraction, a
 
 function setText({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
       const targetInfo = resolveTargetOrSubnode(doc, index, cmd.nodeId, pageScope, cmdIdx);
-      if (typeof cmd.text !== 'string') {
-        throw cmdError('E_INVALID_VALUE', `命令 #${cmdIdx} setText 的 text 必须是字符串`, { commandIndex: cmdIdx, nodeId: cmd.nodeId, field: 'text' });
+      const spansArr = Array.isArray(cmd.spans) && cmd.spans.length > 0 ? structuredClone(cmd.spans) : null;
+      const textValue = spansArr ? spansArr.map(sp => sp.text ?? '').join('') : cmd.text;
+      if (typeof textValue !== 'string') {
+        throw cmdError('E_INVALID_VALUE', `命令 #${cmdIdx} setText 的 text 必须是字符串或提供 spans 数组`, { commandIndex: cmdIdx, nodeId: cmd.nodeId, field: 'text' });
       }
       const extraProps = {};
       for (const k of ['fontFamily', 'fontSize', 'fontWeight', 'letterSpacing', 'lineHeight', 'align', 'color']) {
@@ -83,7 +85,7 @@ function setText({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
         inst.overrides = inst.overrides || {};
         inst.overrides[targetInfo.subNodeId] = {
           ...(inst.overrides[targetInfo.subNodeId] || {}),
-          text: cmd.text,
+          text: textValue,
           ...extraProps,
         };
         validateComponentInstanceAgainstContract(inst, doc, { strict: true });
@@ -99,10 +101,11 @@ function setText({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
           node.overrides = node.overrides || {};
           node.overrides[targetSub] = { ...(node.overrides[targetSub] || {}), text: cmd.text, ...extraProps };
         } else if (node.type === 'input') {
-          node.value = cmd.text;
+          node.value = textValue;
           Object.assign(node, extraProps);
         } else {
-          node.text = cmd.text;
+          node.text = textValue;
+          if (spansArr) node.spans = spansArr; else delete node.spans;
           Object.assign(node, extraProps);
           if (cmd.autoSize === true && (node.type === 'label' || node.type === 'button') && !node.wrap && typeof node.w === 'number') {
             const tm = measureTextBox({ ...node, w: 'hug' }, null);
