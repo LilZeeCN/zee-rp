@@ -57,6 +57,13 @@ export function visualCss(node) {
   if (node.aurora) {
     backgrounds.push('radial-gradient(ellipse at 15% 20%, #A274E880, transparent 65%)', 'radial-gradient(ellipse at 85% 75%, #43E4C580, transparent 65%)');
   }
+  if (Array.isArray(node.fills)) for (const f of node.fills) {
+    if (typeof f === 'string' && f.trim()) backgrounds.push(f.trim());
+    else if (f && typeof f === 'object') {
+      const gc = gradientCss(f);
+      if (gc) backgrounds.push(gc);
+    }
+  }
   if (node.gradient) {
     const gradient = gradientCss(node.gradient);
     if (gradient) backgrounds.push(gradient);
@@ -69,7 +76,11 @@ export function visualCss(node) {
     const glow = typeof node.innerGlow === 'string' ? node.innerGlow : '#FFFFFF66';
     shadows.push(glow.includes('inset') ? glow : `inset 0 0 12px ${glow}`);
   }
+  if (Array.isArray(node.shadows)) for (const s of node.shadows) {
+    if (typeof s === 'string' && s.trim()) shadows.push(s.trim());
+  }
   if (shadows.length) css['box-shadow'] = shadows.join(',');
+  if (node.mixBlendMode) css['mix-blend-mode'] = String(node.mixBlendMode);
   if (typeof node.customFilter === 'string' && node.customFilter.trim()) css.filter = node.customFilter;
   const parts = [];
   if (typeof node.threeDTransform === 'string' && node.threeDTransform.trim()) parts.push(node.threeDTransform.trim());

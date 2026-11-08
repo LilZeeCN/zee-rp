@@ -17,6 +17,7 @@ const studioFields = [
   'overrides', 'slots', 'variantKey', 'activeState', 'rows', 'source', 'data',
   'filter', 'sort', 'activeFilter', 'activeSort', 'macroSource', 'controlledByMacro', 'componentSource',
   'constraints', 'state', 'tone', 'content', 'clip', 'overflow',
+  'mixBlendMode', 'shadows', 'fills',
 ];
 export const NODE_PROPERTY_NAMES = new Set([...sourceFields, ...studioFields]);
 export const NODE_READONLY_PROPERTIES = new Set(['id','type','sourcePointer','macroSource','controlledByMacro','componentSource']);

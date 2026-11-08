@@ -26,7 +26,7 @@ export const NON_STRUCTURAL_COMMANDS = new Set([
 export const COMMAND_TYPES_BY_GROUP = {
   节点: ['editNodes', 'addNode', 'deleteNode', 'duplicateNode', 'pasteNodes', 'moveNode', 'resizeNode', 'reorderNode', 'renameNode', 'setProperties', 'set-props', 'setText', 'setLayout', 'switchLayoutMode', 'resizeArtboard', 'editPath', 'booleanPathOp'],
   页面: ['addPage', 'duplicatePage', 'renamePage', 'deletePage', 'reorderPages'],
-  组件: ['createComponent', 'registerCoreComponents', 'register-core-components', 'upsert-component', 'evolveComponentContract', 'evolve-component-contract', 'upgrade-component-contract', 'updateComponent', 'createInstance', 'setInstanceOverride', 'clearInstanceOverride', 'resetInstanceOverride', 'setInstanceVariant', 'detachInstance', 'detachMacro'],
+  组件: ['createComponent', 'registerCoreComponents', 'register-core-components', 'upsert-component', 'evolveComponentContract', 'evolve-component-contract', 'upgrade-component-contract', 'updateComponent', 'createInstance', 'setInstanceOverride', 'clearInstanceOverride', 'resetInstanceOverride', 'setInstanceVariant', 'swapInstance', 'detachInstance', 'detachMacro'],
   数据与状态: ['setToken', 'set-tokens', 'setTokens', 'setVariable', 'set-variable', 'datasetOp', 'dataset-op', 'setPanelActiveState', 'setFont', 'repeaterSetFilter', 'repeaterSetSort'],
   资源与交互: ['registerAsset', 'setInteraction', 'removeInteraction'],
   探索: ['generateExplorations', 'selectExploration', 'recordDesignDecision'],

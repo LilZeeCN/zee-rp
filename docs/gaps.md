@@ -23,6 +23,7 @@
 | 10 | `E_STACK_CHILDREN_UNPLACED` 是 error 级诊断却出现在 `ok:true` 回包里,作者易把带错回包当成功 | stack 容器缺 x/y 子节点的命令批应拒写(E_ 信封)或诊断置顶强提示 | 2026-11-08 T01 子代理试用 friction | **open(小)** |
 | 11 | `editNodes` 改 visible 的回包标签「已写入但无视觉效果(已忽略属性)」误导——值实际已生效 | 回包文案改为如实描述(值已写入且生效) | 2026-11-08 T01 子代理试用 friction | **open(小)** |
 | 12 | 本机 MCP 服务进程陈旧检测:studio_open_project 复用旧实例时,旧代码静态路由缺 /src/ 导致渲染 404,作者侧难自查 | open_project 回包带 sourceFingerprint 与 runtime_info 同款新旧对照提示 | 2026-11-08 T01 子代理试用 friction(根因=进程陈旧,非代码缺陷) | **open(中)** |
+| 13 | **布尔组操作数可编辑**(figcraft: 布尔结果跟随操作数拖动实时更新):需在 scene-resolver(唯一几何权威)内嵌 `booleanVectorPaths` 重算——架构级改动,设计已定:容器 `booleanOp: "union"|"subtract"|...` + path 子节点,resolver 渲染时算布尔、操作数保持可编辑 | 加 scene-resolver 布尔检测+重算;门禁 studio-layout + 矢量门禁守护 | figcraft parity D | **open(架构级,设计已定)** |
 
 ## 已关闭(近期)
 
