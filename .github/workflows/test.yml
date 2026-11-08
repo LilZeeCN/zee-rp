@@ -27,6 +27,7 @@ jobs:
         env:
           CHROME_BIN: /usr/bin/google-chrome
       - run: npm run test:studio-parity
+      - run: npm run test:layers
       - run: npm run test:studio-editing
         env:
           CHROME_BIN: /usr/bin/google-chrome
