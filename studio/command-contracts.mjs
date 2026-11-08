@@ -32,6 +32,7 @@ export const COMMAND_CONTRACTS = {
   duplicateNode: schema('duplicateNode', { nodeId: string, newId: string, newName: string, offset: object }, ['nodeId']),
   pasteNodes: schema('pasteNodes', { nodes: { type: 'array', minItems: 1, items: object }, parentId: string, anchorId: string, index: { type: 'integer', minimum: 0 }, offset: object, sourcePageId: string, sourceDocumentId: string }, ['nodes']),
   setInstanceOverride: schema('setInstanceOverride', { nodeId: string, subNodeId: string, targetPath: string, properties: object }, ['nodeId', 'properties']),
+  swapInstance: schema('swapInstance', { nodeId: string, componentId: string, preserveOverrides: { type: 'boolean', description: '默认 true;保留新组件树中也存在的子节点 ID 覆盖' } }, ['nodeId', 'componentId']),
 };
 COMMAND_CONTRACTS['set-props'] = { ...COMMAND_CONTRACTS.setProperties, properties: { ...COMMAND_CONTRACTS.setProperties.properties, type: { const: 'set-props' } } };
 

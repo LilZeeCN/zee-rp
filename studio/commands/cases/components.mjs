@@ -268,6 +268,35 @@ function detachInstance({ doc, cmd, cmdIdx, index, pageScope, sceneOptions, affe
       affectedIds.push(scopedId);
 }
 
+function swapInstance({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
+      const targetInfo = resolveTargetOrSubnode(doc, index, cmd.nodeId, pageScope, cmdIdx);
+      const entry = targetInfo.isInstanceSubnode ? targetInfo.instanceEntry : targetInfo.entry;
+      const { node, scopedId } = entry;
+      if (node.type !== 'instance' && !node.component) {
+        throw cmdError('E_NOT_INSTANCE', `节点 "${node.id}" 不是组件实例,无法交换`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
+      }
+      const newCompId = cmd.componentId;
+      if (!doc.components?.[newCompId] && CORE_COMPONENT_CONTRACTS[newCompId]) {
+        ensureCoreComponentsRegistered(doc, [newCompId]);
+      }
+      if (!doc.components?.[newCompId]) {
+        throw cmdError('E_UNKNOWN_COMPONENT', `目标组件 "${newCompId}" 不存在`, { commandIndex: cmdIdx, field: 'componentId' });
+      }
+      if (node.component === newCompId) {
+        affectedIds.push(scopedId);
+        return;
+      }
+      const newComp = doc.components[newCompId];
+      const oldOverrides = cmd.preserveOverrides === false ? {} : structuredClone(node.overrides || {});
+      node.component = newCompId;
+      node.variant = cmd.variant || newComp.defaultVariant || 'default';
+      node.overrides = oldOverrides;
+      delete node.macroSource;
+      delete node.controlledByMacro;
+      validateComponentInstanceAgainstContract(node, doc, { strict: true });
+      affectedIds.push(scopedId);
+}
+
 export const handlers = {
   createComponent,
   registerCoreComponents,
@@ -282,6 +311,7 @@ export const handlers = {
   clearInstanceOverride,
   resetInstanceOverride: clearInstanceOverride,
   setInstanceVariant,
+  swapInstance,
   detachInstance,
   detachMacro: detachInstance,
 };

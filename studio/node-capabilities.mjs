@@ -44,7 +44,7 @@ const geometry = [
 
 const visualEffects = [
   'shadow', 'innerGlow', 'gradient', 'backdropBlur', 'aurora', 'noise',
-  'css', 'customFilter', 'threeDTransform',
+  'css', 'customFilter', 'threeDTransform', 'mixBlendMode', 'shadows', 'fills',
 ];
 
 const semanticMeta = [
@@ -199,7 +199,7 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
     result.surfaces.native = field === 'threeDTransform'
       ? fact('partial', '原生 .rp 没有 CSS transform，不产生原生可编辑变换（纯 2D 旋转请用 node.rotation，原生可编辑 DOA 3221225522）；导出兼容报告按 unsupported:css:transform 披露光栅化/省略降级', 'studio/export-rp.mjs:classifyNodeCompatibility + studio/visual-style.mjs:exportCssPlan（W7 2026-11-02 实测口径）')
       : fact('partial', '静态表面装饰层导出为独立 PNG；影响文字/子节点的 3D 变换或实时背景模糊在兼容报告中显式标记降级', 'studio/export-rp.mjs:classifyNodeCompatibility + studio/css-raster.mjs:rasterizeStudioPaint');
-    result.surfaces['full-rp1'] = ['shadow', 'innerGlow', 'gradient', 'backdropBlur', 'aurora', 'noise'].includes(field)
+    result.surfaces['full-rp1'] = ['shadow', 'innerGlow', 'gradient', 'backdropBlur', 'aurora', 'noise', 'mixBlendMode', 'shadows', 'fills'].includes(field)
       ? fact('implemented', 'RP/1 视觉样式属性', 'scripts/rp_language.py')
       : fact('unsupported', 'Studio 浏览器视觉扩展属性，完整 RP/1 编译器通过导出层光栅化或省略', 'studio/visual-style.mjs');
   }
