@@ -16,7 +16,7 @@
 | 3 | **T02 未跑完**(旧面),只作视觉样本不计通过 | 新面上 T02 跑完并按 scenario 分级 | 2026-11-02 收口 | **open** |
 | 4 | **纯文本元件旋转在 RP9 预览发布不渲染**(.rp 持久化、编辑器保留)——平台行为 | Axure 平台若开放能力位则接入;否则保持声明边界 | 2026-11-02 逆向 | **won't-fix(平台边界)** |
 | 5 | **web/src 模块间函数提升环**(单文件拆分来源):渲染/手势/Inspector 相互引用 | 纳入 test:layers 无环要求;行为由像素夹具守护 | 2026-11-08 架构重构 | **open(渲染层重构时一并处理)** |
-| 6 | **RP/1 编译链巨石**:`scripts/proto.py` 8438 行 + `rp_language.py` 8125 行 | 按域拆分,语言 51 门禁 + 全示例 IR/hash 不变为安全网 | 2026-11-08 架构盘点 | **open(下一场大仗)** |
+| 6 | ~~RP/1 编译链巨石~~ | 语言 51 + runtime/backend/sync/npm-test 等 12 门禁全绿 | 2026-11-08 架构盘点 | **closed(同日)**:proto.py→`scripts/proto_engine/` 七模块(fonts/tokens/expander/layout/audit/builder/compiler,依赖矩阵严格单向零环),rp_language.py→`scripts/rplang/` 四模块(core/frontend/runtime/tail;pointer 三工具挪 core 断 frontend↔tail 环,compile_language 归 frontend);两 facade 保持 `import proto`/`from rp_language import X`/`python3 scripts/proto.py` 消费面逐名不变 |
 | 7 | **测试双轨**:61 个自写 runner vs 43 个 node --test | 统一 node --test,脚本式仅保留有特殊进程语义的 | 2026-11-08 工程盘点 | **open** |
 | 8 | **扫荡门禁发现的存量候选**:`computeCommandImpactAndDiff` 在事务 catch 之外(提交段抛错会穿透为 E_INTERNAL_ERROR 而非命令信封) | 挪进 try 或单独兜底;由 sweep 扩展用例固化 | 2026-11-08 M-SWEEP | **open(小)** |
 | 9 | 素材出处台账(ATTRIBUTION 模式)+ assets 校验进 CI | assets/ 每文件一行来源与许可,CI 校验 | figcraft 借鉴盘点 | **open(小)** |
