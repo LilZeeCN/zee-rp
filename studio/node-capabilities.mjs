@@ -366,7 +366,7 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
       reason = `${field} 属于其他特定节点或完整 RP/1 宏参数，对 ${type} 节点无效`;
       alternative = rawMacros.has(type)
         ? '此原始宏类型在 Studio 中不自动展开宏参数；请使用显式 children 构图、核心组件实例或 generate_prototype 原生入口'
-        : '请检查目标节点类型是否正确，或通过 studio_query_nodes 查询真实可编辑源目标';
+        : '请检查目标节点类型是否正确，或通过 studio_inspect 查询真实可编辑源目标';
     }
     const unsupportedFact = fact('unsupported', reason, 'studio/node-capabilities.mjs');
     result.surfaces.canvas = unsupportedFact;

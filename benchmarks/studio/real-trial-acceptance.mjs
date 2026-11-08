@@ -1,7 +1,7 @@
 // Only actor-originated receipts count as author behavior; the harness replay is separate.
 export function checkActorEvidence(taskId, receipts, feedback, finalHash, taskScenarios = [], initialBinding = null) {
   const successful = name => receipts.filter(r => r.request?.name === name && r.row?.status === 'success' && r.result?.ok !== false);
-  const screenshotReceipts = receipts.filter(r => ['studio_capture_screenshot', 'studio_review_design'].includes(r.request?.name)
+  const screenshotReceipts = receipts.filter(r => ['studio_screenshot'].includes(r.request?.name) || (r.request?.name === 'studio_design' && r.request?.args?.action === 'review')
     && r.row?.status === 'success' && r.result?.ok !== false && r.images?.length);
   const finalScreenshot = screenshotReceipts.some(r => r.result?.contentHash === finalHash);
   const subset = (required, actual) => {
@@ -9,7 +9,7 @@ export function checkActorEvidence(taskId, receipts, feedback, finalHash, taskSc
     if (Array.isArray(required)) return Array.isArray(actual) && required.length === actual.length && required.every((value,i) => subset(value, actual[i]));
     return required === actual;
   };
-  const scenarioReceipts = successful('studio_run_scenario').filter(r => r.result?.ok === true && (r.result.assertionCount || 0) > 0);
+  const scenarioReceipts = successful('studio_scenario').filter(r => !r.request?.args?.acceptance).filter(r => r.result?.ok === true && (r.result.assertionCount || 0) > 0);
   const scenario = taskScenarios.length > 0 && taskScenarios.every(expected => scenarioReceipts.some(receipt => {
     const args = receipt.request.args || {};
     if ((args.startPageId || 'home') !== (expected.startPageId || 'home') || (expected.reset === true && args.reset === false)) return false;
@@ -25,15 +25,15 @@ export function checkActorEvidence(taskId, receipts, feedback, finalHash, taskSc
   }));
   const checks = { finalScreenshot, scenario, feedback: Boolean(feedback && typeof feedback.easeScore === 'number') };
   if (taskId === 'T08') {
-    const atomic = successful('studio_apply_commands').find(r => {
+    const atomic = successful('studio_command').find(r => {
       const ids = r.result?.directAffectedNodeIds || [];
       return ['home/title', 'home/card', 'home/instanceA'].every(id => ids.includes(id));
     });
     const tx = atomic?.result?.txId, editedHash = atomic?.result?.contentHash;
-    const undo = successful('studio_undo').find(r => r.result?.undoneTxId === tx);
-    const redo = successful('studio_redo').find(r => r.result?.redoneTxId === tx && r.result?.contentHash === editedHash);
+    const undo = successful('studio_history').filter(r => r.request?.args?.action === 'undo').find(r => r.result?.undoneTxId === tx);
+    const redo = successful('studio_history').filter(r => r.request?.args?.action === 'redo').find(r => r.result?.redoneTxId === tx && r.result?.contentHash === editedHash);
     const ai = receipts.indexOf(atomic), ui = receipts.indexOf(undo), ri = receipts.indexOf(redo);
-    const screenshot = (start, end, hash) => receipts.slice(start, end).some(r => ['studio_capture_screenshot', 'studio_review_design'].includes(r.request?.name)
+    const screenshot = (start, end, hash) => receipts.slice(start, end).some(r => ['studio_screenshot'].includes(r.request?.name) || (r.request?.name === 'studio_design' && r.request?.args?.action === 'review')
       && r.row?.status === 'success' && r.images?.length && r.result?.contentHash === hash);
     const initialHash = initialBinding?.contentHash;
     const before = Boolean(initialHash && undo?.result?.contentHash === initialHash && ai >= 0 && screenshot(0, ai, initialHash));
@@ -50,7 +50,7 @@ export function checkActorEvidence(taskId, receipts, feedback, finalHash, taskSc
       const rejected = r.row?.status === 'error' && emptySelection
         && ['E_TRIAL_TOOL','E_EMPTY_SELECTION','E_INVALID_INPUT','E_COMMAND_VALUE'].includes(r.result?.code)
         && /nodeIds|selection|选择|至少|empty/i.test(r.result?.message || '');
-      const unmatchedQuery = r.request?.name === 'studio_query_nodes'
+      const unmatchedQuery = r.request?.name === 'studio_inspect'
         && r.row?.status === 'success'
         && r.result?.ok !== false
         && r.result?.empty === true

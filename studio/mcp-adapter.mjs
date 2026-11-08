@@ -299,13 +299,28 @@ function instanceSummary() {
   }));
 }
 
+// ---------------------------------------------------------------------------
+// Agent 工具面(2026-11-08 收敛):28 个 studio_* 工具收敛为 13 个动词化工具,
+// 参考 figcraft 的 run_command/batch/inspect 模式。HTTP /api/* 路由与浏览器
+// 零变化;studioHandlers 保留旧名作为内部兼容别名(测试/CLI 直调),MCP 客户端
+// 只看到 studioTools 里的 13 个。
+// ---------------------------------------------------------------------------
+
+const projectionProperties = {
+  verbose: { type: 'boolean', description: 'true 返回全量回包,不做压缩与预算降级' },
+  includeDoc: { type: 'boolean' },
+  includeScene: { type: 'boolean' },
+  maxBytes: { type: 'integer', minimum: 2048, maximum: 400000 },
+};
+
 export const studioHandlers = {
-  async studio_operations(args={}){
+  async studio_operations(args={}) {
     const {projectDir,url,port,action='get',...body}=args;
     if(!['get','list','cancel'].includes(action))throw Object.assign(new Error('action需要get/list/cancel'),{code:'E_OPERATION_ACTION'});
     if(projectDir)return new StudioOperations(projectDir)[action](body);
     return callServerJson(await resolveServerUrl({url,port}),'/api/operations','POST',{action,...body});
   },
+
   async studio_describe(args = {}) {
     try { return describeAuthoring(args); }
     catch (error) {
@@ -316,68 +331,7 @@ export const studioHandlers = {
         ...(error.candidates ? { candidates: error.candidates } : {}), ...(contracts.length ? { contracts } : {}) };
     }
   },
-  async studio_get_design_context(args = {}) {
-    return callServerJson(await resolveServerUrl(args), '/api/design/context', 'POST', args, { readOnly: true });
-  },
-  async studio_design_metrics(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    return callServerJson(baseUrl, '/api/design/metrics', 'POST', {
-      pageId: args.pageId || null,
-      thresholds: args.thresholds || null,
-      pixelTruth: args.pixelTruth,
-    });
-  },
-  async studio_design_pixel_contrast(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    return callServerJson(baseUrl, '/api/design/pixel-contrast', 'POST', {
-      pageId: args.pageId || null,
-      dpr: args.dpr ?? 2,
-    });
-  },
-  async studio_design_content_plan(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    return callServerJson(baseUrl, '/api/design/content-plan', 'POST', { pageId: args.pageId || null });
-  },
-  async studio_design_fix_plan(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    return callServerJson(baseUrl, '/api/design/fix-plan', 'POST', { pageId: args.pageId || null });
-  },
-  async studio_design_anchors(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    return callServerJson(baseUrl, '/api/design/anchors', 'POST', {
-      action: args.action || 'list',
-      pageId: args.pageId || null,
-      pages: args.pages || null,
-      mode: args.mode || 'append',
-      includeBelowBar: Boolean(args.includeBelowBar),
-      // approvedBy 如实记录调用方：MCP 通道默认 mcp-ai，与 apply_commands 的 clientId 口径一致。
-      approvedBy: args.approvedBy || 'mcp-ai',
-    });
-  },
-  async studio_design_explore(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    return callServerJson(baseUrl, '/api/design/explore', 'POST', {
-      pageId: args.pageId || null,
-      axes: args.axes || null,
-      limit: args.limit || null,
-      ...(args.candidates ? { candidates: args.candidates, baseRevision: args.baseRevision, states: args.states || [], preserve: args.preserve || {} } : {}),
-      ...(args.async!==undefined?{async:args.async,requestKey:args.requestKey,baseRevision:args.baseRevision}:{}),
-    });
-  },
-  async studio_prepare_media(args = {}) {
-    return callServerJson(await resolveServerUrl(args), '/api/media/prepare', 'POST', args);
-  },
-  async studio_review_design(args = {}) {
-    const { verbose = false, ...request } = args;
-    const result = await callServerJson(await resolveServerUrl(args), '/api/design/review', 'POST', request);
-    if (verbose || !result.ok) return result;
-    const { nodeSnapshots, designMetrics, ...compact } = result;
-    return { ...compact, findings: (result.findings || []).slice(0, 24),
-      detail: { view: 'summary', findingCount: result.findings?.length || 0, returnedFindings: Math.min(24, result.findings?.length || 0),
-        reportPath: result.reportPath || null,
-        next: 'verbose:true读取完整指标和节点快照；图片和具体问题默认保留。' } };
 
-  },
   async studio_open_project({
     projectDir,
     sourcePath = null,
@@ -454,13 +408,306 @@ export const studioHandlers = {
     };
   },
 
-  async studio_project_versions(args = {}) {
-    const body=await callServerJson(await resolveServerUrl(args),'/api/versions','POST',args,{readOnly:!args.action||['list','preview'].includes(args.action)});
-    if(body.diff){const summary=value=>{const raw=typeof value==='string'?value:JSON.stringify(value);return raw===undefined?null:{preview:raw.slice(0,160),length:raw.length,truncated:raw.length>160};};const changes=body.diff.changes.slice(0,12).map(({before,after,...change})=>({...change,beforeSummary:summary(before),afterSummary:summary(after)}));body.diff={...body.diff,changes,returned:changes.length,truncated:body.diff.total>changes.length,valuesInline:false};}
-    return projectPayload(body,{});
+  // ---- 写:唯一事务入口(HTTP /api/commands;as/$ref 步引用在 store 层解析) ----
+  async studio_command(args = {}) {
+    const rp1Source = args.rp1 !== undefined
+      ? args.rp1
+      : (args.sourceMode && args.commands === undefined && typeof args.source === 'string' ? args.source : undefined);
+    if (rp1Source !== undefined && args.commands !== undefined) throw Object.assign(new Error('rp1 与 commands 必须二选一'), { code: 'E_RP1_INPUT' });
+    const baseUrl = await resolveServerUrl(args);
+    const body = await callServerJson(baseUrl, '/api/commands', 'POST', {
+      clientId: args.clientId || 'mcp-ai',
+      source: args.rp1 !== undefined || !args.sourceMode ? (args.source || 'mcp-ai') : 'mcp-ai',
+      baseRevision: args.baseRevision,
+      idempotencyKey: args.idempotencyKey,
+      pageId: args.pageId || null,
+      documentId: args.documentId || null,
+      label: args.label || null,
+      selectionId: args.selectionId,
+      actor: args.actor || null,
+      includeDoc: Boolean(args.includeDoc),
+      includeScene: Boolean(args.includeScene),
+      ...(rp1Source !== undefined ? { rp1: rp1Source, sourceMode: args.sourceMode, parentId: args.parentId, index: args.index } : { commands: args.commands || [] }),
+      simulateCrashStage: args.simulateCrashStage || null,
+    });
+    // 默认紧凑 scene（AI 通道回包瘦身）：事务成功回包只保留受影响节点，未受影响页面只留索引。
+    let projected = body;
+    if (!args.includeScene && !args.verbose && body?.scene?.pages && Array.isArray(body.affectedNodeIds)) {
+      const keep = new Set([...(body.affectedNodeIds || []), ...(body.directAffectedNodeIds || [])]);
+      projected = {
+        ...body,
+        scene: {
+          ...body.scene,
+          pages: body.scene.pages.map(page => {
+            const nodes = (page.nodes || []).filter(n => keep.has(`${page.id}/${n.id}`) || keep.has(n.id) || keep.has(n.scopedId));
+            return {
+              id: page.id,
+              name: page.name,
+              board: page.board,
+              nodeCount: (page.nodes || []).length,
+              ...(nodes.length ? { nodes } : {}),
+            };
+          }),
+        },
+        sceneFiltered: '默认只回受影响节点；需要全量请传 includeScene:true',
+        truncations: [{ level: 1, dropped: 'scene.nodes of unaffected pages and nodes', how: 'pass includeScene:true or use studio_inspect view:nodes' }],
+      };
+    }
+    if (!args.verbose && !args.includeDoc && !args.includeScene && projected.authoring?.sourceSpans) {
+      const { sourceSpans, ...authoring } = projected.authoring;
+      projected = { ...projected, authoring: { ...authoring, sourceSpanCount: sourceSpans.length,
+        next: '源码定位仅在失败时默认展开；verbose:true可读取全部sourceSpans。' } };
+    }
+    return projectPayload(projected, {
+      verbose: args.verbose,
+      includeDoc: args.includeDoc,
+      includeScene: args.includeScene,
+      maxBytes: args.maxBytes,
+      docStyle: 'stub',
+    });
   },
 
-  async studio_project_bundle(args = {}) {
+  // ---- 读:节点查询 / 会话状态 / 组件契约 三视图合一 ----
+  async studio_inspect(args = {}) {
+    const view = args.view || 'nodes';
+    if (view === 'context') {
+      const baseUrl = await resolveServerUrl(args);
+      const body = await callServerJson(baseUrl, '/api/context', 'GET');
+      return {
+        ...projectPayload(body, {
+          verbose: args.verbose,
+          includeDoc: args.includeDoc,
+          includeScene: args.includeScene,
+          maxBytes: args.maxBytes,
+        }),
+        openInstances: instanceSummary(),
+        authoring: AUTHORING_ENTRY,
+      };
+    }
+    if (view === 'contracts') {
+      const baseUrl = await resolveServerUrl(args);
+      return callServerJson(baseUrl, '/api/component-contracts', 'POST', {
+        componentId: args.componentId || null,
+      });
+    }
+    const baseUrl = await resolveServerUrl(args);
+    const { view: mcpView, ...rest } = args;
+    const httpView = mcpView === 'nodes' ? undefined : mcpView; // MCP 层 'nodes' → HTTP 默认 authoring
+    return callServerJson(baseUrl, '/api/query', 'POST', { ...rest, ...(!httpView && !args.cursor ? { view: 'authoring' } : { view: httpView }) }, { readOnly: true });
+  },
+
+  // ---- 像素:截图(内部先等渲染确认,无需独立 wait 工具) ----
+  async studio_screenshot(args = {}) {
+    const baseUrl = await resolveServerUrl(args);
+    return callServerJson(baseUrl, '/api/screenshot', 'POST', {
+      revision: args.revision,
+      pageId: args.pageId || null,
+      nodeId: args.nodeId || null,
+      outPath: args.outPath || null,
+      includeImage: args.includeImage !== false,
+      timeoutMs: args.timeoutMs ?? 5000,
+      simulateHang: Boolean(args.simulateHang),
+    });
+  },
+
+  // ---- 导出:原生 rp / 离线代码包 / 便携工程包 三出口合一 ----
+  async studio_export(args = {}) {
+    const format = args.format || null;
+    if (format === 'rp') {
+      const baseUrl = await resolveServerUrl(args);
+      return callServerJson(baseUrl, '/api/export-rp', 'POST', {
+        outRpPath: args.outRpPath || args.output || null,
+        outReportPath: args.outReportPath || null,
+        ...(args.baseRevision !== undefined ? { baseRevision: args.baseRevision } : {}),
+        ...(args.async !== undefined ? { async: args.async, requestKey: args.requestKey } : {}),
+      });
+    }
+    if (format === 'code') {
+      const baseUrl = await resolveServerUrl(args);
+      return callServerJson(baseUrl, '/api/export-code', 'POST', {
+        outDir: args.outDir || args.output || null,
+        ...(args.baseRevision !== undefined ? { baseRevision: args.baseRevision } : {}),
+        ...(args.resetRegistration !== undefined ? { resetRegistration: args.resetRegistration } : {}),
+        ...(args.async !== undefined ? { async: args.async, requestKey: args.requestKey } : {}),
+      });
+    }
+    if (format === 'bundle') {
+      return studioHandlers._bundle(args);
+    }
+    throw Object.assign(new Error(`format 需要 rp / code / bundle,收到 ${format}`), { code: 'E_EXPORT_FORMAT' });
+  },
+
+  // ---- 历史:撤销/重做/命名版本 一处管理 ----
+  async studio_history(args = {}) {
+    const action = args.action || null;
+    if (action === 'undo') {
+      const baseUrl = await resolveServerUrl(args);
+      const body = await callServerJson(baseUrl, '/api/undo', 'POST', {
+        clientId: args.clientId || 'mcp-ai',
+        source: 'mcp-ai',
+        expectedRevision: args.expectedRevision ?? null,
+        expectedHeadTxId: args.expectedHeadTxId ?? null,
+      });
+      return projectPayload(body, { verbose: args.verbose, includeDoc: args.includeDoc, includeScene: args.includeScene, maxBytes: args.maxBytes });
+    }
+    if (action === 'redo') {
+      const baseUrl = await resolveServerUrl(args);
+      const body = await callServerJson(baseUrl, '/api/redo', 'POST', {
+        clientId: args.clientId || 'mcp-ai',
+        source: 'mcp-ai',
+        expectedRevision: args.expectedRevision ?? null,
+      });
+      return projectPayload(body, { verbose: args.verbose, includeDoc: args.includeDoc, includeScene: args.includeScene, maxBytes: args.maxBytes });
+    }
+    if (['list', 'create', 'preview', 'restore'].includes(action)) {
+      const body = await callServerJson(await resolveServerUrl(args), '/api/versions', 'POST', { ...args, action }, { readOnly: !action || ['list', 'preview'].includes(action) });
+      if (body.diff) {
+        const summary = value => { const raw = typeof value === 'string' ? value : JSON.stringify(value); return raw === undefined ? null : { preview: raw.slice(0, 160), length: raw.length, truncated: raw.length > 160 }; };
+        const changes = body.diff.changes.slice(0, 12).map(({ before, after, ...change }) => ({ ...change, beforeSummary: summary(before), afterSummary: summary(after) }));
+        body.diff = { ...body.diff, changes, returned: changes.length, truncated: body.diff.total > changes.length, valuesInline: false };
+      }
+      return projectPayload(body, {});
+    }
+    throw Object.assign(new Error(`action 需要 undo / redo / list / create / preview / restore,收到 ${action}`), { code: 'E_HISTORY_ACTION' });
+  },
+
+  // ---- 阶段上下文(创作主入口) ----
+  async studio_stage(args = {}) {
+    return callServerJson(await resolveServerUrl(args), '/api/design/context', 'POST', args, { readOnly: true });
+  },
+
+  // ---- 设计质量:度量/像素对比/锚点/内容脚手架/修复计划/探索/看图评审 一处管理 ----
+  async studio_design(args = {}) {
+    const action = args.action || 'metrics';
+    const baseUrl = await resolveServerUrl(args);
+    if (action === 'metrics') {
+      return callServerJson(baseUrl, '/api/design/metrics', 'POST', {
+        pageId: args.pageId || null,
+        thresholds: args.thresholds || null,
+        pixelTruth: args.pixelTruth,
+      });
+    }
+    if (action === 'pixel_contrast') {
+      return callServerJson(baseUrl, '/api/design/pixel-contrast', 'POST', {
+        pageId: args.pageId || null,
+        dpr: args.dpr ?? 2,
+      });
+    }
+    if (action === 'anchors') {
+      return callServerJson(baseUrl, '/api/design/anchors', 'POST', {
+        action: args.anchorAction || 'list',
+        pageId: args.pageId || null,
+        pages: args.pages || null,
+        mode: args.mode || 'append',
+        includeBelowBar: Boolean(args.includeBelowBar),
+        // approvedBy 如实记录调用方：MCP 通道默认 mcp-ai。
+        approvedBy: args.approvedBy || 'mcp-ai',
+      });
+    }
+    if (action === 'content_plan') {
+      return callServerJson(baseUrl, '/api/design/content-plan', 'POST', { pageId: args.pageId || null });
+    }
+    if (action === 'fix_plan') {
+      return callServerJson(baseUrl, '/api/design/fix-plan', 'POST', { pageId: args.pageId || null });
+    }
+    if (action === 'explore') {
+      return callServerJson(baseUrl, '/api/design/explore', 'POST', {
+        pageId: args.pageId || null,
+        axes: args.axes || null,
+        limit: args.limit || null,
+        ...(args.candidates ? { candidates: args.candidates, baseRevision: args.baseRevision, states: args.states || [], preserve: args.preserve || {} } : {}),
+        ...(args.async !== undefined ? { async: args.async, requestKey: args.requestKey, baseRevision: args.baseRevision } : {}),
+      });
+    }
+    if (action === 'review') {
+      const { verbose = false, ...request } = args;
+      const result = await callServerJson(baseUrl, '/api/design/review', 'POST', request);
+      if (verbose || !result.ok) return result;
+      const { nodeSnapshots, designMetrics, ...compact } = result;
+      return { ...compact, findings: (result.findings || []).slice(0, 24),
+        detail: { view: 'summary', findingCount: result.findings?.length || 0, returnedFindings: Math.min(24, result.findings?.length || 0),
+          reportPath: result.reportPath || null,
+          next: 'verbose:true读取完整指标和节点快照；图片和具体问题默认保留。' } };
+    }
+    throw Object.assign(new Error(`action 需要 metrics / pixel_contrast / anchors / content_plan / fix_plan / explore / review,收到 ${action}`), { code: 'E_DESIGN_ACTION' });
+  },
+
+  // ---- 场景:交互剧本 / 12 模板验收 ----
+  async studio_scenario(args = {}) {
+    const baseUrl = await resolveServerUrl(args);
+    if (args.acceptance) {
+      if (args.faultInjection) {
+        return callServerJson(baseUrl, '/api/scenarios/fault-injection', 'POST', {
+          domain: args.domain || null,
+        });
+      }
+      return callServerJson(baseUrl, '/api/scenarios/run', 'POST', {
+        domain: args.domain || null,
+        scenarioIds: args.scenarioIds || null,
+        category: args.category || null,
+        impactReport: args.impactReport || null,
+        runAll: Boolean(args.runAll),
+        layers: args.layers || ['semantic'],
+        screenshotDir: args.screenshotDir || null,
+        exportDir: args.exportDir || null,
+        axurePreviewUrl: args.axurePreviewUrl || null,
+      });
+    }
+    const result = await callServerJson(baseUrl, '/api/runtime/scenario', 'POST', {
+      startPageId: args.startPageId || null,
+      reset: args.reset !== false,
+      ...(args.hitTest !== undefined ? { hitTest: args.hitTest === true } : {}),
+      steps: args.steps || [],
+    });
+    const executionLayer = args.hitTest ? 'studio-semantic+real-browser-pointer' : 'studio-semantic';
+    if (args.verbose || !result.finalState) return { ...result, executionLayer };
+    const { activePageScene, trace, ...state } = result.finalState;
+    return { ...result, executionLayer, finalState: state, detail: { view: 'summary', next: 'verbose:true读取完整场景和动作轨迹；默认保留每步断言与最终变量、面板、显隐状态。' } };
+  },
+
+  // ---- 素材 ----
+  async studio_media(args = {}) {
+    return callServerJson(await resolveServerUrl(args), '/api/media/prepare', 'POST', args);
+  },
+
+  // ---- 合并与原生回填 ----
+  async studio_merge(args = {}) {
+    const kind = args.kind || 'merge';
+    if (kind === 'sync_native') {
+      const baseUrl = await resolveServerUrl(args);
+      return callServerJson(baseUrl, '/api/sync-native', 'POST', {
+        rpPath: args.rpPath || args.rp || null,
+        baseRpPath: args.baseRpPath || null,
+        baselinePath: args.baselinePath || null,
+        mode: args.mode || 'preview',
+        prefer: args.prefer || 'fail',
+        resolutions: args.resolutions || {},
+        ...(args.baseRevision !== undefined ? { baseRevision: args.baseRevision } : {}),
+        ...(args.idempotencyKey !== undefined ? { idempotencyKey: args.idempotencyKey } : {}),
+        ...(args.previewHash !== undefined ? { previewHash: args.previewHash } : {}),
+        ...(args.allowFormulaOverwrite !== undefined ? { allowFormulaOverwrite: args.allowFormulaOverwrite } : {}),
+        ...(args.rebuildRp !== undefined ? { rebuildRp: args.rebuildRp } : {}),
+        ...(args.outRpPath !== undefined ? { outRpPath: args.outRpPath } : {}),
+        ...(args.async !== undefined ? { async: args.async, requestKey: args.requestKey } : {}),
+      }, { readOnly: (args.mode || 'preview') === 'preview' && !args.async });
+    }
+    if (kind === 'merge') {
+      const baseUrl = await resolveServerUrl(args);
+      const body = await callServerJson(baseUrl, '/api/project/merge', 'POST', args, {
+        readOnly: !args.mode || ['preview', 'check-external'].includes(args.mode),
+      });
+      return projectPayload(body, {
+        verbose: args.verbose,
+        includeDoc: args.includeDoc,
+        includeScene: args.includeScene,
+        maxBytes: args.maxBytes,
+      });
+    }
+    throw Object.assign(new Error(`kind 需要 merge / sync_native,收到 ${kind}`), { code: 'E_MERGE_KIND' });
+  },
+
+  // ---- 便携工程包实现(studio_export format:bundle 的主体;保留本地回落) ----
+  async _bundle(args = {}) {
     const action = args.action || 'report';
     if (action === 'verify' && !args.url && !args.port) {
       return verifyProjectBundle({ bundleDir: args.bundleDir || args.outDir });
@@ -520,397 +767,43 @@ export const studioHandlers = {
     }
   },
 
-  async studio_merge_document(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    const body = await callServerJson(baseUrl, '/api/project/merge', 'POST', args, {
-      readOnly: !args.mode || ['preview', 'check-external'].includes(args.mode),
-    });
-    return projectPayload(body, {
-      verbose: args.verbose,
-      includeDoc: args.includeDoc,
-      includeScene: args.includeScene,
-      maxBytes: args.maxBytes,
-    });
-  },
-
-  async studio_get_context(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    const body = await callServerJson(baseUrl, '/api/context', 'GET');
-    return {
-      ...projectPayload(body, {
-        verbose: args.verbose,
-        includeDoc: args.includeDoc,
-        includeScene: args.includeScene,
-        maxBytes: args.maxBytes,
-      }),
-      openInstances: instanceSummary(),
-      authoring: AUTHORING_ENTRY,
-    };
-  },
-
-  async studio_query_nodes(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    return callServerJson(baseUrl, '/api/query', 'POST', { ...args, ...(!args.view && !args.cursor ? { view: 'authoring' } : {}) }, { readOnly: true });
-  },
-
-  async studio_apply_commands(args = {}) {
-    const rp1Source = args.rp1 !== undefined
-      ? args.rp1
-      : (args.sourceMode && args.commands === undefined && typeof args.source === 'string' ? args.source : undefined);
-    if (rp1Source !== undefined && args.commands !== undefined) throw Object.assign(new Error('rp1 与 commands 必须二选一'), { code: 'E_RP1_INPUT' });
-    const baseUrl = await resolveServerUrl(args);
-    const body = await callServerJson(baseUrl, '/api/commands', 'POST', {
-      clientId: args.clientId || 'mcp-ai',
-      source: args.rp1 !== undefined || !args.sourceMode ? (args.source || 'mcp-ai') : 'mcp-ai',
-      baseRevision: args.baseRevision,
-      idempotencyKey: args.idempotencyKey,
-      pageId: args.pageId || null,
-      documentId: args.documentId || null,
-      label: args.label || null,
-      selectionId: args.selectionId,
-      actor: args.actor || null,
-      includeDoc: Boolean(args.includeDoc),
-      includeScene: Boolean(args.includeScene),
-      ...(rp1Source !== undefined ? { rp1: rp1Source, sourceMode: args.sourceMode, parentId: args.parentId, index: args.index } : { commands: args.commands || [] }),
-      simulateCrashStage: args.simulateCrashStage || null,
-    });
-    // 默认紧凑 scene（AI 通道回包瘦身）：事务成功回包只保留受影响节点（affectedNodeIds 含
-    // 传递影响，directAffectedNodeIds 为直接目标），未受影响页面只留 id/name/board/nodeCount 索引。
-    // 降级动作显式记入 truncations（与 enforceBudget 同一约定，不静默截断）；全量 scene 仍由
-    // includeScene:true / verbose:true 显式索取。服务端未上报受影响清单时保持原样，不猜。
-    let projected = body;
-    if (!args.includeScene && !args.verbose && body?.scene?.pages && Array.isArray(body.affectedNodeIds)) {
-      const keep = new Set([...(body.affectedNodeIds || []), ...(body.directAffectedNodeIds || [])]);
-      projected = {
-        ...body,
-        scene: {
-          ...body.scene,
-          pages: body.scene.pages.map(page => {
-            const nodes = (page.nodes || []).filter(n => keep.has(`${page.id}/${n.id}`) || keep.has(n.id) || keep.has(n.scopedId));
-            return {
-              id: page.id,
-              name: page.name,
-              board: page.board,
-              nodeCount: (page.nodes || []).length,
-              ...(nodes.length ? { nodes } : {}),
-            };
-          }),
-        },
-        sceneFiltered: '默认只回受影响节点；需要全量请传 includeScene:true',
-        truncations: [{ level: 1, dropped: 'scene.nodes of unaffected pages and nodes', how: 'pass includeScene:true or use studio_query_nodes' }],
-      };
-    }
-    if (!args.verbose && !args.includeDoc && !args.includeScene && projected.authoring?.sourceSpans) {
-      const { sourceSpans, ...authoring } = projected.authoring;
-      projected = { ...projected, authoring: { ...authoring, sourceSpanCount: sourceSpans.length,
-        next: '源码定位仅在失败时默认展开；verbose:true可读取全部sourceSpans。' } };
-    }
-    return projectPayload(projected, {
-      verbose: args.verbose,
-      includeDoc: args.includeDoc,
-      includeScene: args.includeScene,
-      maxBytes: args.maxBytes,
-      docStyle: 'stub',
-    });
-  },
-
-  async studio_wait_for_render(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    return callServerJson(baseUrl, '/api/wait-render', 'POST', {
-      revision: args.revision,
-      timeoutMs: args.timeoutMs ?? 4000,
-      simulateHang: Boolean(args.simulateHang),
-    });
-  },
-
-  async studio_capture_screenshot(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    return callServerJson(baseUrl, '/api/screenshot', 'POST', {
-      revision: args.revision,
-      pageId: args.pageId || null,
-      nodeId: args.nodeId || null,
-      outPath: args.outPath || null,
-      includeImage: args.includeImage !== false,
-      timeoutMs: args.timeoutMs ?? 5000,
-      simulateHang: Boolean(args.simulateHang),
-    });
-  },
-
-  async studio_undo(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    const body = await callServerJson(baseUrl, '/api/undo', 'POST', {
-      clientId: args.clientId || 'mcp-ai',
-      source: 'mcp-ai',
-      expectedRevision: args.expectedRevision ?? null,
-      expectedHeadTxId: args.expectedHeadTxId ?? null,
-    });
-    return projectPayload(body, { verbose: args.verbose, includeDoc: args.includeDoc, includeScene: args.includeScene, maxBytes: args.maxBytes });
-  },
-
-  async studio_redo(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    const body = await callServerJson(baseUrl, '/api/redo', 'POST', {
-      clientId: args.clientId || 'mcp-ai',
-      source: 'mcp-ai',
-      expectedRevision: args.expectedRevision ?? null,
-    });
-    return projectPayload(body, { verbose: args.verbose, includeDoc: args.includeDoc, includeScene: args.includeScene, maxBytes: args.maxBytes });
-  },
-
-  async studio_run_scenario(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    const result = await callServerJson(baseUrl, '/api/runtime/scenario', 'POST', {
-      startPageId: args.startPageId || null,
-      reset: args.reset !== false,
-      ...(args.hitTest !== undefined ? { hitTest: args.hitTest === true } : {}),
-      steps: args.steps || [],
-    });
-    const executionLayer = args.hitTest ? 'studio-semantic+real-browser-pointer' : 'studio-semantic';
-    if (args.verbose || !result.finalState) return { ...result, executionLayer };
-    const { activePageScene, trace, ...state } = result.finalState;
-    return { ...result, executionLayer, finalState: state, detail: { view: 'summary', next: 'verbose:true读取完整场景和动作轨迹；默认保留每步断言与最终变量、面板、显隐状态。' } };
-  },
-
-  async studio_export_rp(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    return callServerJson(baseUrl, '/api/export-rp', 'POST', {
-      outRpPath: args.outRpPath || args.output || null,
-      outReportPath: args.outReportPath || null,
-      ...(args.baseRevision!==undefined?{baseRevision:args.baseRevision}:{}),
-      ...(args.async!==undefined?{async:args.async,requestKey:args.requestKey}:{}),
-    });
-  },
-
-  async studio_export_code(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    return callServerJson(baseUrl, '/api/export-code', 'POST', {
-      outDir: args.outDir || args.output || null,
-      ...(args.baseRevision !== undefined ? { baseRevision: args.baseRevision } : {}),
-      ...(args.resetRegistration !== undefined ? { resetRegistration: args.resetRegistration } : {}),
-      ...(args.async !== undefined ? { async: args.async, requestKey: args.requestKey } : {}),
-    });
-  },
-
-  async studio_sync_native(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    return callServerJson(baseUrl, '/api/sync-native', 'POST', {
-      rpPath: args.rpPath || args.rp || null,
-      baseRpPath: args.baseRpPath || null,
-      baselinePath: args.baselinePath || null,
-      mode: args.mode || 'preview',
-      prefer: args.prefer || 'fail',
-      resolutions: args.resolutions || {},
-      ...(args.baseRevision !== undefined ? { baseRevision: args.baseRevision } : {}),
-      ...(args.idempotencyKey !== undefined ? { idempotencyKey: args.idempotencyKey } : {}),
-      ...(args.previewHash !== undefined ? { previewHash: args.previewHash } : {}),
-      ...(args.allowFormulaOverwrite !== undefined ? { allowFormulaOverwrite: args.allowFormulaOverwrite } : {}),
-      ...(args.rebuildRp !== undefined ? { rebuildRp: args.rebuildRp } : {}),
-      ...(args.outRpPath !== undefined ? { outRpPath: args.outRpPath } : {}),
-      ...(args.async !== undefined ? { async: args.async, requestKey: args.requestKey } : {}),
-    }, { readOnly: (args.mode || 'preview') === 'preview' && !args.async });
-  },
-
-  async studio_get_component_contracts(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    return callServerJson(baseUrl, '/api/component-contracts', 'POST', {
-      componentId: args.componentId || null,
-    });
-  },
-
-  async studio_run_acceptance_scenarios(args = {}) {
-    const baseUrl = await resolveServerUrl(args);
-    if (args.faultInjection) {
-      return callServerJson(baseUrl, '/api/scenarios/fault-injection', 'POST', {
-        domain: args.domain || null,
-      });
-    }
-    return callServerJson(baseUrl, '/api/scenarios/run', 'POST', {
-      domain: args.domain || null,
-      scenarioIds: args.scenarioIds || null,
-      category: args.category || null,
-      impactReport: args.impactReport || null,
-      runAll: Boolean(args.runAll),
-      layers: args.layers || ['semantic'],
-      screenshotDir: args.screenshotDir || null,
-      exportDir: args.exportDir || null,
-      axurePreviewUrl: args.axurePreviewUrl || null,
-    });
-  },
+  // ---- 内部兼容别名(仅供既有测试/CLI 直调;MCP 工具面只含 studioTools 的 13 个) ----
+  async studio_apply_commands(args = {}) { return studioHandlers.studio_command(args); },
+  async studio_query_nodes(args = {}) { return studioHandlers.studio_inspect({ ...args, view: args.view || 'nodes' }); },
+  async studio_get_context(args = {}) { return studioHandlers.studio_inspect({ ...args, view: 'context' }); },
+  async studio_get_component_contracts(args = {}) { return studioHandlers.studio_inspect({ url: args.url, port: args.port, projectDir: args.projectDir, view: 'contracts', componentId: args.componentId }); },
+  async studio_capture_screenshot(args = {}) { return studioHandlers.studio_screenshot(args); },
+  async studio_undo(args = {}) { return studioHandlers.studio_history({ ...args, action: 'undo' }); },
+  async studio_redo(args = {}) { return studioHandlers.studio_history({ ...args, action: 'redo' }); },
+  async studio_project_versions(args = {}) { return studioHandlers.studio_history({ ...args, action: args.action || 'list' }); },
+  async studio_get_design_context(args = {}) { return studioHandlers.studio_stage(args); },
+  async studio_design_metrics(args = {}) { return studioHandlers.studio_design({ ...args, action: 'metrics' }); },
+  async studio_design_pixel_contrast(args = {}) { return studioHandlers.studio_design({ ...args, action: 'pixel_contrast' }); },
+  async studio_design_content_plan(args = {}) { return studioHandlers.studio_design({ ...args, action: 'content_plan' }); },
+  async studio_design_fix_plan(args = {}) { return studioHandlers.studio_design({ ...args, action: 'fix_plan' }); },
+  async studio_design_anchors(args = {}) { return studioHandlers.studio_design({ ...args, action: 'anchors', anchorAction: args.action || 'list', action: 'anchors' }); },
+  async studio_design_explore(args = {}) { return studioHandlers.studio_design({ ...args, action: 'explore' }); },
+  async studio_review_design(args = {}) { return studioHandlers.studio_design({ ...args, action: 'review' }); },
+  async studio_run_scenario(args = {}) { return studioHandlers.studio_scenario(args); },
+  async studio_run_acceptance_scenarios(args = {}) { return studioHandlers.studio_scenario({ ...args, acceptance: true }); },
+  async studio_export_rp(args = {}) { return studioHandlers.studio_export({ ...args, format: 'rp' }); },
+  async studio_export_code(args = {}) { return studioHandlers.studio_export({ ...args, format: 'code' }); },
+  async studio_project_bundle(args = {}) { return studioHandlers.studio_export({ ...args, format: 'bundle' }); },
+  async studio_sync_native(args = {}) { return studioHandlers.studio_merge({ ...args, kind: 'sync_native' }); },
+  async studio_merge_document(args = {}) { return studioHandlers.studio_merge({ ...args, kind: 'merge' }); },
+  async studio_prepare_media(args = {}) { return studioHandlers.studio_media(args); },
 };
+
+// ---------------------------------------------------------------------------
+// MCP 工具面:13 个动词化工具(figcraft 式收敛)。旧 28 名不在本清单;
+// studioHandlers 上的旧名键是内部兼容别名,不经 MCP 暴露。
+// ---------------------------------------------------------------------------
 
 const connectionProperties = { url: { type: 'string' }, port: { type: 'integer' }, projectDir: { type: 'string' } };
 export const studioTools = [
-  {name:'studio_operations',description:'按工程持久查询、列出或取消长操作。可按id或原requestKey核对，MCP断连/服务重开不重做。cancel分别返回请求确认与实际停止；includeResult读取完成结果，过期结果移除提交建议。',inputSchema:{type:'object',properties:{...connectionProperties,action:{enum:['get','list','cancel']},id:{type:'string'},requestKey:{type:'string',minLength:1,maxLength:200},includeResult:{type:'boolean'},limit:{type:'integer',minimum:1,maximum:100}},additionalProperties:false},handler:studioHandlers.studio_operations},
-  {
-    name:'studio_project_versions',
-    description:'命名保存、列出和预览工程版本；恢复需当前baseRevision、预览返回的previewHash及唯一idempotencyKey，产生可撤销新事务。保存包含设计决定、页面、组件、tokens、数据和资源引用。',
-    inputSchema:{type:'object',properties:{...connectionProperties,action:{enum:['list','create','preview','restore']},name:{type:'string',minLength:1,maxLength:80},versionId:{type:'string'},baseRevision:{type:'integer',minimum:1},previewHash:{type:'string'},idempotencyKey:{type:'string',minLength:1}},additionalProperties:false},
-    handler:async(args={})=>studioHandlers.studio_project_versions(args),
-  },
-  {
-    name: 'studio_describe', readOnly: true,
-    description: '按需发现AI创作流程、RP/1、命令schema与craft指导。topic:command用name或names；fields/operation/surface仅用于topic:node。节点用name+fields查询；源码许可与真实生效验证分开登记。无需打开工程。',
-    inputSchema: { type: 'object', properties: { topic: { type: 'string', enum: ['workflow', 'rp1', 'command', 'node', 'design', 'craft'] }, name: { type: 'string' }, names: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' } }, fields:{type:'array',minItems:1,maxItems:16,items:{type:'string',minLength:1}},operation:{enum:['create','edit']},surface:{enum:['canvas','runtime','native','full-rp1']},intent: { type: 'string', enum: ['editorial', 'task', 'learning'] }, platform: { type: 'string', enum: ['mobile', 'web'] }, guideId: { type: 'string' } }, additionalProperties: false },
-    handler: studioHandlers.studio_describe,
-  },
-  {
-    name: 'studio_get_design_context',
-    description: '按stage准备规划/骨架/内容/精修/检查/局部改稿上下文。局部改稿先get_context取版本，再传stage:edit、target.pageId/target.revision/nodeIds；返回可编辑源目标和设计决定。target是工程选区，referencePageId是参考页。',
-    readOnly: true,
-    inputSchema: { type: 'object', properties: { ...connectionProperties,
-      intent: { type: 'string', enum: ['editorial', 'task', 'learning'] }, platform: { type: 'string', enum: ['mobile', 'web'] },
-      pageId: { type: 'string', description: '旧入口的栖羽参考页，非工程页；stage入口使用referencePageId与target.pageId' },
-      stage: {type:'string',enum:['planning','skeleton','content','refine','review','edit']},
-      brief: {anyOf:[{type:'string'}, {type:'object',properties:{task:{type:'string'},content:{type:'array',items:{type:'string'}},states:{type:'array',items:{type:'string'}},constraints:{type:'array',items:{type:'string'}}},additionalProperties:false}]},
-      target: {type:'object',properties:{selection:{enum:['active']},clientId:{type:'string'},selectionId:{type:'string'},pageId:{type:'string'},documentId:{type:'string'},revision:{type:'integer',minimum:1},contentHash:{type:'string'},nodeIds:{type:'array',minItems:1,maxItems:32,items:{type:'string'}},role:{type:'string'},within:{type:'string'},textContains:{type:'string'}},oneOf:[{required:['pageId'],not:{required:['selection']}},{required:['selection'],not:{required:['pageId']}}],additionalProperties:false},
-      referencePackId:{type:'string'},referencePageId:{type:'string'},includeSource:{type:'boolean'},
-      maxBytes:{type:'integer',minimum:4000,maximum:48000,description:'文字JSON预算；图片字节数单独报告'},
-      includeImages: { type: 'boolean' }, guideId: { type: 'string' }
-    }, additionalProperties: false },
-    handler: studioHandlers.studio_get_design_context,
-  },
-  {
-    name: 'studio_design_metrics',
-    description: '计算页面的 L1 视觉完成度代理指标（字阶比、4px 栅格一致性、留白占比、文本对比度、主色相数）与反 AI-slop 负样本规则（等距三卡、紫渐变、空洞居中标题、图标圆角方块、首屏无素材、圆角过度）。每条 slop 规则的触发阈值随结果 slopRules 返回——未命中可能只是样本低于阈值，不代表规则失效。不返回审美总分：只给可复现的结构判断与具体改法。',
-    readOnly: true,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
-        pageId: { type: 'string' },
-        thresholds: { type: 'object' },
-        pixelTruth: { type: 'boolean', description: '默认真实浏览器像素测量；false 显式使用几何估算。失败回落时标注原因。' },
-      },
-      additionalProperties: false,
-    },
-    handler: studioHandlers.studio_design_metrics,
-  },
-  {
-    name: 'studio_design_pixel_contrast',
-    description: '像素对比度：用真实浏览器原图、隐藏字形底图和字形掩膜，逐笔画测量对比度；支持非整数DPR。描边、重叠文本和缺失证据显式unknown且不通过。',
-    readOnly: true,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
-        pageId: { type: 'string' },
-        dpr: { type: 'number', minimum: 0.5, maximum: 4 },
-      },
-      additionalProperties: false,
-    },
-    handler: studioHandlers.studio_design_pixel_contrast,
-  },
-  {
-    name: 'studio_design_content_plan',
-    description: '内容脚手架：找出"只有结构没有文案"的位置（空态、口号式大标题），给出需要的槽位、可套用模板与示例，以及一条可直接提交的 applyWith 命令。它不假装会写好文案——只把"该说清什么"变成可填的空。',
-    readOnly: true,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
-        pageId: { type: 'string' },
-      },
-      additionalProperties: false,
-    },
-    handler: studioHandlers.studio_design_content_plan,
-  },
-  {
-    name: 'studio_design_fix_plan',
-    description: '把度量发现的问题翻译成可直接提交的命令：栅格位置吸附、热区补足、为未绑定的列表补空态、把被撑高的文字框回缩。只开确定性处方（可计算、无需品味判断），不自动提交；字阶/配色/构图等取舍类问题交给 studio_design_explore 与锚点对比。',
-    readOnly: true,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
-        pageId: { type: 'string' },
-      },
-      additionalProperties: false,
-    },
-    handler: studioHandlers.studio_design_fix_plan,
-  },
-  {
-    name: 'studio_design_anchors',
-    description: '把项目里已认可的页面提炼成"排版配方"锚点（字阶/栅格/留白/色相/主次比），并让其它页面与锚点比对给出偏离量。语料是本地历史页面而不是互联网美图：这才是这个产品自己的参照系。action=extract 写入设计锚点文件，list 读取，compare 对比某页。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
-        action: { type: 'string', enum: ['extract', 'approve', 'list', 'compare'] },
-        mode: { type: 'string', enum: ['append', 'replace'] },
-        includeBelowBar: { type: 'boolean' },
-        pageId: { type: 'string' },
-        pages: { type: 'array', items: { type: 'string' } },
-        approvedBy: { type: 'string', description: '认可方标识，默认 mcp-ai；人工在界面上认可时记 human' },
-      },
-      required: ['action'],
-      additionalProperties: false,
-    },
-    handler: studioHandlers.studio_design_anchors,
-  },
-  {
-    name: 'studio_design_explore',
-    description: '批量生成设计变体并按可复现判据自动收敛：在密度/字阶/圆角/配色四条轴上展开组合，对每个变体计算同一套 L1 指标与反 slop 规则，按「未达标项 → 硬伤 → 提示 → 改动量」排序，返回入选变体可直接提交的 commands。也可传 candidates/baseRevision/states，隔离预演 AI 自写的任意构图命令，返回真实浏览器多状态联系图，默认保留内容和交互。不改源文档，不自动代选审美。',
-    readOnly: true,
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
-        pageId: { type: 'string' },
-        limit: { type: 'integer', minimum: 2, maximum: 40 },
-        ...OPERATION_PROPERTIES,
-        baseRevision: { type: 'integer', minimum: 1 },
-        candidates: { type: 'array', minItems: 1, maxItems: 4, items: { type: 'object', additionalProperties: false, required: ['id', 'commands'], properties: {
-          id: { type: 'string', pattern: '^[a-zA-Z0-9_-]{1,64}$' }, label: { type: 'string' }, commands: { type: 'array', minItems: 1, items: { type: 'object' } },
-          designIntent:{type:'object',additionalProperties:false,required:['reason','tradeoff','axes'],properties:{reason:{type:'string',minLength:1,maxLength:1000},tradeoff:{type:'string',minLength:1,maxLength:1000},axes:{type:'array',minItems:1,maxItems:6,uniqueItems:true,items:{enum:['structure','reading-order','typography','density','imagery','interaction']}}}},
-        } } },
-        states: { type: 'array', maxItems: 3, items: { type: 'object', additionalProperties: false, required: ['id', 'steps'], properties: {
-          id: { type: 'string', pattern: '^[a-zA-Z0-9_-]{1,64}$' }, steps: { type: 'array', minItems: 1, items: BROWSER_SCENARIO_STEP_SCHEMA },
-        } } },
-        preserve: { type: 'object', additionalProperties: false, properties: { content: { type: 'boolean' }, interactions: { type: 'boolean' } } },
-        axes: {
-          type: 'object',
-          properties: {
-            density: { type: 'array', items: { type: 'string', enum: ['compact', 'normal', 'airy'] } },
-            typeScale: { type: 'array', items: { type: 'string', enum: ['tight', 'normal', 'loose'] } },
-            radius: { type: 'array', items: { type: 'string', enum: ['sharp', 'soft', 'round'] } },
-            palette: { type: 'array', items: { type: 'string', enum: ['mono', 'warm', 'cool', 'ink'] } },
-          },
-          additionalProperties: false,
-        },
-      },
-      additionalProperties: false,
-    },
-    handler: studioHandlers.studio_design_explore,
-  },
-  {
-    name: 'studio_prepare_media',
-    description: '从原图按焦点/保护主体/比例/底色令牌生成可重放的摄影素材，返回带 SHA 的资源登记命令，不自动改画布。将 registerCommand 和图片节点修改原子提交，支持一起撤销。需要 Python Pillow。',
-    inputSchema: { type: 'object', properties: { ...connectionProperties,...OPERATION_PROPERTIES, sourcePath: { type: 'string', minLength: 1 }, credit: { type: 'string' }, crops: { type: 'array', minItems: 1, maxItems: 20, items: {
-      type: 'object', properties: { name: { type: 'string' }, w: { type: 'integer', minimum: 1, maximum: 4096 }, h: { type: 'integer', minimum: 1, maximum: 4096 }, fx: { type: 'number', minimum: 0, maximum: 1 }, fy: { type: 'number', minimum: 0, maximum: 1 }, fh: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, scale: { type: 'integer', enum: [1, 2, 3] }, fadeFrom: { type: 'number', minimum: 0 }, fadeToToken: { type: 'string', description: 'colors 令牌的裸名（如 bg，不是 colors.bg）；令牌缺失或非六位颜色时降级为 W_MEDIA_TOKEN_STALE 警告并回落 #FFFFFF' }, protectedRegion: { type: 'object', description: '保护主体在原图中的归一化区域：0–1 相对原图宽高，不是像素坐标', properties: { x: { type: 'number', description: '归一化 0–1，相对原图宽' }, y: { type: 'number', description: '归一化 0–1，相对原图高' }, w: { type: 'number', description: '归一化 0–1，相对原图宽，需 x+w≤1' }, h: { type: 'number', description: '归一化 0–1，相对原图高，需 y+h≤1' } }, required: ['x', 'y', 'w', 'h'], additionalProperties: false } }, required: ['w', 'h'], additionalProperties: false,
-    } } }, required: ['sourcePath', 'crops'], additionalProperties: false },
-    handler: studioHandlers.studio_prepare_media,
-  },
-  {
-    name: 'studio_review_design',
-    description: '为当前版本创建真实截图和机器检查，返回图片供模型看图；用 reviewId 提交具体 observations。旧版本拒收。compareWithReviewId 可返回前后两张图及变更区域。评审不调用额外模型、不自评审美分、不代表用户验收。',
-    inputSchema: { type: 'object', properties: { ...connectionProperties, verbose: { type: 'boolean', description: '默认摘要；true返回完整指标和节点快照' }, pageId: { type: 'string' }, baseRevision: { type: 'integer', minimum: 1 }, reviewId: { type: 'string' }, compareWithReviewId: { type: 'string', description: '同页此前评审 ID，返回前后两张真实图片、变更节点范围和指标变化' }, observations: { type: 'array', minItems: 1, items: { type: 'object', properties: { nodeIds: { type: 'array', items: { type: 'string' } }, issue: { type: 'string', minLength: 1, maxLength: 4000 }, consequence:{type:'string',maxLength:4000}, decision: { type: 'string',maxLength:4000 }, preserve:{type:'string',maxLength:4000} }, required: ['nodeIds', 'issue'], additionalProperties: false } } }, required: ['pageId', 'baseRevision'], additionalProperties: false },
-    handler: studioHandlers.studio_review_design,
-  },
   {
     name: 'studio_open_project',
-    description: '打开或初始化自由画布工程目录（可选从 RP/1 JSON 或 .rp1 源码导入），启动或复用本机单端口 Studio 服务并返回画布上下文。',
+    description: '打开或初始化自由画布工程目录(可选从 RP/1 JSON 或 .rp1 源码导入),启动或复用本机单端口 Studio 服务并返回画布上下文。这是每个工程的第一步。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -927,49 +820,14 @@ export const studioTools = [
     handler: studioHandlers.studio_open_project,
   },
   {
-    name: 'studio_get_context',
-    description: '读取自由画布当前会话状态（appliedRevision、durableRevision、renderedRevision、contentHash、页面、组件、令牌、字体与恢复摘要）。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
-        verbose: { type: 'boolean' }, includeDoc: { type: 'boolean' }, includeScene: { type: 'boolean' },
-        maxBytes: { type: 'integer', minimum: 2048, maximum: 400000 },
-      },
-      additionalProperties: false,
-    },
-    readOnly: true,
-    handler: studioHandlers.studio_get_context,
+    name: 'studio_describe', readOnly: true,
+    description: '按需发现AI创作流程、RP/1、命令schema与craft指导。topic:command用name或names;fields/operation/surface仅用于topic:node。节点用name+fields查询；源码许可与真实生效验证分开登记。无需打开工程。',
+    inputSchema: { type: 'object', properties: { topic: { type: 'string', enum: ['workflow', 'rp1', 'command', 'node', 'design', 'craft'] }, name: { type: 'string' }, names: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' } }, fields: { type: 'array', minItems: 1, maxItems: 16, items: { type: 'string', minLength: 1 } }, operation: { enum: ['create', 'edit'] }, surface: { enum: ['canvas', 'runtime', 'native', 'full-rp1'] }, intent: { type: 'string', enum: ['editorial', 'task', 'learning'] }, platform: { type: 'string', enum: ['mobile', 'web'] }, guideId: { type: 'string' } }, additionalProperties: false },
+    handler: studioHandlers.studio_describe,
   },
   {
-    name: 'studio_query_nodes',
-    description: '按语义/ID/区域查询真实节点，默认8项，返回可编辑源目标、宏/组件控制关系和父布局/padding坐标说明。fields精确取字段、cursor按版本续取；view:full取完整解算节点。跨页重名及过期游标明确拒绝，不扩大目标。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
-        pageId: { type: 'string' },
-        nodeId: { type: 'string' },
-        type: { type: 'string' },
-        textContains: { type: 'string' },
-        nodeIds: { type: 'array', minItems: 1, items: { type: 'string' } },
-        role: { type: 'string' }, within: { type: 'string' },
-        view: { type: 'string', enum: ['authoring', 'full'] },
-        fields: { type: 'array', minItems: 1, items: { type: 'string' }, description: 'authoring可选id/scopedId/pageId/name/type/role/text/textLength/textTruncated/visible/locked/bounds/editableTargetId/target/source/layoutContext/controls/suggestedEdit；几何用bounds。view:full才使用解算字段如x/y/w/h。' },
-        limit: { type: 'integer', minimum: 1, maximum: 200 }, offset: { type: 'integer', minimum: 0 }, cursor: { type: 'string' },
-      },
-      additionalProperties: false,
-    },
-    readOnly: true,
-    handler: studioHandlers.studio_query_nodes,
-  },
-  {
-    name: 'studio_apply_commands',
-    description: '提交同一权威文档的原子修改。commands或rp1片段二选一；rp1需要sourceMode:insert/update和pageId，显式字段增量更新、省略内容保留，支持行列号诊断。editNodes按role/within批量改稿；精确参数用studio_describe按需发现。强校验版本、幂等、WAL与撤销。',
+    name: 'studio_command',
+    description: '提交同一权威文档的原子修改(唯一写入口)。commands 或 rp1 片段二选一;rp1 需要 sourceMode:insert/update 和 pageId。批处理步引用:命令可带顶层 as:"名字" 命名本步产出,同事务后续命令任意字段写 {"$ref":"名字"} 引用该节点 scoped id(整批一个 undo 步)。强校验版本乐观锁、幂等键、WAL 与撤销;失败整批不写入并返回 E_* 信封。命令词表用 studio_describe(topic:"command") 发现。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -981,11 +839,11 @@ export const studioTools = [
         pageId: { type: 'string' },
         documentId: { type: 'string' },
         label: { type: 'string' },
-        selectionId: {type:'string',minLength:1},
+        selectionId: { type: 'string', minLength: 1 },
         actor: { type: 'object' },
         baseRevision: { type: 'integer', minimum: 0 },
         idempotencyKey: { type: 'string', minLength: 1 },
-        commands: { type: 'array', minItems: 1, items: { type: 'object', properties: { type: { type: 'string', enum: VALID_COMMAND_TYPES } }, required: ['type'] } },
+        commands: { type: 'array', minItems: 1, items: { type: 'object', properties: { type: { type: 'string', enum: VALID_COMMAND_TYPES }, as: { type: 'string', description: '命名本步产出(scoped id),供后续步骤 {"$ref":名字} 引用' } }, required: ['type'] } },
         rp1: { type: 'string', minLength: 1, description: 'RP/1节点片段；用#id稳定命名，精确语法见studio_describe(topic:rp1)' },
         sourceMode: { type: 'string', enum: ['insert', 'update'] }, parentId: { type: 'string' }, index: { type: 'integer', minimum: 0 },
         verbose: { type: 'boolean' },
@@ -997,28 +855,37 @@ export const studioTools = [
       oneOf: [{ required: ['commands'], not: { required: ['rp1'] } }, { required: ['rp1', 'sourceMode', 'pageId'], not: { required: ['commands'] } }],
       additionalProperties: false,
     },
-    handler: studioHandlers.studio_apply_commands,
+    handler: studioHandlers.studio_command,
   },
   {
-    name: 'studio_wait_for_render',
-    description: '等待真实浏览器画布完成指定文档版本（revision）的布局、字体与图片绘制确认。',
+    name: 'studio_inspect', readOnly: true,
+    description: '读取画布状态的三合一入口。view:nodes(默认)按语义/ID/区域查询真实节点,fields 精确取字段、cursor 续取,跨页重名与过期游标明确拒绝;view:context 读取会话状态(appliedRevision/durableRevision/contentHash/页面/组件/令牌/字体与恢复摘要);view:contracts 查询 6 个核心组件契约(参数/插槽/覆盖白名单/状态矩阵/调用示例)。改稿前先用 view:nodes 取可编辑源目标。',
     inputSchema: {
       type: 'object',
       properties: {
         url: { type: 'string' },
         port: { type: 'integer' },
         projectDir: { type: 'string' },
-        revision: { type: 'integer', minimum: 1 },
-        timeoutMs: { type: 'integer', minimum: 50 },
+        view: { type: 'string', enum: ['nodes', 'context', 'contracts'], description: '默认 nodes' },
+        pageId: { type: 'string' },
+        nodeId: { type: 'string' },
+        type: { type: 'string' },
+        textContains: { type: 'string' },
+        nodeIds: { type: 'array', minItems: 1, items: { type: 'string' } },
+        role: { type: 'string' }, within: { type: 'string' },
+        fields: { type: 'array', minItems: 1, items: { type: 'string' }, description: 'nodes视图可选id/scopedId/pageId/name/type/role/text/textLength/textTruncated/visible/locked/bounds/editableTargetId/target/source/layoutContext/controls/suggestedEdit；几何用bounds' },
+        limit: { type: 'integer', minimum: 1, maximum: 200 }, offset: { type: 'integer', minimum: 0 }, cursor: { type: 'string' },
+        verbose: { type: 'boolean' }, includeDoc: { type: 'boolean' }, includeScene: { type: 'boolean' },
+        maxBytes: { type: 'integer', minimum: 2048, maximum: 400000 },
+        componentId: { type: 'string', description: '仅 view:contracts' },
       },
       additionalProperties: false,
     },
-    readOnly: true,
-    handler: studioHandlers.studio_wait_for_render,
+    handler: studioHandlers.studio_inspect,
   },
   {
-    name: 'studio_capture_screenshot',
-    description: '严格等待指定 revision 在真实浏览器完成字体与图片渲染后截取画板或节点 PNG，返回 revision、contentHash 与文件 SHA-256。',
+    name: 'studio_screenshot', readOnly: true,
+    description: '严格等待指定 revision 在真实浏览器完成布局、字体与图片渲染后截取画板或节点 PNG,返回 revision、contentHash 与文件 SHA-256。"先 inspect 拿数字、再 screenshot 看像素"是标准验证流程。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1031,151 +898,178 @@ export const studioTools = [
         outPath: { type: 'string' },
         includeImage: { type: 'boolean', description: '默认 true，直接返回 MCP 图片供模型查看' },
         timeoutMs: { type: 'integer', minimum: 50 },
+        simulateHang: { type: 'boolean' },
       },
       additionalProperties: false,
     },
-    readOnly: true,
-    handler: studioHandlers.studio_capture_screenshot,
+    handler: studioHandlers.studio_screenshot,
   },
   {
-    name: 'studio_undo',
-    description: '撤销最近一次已提交的画布事务并同步浏览器与磁盘。',
+    name: 'studio_export',
+    description: '从当前权威快照导出三种产物。format:rp——原生 .rp 与逐节点兼容报告(baseRevision 指定时必须仍为当前版);format:code——独立可运行 HTML/CSS/JS 代码工程包(资源闭包、manifest、运行说明,显式列明未支持交互);format:bundle——自包含可迁移工程包(action:report/export/verify/import/compare,资源/字体/组件闭包+兼容诊断)。async:true 加 requestKey 返回持久句柄,用 studio_operations 核对或取消。',
     inputSchema: {
       type: 'object',
       properties: {
         url: { type: 'string' },
         port: { type: 'integer' },
         projectDir: { type: 'string' },
-        clientId: { type: 'string' },
-        expectedRevision: { type: 'integer', minimum: 1 },
-        expectedHeadTxId: { type: 'string' },
-      },
-      additionalProperties: false,
-    },
-    handler: studioHandlers.studio_undo,
-  },
-  {
-    name: 'studio_redo',
-    description: '重做最近一次已撤销的画布事务并同步浏览器与磁盘。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
-        clientId: { type: 'string' },
-        expectedRevision: { type: 'integer', minimum: 1 },
-      },
-      additionalProperties: false,
-    },
-    handler: studioHandlers.studio_redo,
-  },
-  {
-    name: 'studio_run_scenario',
-    description: '在隔离的交互运行态会话（StudioRuntimeSession）中执行业务交互剧本并断言变量、面板状态、文本、显隐与数据集，不污染设计态文档。默认走语义执行层，不做遮挡/hitTest校验：click只要求目标在当前运行态可见，通过≠真实可点。hitTest:true 先用真实浏览器指针重放校验每个点击目标（遮挡/命中按真实DOM结论），被遮挡返回E_SCENARIO_OCCLUDED（含nodeId/occludedBy遮挡者/stepIndex，语义层不执行该步）；真实浏览器不可用返回E_SCENARIO_HITTEST_UNAVAILABLE（不静默降级）；含navigate/dataset等浏览器层无法重放的步骤返回E_SCENARIO_HITTEST_UNSUPPORTED。步骤示例：{action:"click",target:"reveal",expect:{visible:{answer:true}}}；未知步骤或零断言会拒绝。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
-        startPageId: { type: 'string' },
-        verbose: { type: 'boolean', description: 'true返回完整运行场景与轨迹' },
-        reset: { type: 'boolean' },
-        hitTest: { type: 'boolean', description: '默认false走语义层（不校验遮挡，通过≠真实可点）；true用真实浏览器指针校验点击目标，被遮挡返回E_SCENARIO_OCCLUDED（含nodeId/遮挡者），不可用返回E_SCENARIO_HITTEST_UNAVAILABLE，不静默降级' },
-        steps: { type: 'array', minItems: 1, items: SCENARIO_STEP_SCHEMA },
-      },
-      required: ['steps'],
-      additionalProperties: false,
-    },
-    handler: studioHandlers.studio_run_scenario,
-  },
-  {
-    name: 'studio_export_rp',
-    description: '从当前权威快照导出原生.rp与逐节点兼容报告。baseRevision指定时必须仍为当前版。async:true加requestKey/baseRevision返回持久句柄，产物保存在独立操作目录；用studio_operations核对或取消。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
+        format: { type: 'string', enum: ['rp', 'code', 'bundle'] },
         outRpPath: { type: 'string' },
         outReportPath: { type: 'string' },
-        ...OPERATION_PROPERTIES,
-      },
-      additionalProperties: false,
-    },
-    handler: studioHandlers.studio_export_rp,
-  },
-  {
-    name: 'studio_export_code',
-    description: '从当前权威快照导出独立可运行 HTML/CSS/JS 代码工程包（含源码、资源闭包、版本绑定 manifest.json 与运行说明 README.md），复用语义源布局、变量、动态面板、导航、中继器与矢量路径，显式列明并禁用未支持交互。支持 baseRevision 校验与 async:true 持久操作。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
         outDir: { type: 'string' },
         resetRegistration: { type: 'boolean' },
-        ...OPERATION_PROPERTIES,
-      },
-      additionalProperties: false,
-    },
-    handler: studioHandlers.studio_export_code,
-  },
-  {
-    name: 'studio_sync_native',
-    description: '将原生 .rp 修改自动收敛回同一 Studio 源文档（preview/apply）。通过基线符号与 GUID 映射到真实作者源 target/propertyMap/父内容盒坐标，覆盖普通节点、宏参数、组件实例覆盖、流式布局排布提示、非激活面板状态、中继器模板（默认保护 =item.xxx 公式不被首行字面量覆盖）与多页三方冲突裁决。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        ...connectionProperties,
-        ...OPERATION_PROPERTIES,
-        rpPath: { type: 'string', minLength: 1 },
-        baseRpPath: { type: 'string' },
-        baselinePath: { type: 'string' },
-        mode: { type: 'string', enum: ['preview', 'apply'] },
-        prefer: { type: 'string', enum: ['fail', 'studio', 'native'] },
-        resolutions: { type: 'object', additionalProperties: { type: 'string', enum: ['studio', 'native'] } },
-        idempotencyKey: { type: 'string', minLength: 1 },
-        previewHash: { type: 'string', minLength: 1 },
-        allowFormulaOverwrite: { type: 'boolean' },
-        rebuildRp: { type: 'boolean' },
-        outRpPath: { type: 'string' },
-      },
-      required: ['rpPath'],
-      additionalProperties: false,
-    },
-    handler: studioHandlers.studio_sync_native,
-  },
-  {
-    name: 'studio_project_bundle',
-    description: '导出、校验、导入或对比自包含可迁移工程包（report/export/verify/import/compare）。包含权威文档、组件契约、tokens、变量、数据集、设计决定、版本快照及引用资源/字体闭包（全部相对路径，零宿主机绝对路径泄漏），并生成兼容诊断报告。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        ...connectionProperties,
-        action: { type: 'string', enum: ['report', 'export', 'verify', 'import', 'compare'] },
+        action: { type: 'string', enum: ['report', 'export', 'verify', 'import', 'compare'], description: '仅 format:bundle' },
         bundleDir: { type: 'string' },
-        outDir: { type: 'string' },
         targetProjectDir: { type: 'string' },
         includeVersions: { type: 'boolean' },
         includeThumbnails: { type: 'boolean' },
         overwrite: { type: 'boolean' },
+        ...OPERATION_PROPERTIES,
+      },
+      required: ['format'],
+      additionalProperties: false,
+    },
+    handler: studioHandlers.studio_export,
+  },
+  {
+    name: 'studio_history',
+    description: '画布历史管理:action:undo 撤销最近事务(expectedRevision/expectedHeadTxId 防回退他人修改);action:redo 重做;action:list/create/preview/restore 管理命名版本(restore 需当前 baseRevision、预览返回的 previewHash 与唯一 idempotencyKey,产生可撤销新事务)。保存包含设计决定、页面、组件、tokens、数据和资源引用。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        port: { type: 'integer' },
+        projectDir: { type: 'string' },
+        action: { type: 'string', enum: ['undo', 'redo', 'list', 'create', 'preview', 'restore'] },
+        clientId: { type: 'string' },
+        expectedRevision: { type: 'integer', minimum: 1 },
+        expectedHeadTxId: { type: 'string', description: '仅 undo' },
+        name: { type: 'string', minLength: 1, maxLength: 80, description: '仅 create' },
+        versionId: { type: 'string', description: '仅 preview/restore' },
+        baseRevision: { type: 'integer', minimum: 1 },
+        previewHash: { type: 'string', description: '仅 restore' },
+        idempotencyKey: { type: 'string', minLength: 1, description: '仅 create/restore' },
+        verbose: { type: 'boolean' },
+        includeDoc: { type: 'boolean' },
+        includeScene: { type: 'boolean' },
+        maxBytes: { type: 'integer', minimum: 2048, maximum: 400000 },
+      },
+      required: ['action'],
+      additionalProperties: false,
+    },
+    handler: studioHandlers.studio_history,
+  },
+  {
+    name: 'studio_stage', readOnly: true,
+    description: '按stage准备规划/骨架/内容/精修/检查/局部改稿上下文。局部改稿先studio_inspect(view:context)取版本,再传stage:edit、target.pageId/target.revision/nodeIds；返回可编辑源目标和设计决定。target是工程选区，referencePageId是参考页。',
+    inputSchema: { type: 'object', properties: { ...connectionProperties,
+      intent: { type: 'string', enum: ['editorial', 'task', 'learning'] }, platform: { type: 'string', enum: ['mobile', 'web'] },
+      pageId: { type: 'string', description: '旧入口的栖羽参考页，非工程页；stage入口使用referencePageId与target.pageId' },
+      stage: { type: 'string', enum: ['planning', 'skeleton', 'content', 'refine', 'review', 'edit'] },
+      brief: { anyOf: [{ type: 'string' }, { type: 'object', properties: { task: { type: 'string' }, content: { type: 'array', items: { type: 'string' } }, states: { type: 'array', items: { type: 'string' } }, constraints: { type: 'array', items: { type: 'string' } } }, additionalProperties: false }] },
+      target: { type: 'object', properties: { selection: { enum: ['active'] }, clientId: { type: 'string' }, selectionId: { type: 'string' }, pageId: { type: 'string' }, documentId: { type: 'string' }, revision: { type: 'integer', minimum: 1 }, contentHash: { type: 'string' }, nodeIds: { type: 'array', minItems: 1, maxItems: 32, items: { type: 'string' } }, role: { type: 'string' }, within: { type: 'string' }, textContains: { type: 'string' } }, oneOf: [{ required: ['pageId'], not: { required: ['selection'] } }, { required: ['selection'], not: { required: ['pageId'] } }], additionalProperties: false },
+      referencePackId: { type: 'string' }, referencePageId: { type: 'string' }, includeSource: { type: 'boolean' },
+      maxBytes: { type: 'integer', minimum: 4000, maximum: 48000, description: '文字JSON预算；图片字节数单独报告' },
+      includeImages: { type: 'boolean' }, guideId: { type: 'string' }
+    }, additionalProperties: false },
+    handler: studioHandlers.studio_stage,
+  },
+  {
+    name: 'studio_design', readOnly: true,
+    description: '设计质量层,action 词表分发:metrics——L1 视觉完成度代理指标(字阶/4px 栅格/留白/对比度/色相数)与反 slop 规则,阈值随 slopRules 返回,不返回审美总分;pixel_contrast——真实浏览器字形掩膜逐笔画对比度,描边/重叠/缺证据显式 unknown;anchors——把已认可页面提炼为排版配方锚点并对比偏离量(anchorAction:extract/approve/list/compare,语料是本地历史页面);content_plan——找出只有结构没有文案的槽位并给 applyWith 命令;fix_plan——把度量问题翻译成确定性修复命令(不自动提交);explore——批量设计变体按可复现判据收敛,或传 candidates/states 隔离预演 AI 自写构图,返回真实浏览器联系图;review——当前版本真实截图+机器检查,reviewId 提交 observations,compareWithReviewId 返回前后对照。评审不自评审美分、不代表用户验收。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        port: { type: 'integer' },
+        projectDir: { type: 'string' },
+        action: { type: 'string', enum: ['metrics', 'pixel_contrast', 'anchors', 'content_plan', 'fix_plan', 'explore', 'review'] },
+        pageId: { type: 'string' },
+        thresholds: { type: 'object' },
+        pixelTruth: { type: 'boolean', description: 'metrics:默认真实浏览器像素测量;false 显式几何估算' },
+        dpr: { type: 'number', minimum: 0.5, maximum: 4, description: 'pixel_contrast' },
+        anchorAction: { type: 'string', enum: ['extract', 'approve', 'list', 'compare'], description: 'anchors 的子动作,默认 list' },
+        mode: { type: 'string', enum: ['append', 'replace'], description: 'anchors' },
+        includeBelowBar: { type: 'boolean', description: 'anchors' },
+        pages: { type: 'array', items: { type: 'string' }, description: 'anchors' },
+        approvedBy: { type: 'string', description: 'anchors:认可方标识,默认 mcp-ai;人工认可记 human' },
+        limit: { type: 'integer', minimum: 2, maximum: 40, description: 'explore' },
+        baseRevision: { type: 'integer', minimum: 1, description: 'explore/review' },
+        candidates: { type: 'array', minItems: 1, maxItems: 4, items: { type: 'object', additionalProperties: false, required: ['id', 'commands'], properties: {
+          id: { type: 'string', pattern: '^[a-zA-Z0-9_-]{1,64}$' }, label: { type: 'string' }, commands: { type: 'array', minItems: 1, items: { type: 'object' } },
+          designIntent: { type: 'object', additionalProperties: false, required: ['reason', 'tradeoff', 'axes'], properties: { reason: { type: 'string', minLength: 1, maxLength: 1000 }, tradeoff: { type: 'string', minLength: 1, maxLength: 1000 }, axes: { type: 'array', minItems: 1, maxItems: 6, uniqueItems: true, items: { enum: ['structure', 'reading-order', 'typography', 'density', 'imagery', 'interaction'] } } } },
+        } }, description: 'explore' },
+        states: { type: 'array', maxItems: 3, items: { type: 'object', additionalProperties: false, required: ['id', 'steps'], properties: {
+          id: { type: 'string', pattern: '^[a-zA-Z0-9_-]{1,64}$' }, steps: { type: 'array', minItems: 1, items: BROWSER_SCENARIO_STEP_SCHEMA },
+        } }, description: 'explore' },
+        preserve: { type: 'object', additionalProperties: false, properties: { content: { type: 'boolean' }, interactions: { type: 'boolean' } }, description: 'explore' },
+        axes: {
+          type: 'object',
+          properties: {
+            density: { type: 'array', items: { type: 'string', enum: ['compact', 'normal', 'airy'] } },
+            typeScale: { type: 'array', items: { type: 'string', enum: ['tight', 'normal', 'loose'] } },
+            radius: { type: 'array', items: { type: 'string', enum: ['sharp', 'soft', 'round'] } },
+            palette: { type: 'array', items: { type: 'string', enum: ['mono', 'warm', 'cool', 'ink'] } },
+          },
+          additionalProperties: false,
+          description: 'explore',
+        },
+        reviewId: { type: 'string', description: 'review' },
+        compareWithReviewId: { type: 'string', description: 'review:同页此前评审 ID,返回前后两张图与变更区域' },
+        observations: { type: 'array', minItems: 1, items: { type: 'object', properties: { nodeIds: { type: 'array', items: { type: 'string' } }, issue: { type: 'string', minLength: 1, maxLength: 4000 }, consequence: { type: 'string', maxLength: 4000 }, decision: { type: 'string', maxLength: 4000 }, preserve: { type: 'string', maxLength: 4000 } }, required: ['nodeIds', 'issue'], additionalProperties: false }, description: 'review' },
+      },
+      required: ['action'],
+      additionalProperties: false,
+    },
+    handler: studioHandlers.studio_design,
+  },
+  {
+    name: 'studio_scenario',
+    description: '在隔离的交互运行态会话（StudioRuntimeSession）中执行业务交互剧本并断言变量、面板状态、文本、显隐与数据集，不污染设计态文档。默认走语义执行层，不做遮挡/hitTest校验：click只要求目标在当前运行态可见，通过≠真实可点。hitTest:true 先用真实浏览器指针重放校验每个点击目标（遮挡/命中按真实DOM结论），被遮挡返回E_SCENARIO_OCCLUDED（含nodeId/occludedBy遮挡者/stepIndex，语义层不执行该步）；真实浏览器不可用返回E_SCENARIO_HITTEST_UNAVAILABLE（不静默降级）；含navigate/dataset等浏览器层无法重放的步骤返回E_SCENARIO_HITTEST_UNSUPPORTED。步骤示例：{action:"click",target:"reveal",expect:{visible:{answer:true}}}；未知步骤或零断言会拒绝。acceptance:true 改为执行12个语义验收模板（faultInjection:true 跑故障注入对照）；无操作脚本或不支持的断言返回unsupported，不记为通过。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: { type: 'string' },
+        port: { type: 'integer' },
+        projectDir: { type: 'string' },
+        acceptance: { type: 'boolean', description: 'true 切换为验收模板执行' },
+        startPageId: { type: 'string' },
+        verbose: { type: 'boolean', description: 'true返回完整运行场景与轨迹' },
+        reset: { type: 'boolean' },
+        hitTest: { type: 'boolean', description: '真实浏览器指针校验,被遮挡返回 E_SCENARIO_OCCLUDED' },
+        steps: { type: 'array', minItems: 1, items: SCENARIO_STEP_SCHEMA },
+        domain: { type: 'string', description: 'acceptance' },
+        scenarioIds: { type: 'array', items: { type: 'string' }, description: 'acceptance' },
+        category: { type: 'string', description: 'acceptance' },
+        impactReport: { type: 'object', description: 'acceptance' },
+        runAll: { type: 'boolean', description: 'acceptance' },
+        layers: { type: 'array', items: { type: 'string' }, description: 'acceptance' },
+        axurePreviewUrl: { type: 'string', description: 'acceptance:可选真实 Axure 预览地址' },
+        faultInjection: { type: 'boolean', description: 'acceptance:故障注入对照' },
+        screenshotDir: { type: 'string' },
+        exportDir: { type: 'string' },
       },
       additionalProperties: false,
     },
-    handler: studioHandlers.studio_project_bundle,
+    handler: studioHandlers.studio_scenario,
   },
   {
-    name: 'studio_merge_document',
-    description: '对同一工程执行人类/AI并发编辑或外部 JSON/RP1 文件的三方结构化合并（preview/apply/check-external）。自动合并无关修改，显式报出同字段、删改、跨容器重挂、布局耦合（如 x vs right、父流式 vs 子坐标）、组件实例覆盖与引用冲突，支持逐项裁决并写入单步可撤销事务。',
+    name: 'studio_media',
+    description: '从原图按焦点/保护主体/比例/底色令牌生成可重放的摄影素材，返回带 SHA 的资源登记命令，不自动改画布。将 registerCommand 和图片节点修改用 studio_command 原子提交，支持一起撤销。需要 Python Pillow。',
+    inputSchema: { type: 'object', properties: { ...connectionProperties, ...OPERATION_PROPERTIES, sourcePath: { type: 'string', minLength: 1 }, credit: { type: 'string' }, crops: { type: 'array', minItems: 1, maxItems: 20, items: {
+      type: 'object', properties: { name: { type: 'string' }, w: { type: 'integer', minimum: 1, maximum: 4096 }, h: { type: 'integer', minimum: 1, maximum: 4096 }, fx: { type: 'number', minimum: 0, maximum: 1 }, fy: { type: 'number', minimum: 0, maximum: 1 }, fh: { type: 'number', exclusiveMinimum: 0, maximum: 1 }, scale: { type: 'integer', enum: [1, 2, 3] }, fadeFrom: { type: 'number', minimum: 0 }, fadeToToken: { type: 'string', description: 'colors 令牌的裸名（如 bg，不是 colors.bg）；令牌缺失或非六位颜色时降级为 W_MEDIA_TOKEN_STALE 警告并回落 #FFFFFF' }, protectedRegion: { type: 'object', description: '保护主体在原图中的归一化区域：0–1 相对原图宽高，不是像素坐标', properties: { x: { type: 'number', description: '归一化 0–1，相对原图宽' }, y: { type: 'number', description: '归一化 0–1，相对原图高' }, w: { type: 'number', description: '归一化 0–1，相对原图宽，需 x+w≤1' }, h: { type: 'number', description: '归一化 0–1，相对原图高，需 y+h≤1' } }, required: ['x', 'y', 'w', 'h'], additionalProperties: false } }, required: ['w', 'h'], additionalProperties: false,
+    } } }, required: ['sourcePath', 'crops'], additionalProperties: false },
+    handler: studioHandlers.studio_media,
+  },
+  {
+    name: 'studio_merge',
+    description: '并发编辑整合。kind:merge(默认)——对同一工程执行人类/AI并发编辑或外部 JSON/RP1 文件的三方结构化合并(mode:preview/apply/check-external),自动合并无关修改,显式报出同字段/删改/跨容器重挂/布局耦合/实例覆盖冲突,支持逐项裁决并写入单步可撤销事务;kind:sync_native——将原生 .rp 手工修改经基线符号与 GUID 映射收敛回 Studio 源文档(mode:preview/apply),覆盖普通节点、宏参数、实例覆盖、面板状态、中继器模板(默认保护 =item.xxx 公式)与多页冲突裁决。',
     inputSchema: {
       type: 'object',
       properties: {
         ...connectionProperties,
-        mode: { type: 'string', enum: ['preview', 'apply', 'check-external'] },
+        kind: { type: 'string', enum: ['merge', 'sync_native'] },
+        mode: { type: 'string', enum: ['preview', 'apply', 'check-external'], description: 'merge:三方合并模式;sync_native:preview/apply' },
         baseRevision: { type: 'integer', minimum: 1 },
         baseVersionId: { type: 'string' },
         baseDoc: { type: 'object' },
@@ -1187,61 +1081,33 @@ export const studioTools = [
         theirsSourceMode: { type: 'string', enum: ['insert', 'update', 'replace-children'] },
         theirsParentId: { type: 'string' },
         externalSourcePath: { type: 'string' },
-        prefer: { type: 'string', enum: ['fail', 'ours', 'theirs'] },
-        resolutions: { type: 'object', additionalProperties: { type: 'string', enum: ['ours', 'theirs'] } },
+        prefer: { type: 'string', enum: ['fail', 'ours', 'theirs', 'studio', 'native'] },
+        resolutions: { type: 'object', additionalProperties: { type: 'string', enum: ['ours', 'theirs', 'studio', 'native'] } },
         idempotencyKey: { type: 'string', minLength: 1 },
         previewHash: { type: 'string', minLength: 1 },
+        rpPath: { type: 'string', minLength: 1, description: 'sync_native' },
+        baseRpPath: { type: 'string', description: 'sync_native' },
+        baselinePath: { type: 'string', description: 'sync_native' },
+        allowFormulaOverwrite: { type: 'boolean', description: 'sync_native' },
+        rebuildRp: { type: 'boolean', description: 'sync_native' },
+        outRpPath: { type: 'string', description: 'sync_native' },
         clientId: { type: 'string' },
         actor: { type: 'object' },
         label: { type: 'string' },
         verbose: { type: 'boolean' },
         includeDoc: { type: 'boolean' },
         includeScene: { type: 'boolean' },
-        maxBytes: { type: 'integer' },
+        maxBytes: { type: 'integer', minimum: 2048, maximum: 400000 },
       },
       additionalProperties: false,
     },
-    handler: studioHandlers.studio_merge_document,
+    handler: studioHandlers.studio_merge,
   },
   {
-    name: 'studio_get_component_contracts',
-    description: '查询自由画布 6 个核心高频组件（button、input-field、list-item、info-card、nav-bar、status-zone）的契约规范（参数、插槽、允许覆盖白名单、锁定内部结构、尺寸规则、状态矩阵、事件语义与调用示例）。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
-        componentId: { type: 'string' },
-      },
-      additionalProperties: false,
-    },
-    readOnly: true,
-    handler: studioHandlers.studio_get_component_contracts,
-  },
-  {
-    name: 'studio_run_acceptance_scenarios',
-    description: '执行12个语义验收模板；有interactionSteps的场景可重放真实浏览器与Axure预览操作。无操作脚本或不支持的断言返回unsupported，不记为通过。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        url: { type: 'string' },
-        port: { type: 'integer' },
-        projectDir: { type: 'string' },
-        domain: { type: 'string' },
-        scenarioIds: { type: 'array', items: { type: 'string' } },
-        category: { type: 'string' },
-        impactReport: { type: 'object' },
-        runAll: { type: 'boolean' },
-        layers: { type: 'array', items: { type: 'string' } },
-        axurePreviewUrl: { type: 'string', description: '可选的真实 Axure 预览地址；未提供时在 macOS RP9 中打开本次独立导出并生成新预览。' },
-        faultInjection: { type: 'boolean' },
-        screenshotDir: { type: 'string' },
-        exportDir: { type: 'string' },
-      },
-      additionalProperties: false,
-    },
-    handler: studioHandlers.studio_run_acceptance_scenarios,
+    name: 'studio_operations',
+    description: '按工程持久查询、列出或取消长操作。可按id或原requestKey核对，MCP断连/服务重开不重做。cancel分别返回请求确认与实际停止；includeResult读取完成结果，过期结果移除提交建议。',
+    inputSchema: { type: 'object', properties: { ...connectionProperties, action: { enum: ['get', 'list', 'cancel'] }, id: { type: 'string' }, requestKey: { type: 'string', minLength: 1, maxLength: 200 }, includeResult: { type: 'boolean' }, limit: { type: 'integer', minimum: 1, maximum: 100 } }, additionalProperties: false },
+    handler: studioHandlers.studio_operations,
   },
 ];
 

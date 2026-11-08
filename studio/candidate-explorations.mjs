@@ -58,7 +58,7 @@ export async function previewCandidates(studio, { pageId, baseRevision, candidat
   for (const state of states) {
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(state?.id || '') || stateIds.has(state.id)) fail('E_EXPLORATION_STATES', '状态需要唯一安全 id');
     stateIds.add(state.id);
-    // 与 studio_run_scenario 同口径：零断言/零操作在入口拒绝，不先跑完像素审计再在帧里失败。
+    // 与 studio_scenario 同口径：零断言/零操作在入口拒绝，不先跑完像素审计再在帧里失败。
     if (!Array.isArray(state.steps) || !state.steps.length) fail('E_SCENARIO_ACTIONS_REQUIRED', `状态 ${state.id} 尚未提供可重放的用户操作；请补充 click/input/fill/expect 步骤`);
     if (!countScenarioAssertions(state.steps)) fail('E_SCENARIO_ASSERTIONS_REQUIRED', `状态 ${state.id} 没有任何断言，不能认证为通过；请为 expect 增加页面、变量、可见文字、面板状态或数据集断言`);
   }

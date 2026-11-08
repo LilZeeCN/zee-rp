@@ -87,9 +87,9 @@ test('button variants paint usable defaults while explicit styles remain authori
  const doc=createEmptyStudioDocument({domain:'web'});doc.pages[0].root.children=['primary','outline','ghost','secondary','soft','danger','accent'].map((variant,i)=>({type:'button',id:variant,text:variant,variant,w:240,h:48,y:i*52}));
  doc.pages[0].root.children.push({type:'button',id:'explicit',text:'Explicit',variant:'primary',fill:null,color:'#112233',stroke:'#334455',w:240,h:48});
  const nodes=resolveDocumentScene(doc).pages[0].nodes;const n=id=>nodes.find(n=>n.id===id);assert.equal(n('primary').fill,doc.palette.brand);assert.equal(n('primary').color,'#FFFFFF');assert(n('outline').stroke);assert.equal(n('ghost').fill,null);assert.equal(n('ghost').color,doc.palette.ink);assert.equal(n('explicit').fill,null);assert.equal(n('explicit').color,'#112233');
- const schema=studioTools.find(t=>t.name==='studio_design_explore').inputSchema;
- assert.throws(()=>validateInput(schema,{pageId:'home',states:[{id:'bad',steps:[{action:'navigate',page:'home',expect:{page:'home'}}]}]}));
- validateInput(schema,{pageId:'home',states:[{id:'good',steps:[{action:'click',target:'start',expect:{page:'review'}}]}]});
+ const schema=studioTools.find(t=>t.name==='studio_design').inputSchema;
+ assert.throws(()=>validateInput(schema,{action:'explore',pageId:'home',states:[{id:'bad',steps:[{action:'navigate',page:'home',expect:{page:'home'}}]}]}));
+ validateInput(schema,{action:'explore',pageId:'home',states:[{id:'good',steps:[{action:'click',target:'start',expect:{page:'review'}}]}]});
 });
 
 test('large serif text and spacers export as editable native text and geometry',{skip:nativeTemplateSkipReason()},async t=>{

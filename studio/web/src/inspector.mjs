@@ -952,7 +952,7 @@ export function renderInspectorContent() {
     });
   };
 
-  // 检查器显示页面绝对坐标（与 studio_query_nodes bounds / DOM 一致，S1-N1）；
+  // 检查器显示页面绝对坐标（与 studio_inspect bounds / DOM 一致，S1-N1）；
   // 提交时改用 deltaX/deltaY，由命令层换算回父内容盒内坐标，语义不受坐标系影响。
   bindGuardedNumProp('#insp-x', val => ({ type: 'moveNode', pageId: state.activePageId, nodeId: node.id, deltaX: Number(val) - node.x }), {
     original: () => node.x,

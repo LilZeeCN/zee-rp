@@ -93,7 +93,7 @@ test('stage edit maps macro content and instance text to their writable source w
 });
 
 test('public stage contract rejects unknown nested fields before server execution', () => {
-  const schema=studioTools.find(t=>t.name==='studio_get_design_context').inputSchema;
+  const schema=studioTools.find(t=>t.name==='studio_stage').inputSchema;
   validateInput(schema,{stage:'planning',intent:'learning',platform:'mobile',target:{pageId:'home'},brief:{task:'Learn',states:['recall']}});
   assert.throws(()=>validateInput(schema,{stage:'planning',target:{pageId:'home',guessPage:true}}));
   assert.throws(()=>validateInput(schema,{stage:'new-stage'}));
@@ -111,10 +111,10 @@ test('craft follows effective direction decisions, excludes stale choices and ke
 });
 
 test('candidate reasoning is typed and rejects invalid intent before allocating a preview',async()=>{
- const schema=studioTools.find(t=>t.name==='studio_design_explore').inputSchema;
+ const schema=studioTools.find(t=>t.name==='studio_design').inputSchema;
  const candidate={id:'option-a',designIntent:{reason:'Let the word lead',tradeoff:'Fewer items above the fold',axes:['structure','typography']},commands:[{type:'setText',nodeId:'title',text:'word'}]};
- validateInput(schema,{pageId:'home',baseRevision:1,candidates:[candidate]});
- assert.throws(()=>validateInput(schema,{candidates:[{...candidate,designIntent:{...candidate.designIntent,axes:['palette']}}]}));
+ validateInput(schema,{action:'explore',pageId:'home',baseRevision:1,candidates:[candidate]});
+ assert.throws(()=>validateInput(schema,{action:'explore',candidates:[{...candidate,designIntent:{...candidate.designIntent,axes:['palette']}}]}));
  const {previewCandidates}=await import('../studio/candidate-explorations.mjs');const store=seeded(),hash=store.doc.contentHash;
  await assert.rejects(()=>previewCandidates({store,scene:{pages:[{id:'home'}]}},{pageId:'home',baseRevision:store.appliedRevision,candidates:[{...candidate,designIntent:{...candidate.designIntent,axes:['typography','typography']}}]}),{code:'E_CANDIDATE_INTENT'});
  assert.equal(store.doc.contentHash,hash);
@@ -125,9 +125,9 @@ test('fresh MCP needs only open/context/apply and restores recorded design choic
   const client=new Client({name:'stage-public-caller',version:'1'}),transport=new StdioClientTransport({command:process.execPath,args:[join(root,'bin/mcp.mjs')],stderr:'pipe'});
   const call=async(name,args)=>{const r=await client.callTool({name,arguments:args});return r.structuredContent||JSON.parse(r.content.find(c=>c.type==='text').text)};
   try{await client.connect(transport);const opened=await call('studio_open_project',{projectDir:dir,port:4518});assert(opened.ok,JSON.stringify(opened));
-    const ctx=await call('studio_get_design_context',{projectDir:dir,stage:'skeleton',intent:'learning',platform:'mobile',target:{pageId:'home'},brief:'Recall before revealing the meaning'});assert(ctx.ready);assert.equal(ctx.referencePack.id,'deep-recall-mobile');
-    const write=await call('studio_apply_commands',{projectDir:dir,baseRevision:ctx.binding.revision,idempotencyKey:'first-draft',commands:[{type:'addNode',pageId:'home',parentId:'home_screen',node:{id:'word',type:'label',text:'linger',w:300,h:80,fontSize:48}},record('direction',{scope:{kind:'page',pageId:'home'},subject:'direction',choice:'One large word',basedOnRevision:ctx.binding.revision})]});assert(write.ok,JSON.stringify(write));
-    const next=await call('studio_get_design_context',{projectDir:dir,stage:'refine',intent:'learning',target:{pageId:'home'}});assert.equal(next.decisions.effective[0].id,'direction');
+    const ctx=await call('studio_stage',{projectDir:dir,stage:'skeleton',intent:'learning',platform:'mobile',target:{pageId:'home'},brief:'Recall before revealing the meaning'});assert(ctx.ready);assert.equal(ctx.referencePack.id,'deep-recall-mobile');
+    const write=await call('studio_command',{projectDir:dir,baseRevision:ctx.binding.revision,idempotencyKey:'first-draft',commands:[{type:'addNode',pageId:'home',parentId:'home_screen',node:{id:'word',type:'label',text:'linger',w:300,h:80,fontSize:48}},record('direction',{scope:{kind:'page',pageId:'home'},subject:'direction',choice:'One large word',basedOnRevision:ctx.binding.revision})]});assert(write.ok,JSON.stringify(write));
+    const next=await call('studio_stage',{projectDir:dir,stage:'refine',intent:'learning',target:{pageId:'home'}});assert.equal(next.decisions.effective[0].id,'direction');
   }finally{await client.close();}
   const {store}=new StudioPersistence(dir).initOrLoad();assert.equal(getDesignDecisions(store.doc,{scope:{kind:'page',pageId:'home'}}).effective[0].id,'direction');
 });

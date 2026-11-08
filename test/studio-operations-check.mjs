@@ -44,7 +44,7 @@ test('request contracts reject stale versions and changed resources before start
  const {dir,store,operations}=project(t);await assert.rejects(()=>operations.start('export-rp',{async:true,requestKey:'old',baseRevision:1},store.doc),{code:'E_OPERATION_STALE'});
  await assert.rejects(()=>operations.start('export-rp',{async:true,requestKey:'custom',baseRevision:store.doc.revision,outRpPath:join(dir,'existing.rp')},store.doc),{code:'E_OPERATION_OUTPUT'});
  assert.equal((await operations.list()).total,0);
- const tool=studioTools.find(x=>x.name==='studio_export_rp');validateInput(tool.inputSchema,{async:true,requestKey:'a',baseRevision:2});assert.throws(()=>validateInput(tool.inputSchema,{async:true,requestKey:7}));
+ const tool=studioTools.find(x=>x.name==='studio_export');validateInput(tool.inputSchema,{format:'rp',async:true,requestKey:'a',baseRevision:2});assert.throws(()=>validateInput(tool.inputSchema,{format:'rp',async:true,requestKey:7}));
  await assert.rejects(()=>operations.get({requestKey:'not-started'}),{code:'E_OPERATION_NOT_FOUND'});
  const png=readFileSync(getReferencePack('daily-margin-mobile').previewPath);mkdirSync(join(dir,'assets'),{recursive:true});const image=join(dir,'assets','source.png');copyFileSync(getReferencePack('daily-margin-mobile').previewPath,image);
  const registered=store.applyTransaction({baseRevision:store.appliedRevision,idempotencyKey:'asset',commands:[{type:'registerAsset',asset:{relativePath:'assets/source.png',sha256:sha256(png),width:png.readUInt32BE(16),height:png.readUInt32BE(20)}}]});assert(registered.ok);new StudioPersistence(dir).persistTransaction(store,store.history.at(-1));

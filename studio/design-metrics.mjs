@@ -499,7 +499,7 @@ function compositionBalance(nodes, board) {
 
 // 导出预算是**加性**的：每个节点本身都是可编辑基底，效果只是额外装饰层。
 // 之前做成互斥桶，导致"6 个节点 = 6 native + 2 raster"这种分母不自洽的报表。
-// 按实测校准（对比 studio_export_rp 的真实分类）：
+// 按实测校准（对比 studio_export(format:rp) 的真实分类）：
 //   filter / mask / backdrop → 被栅格化成装饰层
 //   transform / clipPath     → 导出不支持
 //   background 渐变            → 栅格装饰层（节点本身仍 native-editable）
@@ -552,7 +552,7 @@ function exportProjection(scenePage) {
     note: '加性口径：每个节点都是可编辑基底，rasterized/uncertain/dropped 是额外装饰层。'
       + 'filter/mask/transform 去向在静态阶段无法确知（标 uncertain）；backdrop 类通常 unsupported。'
       + '词表与导出报告一致：native-editable / rasterized-effect / uncertain / unsupported。'
-      + '真实结论以 studio_export_rp 报告为准。',
+      + '真实结论以 studio_export(format:rp) 报告为准。',
   };
 }
 
@@ -1039,7 +1039,7 @@ export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc =
     contrastWarnings.push({
       check: 'export-budget',
       detail: budgetLines.join('；'),
-      fix: '交付前跑一次 studio_export_rp 核对报告；要稳就改成纯色/渐变背景',
+      fix: '交付前跑一次 studio_export(format:rp) 核对报告；要稳就改成纯色/渐变背景',
     });
   }
   if (balance?.deadRight) {
@@ -1108,7 +1108,7 @@ export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc =
         ? [{
           check: 'export-budget',
           detail: `装饰层：栅格化 ${exportBudget.rasterized}、不确定 ${exportBudget.uncertain}、不支持 ${exportBudget.unsupported}`,
-          fix: '真实结论以 studio_export_rp 报告为准',
+          fix: '真实结论以 studio_export(format:rp) 报告为准',
         }]
         : [],
       violations: [{ check: 'content-presence', detail: '空页面没有可评估的设计；先放内容再谈指标' }],

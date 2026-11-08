@@ -1344,9 +1344,11 @@ export async function runAllBenchmarkTrials({
 
 if (import.meta.url === `file://${process.argv[1]}`) {
   const outIdx = process.argv.indexOf('--out');
+  // M-SURFACE 教训:缺省输出根曾指向冻结的 2026-10-30 证据树,一次重跑覆盖了
+  // repeat-1/T01 的原始产物。现在缺省写入独立本地目录,冻结树必须显式 --out。
   const outRootDir = outIdx >= 0
     ? resolve(process.argv[outIdx + 1])
-    : resolve('/Users/lilzee/axure-exp/outputs/studio-completion-20261030/trials');
+    : resolve(new URL('./trials-local/' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19), import.meta.url).pathname);
   const repeatsIdx = process.argv.indexOf('--repeats');
   const repeats = repeatsIdx >= 0 ? Number(process.argv[repeatsIdx + 1]) : 3;
   const tasksIdx = process.argv.indexOf('--tasks');

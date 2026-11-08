@@ -64,8 +64,8 @@ async function main() {
     return;
   }
 
-  if (['query', 'apply', 'design-context', 'prepare-media', 'review', 'versions','operations','explore','export-rp','export-code','sync-native','bundle','project-bundle','merge'].includes(sub)) {
-    const handler = { query: 'studio_query_nodes', apply: 'studio_apply_commands', 'design-context': 'studio_get_design_context', 'prepare-media': 'studio_prepare_media', review: 'studio_review_design', versions: 'studio_project_versions',operations:'studio_operations',explore:'studio_design_explore','export-rp':'studio_export_rp','export-code':'studio_export_code','sync-native':'studio_sync_native',bundle:'studio_project_bundle','project-bundle':'studio_project_bundle',merge:'studio_merge_document' }[sub];
+  if (['query', 'apply', 'design-context', 'prepare-media', 'review', 'versions','operations','explore','export-rp','export-code','sync-native','bundle','project-bundle','merge','command','inspect','screenshot','export','history','stage','design','scenario','media'].includes(sub)) {
+    const handler = { query: 'studio_query_nodes', apply: 'studio_apply_commands', 'design-context': 'studio_get_design_context', 'prepare-media': 'studio_prepare_media', review: 'studio_review_design', versions: 'studio_project_versions',operations:'studio_operations',explore:'studio_design_explore','export-rp':'studio_export_rp','export-code':'studio_export_code','sync-native':'studio_sync_native',bundle:'studio_project_bundle','project-bundle':'studio_project_bundle',merge:'studio_merge_document',command:'studio_command',inspect:'studio_inspect',screenshot:'studio_screenshot',export:'studio_export',history:'studio_history',stage:'studio_stage',design:'studio_design',scenario:'studio_scenario',media:'studio_media' }[sub];
     const input = args.input ? JSON.parse(readFileSync(resolve(args.input), 'utf8')) : {};
     if (sub === 'export-code') {
       if (args.out || args.outDir) input.outDir = resolve(args.out || args.outDir);
@@ -135,7 +135,7 @@ async function main() {
   }
 
   if (sub === 'screenshot') {
-    const res = await studioHandlers.studio_capture_screenshot({
+    const res = await studioHandlers.studio_screenshot({
       url: args.url,
       port: args.port ? Number(args.port) : undefined,
       projectDir: args.project,

@@ -22,7 +22,7 @@ export function locateDiagnostic({doc,scene,pageId=null,nodeIds=[],field=null,co
   }
   return {binding,targets,total:ids.length,returned:targets.length,complete:targets.length===ids.length,unresolved,
     ...(ids.length>limit?{omittedNodeIds:ids.slice(limit)}:{}),
-    ...(ids.length?{next:{tool:'studio_query_nodes',arguments:{...(pageId?{pageId}:{}),nodeIds:ids.slice(0,32),fields:['target','bounds','controls']},note:'按binding确认版本；使用target中的源宏参数/实例覆盖，不把截图坐标写回。'}}:{reason:'此问题针对整个页面，没有虚构可编辑节点'})};
+    ...(ids.length?{next:{tool:'studio_inspect',arguments:{...(pageId?{pageId}:{}),nodeIds:ids.slice(0,32),fields:['target','bounds','controls']},note:'按binding确认版本；使用target中的源宏参数/实例覆盖，不把截图坐标写回。'}}:{reason:'此问题针对整个页面，没有虚构可编辑节点'})};
 }
 
 export function errorDiagnostic(error,studio){

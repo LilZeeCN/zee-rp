@@ -167,7 +167,7 @@ test('copy owns the original snapshot, remaps all descendant IDs and preserves i
 });
 
 test('public schema validates the exclusive RP/1 and command forms, including nested commands', () => {
-  const schema = studioTools.find(tool => tool.name === 'studio_apply_commands').inputSchema;
+  const schema = studioTools.find(tool => tool.name === 'studio_command').inputSchema;
   validateInput(schema, { baseRevision: 1, idempotencyKey: 'a', pageId: 'home', sourceMode: 'insert', rp1: source });
   validateInput(schema, { baseRevision: 1, idempotencyKey: 'b', commands: [{ type: 'setText', nodeId: 'x', text: 'y' }] });
   assert.throws(() => validateInput(schema, { baseRevision: 1, idempotencyKey: 'a' }));
@@ -188,25 +188,25 @@ test('fresh MCP discovers, inserts, replays safely, sparsely updates and queries
     await client.connect(transport);
     assert.equal((await call('studio_describe', { topic: 'rp1' })).format, 'studio-rp1-subset');
     const args = { baseRevision: 1, idempotencyKey: 'rp1-once', pageId: 'home', sourceMode: 'insert', rp1: source };
-    assert.equal((await call('studio_apply_commands', args)).ok, true);
-    const replay = await call('studio_apply_commands', args); assert.equal(replay.idempotentReplay, true); assert.equal(studio.store.appliedRevision, 2);
-    assert.equal((await call('studio_apply_commands', { ...args, documentId: 'another-document' })).code, 'E_DOCUMENT_ID_MISMATCH');
-    assert.equal((await call('studio_apply_commands', { ...args, rp1: source + '\n  label #extra "Extra"' })).code, 'E_IDEMPOTENCY_CONFLICT');
-    const changed = await call('studio_apply_commands', { baseRevision: 2, idempotencyKey: 'update', pageId: 'home', sourceMode: 'update', parentId: 'lesson', rp1: 'button #reveal "查看释义"' });
+    assert.equal((await call('studio_command', args)).ok, true);
+    const replay = await call('studio_command', args); assert.equal(replay.idempotentReplay, true); assert.equal(studio.store.appliedRevision, 2);
+    assert.equal((await call('studio_command', { ...args, documentId: 'another-document' })).code, 'E_DOCUMENT_ID_MISMATCH');
+    assert.equal((await call('studio_command', { ...args, rp1: source + '\n  label #extra "Extra"' })).code, 'E_IDEMPOTENCY_CONFLICT');
+    const changed = await call('studio_command', { baseRevision: 2, idempotencyKey: 'update', pageId: 'home', sourceMode: 'update', parentId: 'lesson', rp1: 'button #reveal "查看释义"' });
     assert.equal(changed.ok, true);
     assert.deepEqual(node(studio.store, 'reveal').on.click, [{ type: 'show', target: 'answer' }]);
-    const queried = await call('studio_query_nodes', { pageId: 'home', nodeId: 'word' });
+    const queried = await call('studio_inspect', { pageId: 'home', nodeId: 'word' });
     assert.equal(queried.nodes[0].editableTargetId, 'home/word');
     assert.ok(queried.nodes[0].controls.some(control => control.kind === 'flow-layout'));
-    const invalid = await call('studio_apply_commands', { baseRevision: 3, idempotencyKey: 'typo', pageId: 'home', sourceMode: 'insert', rp1: 'label #oops "Oops" fontSzie=30' });
+    const invalid = await call('studio_command', { baseRevision: 3, idempotencyKey: 'typo', pageId: 'home', sourceMode: 'insert', rp1: 'label #oops "Oops" fontSzie=30' });
     assert.equal(invalid.code, 'E_UNKNOWN_PROPERTY'); assert.equal(invalid.line, 1);
-    const seedDs = await call('studio_apply_commands', {
+    const seedDs = await call('studio_command', {
       baseRevision: 3,
       idempotencyKey: 'seed-items-dataset',
       commands: [{ type: 'datasetOp', dataset: 'items', op: 'add', row: { id: 'A' } }],
     });
     assert.equal(seedDs.ok, true, JSON.stringify(seedDs));
-    const viaPanelAndRepeater = await call('studio_apply_commands', {
+    const viaPanelAndRepeater = await call('studio_command', {
       baseRevision: 4,
       idempotencyKey: 'panel-and-repeater-rp1',
       pageId: 'home',

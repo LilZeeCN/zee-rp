@@ -123,8 +123,8 @@ test('T-D-2 describe(workflow) 与 run_scenario 工具描述声明语义层不�
  assert(/语义执行层不做遮挡\/hitTest校验/.test(seqText),`describe workflow 应声明遮挡口径: ${seqText.slice(0,300)}`);
  assert(/通过≠真实可点/.test(seqText),'声明应说明通过≠真实可点');
  assert(/explore\.states真实浏览器指针/.test(seqText),'声明应指向 explore.states 真实指针核验');
- const tool=studioTools.find(t2=>t2.name==='studio_run_scenario');
- assert(tool,'studioTools 应含 studio_run_scenario');
- assert(/不做遮挡\/hitTest校验/.test(tool.description),`run_scenario 工具描述应声明遮挡口径: ${tool.description.slice(0,200)}`);
+ const tool=studioTools.find(t2=>t2.name==='studio_scenario');
+ assert(tool,'studioTools 应含 studio_scenario');
+ assert(/不做遮挡\/hitTest校验/.test(tool.description),`scenario 工具描述应声明遮挡口径: ${tool.description.slice(0,200)}`);
  assert(/真实浏览器指针/.test(tool.description),'工具描述应指路真实指针核验');
 });
