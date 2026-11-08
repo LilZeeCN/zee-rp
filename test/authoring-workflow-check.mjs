@@ -196,13 +196,13 @@ try {
     const code = `import {runtimeInfo} from ${JSON.stringify('file://' + join(isolated, 'scripts/authoring-workflow.mjs'))};
       import {writeFileSync} from 'node:fs'; writeFileSync(${JSON.stringify(join(isolated, 'scripts/fingerprint-probe.py'))},'# probe');
       writeFileSync(${JSON.stringify(join(isolated, 'studio/runtime.mjs'))},'// changed runtime');
-      writeFileSync(${JSON.stringify(join(isolated, 'studio/web/app.js'))},'// changed frontend');
+      writeFileSync(${JSON.stringify(join(isolated, 'studio/web/src/render.mjs'))},'// changed frontend');
       writeFileSync(${JSON.stringify(join(isolated, 'references/rp-language.schema.json'))},'{}');
       console.log(JSON.stringify(runtimeInfo([])));`;
     const proc = spawnSync(process.execPath, ['--input-type=module', '-e', code], { encoding: 'utf8' });
     assert.equal(proc.status, 0, proc.stderr);
     const info = JSON.parse(proc.stdout); assert(info.restartRequired); assert(info.changedFiles.includes('scripts/fingerprint-probe.py'));
-    assert(info.changedFiles.includes('studio/runtime.mjs')); assert(info.changedFiles.includes('studio/web/app.js')); assert(info.changedFiles.includes('references/rp-language.schema.json'));
+    assert(info.changedFiles.includes('studio/runtime.mjs')); assert(info.changedFiles.includes('studio/web/src/render.mjs')); assert(info.changedFiles.includes('references/rp-language.schema.json'));
     rmSync(isolated, { recursive: true, force: true });
   });
   await check('missing image dependencies report the active interpreter and a concrete next action', async () => {

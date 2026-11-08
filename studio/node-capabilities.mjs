@@ -178,7 +178,7 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
   };
 
   // 1. Universal geometry, constraints, borders, and clipping
-  consumes(geometry, 'studio/scene-resolver.mjs:measureAndLayoutTree + studio/web/app.js:buildNodeElementHtml', '参与节点几何、显隐、约束或自身表面样式；流式位置仍受父布局控制', true);
+  consumes(geometry, 'studio/scene-resolver.mjs:measureAndLayoutTree + studio/web/src/render.mjs:buildNodeElementHtml', '参与节点几何、显隐、约束或自身表面样式；流式位置仍受父布局控制', true);
   if (field === 'rotation') {
     // W1 2026-11-02：原生 2D 旋转破解。.rp MyStyle DOA 3221225522（0xC0000000+50，f64 度）；
     // 官方库 Menu Carat=180°/Summing Junction 315° 样本 + 探针三重验证（注入存活/规范重写存活/preview data.js rotation:15 + styles.css rotate(15deg)）。
@@ -194,7 +194,7 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
   // 2. Universal browser visual effects & CSS
   if (visualEffects.includes(field)) {
     matched = true;
-    result.surfaces.canvas = fact('implemented', '浏览器画布直接渲染该视觉/变换效果', 'studio/visual-style.mjs:visualCss + studio/web/app.js:buildNodeElementHtml');
+    result.surfaces.canvas = fact('implemented', '浏览器画布直接渲染该视觉/变换效果', 'studio/visual-style.mjs:visualCss + studio/web/src/render.mjs:buildNodeElementHtml');
     result.surfaces.runtime = result.surfaces.canvas;
     result.surfaces.native = field === 'threeDTransform'
       ? fact('partial', '原生 .rp 没有 CSS transform，不产生原生可编辑变换（纯 2D 旋转请用 node.rotation，原生可编辑 DOA 3221225522）；导出兼容报告按 unsupported:css:transform 披露光栅化/省略降级', 'studio/export-rp.mjs:classifyNodeCompatibility + studio/visual-style.mjs:exportCssPlan（W7 2026-11-02 实测口径）')
@@ -224,7 +224,7 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
 
   // 4. Typography fields
   if (textTypes.has(type)) {
-    consumes([...text, 'align'], 'studio/scene-resolver.mjs:measureAndLayoutTree + studio/web/app.js:buildNodeElementHtml', '参与该文字节点的度量或绘制', true);
+    consumes([...text, 'align'], 'studio/scene-resolver.mjs:measureAndLayoutTree + studio/web/src/render.mjs:buildNodeElementHtml', '参与该文字节点的度量或绘制', true);
     if (field === 'fontSize' || field === 'size') {
       result.surfaces.canvas.reason = result.surfaces.runtime.reason = '数值或$名称引用已声明的标量数值令牌；共享令牌更新会重新度量，源引用保留';
     }
@@ -235,12 +235,12 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
       result.surfaces.native = fact('unsupported', '当前原生输入框不保留字体族', 'studio/export-rp.mjs:resolvedTreeToRp1Node');
     }
   } else if ((type === 'icon' || type === 'divider' || type === 'path' || type === 'sparkline') && field === 'color') {
-    consumes(['color'], 'studio/scene-resolver.mjs:prepareTree + studio/web/app.js:buildNodeElementHtml', '设置图标、分割线或矢量路径颜色', true);
+    consumes(['color'], 'studio/scene-resolver.mjs:prepareTree + studio/web/src/render.mjs:buildNodeElementHtml', '设置图标、分割线或矢量路径颜色', true);
   }
   if (type === 'path' || type === 'sparkline') {
     consumes(
       ['points', 'content', 'smooth'],
-      'studio/vector-paths.mjs:normalizeVectorNodeSpec + studio/web/app.js:buildNodeElementHtml',
+      'studio/vector-paths.mjs:normalizeVectorNodeSpec + studio/web/src/render.mjs:buildNodeElementHtml',
       '控制可编辑矢量路径的子路径控制点、SVG path/markup 内容、填充规则与平滑切线手柄；导出为 RP9 Shape:300 ControlPoints 并逐节点记录降级边界',
       true
     );
@@ -258,19 +258,19 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
     consumes(['direction'], 'studio/scene-resolver.mjs:measure', '控制分割线为水平或垂直方向', true);
   }
   if (type === 'image') {
-    consumes(['src'], 'studio/scene-resolver.mjs:collectResolved + studio/web/app.js:buildNodeElementHtml', '从工程素材引用绘制图片', true);
+    consumes(['src'], 'studio/scene-resolver.mjs:collectResolved + studio/web/src/render.mjs:buildNodeElementHtml', '从工程素材引用绘制图片', true);
   }
   if (type === 'icon') {
-    consumes(['icon'], 'studio/web/app.js:renderIconSvg', '按已知图标名绘制；原生是否可编辑由逐节点导出报告决定', true);
+    consumes(['icon'], 'studio/web/src/render.mjs:renderIconSvg', '按已知图标名绘制；原生是否可编辑由逐节点导出报告决定', true);
   }
   if (type === 'input') {
-    consumes(['placeholder', 'value'], 'studio/runtime.mjs:setInput + studio/web/app.js:buildNodeElementHtml', '输入控件显示与运行态文本', true);
+    consumes(['placeholder', 'value'], 'studio/runtime.mjs:setInput + studio/web/src/render.mjs:buildNodeElementHtml', '输入控件显示与运行态文本', true);
   }
   if (type === 'button' || type === 'badge') {
     consumes(['variant', 'tone'], 'studio/scene-resolver.mjs:prepareTree', '按语义变体设置按钮或徽标默认配色', true);
   }
   if (type === 'phone-shell') {
-    consumes(phoneShellFields, 'studio/scene-resolver.mjs:expandMacroNode + studio/web/app.js:renderCanvasStage', '设置手机画板机型、灵动岛、状态栏与屏幕底色', true);
+    consumes(phoneShellFields, 'studio/scene-resolver.mjs:expandMacroNode + studio/web/src/render.mjs:renderCanvasStage', '设置手机画板机型、灵动岛、状态栏与屏幕底色', true);
   }
   if (type === 'card') {
     consumes(cardMacroFields, 'studio/scene-resolver.mjs:expandMacroNode', '无显式children时展开宏内容及标题字号；有children时不自动生成子节点', true);

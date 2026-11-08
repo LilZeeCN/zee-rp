@@ -55,4 +55,4 @@ node studio/cli.mjs start --project /absolute/path/to/project --port 4380
 
 版本化截图的 DPR 与截图缩放分开处理：DPR=2 时不再额外乘一次裁切缩放；宽画板会先在受管渲染器中完整定位，避免 Inspector 覆盖截图右侧。该处理不改变用户标签页的视角。
 
-实现入口：[浏览器样式](../studio/visual-style.mjs)、[装饰图片导出](../studio/css-raster.mjs)、[渲染与编辑](../studio/web/app.js)、[RP9 导出](../studio/export-rp.mjs)、[专项回归](../test/studio-css-check.mjs)。
+实现入口：[浏览器样式](../studio/visual-style.mjs)、[装饰图片导出](../studio/css-raster.mjs)、[渲染与编辑](../studio/web/src/render.mjs)、[RP9 导出](../studio/export-rp.mjs)、[专项回归](../test/studio-css-check.mjs)。
