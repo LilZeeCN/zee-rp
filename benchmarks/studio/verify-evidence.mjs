@@ -12,7 +12,7 @@ const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 export function verifyPerformanceEvidence(data, { root = defaultRoot } = {}) {
   assert(data.metadata?.runtimeFiles?.length, 'Performance evidence must bind actual runtime files');
   const runtimeFiles = data.metadata.runtimeFiles.filter(file => /^(studio\/|scripts\/|bin\/|references\/rp-language\.schema\.json$|package(?:-lock)?\.json$)/.test(file.path));
-  for (const required of ['studio/commands.mjs', 'studio/document.mjs', 'studio/scene-resolver.mjs', 'studio/server.mjs', 'studio/web/app.js']) {
+  for (const required of ['studio/commands.mjs', 'studio/document.mjs', 'studio/scene-resolver.mjs', 'studio/server.mjs', 'studio/web/src/main.mjs', 'studio/web/src/render.mjs']) {
     assert(runtimeFiles.some(file => file.path === required), `Missing runtime binding: ${required}`);
   }
   for (const file of runtimeFiles) {

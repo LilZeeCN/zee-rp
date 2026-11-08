@@ -6,11 +6,18 @@ import { fileURLToPath } from 'node:url';
 import { canonicalJson, computeContentHash, sha256 } from './document.mjs';
 import { resolveDocumentScene, RENDERER_VERSION } from './scene-resolver.mjs';
 import { StudioPersistence } from './persistence.mjs';
+import {
+  ensureManagedBrowserPage,
+  waitForRenderedRevision,
+  withCapture,
+  capturePixelContrast,
+  _capturePixelContrast,
+  measureDesignMetrics,
+  captureScreenshot,
+  _captureScreenshot,
+} from './server-capture.mjs';
 import { StudioRuntimeSession } from './runtime.mjs';
 import { exportStudioDocumentToRp } from './export-rp.mjs';
-import { launchChrome } from './cdp.mjs';
-import { collectRenderedText, contrastTextNodes, measurePixelContrast } from './pixel-truth.mjs';
-import { decodePng } from './png-decode.mjs';
 import { getComponentContracts } from './component-contracts.mjs';
 import { getDesignContext } from './design-context.mjs';
 import { queryAuthoringNodes } from './authoring-query.mjs';
@@ -105,6 +112,44 @@ function unregisterInstanceRecord(instanceId) {
     // Ignore
   }
 }
+
+// 精确路径 HTTP 路由表:method+path → StudioServer 方法名。
+// 新增路由:实现为类方法并在此登记;前缀/正则路由(static、/assets、/fonts、/api/events、
+// /api/design/reviews/<uuid>/image、/api/runtime/*)保留在 handleRequest 内联处理。
+const ROUTE_HANDLERS = {
+  'GET /api/context': 'routeGetContext',
+  'POST /api/selection': 'routePostSelection',
+  'POST /api/query': 'routePostQuery',
+  'POST /api/commands': 'routePostCommands',
+  'POST /api/undo': 'routePostHistory',
+  'POST /api/redo': 'routePostHistory',
+  'POST /api/render-confirm': 'routePostRenderConfirm',
+  'POST /api/wait-render': 'routePostWaitRender',
+  'POST /api/screenshot': 'routePostScreenshot',
+  'POST /api/versions': 'routePostVersions',
+  'POST /api/design/context': 'routePostDesignContext',
+  'POST /api/media/prepare': 'routePostMediaPrepare',
+  'POST /api/design/metrics': 'routePostDesignMetrics',
+  'POST /api/design/anchors': 'routePostDesignAnchors',
+  'POST /api/design/pixel-contrast': 'routePostPixelContrast',
+  'POST /api/design/content-plan': 'routePostContentPlan',
+  'POST /api/design/fix-plan': 'routePostFixPlan',
+  'POST /api/design/explore': 'routePostDesignExplore',
+  'GET /api/design/reviews': 'routeGetDesignReviews',
+  'POST /api/design/review': 'routePostDesignReview',
+  'POST /api/operations': 'routePostOperations',
+  'POST /api/export-rp': 'routePostExportRp',
+  'POST /api/export-code': 'routePostExportCode',
+  'POST /api/sync-native': 'routePostSyncNative',
+  'POST /api/project/bundle': 'routePostProjectBundle',
+  'POST /api/project/merge': 'routePostProjectMerge',
+  'POST /api/project/open': 'routePostProjectOpen',
+  'GET /api/component-contracts': 'routeComponentContracts',
+  'POST /api/component-contracts': 'routeComponentContracts',
+  'GET /api/scenarios': 'routeGetScenarios',
+  'POST /api/scenarios/run': 'routePostScenariosRun',
+  'POST /api/scenarios/fault-injection': 'routePostFaultInjection',
+};
 
 export class StudioServer {
   constructor({
@@ -240,352 +285,37 @@ export class StudioServer {
     this.renderWaiters = remaining;
   }
 
+  // CDP 截图与像素测量:实现整体在 ./server-capture.mjs,此处保持调用面不变。
   async ensureManagedBrowserPage() {
-    if (this.managedChrome && this.managedPage) {
-      const currentHref = await this.managedPage.evaluate('location.href').catch(() => '');
-      if (currentHref.startsWith(this.url)) {
-        return this.managedPage;
-      }
-      await this.managedPage.navigate(`${this.url}/?clientId=managed_renderer`);
-      await this.managedPage.waitForFunction('Boolean(window.__STUDIO_APP__ && window.__STUDIO_RENDERED_REVISION__ >= 1)', 10000);
-      return this.managedPage;
-    }
-    this.managedChrome = await launchChrome({ headless: true, width: 1440, height: 1050, dpr: 2 });
-    this.managedPage = await this.managedChrome.openPage(`${this.url}/?clientId=managed_renderer`);
-    try {
-      await this.managedPage.waitForFunction('Boolean(window.__STUDIO_APP__ && window.__STUDIO_RENDERED_REVISION__ >= 1)', 10000);
-    } catch (error) {
-      const state = await this.managedPage.evaluate('({url:location.href,ready:document.readyState,app:!!window.__STUDIO_APP__,revision:window.__STUDIO_RENDERED_REVISION__})').catch(()=>null);
-      throw Object.assign(new Error(`画布初始化未完成：${JSON.stringify({state,errors:this.managedPage.scriptErrors})}`),{code:'E_RENDERER_STARTUP',stage:'browser-initialization',cause:error});
-    }
-    return this.managedPage;
+    return ensureManagedBrowserPage(this);
   }
 
-  async waitForRenderedRevision(targetRevision = this.store.appliedRevision, { timeoutMs = 4000, simulateHang = false } = {}) {
-    if (simulateHang) {
-      await new Promise(r => setTimeout(r, timeoutMs + 20));
-      throw Object.assign(
-        new Error(`等待版本 rev ${targetRevision} 浏览器渲染超时 (${timeoutMs}ms)`),
-        { code: 'E_RENDER_TIMEOUT', targetRevision, renderedRevision: this.renderedRevision }
-      );
-    }
-
-    if (this.renderedRevision >= targetRevision && this.lastRenderConfirm?.contentHash === this.store.doc.contentHash) {
-      return this.lastRenderConfirm;
-    }
-
-    // If no external SSE browser client is connected, or to guarantee immediate render confirmation, sync managed page
-    const waitPromise = new Promise((resolveWait, rejectWait) => {
-      const timer = setTimeout(() => {
-        this.renderWaiters = this.renderWaiters.filter(w => w.timer !== timer);
-        rejectWait(
-          Object.assign(
-            new Error(`等待版本 rev ${targetRevision} 浏览器渲染超时 (${timeoutMs}ms)`),
-            { code: 'E_RENDER_TIMEOUT', targetRevision, renderedRevision: this.renderedRevision }
-          )
-        );
-      }, timeoutMs);
-      this.renderWaiters.push({ targetRevision, timer, resolve: resolveWait, reject: rejectWait });
-    });
-
-    const syncManagedRenderer = () => {
-      const expectedHash = this.store.doc.contentHash;
-      this.ensureManagedBrowserPage()
-        .then(async page => {
-          await page.evaluate(`(async () => {
-            if (window.__STUDIO_RENDERED_REVISION__ !== ${targetRevision} || window.__STUDIO_RENDERED_HASH__ !== ${JSON.stringify(expectedHash)}) {
-              const res = await fetch('/api/context');
-              const data = await res.json();
-              if (window.__STUDIO_STATE__ && window.__STUDIO_APP__) {
-                window.__STUDIO_STATE__.doc = data.doc;
-                window.__STUDIO_STATE__.scene = data.scene;
-                window.__STUDIO_STATE__.appliedRevision = data.appliedRevision;
-                window.__STUDIO_STATE__.durableRevision = data.durableRevision;
-                window.__STUDIO_APP__.selectNodes(window.__STUDIO_STATE__.selectedIds || [], window.__STUDIO_STATE__.activePageId);
-                if (document.fonts && document.fonts.ready) await document.fonts.ready;
-                void document.body.offsetHeight;
-                await Promise.race([new Promise(r => requestAnimationFrame(r)), new Promise(r => setTimeout(r, 16))]);
-                window.__STUDIO_RENDERED_REVISION__ = data.appliedRevision;
-                window.__STUDIO_RENDERED_HASH__ = data.contentHash;
-                await fetch('/api/render-confirm', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({
-                    clientId: 'managed_renderer',
-                    sessionId: data.sessionId,
-                    renderedRevision: data.appliedRevision,
-                    contentHash: data.contentHash,
-                  })
-                });
-              }
-            }
-          })()`);
-        })
-        .catch(() => {});
-    };
-
-    if (this.sseClients.size === 0) {
-      syncManagedRenderer();
-    } else {
-      const fallbackTimer = setTimeout(() => {
-        if (this.renderedRevision < targetRevision) syncManagedRenderer();
-      }, 250);
-      waitPromise.finally(() => clearTimeout(fallbackTimer)).catch(() => {});
-    }
-
-    return waitPromise;
+  async waitForRenderedRevision(targetRevision = this.store.appliedRevision, options = {}) {
+    return waitForRenderedRevision(this, targetRevision, options);
   }
 
-
-  // All captures share one managed browser. Temporary paint changes must not overlap.
   withCapture(action) {
-    const pending = (this.captureQueue || Promise.resolve()).then(action);
-    this.captureQueue = pending.catch(() => {});
-    return pending;
+    return withCapture(this, action);
   }
 
   capturePixelContrast(pageId, options = {}) {
-    return this.withCapture(() => this._capturePixelContrast(pageId, options));
+    return capturePixelContrast(this, pageId, options);
   }
 
-  async _capturePixelContrast(pageId, { dpr = 2 } = {}) {
-    if (!Number.isFinite(dpr) || dpr < 0.5 || dpr > 4) {
-      throw Object.assign(new Error('dpr 必须在 0.5–4 之间'), { code: 'E_PIXEL_DPR' });
-    }
-    const revision = this.store.appliedRevision, contentHash = this.store.doc.contentHash;
-    const target = this.scene.pages.find(p => p.id === pageId);
-    if (!target) throw Object.assign(new Error(`页面不存在：${pageId}`), { code: 'E_PAGE_NOT_FOUND' });
-    const candidates = contrastTextNodes(target);
-    const page = await this.ensureManagedBrowserPage();
-    let styleInstalled = false;
-    try {
-      await page.evaluate(`(() => {
-        const style = document.createElement('style');
-        style.id = 'studio-pixel-paint';
-        style.textContent = '.studio-node, .studio-node * { animation-play-state:paused!important; transition:none!important; caret-color:transparent!important; }';
-        document.head.append(style);
-      })()`);
-      styleInstalled = true;
-      await this._captureScreenshot({ revision, pageId, dpr });
-      await page.evaluate("document.body.classList.add('studio-capture')");
-      const geometry = await page.evaluate(`(${collectRenderedText.toString()})(${JSON.stringify(pageId)}, ${JSON.stringify(candidates.map(n => ({ id: n.id, fontSize: n.fontSize, fontWeight: n.fontWeight })))})`);
-      const { clip, boxes } = geometry;
-      const missingIds = target.nodes.filter(n => n.assetMissing || (n.type === 'image' && n.src?.startsWith('assets/') && !existsSync(join(this.projectDir, n.src)))).map(n => n.id);
-      // Measure visibility before the reference-mask pass forces opacity to 1.
-      const missingPaint = await page.evaluate(`(() => {
-        const ids = new Set(${JSON.stringify(missingIds)}), clip = ${JSON.stringify(geometry.clip)};
-        const board = [...document.querySelectorAll('.artboard-wrapper')].find(el => el.dataset.artboardId === ${JSON.stringify(pageId)});
-        return [...(board?.querySelectorAll('.studio-node') || [])].filter(el => ids.has(el.dataset.nodeId)).flatMap(el => {
-          for (let p = el; p; p = p.parentElement) {
-            const style = getComputedStyle(p);
-            if (Number(style.opacity) === 0 || style.display === 'none' || style.visibility === 'hidden') return [];
-          }
-          const r = el.getBoundingClientRect();
-          return [{ x: r.x + scrollX - clip.x, y: r.y + scrollY - clip.y, w: r.width, h: r.height }];
-        });
-      })()`);
-
-      const screenshot = () => page.screenshot({ clip: { ...clip, scale: 1 }, captureBeyondViewport: true });
-      const png = await screenshot();
-      await page.evaluate(`(() => {
-        document.getElementById('studio-pixel-paint').textContent +=
-          '[data-studio-hide-glyphs], [data-studio-hide-glyphs] > .studio-text-span { -webkit-text-fill-color:transparent!important; -webkit-text-stroke-color:transparent!important; text-shadow:none!important; text-decoration-color:transparent!important; }';
-        for (const el of document.querySelectorAll('[data-studio-hide-glyphs], [data-studio-hide-glyphs] > .studio-text-span')) {
-          if (getComputedStyle(el).backgroundClip === 'text') {
-            el.setAttribute('data-studio-original-paint', el.getAttribute('style') || '');
-            el.style.setProperty('background-image', 'none', 'important');
-          }
-        }
-      })()`);
-      const backgroundPng = await screenshot();
-      // Render the same browser glyphs without scene paint or occluders. This
-      // reference mask exposes lost strokes inside a character, not just lost words.
-      await page.evaluate(`(() => {
-        document.getElementById('studio-pixel-paint').textContent +=
-          '.artboard-outer, .artboard-screen { background:#000!important; }' +
-          '.studio-node, .studio-node * { background:none!important; border-color:transparent!important; box-shadow:none!important; text-shadow:none!important; text-decoration:none!important; color:transparent!important; -webkit-text-fill-color:transparent!important; -webkit-text-stroke:0!important; opacity:1!important; filter:none!important; backdrop-filter:none!important; mix-blend-mode:normal!important; mask:none!important; clip-path:none!important; overflow:visible!important; }' +
-          '.studio-node img, .studio-node svg, .artboard-island, .artboard-home-indicator { visibility:hidden!important; }' +
-          '[data-studio-hide-glyphs], [data-studio-hide-glyphs] > .studio-text-span { color:#fff!important; -webkit-text-fill-color:#fff!important; }';
-      })()`);
-      const inkPng = await screenshot();
-      if (revision !== this.store.appliedRevision || contentHash !== this.store.doc.contentHash) {
-        throw Object.assign(new Error('像素测量期间文档版本已变化，请重试'), { code: 'E_PIXEL_REVISION_CHANGED' });
-      }
-      // Missing source images must not be certified from their placeholder paint.
-      for (const box of boxes) {
-        if (missingPaint.some(n => box.glyphs.some(g => n.x < g.x + g.w && n.x + n.w > g.x && n.y < g.y + g.h && n.y + n.h > g.y))) box.reason = 'missing-image-resource';
-      }
-      const image = decodePng(png);
-      const results = measurePixelContrast(png, boxes, { backgroundPng, inkPng, scale: image.width / clip.w, scaleY: image.height / clip.h });
-      return { pageId, source: 'pixel', method: 'glyph-difference', dpr: geometry.dpr, revision, contentHash,
-        board: { w: target.board.screenW, h: target.board.screenH }, results };
-    } finally {
-      if (styleInstalled) await page.evaluate(`(() => {
-        document.getElementById('studio-pixel-paint')?.remove();
-        document.querySelectorAll('[data-studio-hide-glyphs]').forEach(el => el.removeAttribute('data-studio-hide-glyphs'));
-        document.body.classList.remove('studio-capture');
-        document.querySelectorAll('[data-studio-original-paint]').forEach(el => {
-          el.setAttribute('style', el.getAttribute('data-studio-original-paint'));
-          el.removeAttribute('data-studio-original-paint');
-        });
-      })()`);
-    }
+  _capturePixelContrast(pageId, options = {}) {
+    return _capturePixelContrast(this, pageId, options);
   }
 
-  async measureDesignMetrics(pageId, { thresholds, pixelTruth = true } = {}) {
-    const { computeDesignMetrics } = await import('./design-metrics.mjs');
-    let pixelContrast = null, fallbackReason = null;
-    if (!this.scene.pages.some(p => p.id === pageId)) throw Object.assign(new Error(`页面不存在：${pageId}`), { code: 'E_PAGE_NOT_FOUND' });
-    if (pixelTruth) {
-      try { pixelContrast = (await this.capturePixelContrast(pageId)).results; }
-      catch (err) { fallbackReason = `${err.code || 'E_PIXEL_CAPTURE'}: ${err.message}`; }
-    }
-    const result = computeDesignMetrics(this.scene.pages.find(p => p.id === pageId), {
-      thresholds, doc: this.store.doc, pixelContrast,
-    });
-    if (fallbackReason) result.metrics.contrast.fallbackReason = fallbackReason;
-    return { ...result, baseRevision: this.store.appliedRevision, contentHash: this.store.doc.contentHash };
+  async measureDesignMetrics(pageId, options = {}) {
+    return measureDesignMetrics(this, pageId, options);
   }
 
   captureScreenshot(options = {}) {
-    return this.withCapture(() => this._captureScreenshot(options));
+    return captureScreenshot(this, options);
   }
 
-  async _captureScreenshot({
-    revision = this.store.appliedRevision,
-    pageId = null,
-    nodeId = null,
-    outPath = null,
-    timeoutMs = 5000,
-    simulateHang = false,
-    includeImage = false,
-    dpr = 2,
-  } = {}) {
-    if (revision > this.store.appliedRevision) {
-      throw Object.assign(
-        new Error(`请求的截图版本 rev ${revision} 大于当前最新文档版本 rev ${this.store.appliedRevision}`),
-        { code: 'E_FUTURE_REVISION', requestedRevision: revision, currentRevision: this.store.appliedRevision }
-      );
-    }
-
-    if (!simulateHang) {
-      await this.ensureManagedBrowserPage();
-    }
-    await this.waitForRenderedRevision(revision, { timeoutMs, simulateHang });
-    const page = await this.ensureManagedBrowserPage();
-
-    // Ensure the managed page has rendered the exact requested revision and active page
-    const targetPageId = pageId || this.store.doc.pages[0]?.id || 'home';
-    const board = this.scene.pages.find(pg => pg.id === targetPageId)?.board;
-    if (board) {
-      // The capture renderer must fit the artboard inside the canvas viewport;
-      // clipping a larger board otherwise includes the Inspector over its right edge.
-      await page.send('Emulation.setDeviceMetricsOverride', {
-        width: Math.max(1440, Math.ceil(board.totalW + 850)),
-        height: Math.max(900, Math.ceil(board.totalH + 240)),
-        deviceScaleFactor: dpr,
-        mobile: false,
-      });
-    }
-    await page.evaluate(`(async () => {
-      if (window.__STUDIO_APP__) {
-        if (window.__STUDIO_APP__.state.mode !== 'design') document.querySelector('[data-mode="design"]')?.click();
-        window.__STUDIO_APP__.selectNodes([], ${JSON.stringify(targetPageId)});
-        const pg = window.__STUDIO_STATE__?.scene?.pages?.find(p => p.id === ${JSON.stringify(targetPageId)});
-        if (pg) window.__STUDIO_APP__.setPanZoom(40 - (pg._stageX ?? 60), 40 - (pg._stageY ?? 40), 1);
-      }
-      if (window.__STUDIO_RENDERED_REVISION__ !== ${revision} || window.__STUDIO_STATE__?.activePageId !== ${JSON.stringify(targetPageId)}) {
-        const res = await fetch('/api/context');
-        const data = await res.json();
-        if (window.__STUDIO_STATE__ && window.__STUDIO_APP__) {
-          window.__STUDIO_STATE__.doc = data.doc;
-          window.__STUDIO_STATE__.scene = data.scene;
-          window.__STUDIO_STATE__.appliedRevision = data.appliedRevision;
-          window.__STUDIO_STATE__.durableRevision = data.durableRevision;
-          window.__STUDIO_APP__.selectNodes([], ${JSON.stringify(targetPageId)});
-        }
-        if (document.fonts && document.fonts.ready) await document.fonts.ready;
-        const imgs = [...document.querySelectorAll('#canvas-stage img')];
-        await Promise.all(imgs.map(img => img.complete ? Promise.resolve() : new Promise(r => { img.onload = r; img.onerror = r; setTimeout(r, 1000); })));
-        await new Promise(r => requestAnimationFrame(r));
-        window.__STUDIO_RENDERED_REVISION__ = data.appliedRevision;
-        window.__STUDIO_RENDERED_HASH__ = data.contentHash;
-      }
-    })()`);
-
-    // Device viewport changes and SSE renders commit asynchronously in Chromium.
-    // Wait for compositor frames even when the document revision did not change.
-    await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
-    const renderCheck = await page.evaluate(`(() => {
-      const targetEl = ${
-        nodeId
-          ? `document.querySelector('.studio-node[data-node-id=${JSON.stringify(nodeId)}]')`
-          : `document.querySelector('.artboard-wrapper[data-artboard-id=${JSON.stringify(targetPageId)}] .artboard-outer') || document.getElementById('screen-root')`
-      };
-      if (!targetEl) return null;
-      const r = targetEl.getBoundingClientRect();
-      return {
-        pageId: targetEl.closest('.artboard-wrapper')?.getAttribute('data-artboard-id'),
-        renderedRevision: window.__STUDIO_RENDERED_REVISION__,
-        contentHash: window.__STUDIO_RENDERED_HASH__,
-        rect: { x: Math.max(0, Math.round(r.left)), y: Math.max(0, Math.round(r.top)), w: Math.round(r.width), h: Math.round(r.height) },
-      };
-    })()`);
-
-    if (renderCheck?.pageId !== targetPageId) throw Object.assign(new Error('实际截取画板与请求页面不一致'), { code: 'E_SCREENSHOT_PAGE_MISMATCH' });
-
-    if (!renderCheck || renderCheck.renderedRevision < revision) {
-      throw Object.assign(
-        new Error(`截图失败：浏览器渲染版本 (${renderCheck?.renderedRevision}) 未达到请求版本 (${revision})`),
-        { code: 'E_SCREENSHOT_REVISION_MISMATCH', requestedRevision: revision, renderedRevision: renderCheck?.renderedRevision }
-      );
-    }
-
-    // The workspace has floating panels above the canvas. Only the dedicated
-    // capture page hides them; document geometry and the human UI stay intact.
-    await page.evaluate("document.body.classList.add('studio-capture')");
-    let buf;
-    try {
-      buf = await page.screenshot({
-        captureBeyondViewport: true,
-        clip: {
-          x: renderCheck.rect.x,
-          y: renderCheck.rect.y,
-          w: Math.max(10, renderCheck.rect.w),
-          h: Math.max(10, renderCheck.rect.h),
-          // DPR already supplies the 2x pixels. Multiplying clip scale as well
-          // produced 4x images (with incorrect metadata) and huge effect surfaces.
-          scale: 1,
-        },
-      });
-    } finally {
-      await page.evaluate("document.body.classList.remove('studio-capture')");
-    }
-
-    const imageSha = sha256(buf);
-    let savedPath = null;
-    if (outPath) {
-      savedPath = resolve(outPath);
-      mkdirSync(dirname(savedPath), { recursive: true });
-      writeFileSync(savedPath, buf);
-    }
-
-    return {
-      ok: true,
-      revision: this.store.appliedRevision,
-      durableRevision: this.store.durableRevision,
-      renderedRevision: renderCheck.renderedRevision,
-      contentHash: this.store.doc.contentHash,
-      rendererVersion: RENDERER_VERSION,
-      pageId: targetPageId,
-      nodeId: nodeId || null,
-      width: renderCheck.rect.w * dpr,
-      height: renderCheck.rect.h * dpr,
-      sha256: imageSha,
-      outPath: savedPath,
-      base64: outPath ? undefined : buf.toString('base64'),
-      ...(includeImage ? { mcpImages: [{ mimeType: 'image/png', data: buf.toString('base64') }], base64: undefined } : {}),
-    };
+  _captureScreenshot(options = {}) {
+    return _captureScreenshot(this, options);
   }
 
   async handleRequest(req, res) {
@@ -593,8 +323,8 @@ export class StudioServer {
       const parsedUrl = new URL(req.url || '/', `http://${this.host}:${this.port}`);
       const pathname = parsedUrl.pathname;
 
-      // Static Web UI files
-      if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html' || pathname === '/styles.css' || pathname === '/app.js' || pathname === '/visual-style.mjs' || pathname === '/clipboard.mjs')) {
+      // Static Web UI files(/src/** 为画布前端拆分模块;URL 点段已被 new URL 规范化,无目录穿越)
+      if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html' || pathname === '/styles.css' || pathname === '/visual-style.mjs' || pathname === '/clipboard.mjs' || pathname.startsWith('/src/'))) {
         const relFile = pathname === '/' ? 'index.html' : pathname.slice(1);
         const fullPath = join(['/visual-style.mjs', '/clipboard.mjs'].includes(pathname) ? HERE : WEB_DIR, relFile);
         const content = readFileSync(fullPath);
@@ -606,7 +336,6 @@ export class StudioServer {
         return;
       }
 
-      // Project localized assets
       if (req.method === 'GET' && pathname.startsWith('/assets/')) {
         const assetRel = decodeURIComponent(pathname.slice('/assets/'.length));
         const assetPath = join(this.projectDir, 'assets', assetRel);
@@ -624,7 +353,6 @@ export class StudioServer {
         return;
       }
 
-      // Project localized fonts
       if (req.method === 'GET' && pathname.startsWith('/fonts/')) {
         const fontRel = decodeURIComponent(pathname.slice('/fonts/'.length));
         const fontPath = join(this.projectDir, 'fonts', fontRel);
@@ -642,7 +370,6 @@ export class StudioServer {
         return;
       }
 
-      // SSE Stream
       if (req.method === 'GET' && pathname === '/api/events') {
         res.writeHead(200, {
           'Content-Type': 'text/event-stream',
@@ -659,17 +386,53 @@ export class StudioServer {
         return;
       }
 
-      // Context & state summary
-      if (req.method === 'GET' && pathname === '/api/context') {
-        sendJson(res, 200, this.buildContextPayload());
+      // 精确路径路由表:method+path → 类方法(分支体见下方 route* 方法,原样迁移)。
+      const routeHandler = ROUTE_HANDLERS[`${req.method} ${pathname}`];
+      if (routeHandler) {
+        await this[routeHandler](req, res, { parsedUrl, pathname });
         return;
       }
 
-      if(req.method==='POST'&&pathname==='/api/selection'){
-        const body=await readJsonBody(req);const selection=this.selections.publish(this.store.doc,this.scene,body);return sendJson(res,200,{ok:true,selectionId:selection.selectionId});
+      const reviewImage = pathname.match(/^\/api\/design\/reviews\/([a-f0-9-]{36})\/image$/);
+      if (req.method === 'GET' && reviewImage) {
+        const path = join(this.projectDir, 'design-reviews', `${reviewImage[1]}.png`);
+        if (!existsSync(path)) return sendJson(res, 404, { ok: false, code: 'E_REVIEW_NOT_FOUND' });
+        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
+        res.end(readFileSync(path)); return;
       }
-      // Query nodes, components, tokens, fonts
-      if (req.method === 'POST' && pathname === '/api/query') {
+
+      if (req.method === 'POST' && pathname.startsWith('/api/runtime/')) {
+        await this.routePostRuntime(req, res, { parsedUrl, pathname });
+        return;
+      }
+
+      sendJson(res, 404, { ok: false, code: 'E_NOT_FOUND', message: `Unknown endpoint: ${pathname}` });
+    } catch (err) {
+      const code = err.code || 'E_INTERNAL_ERROR';
+      const status = code === 'E_RENDER_TIMEOUT' ? 504 : 400;
+      sendJson(res, status, {
+        ok: false,
+        code,
+        message: err.message,
+        diagnostic:this.store&&this.scene?errorDiagnostic(err,this):null,
+        ...Object.fromEntries(['sourceSpan', 'line', 'column', 'snippet', 'nodeId', 'field', 'candidates', 'suggestion', 'currentRevision'].filter(key => err[key] !== undefined).map(key => [key, err[key]])),
+        appliedRevision: this.store?.appliedRevision,
+        durableRevision: this.store?.durableRevision,
+        renderedRevision: this.renderedRevision,
+      });
+    }
+  }
+
+  async routeGetContext(req, res, { parsedUrl, pathname }) {
+        sendJson(res, 200, this.buildContextPayload());
+        return;
+  }
+
+  async routePostSelection(req, res, { parsedUrl, pathname }) {
+        const body=await readJsonBody(req);const selection=this.selections.publish(this.store.doc,this.scene,body);return sendJson(res,200,{ok:true,selectionId:selection.selectionId});
+  }
+
+  async routePostQuery(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         if (body.view || body.cursor || body.role || body.within || body.fields || body.nodeIds || body.limit || body.offset !== undefined) {
           sendJson(res, 200, { ...queryAuthoringNodes({ doc: this.store.doc, scene: this.scene, args: body }),
@@ -705,10 +468,9 @@ export class StudioServer {
           assetDiagnostics: this.scene.assetDiagnostics,
         });
         return;
-      }
+  }
 
-      // Apply Command Transaction
-      if (req.method === 'POST' && pathname === '/api/commands') {
+  async routePostCommands(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         // 版本握手指令：没有 baseRevision 的写入是"盲写"，两个客户端并行时会静默互相覆盖。
         if (body.baseRevision === undefined || body.baseRevision === null) {
@@ -880,10 +642,9 @@ export class StudioServer {
           ...(sourcePreparation ? { authoring: { format: sourcePreparation.format, ...sourcePreparation.summary, sourceSpans: sourcePreparation.sourceSpans } } : {}),
         });
         return;
-      }
+  }
 
-      // Undo / Redo
-      if (req.method === 'POST' && (pathname === '/api/undo' || pathname === '/api/redo')) {
+  async routePostHistory(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         // 预览运行态存在即视为只读：撤销/重做会回滚设计文档，直接拒绝以守住隔离承诺（T-D-1）。
         // scenario 等设计态语义会话不带 preview 标记，不影响正常撤销。
@@ -915,10 +676,9 @@ export class StudioServer {
         this.broadcastSse({ type: 'revision', ...payload });
         sendJson(res, 200, payload);
         return;
-      }
+  }
 
-      // Browser Render Confirmation
-      if (req.method === 'POST' && pathname === '/api/render-confirm') {
+  async routePostRenderConfirm(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         this.recordRenderConfirm(body);
         sendJson(res, 200, {
@@ -927,10 +687,9 @@ export class StudioServer {
           lastRenderConfirm: this.lastRenderConfirm,
         });
         return;
-      }
+  }
 
-      // Wait for Render
-      if (req.method === 'POST' && pathname === '/api/wait-render') {
+  async routePostWaitRender(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         const targetRev = body.revision ?? this.store.appliedRevision;
         const confirm = await this.waitForRenderedRevision(targetRev, {
@@ -945,10 +704,9 @@ export class StudioServer {
           confirm,
         });
         return;
-      }
+  }
 
-      // Versioned Screenshot
-      if (req.method === 'POST' && pathname === '/api/screenshot') {
+  async routePostScreenshot(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         const shot = await this.captureScreenshot({
           revision: body.revision ?? this.store.appliedRevision,
@@ -961,10 +719,9 @@ export class StudioServer {
         });
         sendJson(res, 200, shot);
         return;
-      }
+  }
 
-      // Runtime Session Endpoints
-      if (req.method === 'POST' && pathname === '/api/versions') {
+  async routePostVersions(req, res, { parsedUrl, pathname }) {
         const body=await readJsonBody(req);
         const unknown=Object.keys(body).filter(key=>!['action','name','versionId','baseRevision','previewHash','idempotencyKey','projectDir','url','port'].includes(key));
         if(unknown.length) throw Object.assign(new Error(`版本操作不接受字段 ${unknown.join(', ')}`),{code:'E_VERSION_INPUT'});
@@ -977,8 +734,9 @@ export class StudioServer {
           return sendJson(res,result.ok?200:409,{...result,durableRevision:this.store.durableRevision,doc:this.store.doc,scene:this.scene});
         }
         throw Object.assign(new Error('action应为list/create/preview/restore'),{code:'E_VERSION_INPUT'});
-      }
-      if (req.method === 'POST' && pathname === '/api/design/context') {
+  }
+
+  async routePostDesignContext(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         const context = getDesignContext(body, { doc: this.store.doc, scene: this.scene, selections: this.selections });
         // Stage responses already contain a bounded, version-bound project selection.
@@ -987,14 +745,16 @@ export class StudioServer {
           contentHash: this.store.doc.contentHash, tokens: this.store.doc.tokens,
           pages: this.scene.pages.map(p => ({ id: p.id, name: p.name, board: p.board })) } });
         return;
-      }
-      if (req.method === 'POST' && pathname === '/api/media/prepare') {
+  }
+
+  async routePostMediaPrepare(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         if(body.async===true)return sendJson(res,200,await this.operations.start('media',body,this.store.doc));
         sendJson(res, 200, await prepareMedia({ ...body, projectDir: this.projectDir, tokens: this.store.doc.tokens }));
         return;
-      }
-      if (req.method === 'POST' && pathname === '/api/design/metrics') {
+  }
+
+  async routePostDesignMetrics(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         const pageId = body.pageId || this.scene.pages[0]?.id;
         const page = this.scene.pages.find(p => p.id === pageId);
@@ -1002,8 +762,9 @@ export class StudioServer {
         const { summarizeMetrics } = await import('./design-metrics.mjs');
         const result = await this.measureDesignMetrics(pageId, { thresholds: body.thresholds || undefined, pixelTruth: body.pixelTruth !== false });
         return sendJson(res, 200, { ok: true, ...result, summary: summarizeMetrics(result) });
-      }
-      if (req.method === 'POST' && pathname === '/api/design/anchors') {
+  }
+
+  async routePostDesignAnchors(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         const { extractAnchors, summarizeAnchors, compareToAnchors, mergeAnchorSets, ANCHOR_FILE } = await import('./anchors.mjs');
         const anchorPath = join(this.projectDir, ANCHOR_FILE);
@@ -1057,8 +818,9 @@ export class StudioServer {
         } catch (err) {
           return sendJson(res, 400, { ok: false, code: err.code || 'E_ANCHORS', message: err.message });
         }
-      }
-      if (req.method === 'POST' && pathname === '/api/design/pixel-contrast') {
+  }
+
+  async routePostPixelContrast(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         const pageId = body.pageId || this.store.doc.pages[0]?.id || 'home';
         const target = this.scene.pages.find(p => p.id === pageId);
@@ -1070,16 +832,18 @@ export class StudioServer {
           failing: shot.results.filter(r => r.status === 'measured' && !r.passes).length,
           worst: shot.results.filter(r => !r.passes).slice(0, 5), baseRevision: shot.revision,
         });
-      }
-      if (req.method === 'POST' && pathname === '/api/design/content-plan') {
+  }
+
+  async routePostContentPlan(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         const pageId = body.pageId || this.scene.pages[0]?.id;
         const page = this.scene.pages.find(p => p.id === pageId);
         if (!page) return sendJson(res, 404, { ok: false, code: 'E_PAGE_NOT_FOUND', message: `页面不存在：${pageId}` });
         const { buildContentPlan } = await import('./content-plan.mjs');
         return sendJson(res, 200, { ...buildContentPlan(page), baseRevision: this.store.appliedRevision });
-      }
-      if (req.method === 'POST' && pathname === '/api/design/fix-plan') {
+  }
+
+  async routePostFixPlan(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         const pageId = body.pageId || this.scene.pages[0]?.id;
         const page = this.scene.pages.find(p => p.id === pageId);
@@ -1189,8 +953,9 @@ export class StudioServer {
           verified: true,
           verificationBasis: 'geometry',
         });
-      }
-      if (req.method === 'POST' && pathname === '/api/design/explore') {
+  }
+
+  async routePostDesignExplore(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         if(body.async===true)return sendJson(res,200,await this.operations.start('explore',{...body,pageId:body.pageId||this.scene.pages[0]?.id},this.store.doc));
         const { exploreVariants } = await import('./explore.mjs');
@@ -1208,8 +973,9 @@ export class StudioServer {
         } catch (err) {
           return sendJson(res, 400, { ok: false, code: err.code || 'E_EXPLORE', message: err.message });
         }
-      }
-      if (req.method === 'GET' && pathname === '/api/design/reviews') {
+  }
+
+  async routeGetDesignReviews(req, res, { parsedUrl, pathname }) {
         const dir = join(this.projectDir, 'design-reviews');
         const pageId = parsedUrl.searchParams.get('pageId');
         const records = existsSync(dir) ? readdirSync(dir).filter(name => /^[a-f0-9-]{36}\.json$/.test(name))
@@ -1218,20 +984,153 @@ export class StudioServer {
           .sort((a, b) => b.revision - a.revision).slice(0, 20)
           .map(r => ({ reviewId: r.reviewId, pageId: r.pageId, revision: r.revision, contentHash: r.contentHash })) : [];
         return sendJson(res, 200, { ok: true, reviews: records });
-      }
-      const reviewImage = pathname.match(/^\/api\/design\/reviews\/([a-f0-9-]{36})\/image$/);
-      if (req.method === 'GET' && reviewImage) {
-        const path = join(this.projectDir, 'design-reviews', `${reviewImage[1]}.png`);
-        if (!existsSync(path)) return sendJson(res, 404, { ok: false, code: 'E_REVIEW_NOT_FOUND' });
-        res.writeHead(200, { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' });
-        res.end(readFileSync(path)); return;
-      }
+  }
 
-      if (req.method === 'POST' && pathname === '/api/design/review') {
+  async routePostDesignReview(req, res, { parsedUrl, pathname }) {
         sendJson(res, 200, await reviewDesign(this, await readJsonBody(req)));
         return;
-      }
-      if (req.method === 'POST' && pathname.startsWith('/api/runtime/')) {
+  }
+
+  async routePostOperations(req, res, { parsedUrl, pathname }) {
+        const {action,...body}=await readJsonBody(req);
+        if(!['get','list','cancel'].includes(action))throw Object.assign(new Error('action需要get/list/cancel'),{code:'E_OPERATION_ACTION'});
+        return sendJson(res,200,await this.operations[action](body));
+  }
+
+  async routePostExportRp(req, res, { parsedUrl, pathname }) {
+        const body = await readJsonBody(req);
+        if(body.async===true)return sendJson(res,200,await this.operations.start('export-rp',body,this.store.doc));
+        if(body.baseRevision!==undefined&&body.baseRevision!==this.store.appliedRevision)throw Object.assign(new Error('导出版本已变化，请重新确认'),{code:'E_OPERATION_STALE'});
+        const expRes = await this.exportRp({
+          outRpPath: body.outRpPath,
+          outReportPath: body.outReportPath,
+        });
+        sendJson(res, 200, expRes);
+        return;
+  }
+
+  async routePostExportCode(req, res, { parsedUrl, pathname }) {
+        const body = await readJsonBody(req);
+        if (body.async === true) {
+          return sendJson(res, 200, await this.operations.start('export-code', body, this.store.doc));
+        }
+        const codeRes = await this.exportCode({
+          outDir: body.outDir,
+          baseRevision: body.baseRevision,
+          resetRegistration: body.resetRegistration,
+        });
+        sendJson(res, 200, codeRes);
+        return;
+  }
+
+  async routePostSyncNative(req, res, { parsedUrl, pathname }) {
+        const body = await readJsonBody(req);
+        if (body.async === true) {
+          return sendJson(res, 200, await this.operations.start('sync-native', body, this.store.doc));
+        }
+        const syncRes = await this.syncNative(body);
+        sendJson(res, syncRes.ok === false ? 409 : 200, syncRes);
+        return;
+  }
+
+  async routePostProjectBundle(req, res, { parsedUrl, pathname }) {
+        const body = await readJsonBody(req);
+        const bundleRes = await this.projectBundle(body);
+        sendJson(res, bundleRes.ok === false ? 400 : 200, bundleRes);
+        return;
+  }
+
+  async routePostProjectMerge(req, res, { parsedUrl, pathname }) {
+        const body = await readJsonBody(req);
+        const mergeRes = await this.mergeDocument(body);
+        sendJson(res, mergeRes.ok === false ? 409 : 200, mergeRes);
+        return;
+  }
+
+  async routePostProjectOpen(req, res, { parsedUrl, pathname }) {
+        const body = await readJsonBody(req);
+        const ctx = this.openProject({
+          projectDir: body.projectDir,
+          sourcePath: body.sourcePath || null,
+          name: body.name || 'Studio Project',
+          domain: body.domain || 'mobile',
+        });
+        sendJson(res, 200, ctx);
+        return;
+  }
+
+  async routeComponentContracts(req, res, { parsedUrl, pathname }) {
+        const body = req.method === 'POST' ? await readJsonBody(req) : {};
+        const componentId = parsedUrl.searchParams.get('componentId') || body.componentId || null;
+        const contractsRes = getComponentContracts(this.store.doc, { componentId });
+        sendJson(res, 200, {
+          ok: true,
+          appliedRevision: this.store.appliedRevision,
+          ...contractsRes,
+        });
+        return;
+  }
+
+  async routeGetScenarios(req, res, { parsedUrl, pathname }) {
+        sendJson(res, 200, {
+          ok: true,
+          scenarioCount: SCENARIO_TEMPLATES_12.length,
+          scenarios: SCENARIO_TEMPLATES_12,
+          domains: Object.keys(DOMAIN_PRESETS),
+          domainPresets: DOMAIN_PRESETS,
+        });
+        return;
+  }
+
+  async routePostScenariosRun(req, res, { parsedUrl, pathname }) {
+        const body = await readJsonBody(req);
+        const isBlankDefaultDoc =
+          !body.domain &&
+          !body.doc &&
+          (this.store.doc?.pages?.length ?? 0) === 1 &&
+          !this.store.doc?.pages?.some(p => p.id === 'list' || p.id === 'detail') &&
+          (this.store.doc?.pages?.[0]?.root?.children?.[0]?.children?.length ?? 0) === 0;
+        const targetDoc = body.domain
+          ? createDomainProjectDocument(body.domain)
+          : body.doc || (isBlankDefaultDoc ? createDomainProjectDocument('birding') : this.store.doc);
+        let scenariosToRun = SCENARIO_TEMPLATES_12;
+        if (body.impactReport) {
+          scenariosToRun = selectAffectedScenarios(body.impactReport, { runAll: Boolean(body.runAll) });
+        }
+        if (Array.isArray(body.scenarioIds) && body.scenarioIds.length > 0) {
+          scenariosToRun = scenariosToRun.filter(s => body.scenarioIds.includes(s.scenarioId));
+        }
+        if (body.category) {
+          scenariosToRun = scenariosToRun.filter(s => s.category === body.category);
+        }
+        const layers = Array.isArray(body.layers) && body.layers.length > 0 ? body.layers : ['semantic'];
+        const runRes = await runAcceptanceScenarios(targetDoc, {
+          scenarios: scenariosToRun,
+          layers,
+          studioServer: layers.includes('browser') ? this : null,
+          screenshotDir: body.screenshotDir || join(this.projectDir, 'exports', 'scenario-screenshots'),
+          exportDir: body.exportDir || join(this.projectDir, 'exports', 'scenario-rp'),
+          axurePreviewUrl: body.axurePreviewUrl || null,
+        });
+        sendJson(res, 200, {
+          ok: true,
+          ...runRes,
+        });
+        return;
+  }
+
+  async routePostFaultInjection(req, res, { parsedUrl, pathname }) {
+        const body = await readJsonBody(req);
+        const baseDoc = body.domain ? createDomainProjectDocument(body.domain) : null;
+        const faultRes = runFaultInjectionControl(baseDoc);
+        sendJson(res, 200, {
+          ok: true,
+          ...faultRes,
+        });
+        return;
+  }
+
+  async routePostRuntime(req, res, { parsedUrl, pathname }) {
         const body = await readJsonBody(req);
         const sub = pathname.slice('/api/runtime/'.length);
         // 退出预览：清除预览运行态会话，恢复设计态撤销/重做（T-D-1 配套出口）。
@@ -1360,167 +1259,7 @@ export class StudioServer {
           });
           return;
         }
-      }
-
-      // Export Native .rp
-      if(req.method==='POST'&&pathname==='/api/operations'){
-        const {action,...body}=await readJsonBody(req);
-        if(!['get','list','cancel'].includes(action))throw Object.assign(new Error('action需要get/list/cancel'),{code:'E_OPERATION_ACTION'});
-        return sendJson(res,200,await this.operations[action](body));
-      }
-      if (req.method === 'POST' && pathname === '/api/export-rp') {
-        const body = await readJsonBody(req);
-        if(body.async===true)return sendJson(res,200,await this.operations.start('export-rp',body,this.store.doc));
-        if(body.baseRevision!==undefined&&body.baseRevision!==this.store.appliedRevision)throw Object.assign(new Error('导出版本已变化，请重新确认'),{code:'E_OPERATION_STALE'});
-        const expRes = await this.exportRp({
-          outRpPath: body.outRpPath,
-          outReportPath: body.outReportPath,
-        });
-        sendJson(res, 200, expRes);
-        return;
-      }
-
-      if (req.method === 'POST' && pathname === '/api/export-code') {
-        const body = await readJsonBody(req);
-        if (body.async === true) {
-          return sendJson(res, 200, await this.operations.start('export-code', body, this.store.doc));
-        }
-        const codeRes = await this.exportCode({
-          outDir: body.outDir,
-          baseRevision: body.baseRevision,
-          resetRegistration: body.resetRegistration,
-        });
-        sendJson(res, 200, codeRes);
-        return;
-      }
-
-      if (req.method === 'POST' && pathname === '/api/sync-native') {
-        const body = await readJsonBody(req);
-        if (body.async === true) {
-          return sendJson(res, 200, await this.operations.start('sync-native', body, this.store.doc));
-        }
-        const syncRes = await this.syncNative(body);
-        sendJson(res, syncRes.ok === false ? 409 : 200, syncRes);
-        return;
-      }
-
-      if (req.method === 'POST' && pathname === '/api/project/bundle') {
-        const body = await readJsonBody(req);
-        const bundleRes = await this.projectBundle(body);
-        sendJson(res, bundleRes.ok === false ? 400 : 200, bundleRes);
-        return;
-      }
-
-      if (req.method === 'POST' && pathname === '/api/project/merge') {
-        const body = await readJsonBody(req);
-        const mergeRes = await this.mergeDocument(body);
-        sendJson(res, mergeRes.ok === false ? 409 : 200, mergeRes);
-        return;
-      }
-
-      // Open / Switch Project
-      if (req.method === 'POST' && pathname === '/api/project/open') {
-        const body = await readJsonBody(req);
-        const ctx = this.openProject({
-          projectDir: body.projectDir,
-          sourcePath: body.sourcePath || null,
-          name: body.name || 'Studio Project',
-          domain: body.domain || 'mobile',
-        });
-        sendJson(res, 200, ctx);
-        return;
-      }
-
-      // Component Contracts Query (Direction 3)
-      if ((req.method === 'GET' || req.method === 'POST') && pathname === '/api/component-contracts') {
-        const body = req.method === 'POST' ? await readJsonBody(req) : {};
-        const componentId = parsedUrl.searchParams.get('componentId') || body.componentId || null;
-        const contractsRes = getComponentContracts(this.store.doc, { componentId });
-        sendJson(res, 200, {
-          ok: true,
-          appliedRevision: this.store.appliedRevision,
-          ...contractsRes,
-        });
-        return;
-      }
-
-      // Reusable Acceptance Scenarios Catalog (Direction 5)
-      if (req.method === 'GET' && pathname === '/api/scenarios') {
-        sendJson(res, 200, {
-          ok: true,
-          scenarioCount: SCENARIO_TEMPLATES_12.length,
-          scenarios: SCENARIO_TEMPLATES_12,
-          domains: Object.keys(DOMAIN_PRESETS),
-          domainPresets: DOMAIN_PRESETS,
-        });
-        return;
-      }
-
-      // Run Acceptance Scenarios (Direction 5)
-      if (req.method === 'POST' && pathname === '/api/scenarios/run') {
-        const body = await readJsonBody(req);
-        const isBlankDefaultDoc =
-          !body.domain &&
-          !body.doc &&
-          (this.store.doc?.pages?.length ?? 0) === 1 &&
-          !this.store.doc?.pages?.some(p => p.id === 'list' || p.id === 'detail') &&
-          (this.store.doc?.pages?.[0]?.root?.children?.[0]?.children?.length ?? 0) === 0;
-        const targetDoc = body.domain
-          ? createDomainProjectDocument(body.domain)
-          : body.doc || (isBlankDefaultDoc ? createDomainProjectDocument('birding') : this.store.doc);
-        let scenariosToRun = SCENARIO_TEMPLATES_12;
-        if (body.impactReport) {
-          scenariosToRun = selectAffectedScenarios(body.impactReport, { runAll: Boolean(body.runAll) });
-        }
-        if (Array.isArray(body.scenarioIds) && body.scenarioIds.length > 0) {
-          scenariosToRun = scenariosToRun.filter(s => body.scenarioIds.includes(s.scenarioId));
-        }
-        if (body.category) {
-          scenariosToRun = scenariosToRun.filter(s => s.category === body.category);
-        }
-        const layers = Array.isArray(body.layers) && body.layers.length > 0 ? body.layers : ['semantic'];
-        const runRes = await runAcceptanceScenarios(targetDoc, {
-          scenarios: scenariosToRun,
-          layers,
-          studioServer: layers.includes('browser') ? this : null,
-          screenshotDir: body.screenshotDir || join(this.projectDir, 'exports', 'scenario-screenshots'),
-          exportDir: body.exportDir || join(this.projectDir, 'exports', 'scenario-rp'),
-          axurePreviewUrl: body.axurePreviewUrl || null,
-        });
-        sendJson(res, 200, {
-          ok: true,
-          ...runRes,
-        });
-        return;
-      }
-
-      // Run Fault Injection Control Experiment (Direction 5)
-      if (req.method === 'POST' && pathname === '/api/scenarios/fault-injection') {
-        const body = await readJsonBody(req);
-        const baseDoc = body.domain ? createDomainProjectDocument(body.domain) : null;
-        const faultRes = runFaultInjectionControl(baseDoc);
-        sendJson(res, 200, {
-          ok: true,
-          ...faultRes,
-        });
-        return;
-      }
-
-      sendJson(res, 404, { ok: false, code: 'E_NOT_FOUND', message: `Unknown endpoint: ${pathname}` });
-    } catch (err) {
-      const code = err.code || 'E_INTERNAL_ERROR';
-      const status = code === 'E_RENDER_TIMEOUT' ? 504 : 400;
-      sendJson(res, status, {
-        ok: false,
-        code,
-        message: err.message,
-        diagnostic:this.store&&this.scene?errorDiagnostic(err,this):null,
-        ...Object.fromEntries(['sourceSpan', 'line', 'column', 'snippet', 'nodeId', 'field', 'candidates', 'suggestion', 'currentRevision'].filter(key => err[key] !== undefined).map(key => [key, err[key]])),
-        appliedRevision: this.store?.appliedRevision,
-        durableRevision: this.store?.durableRevision,
-        renderedRevision: this.renderedRevision,
-      });
-    }
+    sendJson(res, 404, { ok: false, code: 'E_NOT_FOUND', message: `Unknown endpoint: ${pathname}` });
   }
 
   async start() {

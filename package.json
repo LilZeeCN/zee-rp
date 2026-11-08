@@ -62,7 +62,9 @@
     "verify:studio-performance": "node benchmarks/studio/verify-evidence.mjs",
     "test:source-contract": "python3 test/rp-source-contract-check.py",
     "bench:studio-model": "node benchmarks/studio/run-model-trials.mjs",
-    "test:studio-finish": "node --test --test-concurrency=1 test/canvas-boost-20261031-check.mjs test/canvas-fix-g7-check.mjs test/canvas-fix-g8-check.mjs test/set-interaction-var-guard-check.mjs test/studio-canvas-g3-fixes-check.mjs test/studio-canvas-g4-fixes-check.mjs test/studio-canvas-g5-fixes-check.mjs test/studio-run-scenario-hit-test-check.mjs test/studio-startup-normalization-check.mjs"
+    "test:studio-finish": "node --test --test-concurrency=1 test/canvas-boost-20261031-check.mjs test/canvas-fix-g7-check.mjs test/canvas-fix-g8-check.mjs test/set-interaction-var-guard-check.mjs test/studio-canvas-g3-fixes-check.mjs test/studio-canvas-g4-fixes-check.mjs test/studio-canvas-g5-fixes-check.mjs test/studio-run-scenario-hit-test-check.mjs test/studio-startup-normalization-check.mjs",
+    "test:studio-parity": "node --test test/studio-command-parity-check.mjs",
+    "test:layers": "node tools/check-layers.mjs"
   },
   "optionalDependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
