@@ -112,24 +112,37 @@ def accounting(result, ledger=None):
             raise ValueError('Completed run must classify caller experience')
         if ledger is None:
             raise ValueError('Completed run needs its actual call ledger')
-        required_evidence = {
-            'source-structure': 'structure',
-            'semantic': 'semantic',
-            'browser-render': 'render',
-            'browser-pointer': 'pointer',
-        }
-        for level, artifact_id in required_evidence.items():
-            evidence = result['evidence'][level]
-            if evidence['status'] != 'passed' or artifact_id not in evidence['evidenceIds']:
-                raise ValueError(f'Completed run needs passed {level} evidence from {artifact_id}')
-        required_artifacts = {
-            'structure', 'semantic', 'render', 'pointer', 'actor-evidence',
-            'fresh-reopen', 'observed-content', 'events', 'feedback',
-        }
-        actual_artifacts = {item['id'] for item in result['artifacts']}
-        missing = sorted(required_artifacts - actual_artifacts)
-        if missing:
-            raise ValueError('Completed run missing evidence artifacts: ' + ','.join(missing))
+        # M-GAPS#2:按执行类型分要求。scripted-regression(脚本式基线)的产物面是
+        # art-* 命名,从不产出真实模型回执面的 structure/actor-evidence/feedback 等
+        # artifact id——那是 run-model-trials 回执链的产物;此前统一的 required_artifacts
+        # 使脚本式基线自 1c900df 起无法通过验收。真实模型路径的语义一字不动。
+        required_evidence = ('source-structure', 'semantic', 'browser-render', 'browser-pointer')
+        if execution == 'scripted-regression':
+            for level in required_evidence:
+                evidence = result['evidence'][level]
+                if evidence['status'] != 'passed':
+                    raise ValueError(f'Completed scripted run needs passed {level} evidence')
+                if not evidence['evidenceIds']:
+                    raise ValueError(f'Passed layer needs original artifact: {level}')
+        else:
+            required_evidence = {
+                'source-structure': 'structure',
+                'semantic': 'semantic',
+                'browser-render': 'render',
+                'browser-pointer': 'pointer',
+            }
+            for level, artifact_id in required_evidence.items():
+                evidence = result['evidence'][level]
+                if evidence['status'] != 'passed' or artifact_id not in evidence['evidenceIds']:
+                    raise ValueError(f'Completed run needs passed {level} evidence from {artifact_id}')
+            required_artifacts = {
+                'structure', 'semantic', 'render', 'pointer', 'actor-evidence',
+                'fresh-reopen', 'observed-content', 'events', 'feedback',
+            }
+            actual_artifacts = {item['id'] for item in result['artifacts']}
+            missing = sorted(required_artifacts - actual_artifacts)
+            if missing:
+                raise ValueError('Completed run missing evidence artifacts: ' + ','.join(missing))
         for artifact in result['artifacts']:
             if artifact['sha256'] is None:
                 raise ValueError('Completed run artifact is not hashed: ' + artifact['id'])

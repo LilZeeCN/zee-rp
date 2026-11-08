@@ -35,4 +35,7 @@ jobs:
         env:
           CHROME_BIN: /usr/bin/google-chrome
       - run: npm run test:studio-baselines
+      - run: npm run test:scripted-validate
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
       - run: python test/rp-source-contract-check.py

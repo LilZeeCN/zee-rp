@@ -186,6 +186,24 @@ test('T06 runtime paging copy is delegated to its mandatory scenario', () => {
   assert.equal(result.missingContent.includes('第 1 / 3 页'), false);
 });
 
+test('scripted baseline T01 runs end-to-end and passes current validate (M-GAPS#2 regression)', () => {
+  const outDir = mkdtempSync(join(tmpdir(), 'scripted-gate-'));
+  try {
+  const runProc = spawnSync(process.execPath, [
+    resolve(REPO_ROOT, 'benchmarks/studio/run-trials.mjs'),
+    '--repeats', '1', '--tasks', 'T01', '--tracks', 'rp1-authoring',
+    '--no-gui', '--out', outDir, '--force',
+  ], { encoding: 'utf8', timeout: 240000 });
+  assert.equal(runProc.status, 0, (runProc.stderr || runProc.stdout || '').slice(-600));
+  const runDir = join(outDir, 'rp1-authoring', 'repeat-1', 'T01');
+  const resultPath = join(runDir, 'result.json');
+  const ledgerPath = join(runDir, 'call-ledger.jsonl');
+  const valProc = spawnSync('python3', [VALIDATE_PY, '--result', resultPath, '--ledger', ledgerPath], { encoding: 'utf8', timeout: 60000 });
+  assert.equal(valProc.status, 0, (valProc.stderr || valProc.stdout || '').slice(-600));
+  assert.equal(JSON.parse(valProc.stdout).resultValidated, true);
+  } finally { rmSync(outDir, { recursive: true, force: true }); }
+});
+
 test('actor evidence requires the author screenshot, scenario and T08 atomic undo/redo', () => {
   const receipt = (name, result, args = {}, images = []) => ({ request: { name, args }, row: { status: result.ok === false ? 'error' : 'success' }, result, images });
   const rows = [
