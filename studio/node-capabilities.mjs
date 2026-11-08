@@ -61,7 +61,7 @@ const text = [
 
 const layout = [
   'layout', 'padding', 'gap', 'align', 'justify', 'children',
-  'columns', 'columnGap', 'rowGap', 'equalHeight',
+  'columns', 'columnGap', 'rowGap', 'equalHeight', 'wrap',
 ];
 
 const cardMacroFields = [

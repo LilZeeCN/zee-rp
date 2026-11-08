@@ -774,7 +774,28 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
     }
 
     if (Array.isArray(node.children) && node.children.length > 0) {
-      if (layout === 'row') {
+      if (layout === 'row' && node.wrap === true) {
+        // M-SURFACE wrap:row 子节点满宽自动换行(figcraft/figma wrap 布局)
+        for (const ch of node.children) measure(ch, innerAvailW);
+        const lines = [];
+        let curLine = [], curLineW = 0;
+        for (const ch of node.children) {
+          const chW = ch._mw || 0;
+          if (curLine.length > 0 && curLineW + gap + chW > innerAvailW) {
+            lines.push(curLine);
+            curLine = [ch]; curLineW = chW;
+          } else {
+            curLine.push(ch); curLineW += (curLine.length > 1 ? gap : 0) + chW;
+          }
+        }
+        if (curLine.length) lines.push(curLine);
+        node._wrapLines = lines;
+        node._wrapLineHeights = lines.map(line => Math.max(...line.map(c => c._mh || 0), 0));
+        const maxLineW = Math.max(...lines.map(line => line.reduce((s, c) => s + (c._mw || 0), 0) + Math.max(0, line.length - 1) * gap), 0);
+        const totalH = node._wrapLineHeights.reduce((s, h) => s + h, 0) + Math.max(0, lines.length - 1) * gap;
+        if (w === null || node.w === 'hug') w = Math.min(maxLineW, innerAvailW) + padH;
+        if (h === null || node.h === 'hug') h = totalH + padV;
+      } else if (layout === 'row') {
         // First measure non-flex / non-fill children so flex/fill children get exact remaining width
         const totalGap = Math.max(0, node.children.length - 1) * gap;
         let fixedW = 0;
@@ -971,6 +992,24 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
             else if (node.align === 'end' && chW < innerW) chX = innerX + (innerW - chW);
             layout(ch, chX, curY, chW, chH, node._x, node._y);
             curY += ch._h + stepGap;
+          }
+        } else if (mode === 'row' && node.wrap === true && Array.isArray(node._wrapLines)) {
+          // M-SURFACE wrap position:按 _wrapLines 分行布坐标
+          let lineY = innerY;
+          for (let li = 0; li < node._wrapLines.length; li++) {
+            const line = node._wrapLines[li];
+            const lineH = node._wrapLineHeights[li];
+            let lineX = innerX;
+            for (const ch of line) {
+              const chW = ch._mw || 0;
+              const chH = ch.h === 'fill' || node.align === 'stretch' ? lineH : ch._mh;
+              let chY = lineY;
+              if (node.align === 'center' && chH < lineH) chY = lineY + Math.round((lineH - chH) / 2);
+              else if (node.align === 'end' && chH < lineH) chY = lineY + (lineH - chH);
+              layout(ch, lineX, chY, chW, chH, node._x, node._y);
+              lineX += ch._w + gap;
+            }
+            lineY += lineH + gap;
           }
         } else if (mode === 'row') {
           const fixedTotalW = node.children.reduce((acc, c) => acc + (c.flex || c.w === 'fill' ? 0 : c._mw), 0);
