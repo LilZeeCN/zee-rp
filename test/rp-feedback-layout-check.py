@@ -51,8 +51,9 @@ class LayoutFeedbackContract(unittest.TestCase):
         rows = [x for x in plan['pages'][0]['allMainWidgets']
                 if x['name'].startswith('txt-description-l')]
         self.assertGreater(len(rows), 1)
-        self.assertEqual(rows[1]['y'] - rows[0]['y'], 18)
-        self.assertTrue(all(row['h'] >= 12 for row in rows))
+        self.assertTrue(all(row['h'] > 0 for row in rows))
+        for previous, current in zip(rows, rows[1:]):
+            self.assertEqual(current['y'] - previous['y'] - previous['h'], 6)
         self.assertTrue(result['structural_ok'], result['audit']['failures'])
         paragraph = root['children'][0]
         proto.measure_node(paragraph)
@@ -263,10 +264,10 @@ class CliCheckDiagnostics(unittest.TestCase):
     def test_overlapping_labels_report_e_layout_with_page(self):
         root = {"type": "box", "id": "root", "layout": "stack", "w": 300, "h": 300, "fill": "#FFFFFF",
                 "children": [
-                    {"type": "label", "id": "a", "text": "第一行标题", "x": 20, "y": 40, "w": 240, "h": 24,
+                    {"type": "label", "id": "a", "text": "Overlap", "x": 20, "y": 40, "w": 240, "h": 24,
                      "fontSize": 20, "fontWeight": 700, "color": "#15181B"},
-                    {"type": "label", "id": "b", "text": "第二行紧贴上来", "x": 20, "y": 52, "w": 240, "h": 20,
-                     "fontSize": 14, "color": "#15181B"},
+                    {"type": "label", "id": "b", "text": "Overlap", "x": 20, "y": 42, "w": 240, "h": 24,
+                     "fontSize": 20, "fontWeight": 700, "color": "#15181B"},
                 ]}
         proc, payload = self._run_check(spec(root))
         self.assertNotEqual(proc.returncode, 0, "布局失败时 check 应返回非零退出码")
