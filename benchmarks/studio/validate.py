@@ -81,7 +81,8 @@ def accounting(result, ledger=None):
     if experience['classification'] == 'independent':
         if experience['readImplementation'] is not False or experience['priorSameTaskExposure'] is not False or experience['assistance']:
             raise ValueError('Independent requires no implementation/same-task exposure or assistance')
-    ids = {a['id'] for a in result['artifacts']}
+    artifacts_by_id = {a['id']: a for a in result['artifacts']}
+    ids = artifacts_by_id.keys()
     if len(ids) != len(result['artifacts']):
         raise ValueError('Artifact IDs must be unique')
     for level, evidence in result['evidence'].items():
@@ -116,14 +117,21 @@ def accounting(result, ledger=None):
         # art-* 命名,从不产出真实模型回执面的 structure/actor-evidence/feedback 等
         # artifact id——那是 run-model-trials 回执链的产物;此前统一的 required_artifacts
         # 使脚本式基线自 1c900df 起无法通过验收。真实模型路径的语义一字不动。
-        required_evidence = ('source-structure', 'semantic', 'browser-render', 'browser-pointer')
         if execution == 'scripted-regression':
-            for level in required_evidence:
+            required_kinds = {
+                'source-structure': {'source-document'},
+                'semantic': {'scenario-trace'},
+                'browser-render': {'screenshot'},
+                'browser-pointer': {'scenario-trace', 'screenshot'},
+            }
+            for level, kinds in required_kinds.items():
                 evidence = result['evidence'][level]
                 if evidence['status'] != 'passed':
                     raise ValueError(f'Completed scripted run needs passed {level} evidence')
-                if not evidence['evidenceIds']:
-                    raise ValueError(f'Passed layer needs original artifact: {level}')
+                referenced = (artifacts_by_id[artifact_id] for artifact_id in evidence['evidenceIds'])
+                missing = kinds - {a['kind'] for a in referenced if a['relativeTo'] == 'runDir'}
+                if missing:
+                    raise ValueError(f'Completed scripted run needs {level} artifacts: ' + ','.join(sorted(missing)))
         else:
             required_evidence = {
                 'source-structure': 'structure',

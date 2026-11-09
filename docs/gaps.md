@@ -12,7 +12,7 @@
 | # | 缺口(行为级) | 验收口径 | 来源 | 状态 |
 |---|---|---|---|---|
 | 1 | **新 13 工具面作者试用已完成,独立外部模型盲测仍缺**:T01 子代理作者试用全过(2 场景 12/12 断言,27 调用,ease 7/10;outputs/agent-surface-t01-retry-20261108/)——但经旧名兼容层执行(本机 MCP 进程未重启,新名对客户端不可见,#12);`toolSchemaSha256` 已变,历史 result 不可比 | 外部独立模型在新面上 T01 全流程 `completed` 且自评 ≥7/10(需用户准备模型凭据;用户明确暂不烧外部模型) | PROJECT-STATUS 2026-11-02 收口;2026-11-08 子代理试用 | **partial**:面可用性已验,独立盲测待用户准备 |
-| 2 | ~~scripted 基线链与 validate 脱节~~ | run-trials --out 全绿通过 validate | 2026-11-08 | **closed(同日)**:validate.py 按 `execution.kind` 分要求——scripted 走四层 evidence passed + 引用存在检查,真实模型路径语义逐字保留(新旧对照同一真模 result 均 resultValidated:true);回归门禁 `test:scripted-validate`(T01 no-gui 端到端 5s + validate)进 CI |
+| 2 | ~~scripted 基线链与 validate 脱节~~ | run-trials --out 全绿通过 validate | 2026-11-08 | **closed**:脚本结果的四层证据须通过并引用运行目录内的对应产物类型。真实模型验收仍走原有规则。`test:scripted-validate` 校验此契约，有 RP9 模板时也执行 T01 端到端。 |
 | 3 | **T02 未跑完**(旧面),只作视觉样本不计通过 | 新面上 T02 跑完并按 scenario 分级 | 2026-11-02 收口 | **open** |
 | 4 | **纯文本元件旋转在 RP9 预览发布不渲染**(.rp 持久化、编辑器保留)——平台行为 | Axure 平台若开放能力位则接入;否则保持声明边界 | 2026-11-02 逆向 | **won't-fix(平台边界)** |
 | 5 | **web/src 模块间函数提升环**(单文件拆分来源):渲染/手势/Inspector 相互引用 | 纳入 test:layers 无环要求;行为由像素夹具守护 | 2026-11-08 架构重构 | **open(渲染层重构时一并处理)** |
