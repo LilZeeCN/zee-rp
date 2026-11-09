@@ -40,4 +40,5 @@ jobs:
       - run: npm run test:attribution
         env:
           CHROME_BIN: /usr/bin/google-chrome
+      - run: python test/rp-feedback-layout-check.py
       - run: python test/rp-source-contract-check.py

@@ -196,7 +196,7 @@ class LayoutFeedbackContract(unittest.TestCase):
             self.assertTrue(find_panel(root))
             return root, theme
         with tempfile.TemporaryDirectory(prefix="rp-feedback-legacy-") as directory:
-            with mock.patch.object(proto, "build_flagship_prototype", side_effect=poisoned):
+            with mock.patch("proto_engine.builder.build_flagship_prototype", side_effect=poisoned):
                 result = proto.compile_prototype_bundle(directory)
             self.assertFalse(result["audit"]["structural_ok"])
             self.assertGreater(result["audit"]["metrics"]["text_clip_count"], 0)
