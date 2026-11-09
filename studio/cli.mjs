@@ -67,6 +67,19 @@ async function main() {
   if (['query', 'apply', 'design-context', 'prepare-media', 'review', 'versions','operations','explore','export-rp','export-code','sync-native','bundle','project-bundle','merge','command','inspect','screenshot','export','history','stage','design','scenario','media'].includes(sub)) {
     const handler = { query: 'studio_query_nodes', apply: 'studio_apply_commands', 'design-context': 'studio_get_design_context', 'prepare-media': 'studio_prepare_media', review: 'studio_review_design', versions: 'studio_project_versions',operations:'studio_operations',explore:'studio_design_explore','export-rp':'studio_export_rp','export-code':'studio_export_code','sync-native':'studio_sync_native',bundle:'studio_project_bundle','project-bundle':'studio_project_bundle',merge:'studio_merge_document',command:'studio_command',inspect:'studio_inspect',screenshot:'studio_screenshot',export:'studio_export',history:'studio_history',stage:'studio_stage',design:'studio_design',scenario:'studio_scenario',media:'studio_media' }[sub];
     const input = args.input ? JSON.parse(readFileSync(resolve(args.input), 'utf8')) : {};
+    if (sub === 'screenshot') {
+      if (args.revision) input.revision = Number(args.revision);
+      if (args.page) input.pageId = args.page;
+      if (args.node) input.nodeId = args.node;
+      if (args.out) input.outPath = args.out;
+    }
+    if (sub === 'export') {
+      if (!args.input) input.format = 'rp';
+      if (input.format === 'rp') {
+        if (args.out) input.outRpPath = args.out;
+        if (args.report) input.outReportPath = args.report;
+      }
+    }
     if (sub === 'export-code') {
       if (args.out || args.outDir) input.outDir = resolve(args.out || args.outDir);
       if (args['base-revision']) input.baseRevision = Number(args['base-revision']);
@@ -131,32 +144,6 @@ async function main() {
       projectDir: args.project,
     });
     console.log(args.pretty ? JSON.stringify(res, null, 2) : JSON.stringify(res));
-    return;
-  }
-
-  if (sub === 'screenshot') {
-    const res = await studioHandlers.studio_screenshot({
-      url: args.url,
-      port: args.port ? Number(args.port) : undefined,
-      projectDir: args.project,
-      revision: args.revision ? Number(args.revision) : undefined,
-      pageId: args.page,
-      nodeId: args.node,
-      outPath: args.out,
-    });
-    console.log(JSON.stringify(res, null, 2));
-    return;
-  }
-
-  if (sub === 'export') {
-    const res = await studioHandlers.studio_export_rp({
-      url: args.url,
-      port: args.port ? Number(args.port) : undefined,
-      projectDir: args.project,
-      outRpPath: args.out,
-      outReportPath: args.report,
-    });
-    console.log(JSON.stringify(res, null, 2));
     return;
   }
 

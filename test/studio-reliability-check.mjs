@@ -1,13 +1,17 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { StudioPersistence } from '../studio/persistence.mjs';
 import { StudioDocumentStore } from '../studio/commands.mjs';
 import { createEmptyStudioDocument, buildNodeIndex } from '../studio/document.mjs';
 import { studioHandlers } from '../studio/mcp-adapter.mjs';
+import { callCommandTool, listMcpTools } from '../scripts/mcp-tools.mjs';
 
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'zee-reliable-'));
@@ -25,6 +29,49 @@ function fixture(t) {
   return { dir, persistence, store };
 }
 const title = store => [...buildNodeIndex(store.doc).byScopedId.values()].find(entry => entry.node.id === 'title')?.node.text;
+
+test('legacy CLI flags and consolidated MCP parameters reach the Studio HTTP routes', async t => {
+  const requests = [];
+  const server = http.createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    requests.push({ url: request.url, body: JSON.parse(Buffer.concat(chunks)) });
+    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({ ok: true, nodeSnapshots: [{ id: 'label-a' }] }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => {
+    server.close(resolve);
+    server.closeAllConnections();
+  }));
+  const url = `http://127.0.0.1:${server.address().port}`;
+  const cli = fileURLToPath(new URL('../bin/axure.mjs', import.meta.url));
+  const runCli = args => promisify(execFile)(process.execPath, [cli, 'studio', ...args, '--url', url]);
+
+  await runCli(['export', '--out', 'test.rp', '--report', 'test.json']);
+  assert.deepEqual(requests.at(-1), { url: '/api/export-rp', body: { outRpPath: 'test.rp', outReportPath: 'test.json' } });
+  await runCli(['screenshot', '--revision', '99', '--page', 'other', '--node', 'label-a', '--out', 'test.png']);
+  const { revision, pageId, nodeId, outPath } = requests.at(-1).body;
+  assert.equal(requests.at(-1).url, '/api/screenshot');
+  assert.deepEqual({ revision, pageId, nodeId, outPath }, { revision: 99, pageId: 'other', nodeId: 'label-a', outPath: 'test.png' });
+
+  const inspect = await callCommandTool('studio_inspect', { url, view: 'full', nodeId: 'label-a' });
+  assert.equal(inspect.isError, false);
+  assert.equal(requests.at(-1).body.view, 'full');
+  const review = await callCommandTool('studio_design', { url, action: 'review', verbose: true });
+  assert.deepEqual(review.structuredContent.nodeSnapshots, [{ id: 'label-a' }]);
+  for (const [name, args, path] of [
+    ['studio_design', { action: 'explore' }, '/api/design/explore'],
+    ['studio_merge', { kind: 'sync_native', rpPath: 'test.rp' }, '/api/sync-native'],
+  ]) {
+    const result = await callCommandTool(name, { url, ...args, async: true, requestKey: 'test-key' });
+    assert.equal(result.isError, false);
+    assert.equal(requests.at(-1).url, path);
+    assert.equal(requests.at(-1).body.async, true);
+    assert.equal(requests.at(-1).body.requestKey, 'test-key');
+  }
+  assert.equal(listMcpTools().find(tool => tool.name === 'studio_design').annotations.readOnlyHint, false);
+});
 
 test('restart restores undo/redo identity, then a new branch invalidates redo', t => {
   const { dir } = fixture(t);

@@ -866,7 +866,7 @@ export const studioTools = [
         url: { type: 'string' },
         port: { type: 'integer' },
         projectDir: { type: 'string' },
-        view: { type: 'string', enum: ['nodes', 'context', 'contracts'], description: '默认 nodes' },
+        view: { type: 'string', enum: ['nodes', 'authoring', 'full', 'context', 'contracts'], description: '默认 nodes；authoring 同 nodes；full 返回完整解算节点' },
         pageId: { type: 'string' },
         nodeId: { type: 'string' },
         type: { type: 'string' },
@@ -975,7 +975,7 @@ export const studioTools = [
     handler: studioHandlers.studio_stage,
   },
   {
-    name: 'studio_design', readOnly: true,
+    name: 'studio_design',
     description: '设计质量层,action 词表分发:metrics——L1 视觉完成度代理指标(字阶/4px 栅格/留白/对比度/色相数)与反 slop 规则,阈值随 slopRules 返回,不返回审美总分;pixel_contrast——真实浏览器字形掩膜逐笔画对比度,描边/重叠/缺证据显式 unknown;anchors——把已认可页面提炼为排版配方锚点并对比偏离量(anchorAction:extract/approve/list/compare,语料是本地历史页面);content_plan——找出只有结构没有文案的槽位并给 applyWith 命令;fix_plan——把度量问题翻译成确定性修复命令(不自动提交);explore——批量设计变体按可复现判据收敛,或传 candidates/states 隔离预演 AI 自写构图,返回真实浏览器联系图;review——当前版本真实截图+机器检查,reviewId 提交 observations,compareWithReviewId 返回前后对照。评审不自评审美分、不代表用户验收。',
     inputSchema: {
       type: 'object',
@@ -984,6 +984,7 @@ export const studioTools = [
         port: { type: 'integer' },
         projectDir: { type: 'string' },
         action: { type: 'string', enum: ['metrics', 'pixel_contrast', 'anchors', 'content_plan', 'fix_plan', 'explore', 'review'] },
+        ...OPERATION_PROPERTIES,
         pageId: { type: 'string' },
         thresholds: { type: 'object' },
         pixelTruth: { type: 'boolean', description: 'metrics:默认真实浏览器像素测量;false 显式几何估算' },
@@ -1015,6 +1016,7 @@ export const studioTools = [
           description: 'explore',
         },
         reviewId: { type: 'string', description: 'review' },
+        verbose: { type: 'boolean', description: 'review:返回完整指标和节点快照' },
         compareWithReviewId: { type: 'string', description: 'review:同页此前评审 ID,返回前后两张图与变更区域' },
         observations: { type: 'array', minItems: 1, items: { type: 'object', properties: { nodeIds: { type: 'array', items: { type: 'string' } }, issue: { type: 'string', minLength: 1, maxLength: 4000 }, consequence: { type: 'string', maxLength: 4000 }, decision: { type: 'string', maxLength: 4000 }, preserve: { type: 'string', maxLength: 4000 } }, required: ['nodeIds', 'issue'], additionalProperties: false }, description: 'review' },
       },
@@ -1069,6 +1071,7 @@ export const studioTools = [
       properties: {
         ...connectionProperties,
         kind: { type: 'string', enum: ['merge', 'sync_native'] },
+        ...OPERATION_PROPERTIES,
         mode: { type: 'string', enum: ['preview', 'apply', 'check-external'], description: 'merge:三方合并模式;sync_native:preview/apply' },
         baseRevision: { type: 'integer', minimum: 1 },
         baseVersionId: { type: 'string' },

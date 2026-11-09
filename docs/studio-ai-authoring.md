@@ -79,7 +79,7 @@ Studio 原生出口会把跨页 `set-text`（普通 label / paragraph / button /
 {"pageId":"home","role":"primary-action","fields":["target","layoutContext","controls"]}
 ```
 
-`studio_inspect` 默认返回8项 authoring 节点，可按 `nodeId/nodeIds/role/type/textContains/within` 选择；`fields` 精确投影，`cursor` 绑定文档、版本和查询，过期后重新查询。`view:"full"` 返回完整解算节点。
+`studio_inspect` 默认返回8项 authoring 节点，可按 `nodeId/nodeIds/role/type/textContains/within` 选择；`fields` 精确投影，`cursor` 绑定文档、版本和查询，过期后重新查询。`view:"nodes"` 和 `view:"authoring"` 都使用默认投影，`view:"full"` 返回完整解算节点。
 
 - `target` / `editableTargetId`：权威源节点、实例覆盖或可映射宏参数。找不到确定映射时不给虚构的可写目标。
 - `layoutContext`：父布局、padding与源局部坐标。流式布局的子项应改顺序与间距，不能靠屏幕坐标猜回写位置。
