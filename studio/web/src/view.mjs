@@ -1,4 +1,3 @@
-import { renderSelectionOverlay, scheduleBoardMounts } from './render.mjs';
 import { state } from './state.mjs';
 
 export function getActivePageScene() {
@@ -45,7 +44,7 @@ export function fitWorkspace(overview = false) {
   state.zoom = zoom;
   state.panX = Math.round(left + (width - spread * zoom) / 2 - stageX * zoom);
   state.panY = Math.round(top + (height - tall * zoom) / 2 - stageY * zoom);
-  updateCanvasTransform();
+  return true;
 }
 
 export function workspaceBounds() {
@@ -72,12 +71,12 @@ export function revealActiveArtboard() {
   if (vpW <= 40 || vpH <= 40) return;
   const r = target.getBoundingClientRect();
   if (![r.left, r.top, r.right, r.bottom].every(Number.isFinite)) return;
-  if (r.width > vpW || r.height > vpH) { fitWorkspace(); return; }
+  if (r.width > vpW || r.height > vpH) return fitWorkspace();
   const visL = vpRect.left + left, visT = vpRect.top + top;
   if (r.left >= visL && r.top >= visT && r.right <= visL + vpW && r.bottom <= visT + vpH) return;
   state.panX += Math.round(visL + vpW / 2 - (r.left + r.width / 2));
   state.panY += Math.round(visT + vpH / 2 - (r.top + r.height / 2));
-  updateCanvasTransform();
+  return true;
 }
 
 // padding 归一化为 [top, right, bottom, left]（与 scene-resolver parsePadding 语义一致）
@@ -167,7 +166,7 @@ export function updateTopbarStatus() {
   updateWorkspaceChrome();
 }
 
-export function updateCanvasTransform() {
+export function applyCanvasTransform() {
   const stage = document.getElementById('canvas-stage');
   const dpr = window.devicePixelRatio || 1;
   state.panX = Math.round(state.panX*dpr)/dpr;
@@ -175,17 +174,13 @@ export function updateCanvasTransform() {
   if (stage) {
     stage.style.transform = `translate(${state.panX}px, ${state.panY}px) scale(${state.zoom})`;
   }
-  if (state.selectedIds.length > 0 || state.snapGuides.length > 0) {
-    renderSelectionOverlay();
-  } else {
-    const overlay = document.getElementById('selection-overlay');
-    if (overlay && overlay.firstChild) overlay.innerHTML = '';
-  }
+}
+
+export function updateZoomLabel() {
   const zoomEl = document.getElementById('zoom-label');
   if (zoomEl) {
     zoomEl.textContent = `${Math.round(state.zoom * 100)}%`;
   }
-  scheduleBoardMounts();
 }
 
 export function nodeViewportBounds(node) {

@@ -1,9 +1,9 @@
 import { escapeHtml, showToast } from './ui.mjs';
 import { apiPost, commandQueue, dispatchCommands, dispatchHistoryAction } from './api.mjs';
-import { fitWorkspace, getActivePageScene, padList, updateCanvasTransform, updateWorkspaceChrome, workspaceBounds } from './view.mjs';
+import { getActivePageScene, padList, updateWorkspaceChrome, workspaceBounds } from './view.mjs';
 import { renderSidebar } from './sidebar.mjs';
 import { renderInspector } from './inspector.mjs';
-import { renderAll } from './render.mjs';
+import { fitWorkspace, renderAll, updateCanvasTransform } from './render.mjs';
 import { focusDiagnosticTarget, showProjectOperations, showProjectVersions } from './dialogs.mjs';
 import { state } from './state.mjs';
 

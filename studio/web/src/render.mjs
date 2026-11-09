@@ -1,12 +1,32 @@
 import { visualCss } from '/visual-style.mjs';
 import { escapeHtml, renderIconSvg } from './ui.mjs';
 import { apiPost } from './api.mjs';
-import { getActivePageScene, nodeViewportBounds, updateCanvasTransform, updateTopbarStatus, workspaceBounds } from './view.mjs';
+import { applyCanvasTransform, fitWorkspace as fitViewport, getActivePageScene, nodeViewportBounds, revealActiveArtboard as revealArtboard, updateTopbarStatus, updateZoomLabel, workspaceBounds } from './view.mjs';
 import { renderSidebar } from './sidebar.mjs';
 import { renderInspector } from './inspector.mjs';
 import { state } from './state.mjs';
 
 export let boardMountFrame = null;
+
+export function updateCanvasTransform() {
+  applyCanvasTransform();
+  if (state.selectedIds.length > 0 || state.snapGuides.length > 0) {
+    renderSelectionOverlay();
+  } else {
+    const overlay = document.getElementById('selection-overlay');
+    if (overlay && overlay.firstChild) overlay.innerHTML = '';
+  }
+  updateZoomLabel();
+  scheduleBoardMounts();
+}
+
+export function fitWorkspace(overview = false) {
+  if (fitViewport(overview)) updateCanvasTransform();
+}
+
+export function revealActiveArtboard() {
+  if (revealArtboard()) updateCanvasTransform();
+}
 
 export function shouldMountPage(pg) {
   if (pg.id === state.activePageId) return true;

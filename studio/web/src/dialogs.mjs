@@ -1,8 +1,8 @@
 import { escapeHtml, showToast } from './ui.mjs';
 import { apiPost } from './api.mjs';
 import { applyServerSnapshot } from './sync.mjs';
-import { getActivePageScene, layerDisplayName, updateCanvasTransform } from './view.mjs';
-import { renderAll } from './render.mjs';
+import { getActivePageScene, layerDisplayName } from './view.mjs';
+import { renderAll, updateCanvasTransform } from './render.mjs';
 import { state } from './state.mjs';
 
 export function focusDiagnosticTarget(location,binding){

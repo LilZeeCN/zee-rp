@@ -1,8 +1,7 @@
 // 画布入口:装配各子系统并暴露 window.__STUDIO_APP__(CDP 截图/命中测试外部契约)。
 import { dispatchCommands } from './api.mjs';
 import { applyServerSnapshot, connectSseStream } from './sync.mjs';
-import { fitWorkspace, updateCanvasTransform } from './view.mjs';
-import { renderAll } from './render.mjs';
+import { fitWorkspace, renderAll, updateCanvasTransform } from './render.mjs';
 import { cancelCanvasGesture, commitInlineTextEditor, openInlineTextEditor, setupCanvasInteractions } from './gestures.mjs';
 import { setupToolbarAndTabs } from './toolbar.mjs';
 import { state } from './state.mjs';

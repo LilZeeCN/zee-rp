@@ -1,7 +1,7 @@
 import { escapeHtml, uiIcon } from './ui.mjs';
 import { apiPost, dispatchCommands } from './api.mjs';
-import { fitWorkspace, getActivePageScene, layerDisplayName, padList, revealActiveArtboard, updateWorkspaceChrome } from './view.mjs';
-import { renderAll, renderSelectionOverlay } from './render.mjs';
+import { getActivePageScene, layerDisplayName, padList, updateWorkspaceChrome } from './view.mjs';
+import { fitWorkspace, renderAll, renderSelectionOverlay, revealActiveArtboard } from './render.mjs';
 import { renderInspector } from './inspector.mjs';
 import { cancelCanvasGesture } from './gestures.mjs';
 import { state } from './state.mjs';
