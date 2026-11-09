@@ -12,7 +12,10 @@ import { StudioDocumentStore } from '../studio/commands.mjs';
 import { StudioPersistence } from '../studio/persistence.mjs';
 
 test('performance evidence rejects stale source bindings instead of accepting historical green results', () => {
-  const paths = ['studio/commands.mjs', 'studio/document.mjs', 'studio/scene-resolver.mjs', 'studio/server.mjs', 'studio/web/src/main.mjs', 'studio/web/src/render.mjs'];
+  const paths = [
+    'studio/commands.mjs', 'studio/document.mjs', 'studio/scene-resolver.mjs', 'studio/server.mjs',
+    'studio/web/src/api.mjs', 'studio/web/src/main.mjs', 'studio/web/src/render.mjs', 'studio/web/src/sync.mjs', 'studio/web/src/view.mjs',
+  ];
   const runtimeFiles = paths.map(path => ({ path, sha256: createHash('sha256').update(readFileSync(new URL('../' + path, import.meta.url))).digest('hex') }));
   runtimeFiles[0].sha256 = '0'.repeat(64);
   assert.throws(() => verifyPerformanceEvidence({ metadata: { runtimeFiles }, runtimeSourceUnchanged: true, cells: [] }), { code: 'E_EVIDENCE_STALE' });

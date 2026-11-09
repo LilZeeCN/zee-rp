@@ -50,8 +50,8 @@ L6 服务接口 server.mjs(+server-capture)/ mcp-adapter / cli / operation-worke
 
 - 静态 import 图保持无环;经动态 import 的 3 组 server↔特性延迟环是已知白名单
   (operations / candidate-explorations / scenarios),新增动态环要在本文件登记。
-- web/src 由单文件拆分而来,模块间存在函数提升环,行为由像素夹具与浏览器门禁验证;
-  把 web 纳入无环要求属于渲染层重构议题,不在本门禁范围。
+- web/src 纳入静态和字面量动态导入的无环检查。main.mjs 负责装配请求、快照和界面动作，
+  下层模块通过显式参数接收所需动作。画布行为由像素夹具与浏览器门禁验证。
 - `scripts/mcp-tools.mjs` 对 studio 的引用面冻结在 `mcp-adapter.mjs` 与
   `schema-validation.mjs` 两个入口(外部消费方兼容约束)。
 

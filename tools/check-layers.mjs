@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 分层门禁(figcraft "cargo xtask layers" 的等价物):
-//   A. studio/** 静态 import 图必须无环(经动态 import 的 3 组 server↔特性延迟环为已知白名单)
+//   A. studio/** 静态 import 图及浏览器字面量动态 import 必须无环
 //   B. web/ 前端(浏览器侧)不得 import Node 内建模块;相对/URL 绝对引用仅指向同构模块
 //   C. 核心层(core)不得反向依赖命令层/服务层/特性层(figcraft L0-L6 方向约束的 JS 落地)
 //   D. scripts/mcp-tools.mjs 对 studio 的引用面冻结在 mcp-adapter 与 schema-validation 两个入口
@@ -57,14 +57,12 @@ function importsOf(file) {
 }
 const moduleImports = new Map(studioFiles.map(file => [file, importsOf(file)]));
 
-// ---- A. 静态环检测(仅 from 静态引用;动态 import 延迟环白名单) ----
-// 范围:服务端模块(studio 根 + commands/)。web/src 不参与:它由单文件 app.js 拆分而来,
-// 渲染/手势/Inspector 之间是函数提升环(运行期调用,无 TDZ 风险),其行为等价性由
-// 像素夹具与浏览器系门禁验证;把 web 纳入无环要求属于后续渲染层重构议题。
+// ---- A. 全部静态引用和浏览器字面量动态 import 环检测 ----
+// 服务端延迟加载的已知例外见 AGENTS.md；前端由 main.mjs 装配，禁止通过延迟加载引入环。
 const graph = new Map(); // file -> Set(static targets)
 for (const f of studioFiles) {
-  if (isWeb(f)) continue;
-  const targets = moduleImports.get(f).filter(imp => !imp.dynamic && imp.target).map(imp => imp.target);
+  const browserModule = isWeb(f) || WEB_SHARED.has(f);
+  const targets = moduleImports.get(f).filter(imp => imp.target && (!imp.dynamic || browserModule)).map(imp => imp.target);
   graph.set(f, new Set(targets));
 }
 const color = new Map(); // 0 未访问 1 在栈 2 完成

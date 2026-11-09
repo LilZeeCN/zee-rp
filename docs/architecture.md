@@ -40,9 +40,9 @@
 │             bounded-cache / schema-validation / png-decode …      │
 ├────────────────────────────────────────────────────────────────┤
 │ 浏览器侧    studio/web/index.html + styles.css + src/*.mjs        │
-│             main(装配) · state(单例) · sync(SSE/快照 patch)       │
-│             render(DOM 渲染) · gestures(手势/命中)                │
-│             inspector(属性面板) · sidebar · toolbar · api · ui …  │
+│             main(编辑协调) · state(单例) · sync(SSE/快照 patch)   │
+│             render(DOM/局部绘制) · view(视口) · gestures(手势)     │
+│             inspector(属性面板) · sidebar · toolbar · api(请求)  │
 │             同构模块:visual-style.mjs / clipboard.mjs(根目录共享)  │
 └────────────────────────────────────────────────────────────────┘
 ```
@@ -81,6 +81,10 @@ agent ──MCP──▶ bin/mcp.mjs ──▶ scripts/mcp-tools.mjs ──▶ s
 性能路径:大文档(>500 节点)且纯几何变更时走增量 scenePatch;后台标签页降级 1.5s
 轮询(HTTP/1.1 每 host 6 连接约束,见 canvas-fix G2)。
 
+浏览器由 `web/src/main.mjs` 装配。命令和撤销共用请求队列，HTTP 回包与 SSE 使用同一快照
+入口。快照取消过期手势后应用状态和局部或全量绘制，字体与图片就绪后确认对应版本。视口计算
+由 `view.mjs` 负责，`render.mjs` 负责 DOM、选框和画板挂载，面板和手势通过显式参数提交动作。
+
 ## 出口矩阵
 
 | 出口 | 文件 | 说明 |
@@ -94,7 +98,6 @@ agent ──MCP──▶ bin/mcp.mjs ──▶ scripts/mcp-tools.mjs ──▶ s
 
 - 3 组动态 import 延迟环:server↔operations、server↔candidate-explorations、
   server↔scenarios(刻意解静态环;新动态环须在 AGENTS.md 登记)。
-- web/src 模块间函数提升环(单文件拆分来源),行为由像素夹具与浏览器门禁守护。
 - `NON_STRUCTURAL_COMMANDS` / `SAFE_NODE_CACHE_COMMANDS` 含少量历史命令名
   (setConstraints/setTypography/bindToken),不在现行注册表,保留以维持
   事务缓存失效语义。

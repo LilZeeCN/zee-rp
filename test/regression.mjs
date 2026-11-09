@@ -157,11 +157,12 @@ try {
     copyFileSync(join(root, 'tools/check-layers.mjs'), checker);
     writeFileSync(join(probe, 'studio/server.mjs'), "import './capture.mjs';\n");
     writeFileSync(join(probe, 'studio/capture.mjs'), "import './server.mjs';\n");
-    writeFileSync(join(probe, 'studio/web/app.mjs'), "import fs from 'fs';\nimport '/server.mjs';\n");
+    writeFileSync(join(probe, 'studio/web/app.mjs'), "import fs from 'fs';\nimport '/server.mjs';\nimport './canvas.mjs';\n");
+    writeFileSync(join(probe, 'studio/web/canvas.mjs'), "export const loadApp = () => import('./app.mjs');\n");
     writeFileSync(join(probe, 'scripts/mcp-tools.mjs'), "import '../studio/server.mjs';\n");
     const checked = run(checker);
     assert.equal(checked.status, 1);
-    for (const diagnostic of [/A .*循环依赖/, /B .*Node 内建.*fs/, /B .*非同构模块.*server\.mjs/, /D .*越界引用/]) {
+    for (const diagnostic of [/A .*循环依赖.*studio\/server\.mjs/, /A .*循环依赖.*studio\/web\/app\.mjs/, /B .*Node 内建.*fs/, /B .*非同构模块.*server\.mjs/, /D .*越界引用/]) {
       assert.match(checked.stderr, diagnostic);
     }
   });
