@@ -13,7 +13,7 @@ import { diffDocuments } from '../document-diff.mjs';
 import { computeCommandImpactAndDiff } from '../impact-diff.mjs';
 import { finalizeDesignDecisions } from '../design-decisions.mjs';
 import { SAFE_NODE_CACHE_COMMANDS, INTERACTION_MUTATING_COMMANDS, NON_STRUCTURAL_COMMANDS } from './taxonomy.mjs';
-import { cmdError, stackUnplacedChildDiagnostics, validateInteractionAssignments } from './helpers.mjs';
+import { cmdError, defineRecordEntry, stackUnplacedChildDiagnostics, validateInteractionAssignments } from './helpers.mjs';
 import { applySingleCommand } from './apply.mjs';
 
 // ---- 批处理步引用($ref,figcraft batch 语义) ----
@@ -54,7 +54,7 @@ function resolveStepRefs(value, stepRefs, cmdIdx, isRoot) {
   const out = {};
   for (const key of keys) {
     if (isRoot && key === 'as') continue; // as 是事务层元数据,不进入命令校验与 WAL
-    out[key] = resolveStepRefs(value[key], stepRefs, cmdIdx, false);
+    defineRecordEntry(out, key, resolveStepRefs(value[key], stepRefs, cmdIdx, false));
   }
   return out;
 }

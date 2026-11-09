@@ -55,6 +55,21 @@ test('未注册引用报 E_REF_NOT_FOUND,文档不变', () => {
   assert.equal(s.appliedRevision, rev);
 });
 
+test('命名步骤的额外字段仍按自有属性校验，失败时整批不写入', () => {
+  const store = seed();
+  const { revision, contentHash } = store.doc;
+  const invalid = JSON.parse('{"type":"moveNode","as":"move","nodeId":"home/root-card","__proto__":{"x":99}}');
+  const result = apply(store, [
+    { type: 'addNode', as: 'new', node: { id: 'new', type: 'label', text: 'new' } },
+    invalid,
+  ]);
+  assert.equal(result.code, 'E_COMMAND_FIELD');
+  assert.equal(result.field, '__proto__');
+  assert.equal(result.failedCommandIndex, 1);
+  assert.equal(store.doc.revision, revision);
+  assert.equal(store.doc.contentHash, contentHash);
+});
+
 test('前向引用(引用后面步骤的 as 名)报 E_REF_NOT_FOUND', () => {
   const s = seed();
   const hash = s.doc.contentHash;
