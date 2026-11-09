@@ -24,6 +24,7 @@ jobs:
       - run: npm run test:styles
       - run: npm run test:sync
       - run: npm run test:studio-ai
+        timeout-minutes: 10
         env:
           CHROME_BIN: /usr/bin/google-chrome
       - run: npm run test:studio-parity

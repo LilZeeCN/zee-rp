@@ -4,6 +4,8 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import { once } from 'node:events';
+import { connect } from 'node:net';
 
 import { importToStudioDocument as normalizeDocument, computeContentHash } from '../studio/document.mjs';
 import { exportStudioDocumentToCode } from '../studio/export-code.mjs';
@@ -43,11 +45,28 @@ function serveStaticDir(rootDir) {
       const addr = srv.address();
       resolve({
         url: `http://127.0.0.1:${addr.port}`,
-        close: () => new Promise(r => srv.close(() => r())),
+        server: srv,
+        close: () => new Promise(resolveClose => {
+          srv.close(resolveClose);
+          // A browser can leave preconnected sockets open without sending a request.
+          srv.closeAllConnections();
+        }),
       });
     });
   });
 }
+
+test('export test server closes even if a browser preconnect has not sent a request', { timeout: 3000 }, async t => {
+  const fixture = await serveStaticDir(os.tmpdir());
+  const accepted = once(fixture.server, 'connection', { signal: t.signal });
+  const client = connect(fixture.server.address().port, '127.0.0.1');
+  t.after(() => {
+    client.destroy();
+    if (fixture.server.listening) return fixture.close();
+  });
+  await Promise.all([accepted, once(client, 'connect', { signal: t.signal })]);
+  await fixture.close();
+});
 
 test('G01-1: 8 applicable tasks (5 reference packs + 3 domain presets) export to standalone HTML/CSS/JS, relocate to a new directory, and pass browser scenarios', async () => {
   const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-g01-tasks-'));
