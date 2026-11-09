@@ -1,4 +1,5 @@
 import { StudioSelections } from './selection.mjs';
+import { studioSourceFingerprint } from './source-fingerprint.mjs';
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
@@ -35,6 +36,8 @@ import {
   runAcceptanceScenarios,
   runFaultInjectionControl,
 } from './scenarios.mjs';
+
+const loadedSourceFingerprint = studioSourceFingerprint();
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = join(HERE, 'web');
@@ -217,6 +220,7 @@ export class StudioServer {
       renderedRevision: this.renderedRevision,
       contentHash: this.store.doc.contentHash,
       rendererVersion: RENDERER_VERSION,
+      sourceFingerprint: loadedSourceFingerprint,
       // T-J-2：recoveryReport.durableRevision 是恢复/启动时的持久化基线，不随编辑推进；
       // 未发生恢复时直接对齐顶层 durableRevision，避免被当成过期残留误读。
       recoveryReport: this.recoveryReport

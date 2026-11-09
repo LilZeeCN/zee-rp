@@ -7,6 +7,7 @@ import { assertNotProtected, assertWritable } from './engine.mjs';
 import { appExists, templateCandidates } from './version.mjs';
 import { previewPrototype } from './preview-runtime.mjs';
 import { reviewImageStructure } from './image-structure.mjs';
+import { listImplementationFiles } from '../studio/source-fingerprint.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RECIPE_DIR = join(ROOT, 'examples/authoring');
@@ -15,8 +16,8 @@ const fileHash = path => { assertNotProtected(path); return digest(readFileSync(
 const startedAt = new Date().toISOString();
 export const packageVersion = JSON.parse(readFileSync(join(ROOT, 'package.json'))).version;
 function implementation() {
-  const files = ['package.json', 'references/rp-language.schema.json', ...['scripts', 'bin', 'studio', 'studio/web', 'examples/authoring'].filter(dir => existsSync(join(ROOT, dir)))
-    .flatMap(dir => readdirSync(join(ROOT, dir)).filter(f => /\.(mjs|js|py|rp1|html|css)$/.test(f)).sort().map(f => `${dir}/${f}`))];
+  const sourceDirs = ['scripts', 'bin', 'studio', 'examples/authoring'];
+  const files = ['package.json', 'references/rp-language.schema.json', ...sourceDirs.flatMap(listImplementationFiles)];
   const packsRoot = join(ROOT, 'examples/studio/reference-packs');
   if (existsSync(packsRoot)) for (const name of readdirSync(packsRoot)) {
     for (const file of ['manifest.json','source.json']) {

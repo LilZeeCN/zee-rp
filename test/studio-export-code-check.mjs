@@ -502,3 +502,52 @@ test('G01-4: exported code bundle honors repeater pageSize, rowGap, dataset-page
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });
+
+test('layered paint and inline styles reach Studio and the standalone export', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-layered-paint-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const doc = normalizeDocument({ domain: 'web', pages: [{ id: 'home', root: {
+    id: 'root', type: 'box', w: 400, h: 250, children: [
+      { id: 'paint', type: 'box', x: 10, y: 10, w: 140, h: 100,
+        fills: ['linear-gradient(90deg, transparent, #FFFFFF)', '#123456'],
+        shadows: ['1px 2px 3px #000000', 'inset 0 0 2px #000000'], mixBlendMode: 'multiply' },
+      { id: 'words', type: 'label', x: 20, y: 150, w: 280, h: 40,
+        spans: [{ text: 'Layered ', color: '#123456' }, { text: 'paint', italic: true }] },
+    ],
+  } }] });
+  const source = path.join(dir, 'source.json');
+  fs.writeFileSync(source, JSON.stringify(doc));
+  const { studio } = await startStudioServer({ projectDir: path.join(dir, 'project'), sourcePath: source, port: 0 });
+  const staticDir = path.join(dir, 'export');
+  let exported;
+  let offlinePage;
+  try {
+    const design = await studio.ensureManagedBrowserPage();
+    await exportStudioDocumentToCode(doc, { outDir: staticDir, registerExport: false });
+    const html = fs.readFileSync(path.join(staticDir, 'index.html'), 'utf8');
+    assert.match(html, /mix-blend-mode:multiply/);
+    assert.match(html, /<span style="color:#123456">Layered <\/span>/);
+    exported = await serveStaticDir(staticDir);
+    offlinePage = await studio.managedChrome.openPage(exported.url);
+    await offlinePage.waitForFunction('Boolean(window.__STUDIO_EXPORT_APP__)');
+    const probe = `(() => {
+      const style = getComputedStyle(document.querySelector('[data-node-id="paint"]'));
+      const spans = [...document.querySelectorAll('[data-node-id="words"] span')];
+      return { background: style.backgroundImage, shadow: style.boxShadow, blend: style.mixBlendMode,
+        spans: spans.map(el => [el.textContent, getComputedStyle(el).color, getComputedStyle(el).fontStyle]) };
+    })()`;
+    const browser = await design.evaluate(probe);
+    const offline = await offlinePage.evaluate(probe);
+    for (const actual of [browser, offline]) {
+      assert.match(actual.background, /linear-gradient\(rgb\(18, 52, 86\), rgb\(18, 52, 86\)\)/);
+      assert.match(actual.shadow, /inset/);
+      assert.equal(actual.blend, 'multiply');
+      assert.deepEqual(actual.spans[0].slice(0, 2), ['Layered ', 'rgb(18, 52, 86)']);
+      assert.deepEqual([actual.spans[1][0], actual.spans[1][2]], ['paint', 'italic']);
+    }
+  } finally {
+    await offlinePage?.close();
+    await exported?.close();
+    await studio.close();
+  }
+});

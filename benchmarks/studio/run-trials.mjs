@@ -834,7 +834,7 @@ export async function runSingleTrial({
 
     // Optional real Axure RP 9 GUI open/save/close/reopen roundtrip
     let guiRoundtripStatus = 'not-run';
-    let guiRoundtripSummary = 'Not executed in this repeat; see repeat-1 rp1-authoring for host GUI roundtrip.';
+    let guiRoundtripSummary = 'Axure desktop save, close, and reopen were not executed in this run.';
     let guiRoundtripFiles = [];
     if (runGuiRoundtrip && jobManager) {
       const uniqueRoundtripRpPath = join(runDir, `${runId}-${Date.now().toString(36)}-roundtrip.rp`);
@@ -1014,7 +1014,7 @@ export async function runSingleTrial({
           assertionCount: guiRoundtripStatus === 'passed' ? 1 : null,
           note: guiRoundtripStatus === 'passed'
             ? 'Axure RP 9 desktop host opened exported .rp cleanly.'
-            : 'Host load covered by repeat-1 rp1-authoring GUI roundtrip.',
+            : 'Axure desktop host load was not executed in this run.',
         },
         'axure-preview': {
           status: 'not-run',
@@ -1035,10 +1035,10 @@ export async function runSingleTrial({
           note: guiRoundtripSummary,
         },
         'independent-visual': {
-          status: 'passed',
-          evidenceIds: ['art-visual-audit', ...screenshotIds],
-          assertionCount: screenshotIds.length,
-          note: 'Visual metrics and pixel contrast verified; screenshots indexed for independent QA blind review.',
+          status: 'not-run',
+          evidenceIds: [],
+          assertionCount: null,
+          note: 'Automated visual metrics and screenshots are available for independent review.',
         },
         'user-acceptance': {
           status: 'not-run',
@@ -1071,7 +1071,8 @@ export async function runSingleTrial({
       failures: [],
       artifacts,
       limitations: [
-        'Live Axure RP 9 HTML preview server (port 32767) and human user aesthetic sign-off are recorded as not-run; Studio browser preview, runnable HTML code export, and Axure RP 9 desktop host save/close/reopen roundtrip are verified.',
+        'Live Axure RP 9 HTML preview and human visual review were not executed in this run.',
+        ...(guiRoundtripStatus === 'not-run' ? [guiRoundtripSummary] : []),
       ],
     };
     writeFileSync(resultJsonPath, JSON.stringify(resultData, null, 2) + '\n');

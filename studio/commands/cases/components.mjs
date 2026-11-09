@@ -4,9 +4,11 @@
 import {
   CORE_COMPONENT_CONTRACTS,
   ensureCoreComponentsRegistered,
+  getComponentContracts,
   validateComponentInstanceAgainstContract,
   evolveComponentContractOnDocument,
 } from '../../component-contracts.mjs';
+import { buildNodeIndex } from '../../document.mjs';
 import { assertKnownNodeEffects } from '../../node-capabilities.mjs';
 import { resolveDocumentScene } from '../../scene-resolver.mjs';
 import { cmdError, validatePropertiesObject, resolveTargetOrSubnode, defineRecordEntry } from '../helpers.mjs';
@@ -287,10 +289,23 @@ function swapInstance({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
         return;
       }
       const newComp = doc.components[newCompId];
-      const oldOverrides = cmd.preserveOverrides === false ? {} : structuredClone(node.overrides || {});
+      const contract = getComponentContracts(newCompId, doc);
+      const parameters = contract?.parameters || newComp.params || {};
+      const targets = contract?.allowedOverrides || buildNodeIndex({ pages: [], components: { [newCompId]: newComp } }).byId.keys();
+      const allowed = new Set(['$root', '_self', ...targets, ...Object.keys(parameters)]);
+      node.overrides = cmd.preserveOverrides === false ? {} : Object.fromEntries(
+        Object.entries(node.overrides || {}).filter(([key]) => allowed.has(key))
+      );
+      if (node.props) node.props = Object.fromEntries(
+        Object.entries(node.props).filter(([key]) => Object.hasOwn(parameters, key))
+      );
+      if (node.slots) node.slots = Object.fromEntries(
+        Object.entries(node.slots).filter(([key]) => Object.hasOwn(contract?.slots || {}, key))
+      );
+      if (node.state && !Object.hasOwn(contract?.states || { default: {} }, node.state)) delete node.state;
       node.component = newCompId;
-      node.variant = cmd.variant || newComp.defaultVariant || 'default';
-      node.overrides = oldOverrides;
+      const variants = Object.keys(newComp.variants || {});
+      node.variant = variants.includes(newComp.defaultVariant) ? newComp.defaultVariant : variants[0] || 'default';
       delete node.macroSource;
       delete node.controlledByMacro;
       validateComponentInstanceAgainstContract(node, doc, { strict: true });

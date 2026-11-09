@@ -328,10 +328,12 @@ function expandComponentInstance(instanceNode, doc, instanceChain = [], instance
       ...(instanceOverrides[origSubId] || {}),
     };
 
-    // Apply variant overrides first, then instance overrides
+    // A plain text override replaces any inherited rich text.
+    if (Object.hasOwn(vOvr, 'text') && !Object.hasOwn(vOvr, 'spans')) delete clone.spans;
     for (const [k, v] of Object.entries(vOvr)) {
       if (k !== 'id' && k !== 'children') clone[k] = typeof v === 'object' && v !== null ? structuredClone(v) : v;
     }
+    if (Object.hasOwn(iOvr, 'text') && !Object.hasOwn(iOvr, 'spans')) delete clone.spans;
     for (const [k, v] of Object.entries(iOvr)) {
       if (k !== 'id' && k !== 'children') clone[k] = typeof v === 'object' && v !== null ? structuredClone(v) : v;
     }
@@ -775,25 +777,38 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
 
     if (Array.isArray(node.children) && node.children.length > 0) {
       if (layout === 'row' && node.wrap === true) {
-        // M-SURFACE wrap:row 子节点满宽自动换行(figcraft/figma wrap 布局)
-        for (const ch of node.children) measure(ch, innerAvailW);
-        const lines = [];
-        let curLine = [], curLineW = 0;
+        const lineLimit = typeof node.maxW === 'number'
+          ? Math.min(innerAvailW, Math.max(0, node.maxW - padH))
+          : innerAvailW;
+        const lines = [[]];
+        let lineW = 0;
         for (const ch of node.children) {
+          measure(ch, lineLimit);
           const chW = ch._mw || 0;
-          if (curLine.length > 0 && curLineW + gap + chW > innerAvailW) {
-            lines.push(curLine);
-            curLine = [ch]; curLineW = chW;
-          } else {
-            curLine.push(ch); curLineW += (curLine.length > 1 ? gap : 0) + chW;
+          let line = lines.at(-1);
+          if (line.length && lineW + gap + chW > lineLimit) {
+            line = [];
+            lines.push(line);
+            lineW = 0;
           }
+          lineW += (line.length ? gap : 0) + chW;
+          line.push(ch);
         }
-        if (curLine.length) lines.push(curLine);
-        node._wrapLines = lines;
-        node._wrapLineHeights = lines.map(line => Math.max(...line.map(c => c._mh || 0), 0));
-        const maxLineW = Math.max(...lines.map(line => line.reduce((s, c) => s + (c._mw || 0), 0) + Math.max(0, line.length - 1) * gap), 0);
-        const totalH = node._wrapLineHeights.reduce((s, h) => s + h, 0) + Math.max(0, lines.length - 1) * gap;
-        if (w === null || node.w === 'hug') w = Math.min(maxLineW, innerAvailW) + padH;
+        const baseline = ch => (node.align === 'last-baseline' ? ch._lastBaselineOffset : ch._firstBaselineOffset)
+          ?? Math.round((ch._mh || 0) * 0.82);
+        node._wrapLines = lines.map(children => {
+          const metrics = rowWidths(children, lineLimit, gap);
+          for (const child of children) {
+            const weight = rowFlex(child);
+            if (weight > 0) measure(child, Math.max(12, Math.round(metrics.remaining * weight / metrics.flex)));
+          }
+          const sharedBase = isBaselineAlign(node.align) ? Math.max(...children.map(baseline), 0) : 0;
+          const height = Math.max(...children.map(ch => (ch._mh || 0) + (sharedBase ? sharedBase - baseline(ch) : 0)), 0);
+          return { children, height };
+        });
+        const maxLineW = Math.max(...lines.map(line => line.reduce((s, c) => s + (c._mw || 0), 0) + (line.length - 1) * gap), 0);
+        const totalH = node._wrapLines.reduce((sum, line) => sum + line.height, 0) + (lines.length - 1) * gap;
+        if (w === null || node.w === 'hug') w = Math.min(maxLineW, lineLimit) + padH;
         if (h === null || node.h === 'hug') h = totalH + padV;
       } else if (layout === 'row') {
         // First measure non-flex / non-fill children so flex/fill children get exact remaining width
@@ -898,6 +913,16 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
     return node;
   }
 
+  function rowFlex(node) {
+    return Number(node.flex) || (node.w === 'fill' ? 1 : 0);
+  }
+
+  function rowWidths(children, width, gap) {
+    const fixed = children.reduce((sum, child) => sum + (rowFlex(child) ? 0 : child._mw), 0);
+    const flex = children.reduce((sum, child) => sum + rowFlex(child), 0);
+    return { flex, remaining: Math.max(0, width - fixed - (children.length - 1) * gap) };
+  }
+
   function layout(node, absX, absY, assignedW, assignedH, parentX = 0, parentY = 0) {
     if (node._reusedSlice) {
       if (node._reusedSlice.clipDiagnostics?.length) {
@@ -993,64 +1018,43 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
             layout(ch, chX, curY, chW, chH, node._x, node._y);
             curY += ch._h + stepGap;
           }
-        } else if (mode === 'row' && node.wrap === true && Array.isArray(node._wrapLines)) {
-          // M-SURFACE wrap position:按 _wrapLines 分行布坐标
-          let lineY = innerY;
-          for (let li = 0; li < node._wrapLines.length; li++) {
-            const line = node._wrapLines[li];
-            const lineH = node._wrapLineHeights[li];
-            let lineX = innerX;
-            for (const ch of line) {
-              const chW = ch._mw || 0;
-              const chH = ch.h === 'fill' || node.align === 'stretch' ? lineH : ch._mh;
-              let chY = lineY;
-              if (node.align === 'center' && chH < lineH) chY = lineY + Math.round((lineH - chH) / 2);
-              else if (node.align === 'end' && chH < lineH) chY = lineY + (lineH - chH);
-              layout(ch, lineX, chY, chW, chH, node._x, node._y);
-              lineX += ch._w + gap;
-            }
-            lineY += lineH + gap;
-          }
         } else if (mode === 'row') {
-          const fixedTotalW = node.children.reduce((acc, c) => acc + (c.flex || c.w === 'fill' ? 0 : c._mw), 0);
-          const totalGap = Math.max(0, node.children.length - 1) * gap;
-          const totalFlex = node.children.reduce((acc, c) => acc + (Number(c.flex) || (c.w === 'fill' ? 1 : 0)), 0);
-          const remW = Math.max(0, innerW - fixedTotalW - totalGap);
-
-          let curX = innerX;
-          let stepGap = gap;
-          if (totalFlex === 0) {
-            if (node.justify === 'center') curX += Math.round(remW / 2);
-            else if (node.justify === 'end') curX += remW;
-            else if (node.justify === 'space-between' && node.children.length > 1) {
-              stepGap = gap + remW / (node.children.length - 1);
-            }
-          }
-
+          const lines = node.wrap === true ? node._wrapLines : [{ children: node.children, height: innerH }];
           const useBaseline = isBaselineAlign(node.align);
           const useLast = node.align === 'last-baseline';
-          const sharedBase = useBaseline
-            ? Math.max(
-                ...node.children.map(c => (useLast ? c._lastBaselineOffset : c._firstBaselineOffset) ?? Math.round((c._mh || 0) * 0.82)),
-                0
-              )
-            : 0;
-
-          for (const ch of node.children) {
-            const flexWeight = Number(ch.flex) || (ch.w === 'fill' ? 1 : 0);
-            const chW = flexWeight > 0 ? Math.round((remW * flexWeight) / totalFlex) : ch._mw;
-            const chH = ch.h === 'fill' || node.align === 'stretch' || node.equalHeight ? innerH : ch._mh;
-            let chY = innerY;
-            if (useBaseline) {
-              const cb = (useLast ? ch._lastBaselineOffset : ch._firstBaselineOffset) ?? Math.round((chH || 0) * 0.82);
-              chY = innerY + Math.max(0, sharedBase - cb);
-            } else if (node.align === 'center' && chH < innerH) {
-              chY = innerY + Math.round((innerH - chH) / 2);
-            } else if (node.align === 'end' && chH < innerH) {
-              chY = innerY + (innerH - chH);
+          let lineY = innerY;
+          for (const { children, height } of lines) {
+            const { flex, remaining } = rowWidths(children, innerW, gap);
+            let curX = innerX;
+            let stepGap = gap;
+            if (flex === 0) {
+              if (node.justify === 'center') curX += Math.round(remaining / 2);
+              else if (node.justify === 'end') curX += remaining;
+              else if (node.justify === 'space-between' && children.length > 1) {
+                stepGap += remaining / (children.length - 1);
+              }
             }
-            layout(ch, curX, chY, chW, chH, node._x, node._y);
-            curX += ch._w + stepGap;
+
+            const sharedBase = useBaseline
+              ? Math.max(...children.map(c => (useLast ? c._lastBaselineOffset : c._firstBaselineOffset) ?? Math.round((c._mh || 0) * 0.82)), 0)
+              : 0;
+            for (const ch of children) {
+              const weight = rowFlex(ch);
+              const chW = weight > 0 ? Math.round(remaining * weight / flex) : ch._mw;
+              const chH = ch.h === 'fill' || node.align === 'stretch' || node.equalHeight ? height : ch._mh;
+              let chY = lineY;
+              if (useBaseline) {
+                const cb = (useLast ? ch._lastBaselineOffset : ch._firstBaselineOffset) ?? Math.round((chH || 0) * 0.82);
+                chY += Math.max(0, sharedBase - cb);
+              } else if (node.align === 'center' && chH < height) {
+                chY += Math.round((height - chH) / 2);
+              } else if (node.align === 'end' && chH < height) {
+                chY += height - chH;
+              }
+              layout(ch, curX, chY, chW, chH, node._x, node._y);
+              curX += ch._w + stepGap;
+            }
+            lineY += height + gap;
           }
         } else if (mode === 'grid') {
           const plan = planGrid(node), cellW = Math.max(0,(innerW-plan.columnGap*(plan.columns-1))/plan.columns);
@@ -1434,6 +1438,9 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
           vectorFallbackReasons: vectorSpec.nativeCompatibility?.fallbackReasons || [],
         } : {}),
         gradient: n.gradient || null,
+        ...(Array.isArray(n.fills) ? { fills: n.fills } : {}),
+        ...(Array.isArray(n.shadows) ? { shadows: n.shadows } : {}),
+        ...(n.mixBlendMode ? { mixBlendMode: n.mixBlendMode } : {}),
         shadow: n.shadow || null,
         innerGlow: n.innerGlow || null,
         backdropBlur: n.backdropBlur || null,

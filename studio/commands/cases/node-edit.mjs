@@ -80,26 +80,25 @@ function setText({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
       if (Object.keys(extraProps).length > 0) {
         validatePropertiesObject(extraProps, cmd.nodeId, cmdIdx);
       }
+      const applyTextOverride = (instance, subNodeId) => {
+        instance.overrides ||= {};
+        const override = { ...instance.overrides[subNodeId], text: textValue, ...extraProps };
+        if (spansArr) override.spans = spansArr;
+        else delete override.spans;
+        instance.overrides[subNodeId] = override;
+        validateComponentInstanceAgainstContract(instance, doc, { strict: true });
+      };
       if (targetInfo.isInstanceSubnode) {
-        const inst = targetInfo.instanceEntry.node;
-        inst.overrides = inst.overrides || {};
-        inst.overrides[targetInfo.subNodeId] = {
-          ...(inst.overrides[targetInfo.subNodeId] || {}),
-          text: textValue,
-          ...extraProps,
-        };
-        validateComponentInstanceAgainstContract(inst, doc, { strict: true });
+        applyTextOverride(targetInfo.instanceEntry.node, targetInfo.subNodeId);
         affectedIds.push(targetInfo.instanceEntry.scopedId);
       } else {
         const { node, scopedId } = targetInfo.entry;
-        if(node.type!=='instance'&&!node.component)assertKnownNodeEffects(node,{text:cmd.text,...extraProps},{commandIndex:cmdIdx,nodeId:scopedId});
+        if(node.type!=='instance'&&!node.component)assertKnownNodeEffects(node,{text:textValue,...extraProps},{commandIndex:cmdIdx,nodeId:scopedId});
         if (node.locked) {
           throw cmdError('E_NODE_LOCKED', `节点 "${node.id}" 已锁定，无法修改文本`, { commandIndex: cmdIdx, nodeId: cmd.nodeId });
         }
-        if (node.type === 'instance') {
-          const targetSub = cmd.subNodeId || '$root';
-          node.overrides = node.overrides || {};
-          node.overrides[targetSub] = { ...(node.overrides[targetSub] || {}), text: cmd.text, ...extraProps };
+        if (node.type === 'instance' || node.component) {
+          applyTextOverride(node, '$root');
         } else if (node.type === 'input') {
           node.value = textValue;
           Object.assign(node, extraProps);

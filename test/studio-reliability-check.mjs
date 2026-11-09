@@ -161,3 +161,36 @@ test('crash replay retains the transaction page rather than editing the first pa
   const node = [...buildNodeIndex(recovered.doc).byScopedId.values()].find(entry => entry.node.id === 'second-only');
   assert.equal(node.pageId, 'second');
 });
+
+test('Studio reports a legacy server fingerprint and checks a reused instance belongs to the requested project', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-studio-fingerprint-'));
+  let projectDir = dir;
+  let commandRequests = 0;
+  const server = http.createServer((request, response) => {
+    if (request.url === '/api/commands') commandRequests++;
+    response.setHeader('Content-Type', 'application/json');
+    response.end(JSON.stringify({ ok: true, projectDir }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    await new Promise(resolve => {
+      server.close(resolve);
+      server.closeAllConnections();
+    });
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const port = server.address().port;
+  const url = `http://127.0.0.1:${port}`;
+  writeFileSync(join(dir, '.studio-instance.json'), JSON.stringify({ projectDir, port, url }));
+  const opened = await callCommandTool('studio_open_project', { projectDir });
+  assert.equal(opened.isError, false);
+  const { studioRuntime } = opened.structuredContent;
+  assert.equal(studioRuntime.sourceFingerprint, null);
+  assert.match(studioRuntime.diskFingerprint, /^[a-f0-9]{64}$/);
+  assert.equal(studioRuntime.restartRequired, true);
+  await assert.rejects(studioHandlers.studio_open_project({ projectDir, port: port === 4310 ? 4311 : 4310 }),
+    { code: 'E_INSTANCE_PORT_MISMATCH' });
+  projectDir = join(dir, 'different-project');
+  await assert.rejects(studioHandlers.studio_command({ projectDir: dir, commands: [] }), { code: 'E_NO_STUDIO_INSTANCE' });
+  assert.equal(commandRequests, 0);
+});

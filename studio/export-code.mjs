@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { sha256 } from './document.mjs';
 import { resolveDocumentScene } from './scene-resolver.mjs';
+import { textSpanCss, visualCss } from './visual-style.mjs';
 import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
 import { locateDiagnostic } from './diagnostics.mjs';
 import { computeDependencyClosure } from './project-bundle.mjs';
@@ -220,7 +221,15 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
   const rewrittenSrc = n.src && assetRewriteMap.has(n.src) ? assetRewriteMap.get(n.src) : (n.src || null);
   const unsupEntries = nodeUnsupportedMap.get(n.scopedId) || [];
   const supCount = nodeSupportedMap.get(n.scopedId) || 0;
+  const paint = {};
+  if (n.fills || n.shadows || n.mixBlendMode) {
+    const css = visualCss(n);
+    for (const key of ['background-image', 'box-shadow', 'mix-blend-mode']) {
+      if (css[key]) paint[key] = css[key];
+    }
+  }
   return {
+    ...(Object.keys(paint).length ? { paint } : {}),
     id: n.id,
     scopedId: n.scopedId,
     pageId: n.pageId,
@@ -240,6 +249,7 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
     relX: n.relX ?? 0,
     relY: n.relY ?? 0,
     text: n.text ?? '',
+    ...(!n.truncated && n.spans?.length ? { spans: n.spans.map(span => ({ text: span.text, css: textSpanCss(span, n.fontStackCss) })) } : {}),
     rawText: n.rawText ?? n.text ?? '',
     placeholder: n.placeholder || '',
     value: n.value ?? '',
@@ -341,6 +351,7 @@ function renderStaticInitialNodeHtml(n) {
   ];
   if (!n.visible) styleParts.push('display:none');
   if (n.fill && n.type !== 'path') styleParts.push(`background:${n.fill}`);
+  for (const [key, value] of Object.entries(n.paint || {})) styleParts.push(`${key}:${value}`);
   if (n.stroke && n.strokeWidth > 0 && n.type !== 'path') {
     styleParts.push(`border:${n.strokeWidth}px ${n.strokeStyle || 'solid'} ${n.stroke}`);
   }
@@ -361,14 +372,14 @@ function renderStaticInitialNodeHtml(n) {
   if (n.type === 'path' && n.svgD) {
     const vb = n.svgViewBox || { x: 0, y: 0, w: n.w || 100, h: n.h || 100 };
     const dashAttr = n.strokeDasharray ? ` stroke-dasharray="${escapeHtml(n.strokeDasharray)}"` : '';
-    return `<div class="export-node export-node-path" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="path"${roleAttr}${unsupAttr} style="${styleParts.join(';')}"><svg class="export-vector-svg" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" width="100%" height="100%" preserveAspectRatio="none"><path d="${escapeHtml(n.svgD)}" fill="${escapeHtml(n.fill || 'none')}" fill-rule="${escapeHtml(n.fillRule || 'nonzero')}" stroke="${escapeHtml(n.stroke || 'none')}" stroke-width="${n.stroke ? (n.strokeWidth ?? 1) : 0}" stroke-linecap="${escapeHtml(n.strokeLinecap || 'round')}" stroke-linejoin="${escapeHtml(n.strokeLinejoin || 'round')}"${dashAttr}/></svg></div>`;
+    return `<div class="export-node export-node-path" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="path"${roleAttr}${unsupAttr} style="${escapeHtml(styleParts.join(';'))}"><svg class="export-vector-svg" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" width="100%" height="100%" preserveAspectRatio="none"><path d="${escapeHtml(n.svgD)}" fill="${escapeHtml(n.fill || 'none')}" fill-rule="${escapeHtml(n.fillRule || 'nonzero')}" stroke="${escapeHtml(n.stroke || 'none')}" stroke-width="${n.stroke ? (n.strokeWidth ?? 1) : 0}" stroke-linecap="${escapeHtml(n.strokeLinecap || 'round')}" stroke-linejoin="${escapeHtml(n.strokeLinejoin || 'round')}"${dashAttr}/></svg></div>`;
   }
 
   if (n.type === 'image') {
     const imgHtml = n.src
       ? `<img src="${escapeHtml(n.src)}" alt="${escapeHtml(n.name || n.id)}" style="width:100%;height:100%;object-fit:${escapeHtml(n.objectFit || 'cover')};display:block;" />`
       : `<div class="export-image-placeholder">${escapeHtml(n.name || n.id)}</div>`;
-    return `<div class="export-node export-node-image" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="image"${roleAttr}${unsupAttr} style="${styleParts.join(';')}">${imgHtml}</div>`;
+    return `<div class="export-node export-node-image" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="image"${roleAttr}${unsupAttr} style="${escapeHtml(styleParts.join(';'))}">${imgHtml}</div>`;
   }
 
   if (n.type === 'input') {
@@ -378,7 +389,7 @@ function renderStaticInitialNodeHtml(n) {
       `font-family:${escapeHtml(n.fontFamily || 'PingFang SC')}, sans-serif`,
       'padding:0 12px'
     );
-    return `<input class="export-node export-node-input" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="input"${roleAttr}${unsupAttr} type="text" value="${escapeHtml(n.value || n.text || '')}" placeholder="${escapeHtml(n.placeholder || '')}" style="${styleParts.join(';')}" />`;
+    return `<input class="export-node export-node-input" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="input"${roleAttr}${unsupAttr} type="text" value="${escapeHtml(n.value || n.text || '')}" placeholder="${escapeHtml(n.placeholder || '')}" style="${escapeHtml(styleParts.join(';'))}" />`;
   }
 
   const isTextBearing = ['label', 'paragraph', 'button', 'badge'].includes(n.type) || Boolean(n.text);
@@ -401,7 +412,11 @@ function renderStaticInitialNodeHtml(n) {
   const btnTypeAttr = tag === 'button' ? ' type="button"' : '';
   const interactiveClass = n.hasSupportedInteraction ? ' is-interactive' : '';
   const unsupClass = n.unsupportedInteractions?.length && !n.hasSupportedInteraction ? ' is-unsupported-interaction' : '';
-  return `<${tag}${btnTypeAttr} class="export-node export-node-${escapeHtml(n.type)}${interactiveClass}${unsupClass}" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="${escapeHtml(n.type)}"${roleAttr}${unsupAttr} style="${styleParts.join(';')}">${escapeHtml(n.text || '')}</${tag}>`;
+  const textHtml = n.spans?.length ? n.spans.map(span => {
+    const css = Object.entries(span.css).map(([key, value]) => `${key}:${value}`).join(';');
+    return `<span style="${escapeHtml(css)}">${escapeHtml(span.text)}</span>`;
+  }).join('') : escapeHtml(n.text);
+  return `<${tag}${btnTypeAttr} class="export-node export-node-${escapeHtml(n.type)}${interactiveClass}${unsupClass}" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="${escapeHtml(n.type)}"${roleAttr}${unsupAttr} style="${escapeHtml(styleParts.join(';'))}">${textHtml}</${tag}>`;
 }
 
 function buildStylesCss(doc, layoutAnalysis) {
@@ -1481,6 +1496,7 @@ function buildAppJs(bundlePayload) {
       el.style.display = vis ? (n.type === 'button' || n.textAlign === 'center' ? 'flex' : 'block') : 'none';
 
       if (n.fill && n.type !== 'path') el.style.background = n.fill;
+      for (const [key, value] of Object.entries(n.paint || {})) el.style.setProperty(key, value);
       if (n.stroke && n.strokeWidth > 0 && n.type !== 'path') {
         el.style.border = n.strokeWidth + 'px ' + (n.strokeStyle || 'solid') + ' ' + n.stroke;
       }
@@ -1550,7 +1566,16 @@ function buildAppJs(bundlePayload) {
             el.style.alignItems = 'center';
             el.style.justifyContent = n.textAlign === 'center' ? 'center' : n.textAlign === 'right' ? 'flex-end' : 'flex-start';
           }
-          el.textContent = displayText;
+          if (displayText === n.text && n.spans?.length) {
+            for (const span of n.spans) {
+              const inline = document.createElement('span');
+              inline.textContent = span.text;
+              for (const [key, value] of Object.entries(span.css)) inline.style.setProperty(key, value);
+              el.appendChild(inline);
+            }
+          } else {
+            el.textContent = displayText;
+          }
         }
       }
 

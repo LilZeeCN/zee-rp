@@ -3,6 +3,7 @@ import { BROWSER_SCENARIO_STEP_SCHEMA } from './scenario-executors.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { startStudioServer } from './server.mjs';
+import { studioSourceFingerprint } from './source-fingerprint.mjs';
 import { describeAuthoring, AUTHORING_ENTRY } from './authoring-help.mjs';
 import { VALID_COMMAND_TYPES } from './commands.mjs';
 import { StudioOperations, OPERATION_PROPERTIES } from './operations.mjs';
@@ -40,7 +41,7 @@ async function probeInstance(record, expectedProjectDir = null) {
     if (!res.ok) return null;
     const body = await res.json();
     if (!body?.ok) return null;
-    if (expectedProjectDir && body.projectDir && resolve(body.projectDir) !== resolve(expectedProjectDir)) return null;
+    if (expectedProjectDir && (!body.projectDir || resolve(body.projectDir) !== resolve(expectedProjectDir))) return null;
     return body;
   } catch {
     return null;
@@ -52,19 +53,16 @@ async function resolveServerUrl({ url = null, port = null, projectDir = null } =
   if (port) return `http://127.0.0.1:${port}`;
   if (projectDir) {
     const known = inProcessServers.get(resolve(projectDir));
-    if (known) return known.kind === 'local' ? known.studio.url : known.url;
+    if (known?.kind === 'local' && known.studio.server?.listening && known.studio.projectDir === resolve(projectDir)) return known.studio.url;
+    const record = instanceRecordFor(projectDir) || (known?.kind === 'remote' ? known : null);
+    if (await probeInstance(record, projectDir)) return record.url.replace(/\/$/, '');
   }
   if (inProcessServers.size === 1 && !projectDir) {
     const only = [...inProcessServers.values()][0];
     return only.kind === 'local' ? only.studio.url : only.url;
   }
 
-  if (projectDir) {
-    const rec = instanceRecordFor(projectDir);
-    if (rec && (await probeInstance(rec, projectDir))) return rec.url.replace(/\/$/, '');
-  }
-
-  if (existsSync(INSTANCE_REGISTRY_PATH)) {
+  if (!projectDir && existsSync(INSTANCE_REGISTRY_PATH)) {
     try {
       const list = JSON.parse(readFileSync(INSTANCE_REGISTRY_PATH, 'utf8'));
       if (Array.isArray(list)) {
@@ -348,6 +346,24 @@ export const studioHandlers = {
       throw Object.assign(new Error('projectDir 参数必填'), { code: 'E_PROJECT_DIR_REQUIRED' });
     }
     const absDir = resolve(projectDir);
+    const respond = (body, extra = {}) => {
+      const diskFingerprint = studioSourceFingerprint();
+      const sourceFingerprint = body.sourceFingerprint ?? null;
+      const restartRequired = sourceFingerprint !== diskFingerprint;
+      return {
+        ...projectPayload({
+          ...body,
+          studioRuntime: {
+            sourceFingerprint,
+            diskFingerprint,
+            restartRequired,
+            ...(restartRequired ? { nextAction: '保存项目，重启提供此 URL 的 Studio 服务后重新打开项目' } : {}),
+          },
+        }, { verbose, includeDoc, includeScene, maxBytes }),
+        ...extra,
+        openInstances: instanceSummary(),
+      };
+    };
     if (url) {
       const body = await callServerJson(url.replace(/\/$/, ''), '/api/project/open', 'POST', {
         projectDir: absDir,
@@ -355,12 +371,12 @@ export const studioHandlers = {
         name,
         domain,
       });
-      return { ...projectPayload(body, { verbose, includeDoc, includeScene, maxBytes }), openInstances: instanceSummary() };
+      return respond(body);
     }
 
     // 同一工程：已有本地实例就直接复用，避免重复加载与画面重置。
     const known = inProcessServers.get(absDir);
-    if (known?.kind === 'local') {
+    if (known?.kind === 'local' && known.studio.server?.listening && known.studio.projectDir === absDir) {
       if (port !== null && known.studio.port !== port) {
         throw Object.assign(new Error(`工程已在端口 ${known.studio.port} 运行；显式请求端口 ${port} 不会热迁移实例，请继续使用当前端口或换一个新的 projectDir`), {
           code: 'E_INSTANCE_PORT_MISMATCH', projectDir: absDir, currentPort: known.studio.port, requestedPort: port,
@@ -369,43 +385,30 @@ export const studioHandlers = {
       const body = sourcePath
         ? known.studio.openProject({ projectDir: absDir, sourcePath, name, domain })
         : known.studio.buildContextPayload();
-      return { ...projectPayload(body, { verbose, includeDoc, includeScene, maxBytes }), openInstances: instanceSummary() };
+      return respond(body);
     }
-    if (known?.kind === 'remote') {
-      try {
-        const body = await callServerJson(known.url, '/api/context', 'GET');
-        return { ...projectPayload(body, { verbose, includeDoc, includeScene, maxBytes }), openInstances: instanceSummary() };
-      } catch {
-        inProcessServers.delete(absDir);
-      }
-    }
-
-    // 不同工程：先看是否已有别的进程在该目录上跑着（跨进程复用，防止双写）。
-    const rec = instanceRecordFor(absDir);
-    if (rec) {
-      if (port !== null && rec.port !== port) {
-        throw Object.assign(new Error(`工程已在端口 ${rec.port} 运行；显式请求端口 ${port} 不会热迁移实例，请继续使用当前端口或换一个新的 projectDir`), {
-          code: 'E_INSTANCE_PORT_MISMATCH', projectDir: absDir, currentPort: rec.port, requestedPort: port,
+    // 跨进程复用前先确认服务仍在运行且打开的是该工程。
+    const record = instanceRecordFor(absDir) || (known?.kind === 'remote' ? known : null);
+    const live = await probeInstance(record, absDir);
+    if (live) {
+      const endpoint = new URL(live.url || record.url);
+      const currentPort = Number(endpoint.port || (endpoint.protocol === 'https:' ? 443 : 80));
+      if (port !== null && currentPort !== port) {
+        throw Object.assign(new Error(`工程已在端口 ${currentPort} 运行；请继续使用当前端口`), {
+          code: 'E_INSTANCE_PORT_MISMATCH', projectDir: absDir, currentPort, requestedPort: port,
         });
       }
-      const live = await probeInstance(rec, absDir);
-      if (live) {
-        inProcessServers.set(absDir, { kind: 'remote', url: rec.url.replace(/\/$/, '') });
-        return {
-          ...projectPayload({ ...live, reusedInstance: true }, { verbose, includeDoc, includeScene, maxBytes }),
-          openInstances: instanceSummary(),
-        };
-      }
+      inProcessServers.set(absDir, { kind: 'remote', url: record.url.replace(/\/$/, '') });
+      const body = sourcePath
+        ? await callServerJson(record.url, '/api/project/open', 'POST', { projectDir: absDir, sourcePath, name, domain })
+        : live;
+      return respond({ ...body, reusedInstance: true });
     }
 
     // 新工程：起独立实例。端口冲突由 server.start() 自动递增，天然得到并行端口。
     const { studio } = await startStudioServer({ projectDir: absDir, sourcePath, name, port: port ?? 4310, domain });
     inProcessServers.set(absDir, { kind: 'local', studio });
-    return {
-      ...projectPayload(studio.buildContextPayload(), { verbose, includeDoc, includeScene, maxBytes }),
-      authoring: AUTHORING_ENTRY,
-      openInstances: instanceSummary(),
-    };
+    return respond(studio.buildContextPayload(), { authoring: AUTHORING_ENTRY });
   },
 
   // ---- 写:唯一事务入口(HTTP /api/commands;as/$ref 步引用在 store 层解析) ----
@@ -803,7 +806,7 @@ const connectionProperties = { url: { type: 'string' }, port: { type: 'integer' 
 export const studioTools = [
   {
     name: 'studio_open_project',
-    description: '打开或初始化自由画布工程目录(可选从 RP/1 JSON 或 .rp1 源码导入),启动或复用本机单端口 Studio 服务并返回画布上下文。这是每个工程的第一步。',
+    description: '打开或初始化自由画布工程目录(可选从 RP/1 JSON 或 .rp1 源码导入),启动或复用本机单端口 Studio 服务并返回画布上下文和 studioRuntime 指纹状态。这是每个工程的第一步。',
     inputSchema: {
       type: 'object',
       properties: {

@@ -39,6 +39,13 @@ Studio 原生出口会把跨页 `set-text`（普通 label / paragraph / button /
 
 同一个请求中 `commands` 和 `rp1` 二选一。原有 `source` 参数仍表示调用来源，不承载片段，避免破坏旧调用。
 
+## 实例、富文本与布局
+
+- `setText` 接受 `text` 或非空 `spans`，二选一。修改实例根节点或 `instanceId__childId` 只影响该实例。使用普通 `text` 会清除原来的逐段样式。
+- `swapInstance` 保留目标组件仍接受的覆盖和实例位置。使用 `preserveOverrides:false` 可以清空覆盖后换入另一个组件。
+- `layout:"row", wrap:true` 逐行布置子节点。每行应用 `justify` 和交叉轴对齐，`equalHeight` 按行统一高度。添加 stack 子树时，省略坐标导致子节点共用起点会在成功回包中给出定位提醒。
+- `studio_open_project` 的 `studioRuntime.restartRequired` 提示是否需要重启复用的 Studio 服务。MCP 本身的加载状态由 `runtime_info` 单独报告。
+
 ## 从空白开始
 
 1. `studio_open_project({projectDir:"/abs/project"})`，记住返回的版本与真实页面ID。

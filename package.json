@@ -330,6 +330,7 @@
     "studio/scenarios.mjs",
     "studio/scene-resolver.mjs",
     "studio/server.mjs",
+    "studio/source-fingerprint.mjs",
     "studio/text-shaping.mjs",
     "studio/text-shaping.swift",
     "studio/typography.mjs",

@@ -1,4 +1,4 @@
-import { visualCss } from '/visual-style.mjs';
+import { textSpanCss, visualCss } from '/visual-style.mjs';
 import { escapeHtml, renderIconSvg } from './ui.mjs';
 import { applyCanvasTransform, fitWorkspace as fitViewport, getActivePageScene, nodeViewportBounds, revealActiveArtboard as revealArtboard, updateZoomLabel, workspaceBounds } from './view.mjs';
 import { state } from './state.mjs';
@@ -56,21 +56,10 @@ export function shouldMountPage(pg) {
 export function renderTextContentHtml(n) {
   if (n.truncated) return escapeHtml(n.text);
   if (Array.isArray(n.spans) && n.spans.length > 0) {
-    return n.spans
-      .map(sp => {
-        const spStyles = [];
-        if (sp.fontFamily) spStyles.push(`font-family:'${escapeHtml(sp.fontFamily)}', ${n.fontStackCss || 'sans-serif'}`);
-        if (sp.fontSize) spStyles.push(`font-size:${Number(sp.fontSize)}px`);
-        if (sp.fontWeight) spStyles.push(`font-weight:${Number(sp.fontWeight)}`);
-        if (sp.letterSpacing !== undefined) spStyles.push(`letter-spacing:${Number(sp.letterSpacing)}px`);
-        if (sp.color) spStyles.push(`color:${escapeHtml(sp.color)}`);
-        if (sp.italic) spStyles.push('font-style:italic');
-        const spDeco = [sp.underline ? 'underline' : '', sp.strikethrough ? 'line-through' : ''].filter(Boolean).join(' ');
-        if (spDeco) spStyles.push(`text-decoration:${spDeco}`);
-        const stAttr = spStyles.length > 0 ? ` style="${spStyles.join(';')}"` : '';
-        return `<span class="studio-text-span"${stAttr}>${escapeHtml(sp.text ?? '')}</span>`;
-      })
-      .join('');
+    return n.spans.map(span => {
+      const css = Object.entries(textSpanCss(span, n.fontStackCss)).map(([key, value]) => `${key}:${value}`).join(';');
+      return `<span class="studio-text-span"${css ? ` style="${escapeHtml(css)}"` : ''}>${escapeHtml(span.text)}</span>`;
+    }).join('');
   }
   return escapeHtml(n.text);
 }

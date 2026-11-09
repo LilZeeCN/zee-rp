@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
 
+const STYLE_FIELDS = ['fill', 'stroke', 'color', 'radius', 'opacity', 'rotation', 'visible', 'css', 'fills', 'shadows', 'mixBlendMode'];
+const differs = (before, after) => before !== after && (
+  typeof before !== 'object' || typeof after !== 'object' || JSON.stringify(before) !== JSON.stringify(after)
+);
+
 function sha256Json(value) {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
@@ -24,6 +29,10 @@ export function computePageContentHash(rawPage, resolvedPage = null) {
       pageGlobalX: n.pageGlobalX,
       pageGlobalY: n.pageGlobalY,
       text: n.text,
+      spans: n.spans ?? undefined,
+      fills: n.fills,
+      shadows: n.shadows,
+      mixBlendMode: n.mixBlendMode,
       lineCount: n.lineCount,
       fontFamily: n.fontFamily,
       fontSize: n.fontSize,
@@ -417,8 +426,10 @@ export function computeCommandImpactAndDiff({
       if (!bNode || bNode === aNode) continue;
 
       // Text diff
+      const spansChanged = differs(bNode.spans, aNode.spans);
       if (
         bNode.text !== aNode.text ||
+        spansChanged ||
         bNode.lineCount !== aNode.lineCount ||
         bNode.fontFamily !== aNode.fontFamily ||
         bNode.fontSize !== aNode.fontSize ||
@@ -430,6 +441,8 @@ export function computeCommandImpactAndDiff({
           nodeId: aNode.id,
           beforeText: bNode.text,
           afterText: aNode.text,
+          ...(spansChanged
+            ? { beforeSpans: bNode.spans, afterSpans: aNode.spans } : {}),
           beforeLines: bNode.lineCount,
           afterLines: aNode.lineCount,
           beforeFont: `${bNode.fontFamily} ${bNode.fontSize}px/${bNode.fontWeight}`,
@@ -438,21 +451,15 @@ export function computeCommandImpactAndDiff({
       }
 
       // Style diff
-      if (
-        bNode.fill !== aNode.fill ||
-        bNode.stroke !== aNode.stroke ||
-        bNode.color !== aNode.color ||
-        bNode.radius !== aNode.radius ||
-        bNode.opacity !== aNode.opacity ||
-        bNode.rotation !== aNode.rotation ||
-        JSON.stringify(bNode.css) !== JSON.stringify(aNode.css)
-      ) {
+      const changedFields = STYLE_FIELDS.filter(field => differs(bNode[field], aNode[field]));
+      if (changedFields.length) {
         styleChanges.push({
           pageId,
           scopedId,
           nodeId: aNode.id,
-          before: { fill: bNode.fill, stroke: bNode.stroke, color: bNode.color, radius: bNode.radius, opacity: bNode.opacity, rotation: bNode.rotation },
-          after: { fill: aNode.fill, stroke: aNode.stroke, color: aNode.color, radius: aNode.radius, opacity: aNode.opacity, rotation: aNode.rotation },
+          changedFields,
+          before: Object.fromEntries(STYLE_FIELDS.map(field => [field, bNode[field] ?? null])),
+          after: Object.fromEntries(STYLE_FIELDS.map(field => [field, aNode[field] ?? null])),
         });
       }
 
@@ -604,7 +611,8 @@ export function computeCommandImpactAndDiff({
     summaryParts.push(`文案/排版变更 ${textChanges.length} 处`);
   }
   if (styleChanges.length > 0) {
-    summaryParts.push(`视觉样式变更 ${styleChanges.length} 处`);
+    const visibilityCount = styleChanges.filter(change => change.changedFields.includes('visible')).length;
+    summaryParts.push(`视觉样式变更 ${styleChanges.length} 处${visibilityCount ? `（其中 ${visibilityCount} 处显隐变化）` : ''}`);
   }
   if (vectorChanges.length > 0) {
     // T-HR-1：给矢量内容替换（import-svg / set-subpaths / 布尔产物）一个正确的摘要标签。
@@ -637,7 +645,7 @@ export function computeCommandImpactAndDiff({
       const pureNoop = beforeDoc?.contentHash && beforeDoc.contentHash === afterDoc?.contentHash;
       summaryParts.push(pureNoop
         ? `属性 ${[...writtenKeys].join(', ')} 与当前值相同，本次写入未产生任何变更（no-op）`
-        : `属性 ${[...writtenKeys].join(', ')} 已写入但对当前节点/布局无视觉效果（已忽略属性；对齐请确认节点类型与容器布局）`);
+        : `属性 ${[...writtenKeys].join(', ')} 已写入，当前摘要未检测到视觉或结构变化`);
     }
   }
 
@@ -649,9 +657,9 @@ export function computeCommandImpactAndDiff({
   // 摘要与 diagnostics 数组保持一致：按 code 聚合全部事务诊断（文档级 + 场景截断 + 事务生成），
   // 已知三族沿用原文案，其余诊断不再被静默折叠成「无」。
   const txDiagnosticList = [
+    ...(extraDiagnostics || []),
     ...(afterDoc?.diagnostics || []),
     ...(afterScene?.clipDiagnostics || []).map(d => ({ ...d, code: d.code || 'E_TEXT_CLIP' })),
-    ...(extraDiagnostics || []),
   ];
   const diagByCode = new Map();
   for (const d of txDiagnosticList) {
@@ -659,6 +667,7 @@ export function computeCommandImpactAndDiff({
     diagByCode.set(code, (diagByCode.get(code) || 0) + 1);
   }
   const diagLabels = {
+    W_STACK_CHILDREN_UNPLACED: count => `发现 ${count} 个 stack 容器有子节点因省略坐标而共用起点，请检查坐标或改用自动布局`,
     E_TEXT_CLIP: count => `发现文字截断/溢出风险 ${count} 处`,
     E_STALE_OVERRIDE: count => `发现失效组件覆盖 (E_STALE_OVERRIDE) ${count} 处`,
     E_MISSING_ASSET: count => `发现缺失资源 ${count} 处`,

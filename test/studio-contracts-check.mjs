@@ -96,3 +96,47 @@ test('interaction aliases preserve supported conditional behavior and reject uns
  const s=seed();assert(apply(s,[{type:'setInteraction',nodeId:'title',actions:{cases:[{when:'1 == 1',actions:[{type:'set-text',target:'title',value:'Changed'}]}]}}]).ok);
  const rt=new StudioRuntimeSession(s.doc);assert(rt.runScenario([{action:'click',target:'title',expect:{text:{title:'Changed'}}}]).ok);
 });
+
+test('rich text can be replaced on component roots and descendants and survives a compatible swap', () => {
+  const store = new StudioDocumentStore(createEmptyStudioDocument({ domain: 'web' }));
+  const label = (id, text) => ({ id, type: 'label', text, w: 140, h: 24, spans: [{ text, italic: true }] });
+  const first = { id: 'root_a', type: 'box', w: 200, h: 120, children: [label('shared', 'A'), label('only_a', 'old')] };
+  const second = { id: 'root_b', type: 'box', w: 220, h: 150, children: [label('shared', 'B'), label('only_b', 'new')] };
+  const edit = commands => {
+    const result = store.applyTransaction({ commands });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    return result;
+  };
+  const find = (result, suffix) => result.scene.pages[0].nodes.find(n => n.scopedId.endsWith(suffix));
+  edit([
+    { type: 'createComponent', componentId: 'first', root: first },
+    { type: 'createComponent', componentId: 'second', root: second, params: { tone: 'muted' } },
+    { type: 'createComponent', componentId: 'text_root', root: label('text_root_label', 'root') },
+    { type: 'createInstance', componentId: 'first', instanceId: 'card', x: 21, y: 27 },
+    { type: 'createInstance', componentId: 'text_root', instanceId: 'headline' },
+  ]);
+  const spans = [{ text: 'Shared ', color: '#123456' }, { text: 'style', fontWeight: 700 }];
+  const styled = edit([
+    { type: 'setText', nodeId: 'card__shared', spans },
+    { type: 'setText', nodeId: 'card__only_a', text: 'removed override' },
+    { type: 'setText', nodeId: 'headline', spans },
+  ]);
+  assert.deepEqual(find(styled, '/card__shared').spans, spans);
+  assert.deepEqual(find(styled, '/headline').spans, spans);
+  const recolored = edit([{ type: 'setText', nodeId: 'headline', spans: [{ text: 'Shared style', italic: true }] }]);
+  assert.equal(recolored.semanticDiff.textChanges.find(change => change.nodeId === 'headline').afterSpans[0].italic, true);
+  const plain = edit([{ type: 'setText', nodeId: 'headline', text: 'plain' }]);
+  assert.equal(find(plain, '/headline').spans, null);
+  assert.equal(find(plain, '/headline').text, 'plain');
+  const swapped = edit([{ type: 'swapInstance', nodeId: 'card', componentId: 'second' }]);
+  assert.deepEqual(find(swapped, '/card__shared').spans, spans);
+  assert.equal(find(swapped, '/card__only_b').text, 'new');
+  assert.equal(find(swapped, '/card').x, 21);
+  assert.equal(find(swapped, '/card').y, 27);
+  assert.deepEqual(store.doc.pages[0].root.children.find(n => n.id === 'card').overrides, {
+    shared: { text: 'Shared style', spans },
+  });
+  assert.equal(store.doc.components.first.root.children[0].text, 'A');
+  assert.equal(store.applyTransaction({ commands: [{ type: 'setText', nodeId: 'headline', text: 'both', spans }] }).ok, false);
+  assert.equal(store.applyTransaction({ commands: [{ type: 'setText', nodeId: 'headline', spans: [] }] }).ok, false);
+});

@@ -116,3 +116,25 @@ test('real browser executes original aliases and compact MCP responses preserve 
   }
  }finally{await studio.close();rmSync(dir,{recursive:true,force:true});}
 });
+
+test('stack placement diagnostics and visibility edits report the actual outcome', () => {
+ const store = new StudioDocumentStore(createEmptyStudioDocument({ domain: 'web' }));
+ const box = (id, x) => ({ id, type: 'box', x, w: 10, h: 10 });
+ const result = store.applyTransaction({ commands: [
+  { type: 'addNode', node: { id: 'overlap', type: 'box', layout: 'stack', w: 100, h: 100, children: [box('a'), box('b')] } },
+  { type: 'addNode', node: { id: 'separated', type: 'box', layout: 'stack', w: 100, h: 100, children: [box('c', 10), box('d', 50)] } },
+ ] });
+ assert.equal(result.ok, true, JSON.stringify(result));
+ assert.deepEqual(result.diagnostics.filter(d => d.code === 'W_STACK_CHILDREN_UNPLACED').map(d => [d.severity, d.nodeId]), [['warning', 'overlap']]);
+ assert.equal(result.diagnostics[0].code, 'W_STACK_CHILDREN_UNPLACED');
+ assert.match(result.humanReadableSummary.diagnosticsSummary, /共用起点/);
+
+ const hidden = store.applyTransaction({ commands: [{ type: 'editNodes', operation: 'set', select: { nodeIds: ['a'] }, properties: { visible: false } }] });
+ assert.equal(hidden.ok, true, JSON.stringify(hidden));
+ assert.equal(hidden.scene.pages[0].nodes.find(n => n.id === 'a').visible, false);
+ const visibility = hidden.semanticDiff.styleChanges.find(change => change.nodeId === 'a');
+ assert.deepEqual(visibility.changedFields, ['visible']);
+ assert.equal(visibility.before.visible, true);
+ assert.equal(visibility.after.visible, false);
+ assert.match(hidden.humanReadableSummary.whatChanged, /样式/);
+});

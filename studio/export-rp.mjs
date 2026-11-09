@@ -622,6 +622,16 @@ export function classifyNodeCompatibility(node, pageId, entries) {
     name: node.name || node.id,
   };
   const cssPlan = exportCssPlan(node);
+  if (['label', 'paragraph', 'button', 'badge'].includes(node.type) && node.spans?.length) {
+    entries.push({
+      ...baseInfo,
+      classification: 'unsupported',
+      feature: 'text.spans',
+      browserPreserved: true,
+      reason: 'Studio 原生出口将富文本转换为普通可编辑文字',
+      fallback: '保留文字内容和节点级样式；逐段样式保留在 Studio 源与 HTML 代码包',
+    });
+  }
   if (node.type === 'input' && node.rotation) entries.push({ ...baseInfo, classification: 'native-init-action', feature: 'input.rotation', browserPreserved: true, nativePreviewPreserved: true, reason: 'RP9 TextBox 静态旋转不参与预览；导出保留角度，并生成原生 OnLoad 绝对旋转动作，输入框仍可编辑', strategy: 'native-widget-onload-rotate', editorStaticRotationSupported: false });
   if(node.type==='repeater')for(const key of ['filter','sort','pageSize','page','on']){
     const value=key==='on'?nodeEvents(node):node[key];
@@ -649,7 +659,7 @@ export function classifyNodeCompatibility(node, pageId, entries) {
       classification: 'unsupported',
       feature: `css:${cssPlan.unsupported.join(',')}`,
       browserPreserved: true,
-      declarations: { ...(node.css || {}), ...(node.threeDTransform ? { transform: node.threeDTransform } : {}), ...(node.customFilter ? { filter: node.customFilter } : {}) },
+      declarations: { ...(node.css || {}), ...(node.threeDTransform ? { transform: node.threeDTransform } : {}), ...(node.customFilter ? { filter: node.customFilter } : {}), ...(node.mixBlendMode ? { 'mix-blend-mode': node.mixBlendMode } : {}) },
       reason: '这些浏览器效果影响文字、子节点或依赖实时背景；无法在保持原生编辑能力的同时完整表达为 RP9',
       fallback: '仅在 RP9 导出中省略这些效果，保留基础几何、原生文字、子节点与交互；浏览器文档不变',
     });

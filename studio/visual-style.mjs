@@ -46,6 +46,19 @@ function gradientCss(value) {
   return `linear-gradient(${Number(value.angle ?? 135)}deg, ${stops.join(',')})`;
 }
 
+export function textSpanCss(span, fontStack = 'sans-serif') {
+  const css = {};
+  if (span.fontFamily) css['font-family'] = `${JSON.stringify(span.fontFamily)}, ${fontStack}`;
+  if (span.fontSize) css['font-size'] = `${Number(span.fontSize)}px`;
+  if (span.fontWeight) css['font-weight'] = String(span.fontWeight);
+  if (span.letterSpacing !== undefined) css['letter-spacing'] = `${Number(span.letterSpacing)}px`;
+  if (span.color) css.color = span.color;
+  if (span.italic) css['font-style'] = 'italic';
+  const decoration = [span.underline && 'underline', span.strikethrough && 'line-through'].filter(Boolean).join(' ');
+  if (decoration) css['text-decoration'] = decoration;
+  return css;
+}
+
 export function visualCss(node) {
   const css = {};
   const backgrounds = [];
@@ -58,8 +71,11 @@ export function visualCss(node) {
     backgrounds.push('radial-gradient(ellipse at 15% 20%, #A274E880, transparent 65%)', 'radial-gradient(ellipse at 85% 75%, #43E4C580, transparent 65%)');
   }
   if (Array.isArray(node.fills)) for (const f of node.fills) {
-    if (typeof f === 'string' && f.trim()) backgrounds.push(f.trim());
-    else if (f && typeof f === 'object') {
+    if (typeof f === 'string' && f.trim()) {
+      const layer = f.trim();
+      const isImage = /^(?:none$|(?:[a-z-]*gradient|url|image(?:-set)?|cross-fade|element|paint)\()/i.test(layer);
+      backgrounds.push(isImage ? layer : `linear-gradient(${layer},${layer})`);
+    } else if (f && typeof f === 'object') {
       const gc = gradientCss(f);
       if (gc) backgrounds.push(gc);
     }

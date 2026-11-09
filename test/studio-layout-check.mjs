@@ -32,3 +32,22 @@ test('grid geometry reaches browser DOM after column edits and matches the autho
 test('grid exports resolved editable native children without a second layout pass',{skip:nativeTemplateSkipReason()},async t=>{
  const dir=mkdtempSync(join(tmpdir(),'studio-grid-native-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));const {store}=seed(),hash=store.doc.contentHash;const result=await exportStudioDocumentToRp(store.doc,{projectDir:dir,outRpPath:join(dir,'grid.rp')});assert(result.report.summary.threeZerosPassed);assert(result.report.geometryAlignment.passed99PercentWithin1Px,JSON.stringify(result.report.geometryAlignment));const source=JSON.parse(readFileSync(result.sourcePath));assert.equal(source.pages[0].root.children[0].layout,'stack');assert.equal(source.pages[0].root.children[0].children.find(node=>node.id==='wide').w,380);assert.equal(JSON.parse(readFileSync(result.studioSourcePath)).pages[0].root.children[0].layout,'grid');assert.equal(store.doc.contentHash,hash);
 });
+
+test('wrapped rows honor justification, equal heights, and a hug width limit on each line', () => {
+ const store = new StudioDocumentStore(createEmptyStudioDocument({ domain: 'web' }));
+ const children = [30, 60, 20].map((h, i) => ({ id: `wrapped_${i}`, type: 'box', w: 70, h }));
+ const result = store.applyTransaction({ commands: [{ type: 'addNode', node: {
+  id: 'wrapped', type: 'box', layout: 'row', wrap: true, w: 180, h: 'hug',
+  gap: 10, justify: 'end', equalHeight: true, children,
+ } }] });
+ assert.equal(result.ok, true, JSON.stringify(result));
+ assert.equal(node(result.scene, 'wrapped').h, 90);
+ assert.deepEqual(children.map(({ id }) => {
+  const { relX, relY, h } = node(result.scene, id);
+  return [relX, relY, h];
+ }), [[30, 0, 60], [110, 0, 60], [110, 70, 20]]);
+ const hug = store.applyTransaction({ commands: [{ type: 'setProperties', nodeId: 'wrapped', properties: { w: 'hug', maxW: 150 } }] });
+ assert.equal(hug.ok, true, JSON.stringify(hug));
+ assert.equal(node(hug.scene, 'wrapped').w, 150);
+ assert.equal(node(hug.scene, 'wrapped_2').relY, 70);
+});

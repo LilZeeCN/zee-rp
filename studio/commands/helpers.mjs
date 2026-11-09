@@ -296,22 +296,31 @@ export function applyChildConstraintsOnResize(containerNode, oldW, oldH, newW, n
   }
 }
 
-// T-I-1：stack（自由定位）容器收到多个未带 x/y 的子节点时，插入后会全部静默堆叠在
-// 内容盒原点（gap 不生效）。在事务诊断中显式报错，让调用方在读回/回放前就能发现。
+// 提醒调用方检查 stack 中因省略坐标而共用起点的子节点。
 export function stackUnplacedChildDiagnostics(commands, fallbackPageId = null) {
   const out = [];
   const walk = (node, pageId) => {
     if (!node || typeof node !== 'object') return;
     const children = Array.isArray(node.children) ? node.children : [];
     if (node.layout === 'stack' && children.length >= 2) {
-      const unplaced = children.filter(child => typeof child?.x !== 'number' || typeof child?.y !== 'number');
-      if (unplaced.length >= 2) out.push({
-        severity: 'error',
-        code: 'E_STACK_CHILDREN_UNPLACED',
+      const positions = new Map();
+      for (const child of children) {
+        if (child.after || child.pin || child.anchor || child.alignX || child.right != null || child.bottom != null) continue;
+        const position = JSON.stringify([child.x ?? 0, child.y ?? 0]);
+        const group = positions.get(position) || [];
+        group.push(child);
+        positions.set(position, group);
+      }
+      const overlapping = [...positions.values()].flatMap(group => (
+        group.length > 1 ? group.filter(child => child.x == null || child.y == null) : []
+      ));
+      if (overlapping.length) out.push({
+        severity: 'warning',
+        code: 'W_STACK_CHILDREN_UNPLACED',
         pageId,
         nodeId: node.id,
-        message: `stack（自由定位）容器 ${node.id} 有 ${unplaced.length} 个子节点未提供 x/y，插入后将堆叠在内容盒原点、互相遮挡`,
-        suggestion: '如需自动排布请改用 layout=column（配合 gap），或为每个子节点提供 x/y',
+        message: `stack 容器 ${node.id} 中 ${overlapping.map(child => child.id).join('、')} 省略了坐标，并与其他子节点共用起点`,
+        suggestion: '如需自动排布请使用 layout=column 或 row，也可以显式提供子节点的 x/y',
       });
     }
     for (const child of children) walk(child, pageId);

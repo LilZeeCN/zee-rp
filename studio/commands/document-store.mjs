@@ -312,7 +312,6 @@ export class StudioDocumentStore {
     workingDoc.updatedAt = new Date().toISOString();
     resolvedScene.revision = workingDoc.revision;
     resolvedScene.contentHash = workingDoc.contentHash;
-    this.lastScene = resolvedScene;
 
     // 影响计算此刻尚未写入 this.doc(workingDoc 原子性未破坏);若病态输入使其抛错,
     // 必须转成干净信封而不是让裸 RangeError/TypeError 穿透 applyTransaction(M-SWEEP 姊妹防护)。
@@ -346,8 +345,8 @@ export class StudioDocumentStore {
 
     // 文字截断/溢出风险来自场景级 clipDiagnostics；并入事务 diagnostics，让摘要与明细可定位（T-A-3）。
     const txDiagnostics = [
-      ...structuredClone(workingDoc.diagnostics || []),
       ...structuredClone(stackUnplaced),
+      ...structuredClone(workingDoc.diagnostics || []),
       ...(resolvedScene?.clipDiagnostics || []).map(d => ({
         severity: d.severity || 'warning',
         code: d.code || 'E_TEXT_CLIP',
@@ -390,6 +389,7 @@ export class StudioDocumentStore {
     };
 
     this.doc = workingDoc;
+    this.lastScene = resolvedScene;
     this.history.push(txRecord);
     this.redoStack = []; // New forward edit invalidates redo branch
     this.trimHistory();
