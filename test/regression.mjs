@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, existsSync, symlinkSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -139,6 +139,31 @@ try {
     assert.ok(existsSync(join(output, 'test/historical-regression.mjs')));
     assert.ok(existsSync(join(output, 'README.zh-CN.md')));
     assert.equal(run(join(output, 'scripts/registry.mjs'), ['validate']).status, 0);
+  });
+  check('npm tarball includes runtime modules and shipped test entry points', () => {
+    const packed = spawnSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], { cwd: root, encoding: 'utf8' });
+    assert.equal(packed.status, 0, packed.error?.message || packed.stderr);
+    const paths = new Set(JSON.parse(packed.stdout)[0].files.map(file => file.path));
+    const runtime = releasePaths().filter(path => /^(bin|scripts|studio)\//.test(path));
+    const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+    const testEntrypoints = Object.values(scripts).flatMap(script => script.match(/\b(?:test|tools)\/[\w./-]+\.(?:mjs|py)\b/g) || []);
+    const missing = [...new Set([...runtime, ...testEntrypoints])].filter(path => !paths.has(path));
+    assert.deepEqual(missing, []);
+  });
+  check('layer gate detects side-effect import cycles and browser/MCP boundary violations', () => {
+    const probe = join(work, 'layers');
+    for (const dir of ['tools', 'studio/web', 'scripts']) mkdirSync(join(probe, dir), { recursive: true });
+    const checker = join(probe, 'tools/check-layers.mjs');
+    copyFileSync(join(root, 'tools/check-layers.mjs'), checker);
+    writeFileSync(join(probe, 'studio/server.mjs'), "import './capture.mjs';\n");
+    writeFileSync(join(probe, 'studio/capture.mjs'), "import './server.mjs';\n");
+    writeFileSync(join(probe, 'studio/web/app.mjs'), "import fs from 'fs';\nimport '/server.mjs';\n");
+    writeFileSync(join(probe, 'scripts/mcp-tools.mjs'), "import '../studio/server.mjs';\n");
+    const checked = run(checker);
+    assert.equal(checked.status, 1);
+    for (const diagnostic of [/A .*循环依赖/, /B .*Node 内建.*fs/, /B .*非同构模块.*server\.mjs/, /D .*越界引用/]) {
+      assert.match(checked.stderr, diagnostic);
+    }
   });
   check('source baseline fingerprints match every registered script', () => {
     const baseline = JSON.parse(readFileSync(join(root, 'test/baseline-shas.json')));

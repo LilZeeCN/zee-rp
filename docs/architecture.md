@@ -9,7 +9,7 @@
 ┌────────────────────────────────────────────────────────────────┐
 │ L6 接口层   server.mjs(单端口 HTTP + SSE)                       │
 │             server-capture.mjs(CDP 截图/像素测量)               │
-│             mcp-adapter.mjs(28 个 studio_* MCP 工具)             │
+│             mcp-adapter.mjs(13 个 studio_* MCP 工具)             │
 │             cli.mjs(`zee-rp studio`) · operation-worker.mjs      │
 ├────────────────────────────────────────────────────────────────┤
 │ L5 存储会话  persistence(WAL/崩溃恢复) · versions(命名版本)      │

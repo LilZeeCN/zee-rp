@@ -32,7 +32,7 @@
   "native-forms.mjs": "595e288b73e8ebf18dba187ebfb0649da9d5961547dc9d017fa59bb8501f80e2",
   "native-repeater.mjs": "ec3a0dcccc68f650690f910f5647dc0cf5824464623bbc2273fc747f1397a812",
   "native-scene.mjs": "6a4ff54777e6ba12fb2fa67144ea7394a5924dcb8c9093f628fbaf038722ef64",
-  "pack-release.mjs": "15cc9eaf03d4cd12fa201b51bb30bd8b62b660d14a76777cbed66fd2868f16ee",
+  "pack-release.mjs": "a73d675cb56005e66b63eb9ba4bafa3a84cdea513a265835ab47c162d12b8f76",
   "parse-payload.mjs": "1af649fec86371773de781894b3d12f9c4e2540d880c2bb05f47e340725807ac",
   "patch-link-window.mjs": "08359f021e52d65a68dc1c30a4da61cd7a591ca27a03e4a537438b74f6149e6c",
   "patch-string.mjs": "34178259e69ab8354539fd82546098fa396a8f560084892da9cd006f3c0b8446",

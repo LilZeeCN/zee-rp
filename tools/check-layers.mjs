@@ -6,10 +6,16 @@
 //   D. scripts/mcp-tools.mjs 对 studio 的引用面冻结在 mcp-adapter 与 schema-validation 两个入口
 // 违例即非零退出;新增分层约束先改本文件并说明理由,再进 CI。
 import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { builtinModules } from 'node:module';
+import { join, dirname, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+const STUDIO = join(ROOT, 'studio');
+const WEB = join(STUDIO, 'web');
+const WEB_SHARED = new Set(['clipboard.mjs', 'visual-style.mjs'].map(file => join(STUDIO, file)));
+const NODE_BUILTINS = new Set(builtinModules);
+const isWeb = file => file.startsWith(WEB + sep);
 const violations = [];
 
 // ---- 收集 studio 下全部 .mjs ----
@@ -25,35 +31,31 @@ function listMjs(dir) {
   }
   return out;
 }
-const studioFiles = listMjs(join(ROOT, 'studio'));
+const studioFiles = listMjs(STUDIO);
 const rel = p => p.slice(ROOT.length + 1);
 
-// ---- 解析 import(静态 from + 动态 import(),仅限本仓内部引用) ----
+// ---- 收集静态声明、无绑定导入和字面量动态 import ----
 function importsOf(file) {
   const text = readFileSync(file, 'utf8');
-  const specs = [];
-  for (const m of text.matchAll(/from\s+['"]([^'"]+)['"]/g)) specs.push(m[1]);
-  for (const m of text.matchAll(/import\(\s*['"]([^'"]+)['"]\s*\)/g)) specs.push(m[1]);
-  const dir = dirname(file);
-  const out = [];
-  for (const spec of specs) {
-    if (spec.startsWith('node:')) { out.push({ spec, node: true }); continue; }
-    let target = null;
+  const entries = [
+    ...Array.from(text.matchAll(/\b(?:from\s+|import\s*)['"]([^'"\r\n]+)['"]/g), match => ({ spec: match[1], dynamic: false })),
+    ...Array.from(text.matchAll(/\bimport\s*\(\s*['"]([^'"\r\n]+)['"]\s*\)/g), match => ({ spec: match[1], dynamic: true })),
+  ];
+  return entries.map(entry => {
+    const { spec } = entry;
+    if (spec.startsWith('node:') || NODE_BUILTINS.has(spec)) return { ...entry, node: true };
+    let candidates = [];
     if (spec.startsWith('.')) {
-      const abs = resolve(dir, spec);
-      for (const cand of [abs, `${abs}.mjs`, join(abs, 'index.mjs')]) {
-        if (existsSync(cand) && cand.endsWith('.mjs')) { target = cand; break; }
-      }
+      const abs = resolve(dirname(file), spec);
+      candidates = [abs, `${abs}.mjs`, join(abs, 'index.mjs')];
     } else if (spec.startsWith('/')) {
-      // 浏览器 URL 绝对引用:/visual-style.mjs、/clipboard.mjs → studio 根同构模块
-      const abs = join(ROOT, 'studio', spec);
-      if (existsSync(abs)) target = abs;
+      candidates = [join(WEB, spec), join(STUDIO, spec)];
     }
-    if (target) out.push({ spec, node: false, target });
-    else out.push({ spec, node: false, external: true });
-  }
-  return out;
+    const target = candidates.find(path => path.endsWith('.mjs') && existsSync(path));
+    return { ...entry, target };
+  });
 }
+const moduleImports = new Map(studioFiles.map(file => [file, importsOf(file)]));
 
 // ---- A. 静态环检测(仅 from 静态引用;动态 import 延迟环白名单) ----
 // 范围:服务端模块(studio 根 + commands/)。web/src 不参与:它由单文件 app.js 拆分而来,
@@ -61,19 +63,9 @@ function importsOf(file) {
 // 像素夹具与浏览器系门禁验证;把 web 纳入无环要求属于后续渲染层重构议题。
 const graph = new Map(); // file -> Set(static targets)
 for (const f of studioFiles) {
-  if (f.includes(`${join('studio', 'web')}`)) continue;
-  const text = readFileSync(f, 'utf8');
-  const set = new Set();
-  for (const m of text.matchAll(/from\s+['"]([^'"]+)['"]/g)) {
-    const spec = m[1];
-    if (!spec.startsWith('.') && !spec.startsWith('/')) continue;
-    const dir = dirname(f);
-    const abs0 = spec.startsWith('/') ? join(ROOT, 'studio', spec) : resolve(dir, spec);
-    for (const cand of [abs0, `${abs0}.mjs`, join(abs0, 'index.mjs')]) {
-      if (existsSync(cand) && cand.endsWith('.mjs')) { set.add(cand); break; }
-    }
-  }
-  graph.set(f, set);
+  if (isWeb(f)) continue;
+  const targets = moduleImports.get(f).filter(imp => !imp.dynamic && imp.target).map(imp => imp.target);
+  graph.set(f, new Set(targets));
 }
 const color = new Map(); // 0 未访问 1 在栈 2 完成
 function dfs(u, stack) {
@@ -87,9 +79,12 @@ function dfs(u, stack) {
 for (const f of studioFiles) if ((color.get(f) ?? 0) === 0) dfs(f, []);
 
 // ---- B. web/ 浏览器侧约束 ----
-for (const f of studioFiles.filter(p => p.includes(`${join('studio', 'web')}`))) {
-  for (const imp of importsOf(f)) {
+for (const f of studioFiles.filter(file => isWeb(file) || WEB_SHARED.has(file))) {
+  for (const imp of moduleImports.get(f)) {
     if (imp.node) violations.push(`B 浏览器模块引用 Node 内建: ${rel(f)} -> ${imp.spec}`);
+    else if (imp.target && !isWeb(imp.target) && !WEB_SHARED.has(imp.target)) {
+      violations.push(`B 浏览器模块引用非同构模块: ${rel(f)} -> ${imp.spec}`);
+    }
   }
 }
 
@@ -123,12 +118,12 @@ for (const f of studioFiles) {
   const base = rel(f).replace(/^studio\//, '').replace(/\.mjs$/, '');
   const coreName = base.split('/').pop();
   if (!CORE.has(coreName) || base.includes('web/')) continue;
-  for (const imp of importsOf(f)) {
-    if (imp.external || imp.node) continue;
+  for (const imp of moduleImports.get(f)) {
+    if (!imp.target) continue;
     // 仅按原始 spec 判定:解析后的绝对路径会误中 '/commands/' 目录规则(命令包内部文件)。
     const up = upperTargets(imp.spec);
     if (up) violations.push(`C 核心层反向依赖: ${rel(f)} -> ${up}`);
-    if (imp.target && imp.target.includes(`${join('studio', 'web')}`)) violations.push(`C 核心层引用浏览器前端: ${rel(f)}`);
+    if (isWeb(imp.target)) violations.push(`C 核心层引用浏览器前端: ${rel(f)}`);
   }
 }
 
