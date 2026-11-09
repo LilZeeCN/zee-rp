@@ -1,11 +1,10 @@
 import { indexScenePages, loadProjectFonts, projectFontsReady } from './fonts.mjs';
 import { getActivePageScene, updateTopbarStatus } from './view.mjs';
-import { buildNodeElementHtml, publishSelection, renderAll, renderSelectionOverlay, resetLastSelectionKey, tokenCss } from './render.mjs';
-import { renderInspector } from './inspector.mjs';
-import { cancelCanvasGesture } from './gestures.mjs';
+import { buildNodeElementHtml, renderSelectionOverlay, tokenCss } from './render.mjs';
 import { state } from './state.mjs';
 
-export async function applyServerSnapshot(payload) {
+export async function applyServerSnapshot(payload, effects) {
+  const { cancelCanvasGesture, renderAll, renderInspector, publishSelection } = effects;
   const nextRevision = payload.appliedRevision ?? payload.scenePatch?.appliedRevision ?? payload.doc?.revision;
   const nextContentHash = payload.contentHash ?? payload.scenePatch?.contentHash ?? payload.doc?.contentHash;
   if (state.doc && payload.sessionId === state.sessionId && !payload.forceSync) {
@@ -21,7 +20,7 @@ export async function applyServerSnapshot(payload) {
     if (!state.doc || !state.scene || state.appliedRevision !== payload.scenePatch.baseRevision) {
       const fullRes = await fetch('/api/context');
       if (fullRes.ok) {
-        await applyServerSnapshot(await fullRes.json());
+        await applyServerSnapshot(await fullRes.json(), effects);
       }
       return;
     }
@@ -244,73 +243,76 @@ export async function confirmRevisionRendered(revision, contentHash, { increment
   }
 }
 
-export function connectSseStream() {
-  if (state.sse) {
-    try { state.sse.close(); } catch {}
-    state.sse = null;
+export function createSnapshotStream({ applyServerSnapshot, onReconnect }) {
+  function connectSseStream() {
+    if (state.sse) {
+      try { state.sse.close(); } catch {}
+      state.sse = null;
+    }
+    // 浏览器对同一 host:port 只允许约 6 条并发 HTTP/1.1 连接；若每个标签页各持一条
+    // EventSource 长连接，多开画布后连接池被占满，后续请求（含图片加载）会永久排队。
+    // 因此仅前台标签页持有 SSE，后台标签页走下方 1.5s 轮询兜底，切回前台时恢复。
+    if (document.hidden) {
+      return;
+    }
+    openSseStream();
   }
-  // 浏览器对同一 host:port 只允许约 6 条并发 HTTP/1.1 连接；若每个标签页各持一条
-  // EventSource 长连接，多开画布后连接池被占满，后续请求（含图片加载）会永久排队。
-  // 因此仅前台标签页持有 SSE，后台标签页走下方 1.5s 轮询兜底，切回前台时恢复。
-  if (document.hidden) {
-    return;
-  }
-  openSseStream();
-}
 
-export function openSseStream() {
-  const es = new EventSource(`/api/events?clientId=${encodeURIComponent(state.clientId)}`);
-  state.sse = es;
+  function openSseStream() {
+    const es = new EventSource(`/api/events?clientId=${encodeURIComponent(state.clientId)}`);
+    state.sse = es;
 
-  es.onopen = () => {
-    state.connected = true;
-    resetLastSelectionKey();
-    publishSelection();
-    updateTopbarStatus();
-  };
+    es.onopen = () => {
+      state.connected = true;
+      onReconnect();
+      updateTopbarStatus();
+    };
 
-  es.onmessage = async ev => {
-    try {
-      const msg = JSON.parse(ev.data);
-      if (msg.type === 'snapshot' || msg.type === 'revision') {
-        state.connected = true;
-        if (msg.appliedRevision > state.appliedRevision || !state.doc || msg.forceSync) {
-          await applyServerSnapshot(msg);
-        } else {
-          state.durableRevision = Math.max(state.durableRevision, msg.durableRevision || 0);
-          updateTopbarStatus();
+    es.onmessage = async ev => {
+      try {
+        const msg = JSON.parse(ev.data);
+        if (msg.type === 'snapshot' || msg.type === 'revision') {
+          state.connected = true;
+          if (msg.appliedRevision > state.appliedRevision || !state.doc || msg.forceSync) {
+            await applyServerSnapshot(msg);
+          } else {
+            state.durableRevision = Math.max(state.durableRevision, msg.durableRevision || 0);
+            updateTopbarStatus();
+          }
         }
+      } catch {
+        // Ignore malformed event
+      }
+    };
+
+    es.onerror = () => {
+      state.connected = false;
+      updateTopbarStatus();
+    };
+  }
+
+  // Reconnect & sync polling guard if SSE drops
+  setInterval(async () => {
+    try {
+      const res = await fetch('/api/context');
+      if (res.ok) {
+        const data = await res.json();
+        const wasDisconnected = !state.connected;
+        state.connected = true;
+        if (!state.sse && !wasDisconnected) connectSseStream(); // 原 SSE 持有页关闭后，由本兜底轮询尝试接管（拿不到锁则继续静默轮询）
+        if (wasDisconnected || data.appliedRevision !== state.appliedRevision || data.sessionId !== state.sessionId) {
+          await applyServerSnapshot(data);
+          if (wasDisconnected) connectSseStream();
+        }
+      } else {
+        state.connected = false;
+        updateTopbarStatus();
       }
     } catch {
-      // Ignore malformed event
-    }
-  };
-
-  es.onerror = () => {
-    state.connected = false;
-    updateTopbarStatus();
-  };
-}
-
-// Reconnect & sync polling guard if SSE drops
-setInterval(async () => {
-  try {
-    const res = await fetch('/api/context');
-    if (res.ok) {
-      const data = await res.json();
-      const wasDisconnected = !state.connected;
-      state.connected = true;
-      if (!state.sse && !wasDisconnected) connectSseStream(); // 原 SSE 持有页关闭后，由本兜底轮询尝试接管（拿不到锁则继续静默轮询）
-      if (wasDisconnected || data.appliedRevision !== state.appliedRevision || data.sessionId !== state.sessionId) {
-        await applyServerSnapshot(data);
-        if (wasDisconnected) connectSseStream();
-      }
-    } else {
       state.connected = false;
       updateTopbarStatus();
     }
-  } catch {
-    state.connected = false;
-    updateTopbarStatus();
-  }
-}, 1500);
+  }, 1500);
+
+  return connectSseStream;
+}

@@ -1,14 +1,10 @@
 import { copyNodeSnapshots } from '/clipboard.mjs';
 import { isInputFocused, showToast } from './ui.mjs';
-import { apiPost, dispatchCommands, dispatchHistoryAction } from './api.mjs';
-import { applyServerSnapshot, connectSseStream } from './sync.mjs';
 import { findDropContainer, getActivePageScene, nodeViewportBounds, padList, selectedRootNodes, updateWorkspaceChrome } from './view.mjs';
-import { parseRotationDeg, pointerMapper, positionNodeElement, renderAll, renderCanvasStage, renderSelectionOverlay, revealActiveArtboard, updateCanvasTransform, withRotationDeg } from './render.mjs';
-import { renderSidebar } from './sidebar.mjs';
-import { renderInspector } from './inspector.mjs';
+import { parseRotationDeg, pointerMapper, positionNodeElement, renderSelectionOverlay, withRotationDeg } from './render.mjs';
 import { state } from './state.mjs';
 
-export function restoreGesturePreview(ds) {
+function restoreGesturePreview(ds) {
   if (ds.baseRevision !== state.appliedRevision) return;
   const pg = state.scene?.pages.find(page => page.id === ds.pageId);
   const restore = item => {
@@ -35,7 +31,7 @@ export function restoreGesturePreview(ds) {
   } else if (ds.kind === 'marquee') state.selectedIds = ds.prevSelectedIds || [];
 }
 
-export function cancelCanvasGesture({ render = true } = {}) {
+export function clearCanvasGesture() {
   const ds = state.dragSession;
   if (!ds) return false;
   state.dragSession = null;
@@ -45,7 +41,6 @@ export function cancelCanvasGesture({ render = true } = {}) {
   restoreGesturePreview(ds);
   const marquee = document.getElementById('marquee-box');
   if (marquee) marquee.style.display = 'none';
-  if (render) renderAll();
   return true;
 }
 
@@ -74,7 +69,7 @@ export function openInlineTextEditor(node) {
   editor.select();
 }
 
-export async function commitInlineTextEditor(cancel = false) {
+export async function commitInlineTextEditor(dispatchCommands, cancel = false) {
   const editor = document.getElementById('inline-text-editor');
   if (!editor || !state.editingNodeId) return;
   const targetId = state.editingNodeId;
@@ -92,7 +87,10 @@ export async function commitInlineTextEditor(cancel = false) {
   }
 }
 
-export function setupCanvasInteractions() {
+export function setupCanvasInteractions({
+  cancelCanvasGesture, commitInlineTextEditor, dispatchCommands, dispatchHistoryAction, onRuntimeClick,
+  refreshSnapshot, renderAll, renderCanvasStage, renderSelection, revealActiveArtboard, updateCanvasTransform,
+}) {
   const viewport = document.getElementById('canvas-viewport');
   const editor = document.getElementById('inline-text-editor');
 
@@ -175,11 +173,7 @@ export function setupCanvasInteractions() {
       if (nodeEl && nodeEl.tagName !== 'INPUT') {
         const nodeId = nodeEl.getAttribute('data-scoped-id');
         try {
-          const res = await apiPost('/api/runtime/click', { targetId: nodeId });
-          state.runtimeState = res.state;
-          state.activePageId = res.state.currentPageId;
-          renderCanvasStage();
-          renderInspector();
+          await onRuntimeClick(nodeId);
         } catch (err) {
           const rtCode = err?.data?.code;
           if (typeof rtCode === 'string' && rtCode.startsWith('E_RUNTIME_')) {
@@ -329,9 +323,7 @@ export function setupCanvasInteractions() {
         const prevSelectedIds = e.shiftKey ? [...state.selectedIds] : [];
         if (!e.shiftKey) {
           state.selectedIds = [];
-          renderSidebar();
-          renderSelectionOverlay();
-          renderInspector();
+          renderSelection();
         }
         state.dragSession = {
           ...gestureBinding,
@@ -383,9 +375,7 @@ export function setupCanvasInteractions() {
         nodeEl = document.querySelector(`.studio-node[data-scoped-id="${CSS.escape(node.scopedId)}"]`);
       }
 
-      renderSidebar();
-      renderSelectionOverlay();
-      renderInspector();
+      renderSelection();
 
       const isAutoLayoutChild = ['row','column','grid'].includes(node.parentLayout);
       const multiItems = !isAutoLayoutChild && roots.length > 1
@@ -435,9 +425,7 @@ export function setupCanvasInteractions() {
     const prevSelectedIds = e.shiftKey ? [...state.selectedIds] : [];
     if (!e.shiftKey) {
       state.selectedIds = [];
-      renderSidebar();
-      renderSelectionOverlay();
-      renderInspector();
+      renderSelection();
     }
     state.dragSession = {
       ...gestureBinding,
@@ -769,14 +757,12 @@ export function setupCanvasInteractions() {
             }
           });
           state.selectedIds = [...hits];
-          renderSidebar();
-          renderSelectionOverlay();
-          renderInspector();
+          renderSelection();
         } else if (ds.clickNodeId) {
           const ids = new Set(ds.prevSelectedIds || []);
           if (ids.has(ds.clickNodeId)) ids.delete(ds.clickNodeId); else ids.add(ds.clickNodeId);
           state.selectedIds = [...ids];
-          renderSidebar(); renderSelectionOverlay(); renderInspector();
+          renderSelection();
         }
       }
     } catch {
@@ -784,10 +770,7 @@ export function setupCanvasInteractions() {
       renderAll();
       // A rejection can arrive before SSE has delivered the competing edit.
       // Refresh the authority rather than leaving a rejected local preview.
-      try {
-        const latest = await fetch('/api/context');
-        if (latest.ok) await applyServerSnapshot(await latest.json());
-      } catch {}
+      try { await refreshSnapshot(); } catch {}
     }
   });
 
@@ -797,11 +780,6 @@ export function setupCanvasInteractions() {
     cancelCanvasGesture();
     updateWorkspaceChrome();
   });
-  document.addEventListener('visibilitychange', () => {
-    if (document.hidden) { state.spacePressed = false; cancelCanvasGesture(); connectSseStream(); } // 隐藏即释放 SSE 长连接
-    else if (!state.sse) { connectSseStream(); }
-  });
-
   // Double click on text node -> inline text editing
   viewport.addEventListener('dblclick', e => {
     if (state.mode !== 'design') return;
@@ -845,9 +823,7 @@ export function setupCanvasInteractions() {
     if (e.key === 'Escape') {
       if (state.selectedIds.length > 0) {
         state.selectedIds = [];
-        renderSidebar();
-        renderSelectionOverlay();
-        renderInspector();
+        renderSelection();
       }
       return;
     }
@@ -912,9 +888,7 @@ export function setupCanvasInteractions() {
       const res = await dispatchCommands(cmds);
       if (Array.isArray(res?.affectedNodeIds) && res.affectedNodeIds.length > 0) {
         state.selectedIds = res.affectedNodeIds.map(s => String(s).split('/').pop());
-        renderSidebar();
-        renderSelectionOverlay();
-        renderInspector();
+        renderSelection();
       }
       return;
     }
@@ -962,9 +936,7 @@ export function setupCanvasInteractions() {
       const res = await dispatchCommands(cmds);
       if (Array.isArray(res?.affectedNodeIds) && res.affectedNodeIds.length > 0) {
         state.selectedIds = res.affectedNodeIds.map(s => String(s).split('/').pop());
-        renderSidebar();
-        renderSelectionOverlay();
-        renderInspector();
+        renderSelection();
       }
     }
   });

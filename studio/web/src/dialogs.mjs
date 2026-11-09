@@ -1,11 +1,8 @@
 import { escapeHtml, showToast } from './ui.mjs';
-import { apiPost } from './api.mjs';
-import { applyServerSnapshot } from './sync.mjs';
 import { getActivePageScene, layerDisplayName } from './view.mjs';
-import { renderAll, updateCanvasTransform } from './render.mjs';
 import { state } from './state.mjs';
 
-export function focusDiagnosticTarget(location,binding){
+export function focusDiagnosticTarget(location, binding, { renderAll, updateCanvasTransform }) {
   if(state.doc.documentId!==binding.documentId||state.doc.contentHash!==binding.contentHash||state.appliedRevision!==binding.revision){showToast('画布已变化，请重新取得当前问题后定位。','warn',5000);return false;}
   const page=state.scene.pages.find(item=>item.id===location.pageId),owner=location.target?.nodeId;
   const node=page?.nodes.find(item=>item.scopedId===owner)||page?.nodes.find(item=>item.scopedId===location.scopedId);
@@ -16,7 +13,7 @@ export function focusDiagnosticTarget(location,binding){
   return true;
 }
 
-export async function showProjectOperations(){
+export async function showProjectOperations({ apiPost, focusDiagnosticTarget }) {
   let dialog=document.querySelector('#project-operations-dialog');if(dialog){dialog.showModal();return;}
   dialog=document.createElement('dialog');dialog.id='project-operations-dialog';dialog.className='version-dialog';
   dialog.innerHTML='<button class="version-close" aria-label="关闭操作">关闭</button><h2>操作记录</h2><p>关闭面板后仍会继续。取消请求与实际停止会分别显示。</p><div class="operation-message" role="status"></div><div class="operation-list"></div>';
@@ -51,7 +48,7 @@ export async function showProjectOperations(){
   await refresh();
 }
 
-export async function showProjectVersions() {
+export async function showProjectVersions({ apiPost, applyServerSnapshot }) {
   let dialog=document.querySelector('#project-versions-dialog');
   if(dialog){dialog.showModal();return;}
   dialog=document.createElement('dialog');dialog.id='project-versions-dialog';dialog.className='version-dialog';

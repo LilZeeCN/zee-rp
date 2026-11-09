@@ -1,17 +1,15 @@
 import { normalizeVisualCss } from '/visual-style.mjs';
 import { escapeHtml, showToast, uiIcon } from './ui.mjs';
-import { apiPost, dispatchCommands } from './api.mjs';
 import { getActivePageScene, updateWorkspaceChrome } from './view.mjs';
-import { renderAll, renderCanvasStage } from './render.mjs';
 import { bindCommitOnEnter } from './forms.mjs';
 import { state } from './state.mjs';
 
-export function renderInspector() {
-  renderInspectorContent();
+export function renderInspector(actions) {
+  renderInspectorContent(actions);
   refineInspector();
 }
 
-export function refineInspector() {
+function refineInspector() {
   const panel = document.getElementById('inspector-panel');
   if (!panel) return;
   updateWorkspaceChrome();
@@ -88,7 +86,7 @@ export function refineInspector() {
   }
 }
 
-export function renderInspectorContent() {
+function renderInspectorContent({ dispatchCommands, renderAll, resetRuntimePreview }) {
   const panel = document.getElementById('inspector-panel');
   if (!panel || !state.doc) return;
 
@@ -119,12 +117,7 @@ export function renderInspectorContent() {
         <pre style="background:var(--ui-bg);padding:8px;border-radius:6px;max-height:240px;overflow:auto;">${escapeHtml(JSON.stringify((rt?.trace || []).slice(-10), null, 2))}</pre>
       </div>
     `;
-    panel.querySelector('#btn-rt-reset')?.addEventListener('click', async () => {
-      const res = await apiPost('/api/runtime/reset', { startPageId: state.activePageId });
-      state.runtimeState = res.state;
-      renderCanvasStage();
-      renderInspector();
-    });
+    panel.querySelector('#btn-rt-reset')?.addEventListener('click', resetRuntimePreview);
     return;
   }
 

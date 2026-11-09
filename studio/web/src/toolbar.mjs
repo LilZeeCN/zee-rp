@@ -1,13 +1,12 @@
 import { escapeHtml, showToast } from './ui.mjs';
-import { apiPost, commandQueue, dispatchCommands, dispatchHistoryAction } from './api.mjs';
 import { getActivePageScene, padList, updateWorkspaceChrome, workspaceBounds } from './view.mjs';
-import { renderSidebar } from './sidebar.mjs';
-import { renderInspector } from './inspector.mjs';
-import { fitWorkspace, renderAll, updateCanvasTransform } from './render.mjs';
-import { focusDiagnosticTarget, showProjectOperations, showProjectVersions } from './dialogs.mjs';
 import { state } from './state.mjs';
 
-export function setupToolbarAndTabs() {
+export function setupToolbarAndTabs({
+  apiPost, dispatchCommands, dispatchHistoryAction, waitForCommands,
+  fitWorkspace, renderAll, renderInspector, renderSidebar, updateCanvasTransform,
+  focusDiagnosticTarget, showProjectOperations, showProjectVersions,
+}) {
   document.querySelectorAll('[data-tool]').forEach(button => button.addEventListener('click', () => {
     state.tool = button.dataset.tool;
     updateWorkspaceChrome();
@@ -197,7 +196,7 @@ export function setupToolbarAndTabs() {
     const button = event.currentTarget;
     button.disabled = true;
     try {
-      await commandQueue;
+      await waitForCommands();
       const pageId = state.activePageId;
       const history = await (await fetch(`/api/design/reviews?pageId=${encodeURIComponent(pageId)}`)).json();
       const previous = history.reviews.find(r => r.revision < state.appliedRevision);

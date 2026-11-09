@@ -1,31 +1,47 @@
 import { visualCss } from '/visual-style.mjs';
 import { escapeHtml, renderIconSvg } from './ui.mjs';
-import { apiPost } from './api.mjs';
-import { applyCanvasTransform, fitWorkspace as fitViewport, getActivePageScene, nodeViewportBounds, revealActiveArtboard as revealArtboard, updateTopbarStatus, updateZoomLabel, workspaceBounds } from './view.mjs';
-import { renderSidebar } from './sidebar.mjs';
-import { renderInspector } from './inspector.mjs';
+import { applyCanvasTransform, fitWorkspace as fitViewport, getActivePageScene, nodeViewportBounds, revealActiveArtboard as revealArtboard, updateZoomLabel, workspaceBounds } from './view.mjs';
 import { state } from './state.mjs';
 
-export let boardMountFrame = null;
+export function createCanvasRenderer({ onRuntimeInput, onRuntimeRowSelect }) {
+  let boardMountFrame = null;
 
-export function updateCanvasTransform() {
-  applyCanvasTransform();
-  if (state.selectedIds.length > 0 || state.snapGuides.length > 0) {
-    renderSelectionOverlay();
-  } else {
-    const overlay = document.getElementById('selection-overlay');
-    if (overlay && overlay.firstChild) overlay.innerHTML = '';
+  function updateCanvasTransform() {
+    applyCanvasTransform();
+    if (state.selectedIds.length > 0 || state.snapGuides.length > 0) {
+      renderSelectionOverlay();
+    } else {
+      const overlay = document.getElementById('selection-overlay');
+      if (overlay && overlay.firstChild) overlay.innerHTML = '';
+    }
+    updateZoomLabel();
+    scheduleBoardMounts();
   }
-  updateZoomLabel();
-  scheduleBoardMounts();
-}
 
-export function fitWorkspace(overview = false) {
-  if (fitViewport(overview)) updateCanvasTransform();
-}
+  function scheduleBoardMounts() {
+    if (boardMountFrame !== null || state.mode !== 'design' || state.scene?.pages.length < 2) return;
+    boardMountFrame = requestAnimationFrame(() => {
+      boardMountFrame = null;
+      if (state.mode !== 'design' || state.editingNodeId || (state.dragSession && state.dragSession.kind !== 'pan')) return;
+      const mounted = new Map([...document.querySelectorAll('.artboard-wrapper')].map(el => [el.dataset.artboardId, el.dataset.nodesMounted === 'true']));
+      if (state.scene.pages.some(pg => mounted.get(pg.id) !== shouldMountPage(pg))) renderCanvasStage();
+    });
+  }
 
-export function revealActiveArtboard() {
-  if (revealArtboard()) updateCanvasTransform();
+  function renderCanvasStage() {
+    paintCanvasStage(updateCanvasTransform, onRuntimeInput, onRuntimeRowSelect);
+  }
+
+  return {
+    renderCanvasStage,
+    updateCanvasTransform,
+    fitWorkspace(overview = false) {
+      if (fitViewport(overview)) updateCanvasTransform();
+    },
+    revealActiveArtboard() {
+      if (revealArtboard()) updateCanvasTransform();
+    },
+  };
 }
 
 export function shouldMountPage(pg) {
@@ -35,16 +51,6 @@ export function shouldMountPage(pg) {
   const x=state.panX+(pg._stageX ?? 60)*state.zoom, y=state.panY+(pg._stageY ?? 40)*state.zoom;
   return x+pg.board.totalW*state.zoom>=view.left-margin && x<=view.left+view.width+margin
     && y+pg.board.totalH*state.zoom>=view.top-margin && y<=view.top+view.height+margin;
-}
-
-export function scheduleBoardMounts() {
-  if (boardMountFrame !== null || state.mode !== 'design' || state.scene?.pages.length < 2) return;
-  boardMountFrame=requestAnimationFrame(()=>{
-    boardMountFrame=null;
-    if (state.mode !== 'design' || state.editingNodeId || (state.dragSession && state.dragSession.kind !== 'pan')) return;
-    const mounted=new Map([...document.querySelectorAll('.artboard-wrapper')].map(el=>[el.dataset.artboardId,el.dataset.nodesMounted==='true']));
-    if (state.scene.pages.some(pg=>mounted.get(pg.id)!==shouldMountPage(pg))) renderCanvasStage();
-  });
 }
 
 export function renderTextContentHtml(n) {
@@ -265,7 +271,7 @@ export function pointerMapper(nodeEl) {
   };
 }
 
-export function renderCanvasStage() {
+function paintCanvasStage(updateCanvasTransform, onRuntimeInput, onRuntimeRowSelect) {
   const stage = document.getElementById('canvas-stage');
   if (!stage || !state.scene) return;
 
@@ -288,7 +294,7 @@ export function renderCanvasStage() {
         </div>
       </div>
     `;
-    bindRuntimeStageEvents(stage);
+    bindRuntimeStageEvents(stage, onRuntimeInput, onRuntimeRowSelect);
     updateCanvasTransform();
     return;
   }
@@ -338,13 +344,11 @@ export function renderCanvasStage() {
   updateCanvasTransform();
 }
 
-export function bindRuntimeStageEvents(stage) {
+function bindRuntimeStageEvents(stage, onRuntimeInput, onRuntimeRowSelect) {
   stage.querySelectorAll('[data-runtime-input]').forEach(inp => {
     inp.addEventListener('input', async e => {
       const targetId = e.target.getAttribute('data-runtime-input');
-      const res = await apiPost('/api/runtime/input', { targetId, value: e.target.value });
-      state.runtimeState = res.state;
-      renderInspector();
+      await onRuntimeInput(targetId, e.target.value);
     });
   });
 
@@ -353,10 +357,7 @@ export function bindRuntimeStageEvents(stage) {
       e.stopPropagation();
       const dataset = rowEl.getAttribute('data-repeater');
       const rowId = rowEl.getAttribute('data-row-id');
-      const res = await apiPost('/api/runtime/dataset', { op: 'select', dataset, rowId });
-      state.runtimeState = res.state;
-      renderCanvasStage();
-      renderInspector();
+      await onRuntimeRowSelect(dataset, rowId);
     });
   });
 }
@@ -506,28 +507,4 @@ export function distanceGuidesHtml() {
     }
   }
   return lines.join('');
-}
-
-export let lastSelectionKey='';
-// ESM 活绑定只能在本模块内赋值;跨模块(sync 的 SSE 重连)经此 setter 复位。
-export function resetLastSelectionKey() { lastSelectionKey=''; }
-
-export let selectionPublishTimer=null;
-
-export let selectionPublishQueue=Promise.resolve();
-
-export function publishSelection() {
-  if(!state.doc||!state.activePageId)return;
-  const body={clientId:state.clientId,documentId:state.doc.documentId,pageId:state.activePageId,revision:state.appliedRevision,contentHash:state.doc.contentHash,nodeIds:[...state.selectedIds]};
-  const key=JSON.stringify(body);if(key===lastSelectionKey)return;lastSelectionKey=key;
-  clearTimeout(selectionPublishTimer);selectionPublishTimer=setTimeout(()=>{selectionPublishQueue=selectionPublishQueue.catch(()=>{}).then(()=>apiPost('/api/selection',body)).then(result=>{state.selectionId=result.selectionId||null;}).catch(()=>{state.selectionId=null;});},40);
-}
-
-export function renderAll() {
-  updateTopbarStatus();
-  renderCanvasStage();
-  renderSidebar();
-  renderInspector();
-  renderSelectionOverlay();
-  publishSelection();
 }

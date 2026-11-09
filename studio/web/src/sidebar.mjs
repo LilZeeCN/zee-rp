@@ -1,12 +1,9 @@
 import { escapeHtml, uiIcon } from './ui.mjs';
-import { apiPost, dispatchCommands } from './api.mjs';
 import { getActivePageScene, layerDisplayName, padList, updateWorkspaceChrome } from './view.mjs';
-import { fitWorkspace, renderAll, renderSelectionOverlay, revealActiveArtboard } from './render.mjs';
-import { renderInspector } from './inspector.mjs';
-import { cancelCanvasGesture } from './gestures.mjs';
 import { state } from './state.mjs';
 
-export function renderSidebar() {
+export function renderSidebar(actions) {
+  const { dispatchCommands, fitWorkspace, renderAll, renderSelection, selectPage } = actions;
   const container = document.getElementById('sidebar-content');
   if (!container || !state.doc) return;
   updateWorkspaceChrome();
@@ -81,15 +78,15 @@ export function renderSidebar() {
       ${statusNodes.length ? `<button id="btn-status-area" class="status-area-toggle" aria-expanded="${state.showStatusArea}">${state.showStatusArea ? '收起' : '展开'}顶部状态区 (${statusNodes.length})</button>` : ''}
     `;
 
-    container.querySelector('#btn-toggle-pages')?.addEventListener('click', () => { state.pagesExpanded = !state.pagesExpanded; renderSidebar(); });
-    container.querySelector('#btn-status-area')?.addEventListener('click', () => { state.showStatusArea = !state.showStatusArea; renderSidebar(); });
+    container.querySelector('#btn-toggle-pages')?.addEventListener('click', () => { state.pagesExpanded = !state.pagesExpanded; renderSidebar(actions); });
+    container.querySelector('#btn-status-area')?.addEventListener('click', () => { state.showStatusArea = !state.showStatusArea; renderSidebar(actions); });
     container.querySelectorAll('.list-item-row').forEach(row => row.addEventListener('keydown', event => {
       if (event.target === row && ['Enter', ' '].includes(event.key)) { event.preventDefault(); row.click(); }
     }));
 
     container.querySelector('#btn-toggle-all-layers')?.addEventListener('click', () => {
       state.showAllLayers = !state.showAllLayers;
-      renderSidebar();
+      renderSidebar(actions);
     });
 
     container.querySelector('#btn-sidebar-add-page')?.addEventListener('click', async () => {
@@ -106,18 +103,7 @@ export function renderSidebar() {
     container.querySelectorAll('[data-page-select]').forEach(el => {
       el.addEventListener('click', async e => {
         if (e.target.closest('button, summary')) return;
-        const nextPageId = el.getAttribute('data-page-select');
-        cancelCanvasGesture({ render: false });
-        state.activePageId = nextPageId;
-        state.selectedIds = [];
-        if (state.mode === 'interact') {
-          try {
-            const res = await apiPost('/api/runtime/navigate', { pageId: nextPageId });
-            state.runtimeState = res.state;
-          } catch {}
-        }
-        renderAll();
-        revealActiveArtboard();
+        await selectPage(el.getAttribute('data-page-select'));
       });
     });
 
@@ -160,9 +146,7 @@ export function renderSidebar() {
         } else {
           state.selectedIds = [id];
         }
-        renderSidebar();
-        renderSelectionOverlay();
-        renderInspector();
+        renderSelection();
       });
       // 图层行拖拽换父：拖到目标容器行释放 → reorderNode 重挂并保持视觉位置
       el.addEventListener('dragstart', e => {
