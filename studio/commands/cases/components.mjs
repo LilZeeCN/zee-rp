@@ -130,7 +130,7 @@ function updateComponent({ doc, cmd, cmdIdx, affectedIds }) {
       affectedIds.push(`component:${compId}`);
 }
 
-function createInstance({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
+function createInstance({ doc, cmd, cmdIdx, index, pageScope, affectedIds, sceneOptions }) {
       let parentNode = null;
       let parentScope = pageScope || doc.pages?.[0]?.id || 'home';
       if (cmd.parentId) {
@@ -172,6 +172,7 @@ function createInstance({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
       parentNode.children = parentNode.children || [];
       parentNode.children.push(instNode);
       affectedIds.push(`${parentScope}/${instId}`);
+      if (!cmd.instanceId && !cmd.id) sceneOptions.recordCommand?.({ ...cmd, instanceId: instId });
 }
 
 function setInstanceOverride({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {

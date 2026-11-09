@@ -1,5 +1,7 @@
 # 能力与验证边界
 
+**Studio 持久化（2026-11-10）：** 普通编辑和撤销重做先同步写事务日志，再更新画布版本。日志写入失败时保留原文档、历史和幂等记录。日志已落盘但快照或辅助索引写入失败时，返回已提交版本及 `W_CHECKPOINT_PENDING`，可从 WAL 恢复。证据覆盖本机真实 HTTP 及文件写入故障。
+
 **Studio 样式与实例行为（2026-11-10）：** Studio 浏览器画布和独立 HTML 代码包消费 `fills` 多层背景、`shadows` 多层阴影、`mixBlendMode` 和富文本 `spans`。Studio 原生出口可将静态装饰栅格化，省略实时背景混合，富文本降为普通可编辑文字。兼容报告逐节点列出降级。独立的完整 RP/1 编译器将三个绘制扩展标为未支持。实例换组件、逐段覆盖与换行布局见 [Studio 创作指南](../docs/studio-ai-authoring.md#实例富文本与布局)。打开工程时返回服务指纹，`runtime_info` 也跟踪嵌套的前端、命令和 Python 编译模块。
 
 **2026-11-08 Studio 工具面收敛（本地 main，未推送/未发布）：** 参考 figcraft 的 run_command/batch/inspect 模式，28 个 `studio_*` MCP 工具收敛为 13 个动词化工具（open_project/describe/**command**（唯一写入口，新增批处理步引用：命令带顶层 `as:"名"` 命名产出、后续命令任意字段 `{"$ref":"名"}` 引用，整批一个 undo 步）/inspect（nodes|context|contracts 三视图）/screenshot/export（rp|code|bundle）/history（undo|redo|versions）/stage/design（metrics|pixel_contrast|anchors|content_plan|fix_plan|explore|review 七动作）/scenario（剧本+acceptance）/media/merge（merge|sync_native）/operations）。HTTP /api/* 与浏览器画布零变化；`studioHandlers` 保留旧名键为内部兼容别名。新增两道门禁进 CI：`test:studio-parity`（命令注册表四方一致）与 `test:layers`（分层方向）；`test:studio-command-sweep`（55 命令×7 类垃圾参数扫荡，断言干净 E_* 信封+失败不变+无原型污染）与 `test:studio-command-ref`（步引用）并入 test:studio-ai。历史日期条目中的旧工具名（如 studio_apply_commands/studio_query_nodes）为当时的真实名称，不回写；现行调用一律用上列 13 名。证据：`/Users/lilzee/axure-exp/outputs/studio-agent-surface-20261108/REPORT.md`。

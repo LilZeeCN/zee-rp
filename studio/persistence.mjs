@@ -8,6 +8,8 @@ import {
   rmSync,
   openSync,
   fsyncSync,
+  fstatSync,
+  ftruncateSync,
   closeSync,
   copyFileSync,
   statSync,
@@ -19,11 +21,11 @@ import {
   importToStudioDocument,
   normalizeStudioDocument,
   computeContentHash,
+  currentDocumentDiagnostics,
   canonicalJson,
   sha256,
 } from './document.mjs';
-import { StudioDocumentStore, applySingleCommand } from './commands.mjs';
-import { finalizeDesignDecisions } from './design-decisions.mjs';
+import { StudioDocumentStore, applyCommandBatch } from './commands/document-store.mjs';
 
 export function ensureProjectDirs(projectDir) {
   const dir = resolve(projectDir);
@@ -38,18 +40,37 @@ export function ensureProjectDirs(projectDir) {
 export function writeJsonAtomic(targetPath, data) {
   const text = JSON.stringify(data);
   const tmpPath = `${targetPath}.tmp.${process.pid}.${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
-  writeFileSync(tmpPath, text, 'utf8');
-  renameSync(tmpPath, targetPath);
+  try {
+    writeFileSync(tmpPath, text, 'utf8');
+    renameSync(tmpPath, targetPath);
+  } catch (error) {
+    try { rmSync(tmpPath, { force: true }); } catch {}
+    throw error;
+  }
 }
 
 export function appendJsonlSynced(targetPath, record) {
   const line = `${JSON.stringify(record)}\n`;
   const fd = openSync(targetPath, 'a');
   try {
-    writeFileSync(fd, line, 'utf8');
-    fsyncSync(fd);
+    const originalSize = fstatSync(fd).size;
+    try {
+      writeFileSync(fd, line, 'utf8');
+      fsyncSync(fd);
+    } catch (error) {
+      try {
+        ftruncateSync(fd, originalSize);
+        fsyncSync(fd);
+      } catch {
+        throw Object.assign(new Error('事务日志的写入结果无法确认，请重开工程后核对版本', { cause: error }), {
+          code: 'E_WRITE_OUTCOME_UNKNOWN',
+        });
+      }
+      throw error;
+    }
   } finally {
-    closeSync(fd);
+    // A close error cannot change the outcome of an fsync or hide the original write error.
+    try { closeSync(fd); } catch {}
   }
 }
 
@@ -267,12 +288,14 @@ export class StudioPersistence {
         try {
           if (tx.kind === 'undo' || tx.kind === 'redo') {
             working = this.readSnapshot(tx.restoreSnapshotRevision);
+            if (tx.restoreSnapshot && working?.contentHash !== tx.contentHash) {
+              working = { ...tx.restoreSnapshot, revision: tx.restoreSnapshotRevision };
+              writeJsonAtomic(join(this.snapshotsDir, `rev-${working.revision}.json`), working);
+            }
             if (!working) throw new Error('Missing history restore snapshot');
           } else {
-            for (let i = 0; i < (tx.commands || []).length; i++) {
-              applySingleCommand(working, tx.commands[i], i, tx.pageId || null);
-            }
-            finalizeDesignDecisions(working);
+            applyCommandBatch(working, tx.commands || [], { pageId: tx.pageId, projectDir: this.projectDir });
+            working.diagnostics = currentDocumentDiagnostics(working);
           }
         } catch {
           ok = false;
@@ -325,15 +348,15 @@ export class StudioPersistence {
       try {
         const idemRaw = JSON.parse(readFileSync(this.idempotencyPath, 'utf8'));
         for (const [k, v] of Object.entries(idemRaw || {})) {
-          store.idempotencyMap.set(k, v);
+          if (v.revision <= store.appliedRevision) store.idempotencyMap.set(k, v);
         }
       } catch {
         // Rebuild from transaction records
       }
     }
     for (const tx of sortedRecords) {
-      if (tx.idempotencyKey && !store.idempotencyMap.has(tx.idempotencyKey)) {
-        const rev = tx.appliedRevision || tx.revision;
+      const rev = tx.appliedRevision || tx.revision;
+      if (rev <= store.appliedRevision && tx.idempotencyKey && !store.idempotencyMap.has(tx.idempotencyKey)) {
         store.idempotencyMap.set(tx.idempotencyKey, {
           requestHash: tx.requestHash || '',
           revision: rev,
@@ -372,14 +395,15 @@ export class StudioPersistence {
       clearTimeout(this._pendingSnapshotTimer);
       this._pendingSnapshotTimer = null;
     }
-    if (this._pendingStore) {
+    if (this._pendingStore && !this.walWriteError) {
       const store = this._pendingStore;
-      this._pendingStore = null;
+      this.saveIdempotency(store);
       this.saveFullSnapshot(store.doc, { recomputeHash: false });
       if (this.walCount >= 120 || (existsSync(this.transactionsPath) && statSync(this.transactionsPath).size > 8 * 1024 * 1024)) {
         this.checkpointHistory(store);
       }
       this.pruneSnapshots(store);
+      this._pendingStore = null;
     }
   }
 
@@ -426,8 +450,30 @@ export class StudioPersistence {
     this.checkpoint=state;this.walCount=0;this.walRestoreRevisions.clear();
   }
 
-  persistTransaction(store, txRecord, { simulateCrashStage = null } = {}) {
-    // 1. Append lightweight WAL record to transactions.jsonl first
+  // The store calls the hook after preparing the complete edit and before publishing it.
+  commit(store, apply, options = {}) {
+    let committed;
+    const result = apply(record => {
+      this.appendTransaction(record);
+      store.markDurable(record.revision);
+      committed = record;
+    });
+    if (committed) {
+      try {
+        this.checkpointTransaction(store, committed, options);
+      } catch {
+        this._pendingStore = store;
+        return { ...result, persistenceWarning: {
+          code: 'W_CHECKPOINT_PENDING',
+          message: '事务已写入日志，文档快照或辅助索引等待重试保存。',
+        } };
+      }
+    }
+    return result;
+  }
+
+  appendTransaction(txRecord) {
+    if (this.walWriteError) throw this.walWriteError;
     const walRecord = {
       txId: txRecord.txId,
       kind: txRecord.kind || 'edit',
@@ -448,10 +494,45 @@ export class StudioPersistence {
       affectedNodeIds: txRecord.affectedNodeIds || [],
       contentHash: txRecord.contentHash || txRecord.afterContentHash,
     };
-    appendJsonlSynced(this.transactionsPath, walRecord);
+    try {
+      // A deferred checkpoint can leave the restore target only in memory.
+      const revision = walRecord.restoreSnapshotRevision;
+      if (revision !== null && this.readSnapshot(revision)?.contentHash !== walRecord.contentHash) {
+        walRecord.restoreSnapshot = txRecord.afterSnapshot;
+      }
+      appendJsonlSynced(this.transactionsPath, walRecord);
+    } catch (error) {
+      if (error.code === 'E_WRITE_OUTCOME_UNKNOWN') {
+        this.walWriteError = error;
+        throw error;
+      }
+      throw Object.assign(new Error('事务日志写入失败', { cause: error }), {
+        code: 'E_WAL_WRITE',
+        suggestion: '检查工程目录的写入权限和磁盘空间后重试。',
+      });
+    }
     this.walCount++;
-    if(walRecord.restoreSnapshotRevision)this.walRestoreRevisions.add(walRecord.restoreSnapshotRevision);
+    if (walRecord.restoreSnapshotRevision !== null) this.walRestoreRevisions.add(walRecord.restoreSnapshotRevision);
+  }
 
+  persistTransaction(store, txRecord, options = {}) {
+    this.appendTransaction(txRecord);
+    store.markDurable(txRecord.revision);
+    const replay = store.idempotencyMap.get(txRecord.idempotencyKey);
+    if (replay) replay.result.durableRevision = store.durableRevision;
+    return this.checkpointTransaction(store, txRecord, options);
+  }
+
+  saveIdempotency(store) {
+    const records = Object.create(null);
+    for (const [key, value] of store.idempotencyMap) {
+      const { scene, doc, ...result } = value.result || {};
+      records[key] = { ...value, result };
+    }
+    writeJsonAtomic(this.idempotencyPath, records);
+  }
+
+  checkpointTransaction(store, txRecord, { simulateCrashStage = null } = {}) {
     if (simulateCrashStage === 'after_wal_before_doc') {
       // Write a partial corrupted temp file to simulate mid-write crash
       const partialTmp = `${this.documentJsonPath}.tmp.${process.pid}.crashed`;
@@ -459,15 +540,7 @@ export class StudioPersistence {
       throw new Error('SIMULATED_CRASH_AFTER_WAL');
     }
 
-    // 2. Persist idempotency map (without full scene objects)
-    const idemObj = {};
-    for (const [k, v] of store.idempotencyMap.entries()) {
-      const cleanRes = { ...(v.result || {}) };
-      delete cleanRes.scene;
-      delete cleanRes.doc;
-      idemObj[k] = { ...v, result: cleanRes };
-    }
-    writeJsonAtomic(this.idempotencyPath, idemObj);
+    this.saveIdempotency(store);
 
     // 3. Persist document.json and snapshot atomically (or defer full snapshot on huge docs while WAL is already durable)
     const approxBytes = store.doc._approxBytes || 0;
@@ -479,7 +552,6 @@ export class StudioPersistence {
     ) {
       const now = new Date().toISOString();
       store.doc.updatedAt = now;
-      store.markDurable(store.doc.revision);
       writeJsonAtomic(this.projectJsonPath, {
         schemaVersion: SCHEMA_VERSION,
         projectId: store.doc.documentId,
@@ -492,7 +564,9 @@ export class StudioPersistence {
       this._pendingStore = store;
       if (this._pendingSnapshotTimer) clearTimeout(this._pendingSnapshotTimer);
       this._pendingSnapshotTimer = setTimeout(() => {
-        this.flushPendingSnapshot();
+        try { this.flushPendingSnapshot(); } catch (error) {
+          console.warn(`Studio checkpoint pending: ${error.message}`);
+        }
       }, 120);
       if (typeof this._pendingSnapshotTimer.unref === 'function') {
         this._pendingSnapshotTimer.unref();
@@ -502,7 +576,6 @@ export class StudioPersistence {
 
     this.flushPendingSnapshot();
     this.saveFullSnapshot(store.doc, { recomputeHash: false });
-    store.markDurable(store.doc.revision);
     if(this.walCount>=120 || statSync(this.transactionsPath).size>8*1024*1024)this.checkpointHistory(store);
     this.pruneSnapshots(store);
     return store.durableRevision;

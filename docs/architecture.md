@@ -58,7 +58,8 @@
 - 事务:`studio/commands/document-store.mjs` 的 `applyTransaction` —— 幂等键 →
   baseRevision 乐观锁 → 副本上原子执行 → 影响扩散 + 语义 diff → 快照/历史。
 - undo/redo:线性栈,快照双阈值淘汰(120 条 / 8MB);撤销冲突显式报错。
-- 持久化:`persistence.mjs` 原子落盘 + WAL + 崩溃恢复;`versions.mjs` 命名版本。
+- 普通编辑与撤销重做由 `persistence.mjs` 提交。命令先在内存副本完成校验和解算，再同步追加 WAL，成功后才发布文档、场景、历史与幂等记录。快照或辅助索引写入失败时，已提交事务保留 `durableRevision` 并返回 `W_CHECKPOINT_PENDING`。恢复和在线编辑共用批处理执行，日志保留生成的实例 ID。缺少旧快照时，撤销重做记录携带恢复所需的内容。
+- `versions.mjs` 管理命名版本。命名版本恢复、工程合并和原生回填当前走各自的持久化入口。
 
 四方一致性(分组表 ↔ 全集 ↔ dispatch ↔ 契约)由 `test:studio-parity` 门禁锁定,
 新增命令漏掉任何一面会当场红。

@@ -413,7 +413,8 @@ export class StudioServer {
       sendJson(res, 404, { ok: false, code: 'E_NOT_FOUND', message: `Unknown endpoint: ${pathname}` });
     } catch (err) {
       const code = err.code || 'E_INTERNAL_ERROR';
-      const status = code === 'E_RENDER_TIMEOUT' ? 504 : 400;
+      const status = code === 'E_RENDER_TIMEOUT' ? 504
+        : ['E_WAL_WRITE', 'E_WRITE_OUTCOME_UNKNOWN'].includes(code) ? 500 : 400;
       sendJson(res, status, {
         ok: false,
         code,
@@ -518,7 +519,7 @@ export class StudioServer {
         }
         if(!replay&&body.selectionId)replay=this.store.getIdempotentResult({idempotencyKey:body.idempotencyKey,commands,sourceIdentity,selectionId:body.selectionId});
         const selectionGuard=!replay&&body.selectionId?this.selections.guard(this.store.doc,this.scene,body.selectionId):null;
-        const txResult = replay || this.store.applyTransaction({
+        const txResult = replay || this.persistence.commit(this.store, beforeCommit => this.store.applyTransaction({
           selectionId: body.selectionId || null, selectionGuard,
           baseRevision: body.baseRevision,
           idempotencyKey: body.idempotencyKey,
@@ -530,7 +531,7 @@ export class StudioServer {
           actor: body.actor || null,
           commands,
           sourceIdentity,
-        });
+        }, { beforeCommit }), { simulateCrashStage: body.simulateCrashStage || null });
 
         if (!txResult.ok) {
           const status = txResult.code === 'E_STALE_REVISION' || txResult.code === 'E_IDEMPOTENCY_CONFLICT' ? 409 : 400;
@@ -546,10 +547,6 @@ export class StudioServer {
 
         let scenePatch = null;
         if (!txResult.idempotentReplay) {
-          const latestTx = this.store.transactions[this.store.transactions.length - 1];
-          this.persistence.persistTransaction(this.store, latestTx, {
-            simulateCrashStage: body.simulateCrashStage || null,
-          });
           this.scene = txResult.scene || resolveDocumentScene(this.store.doc, { projectDir: this.projectDir });
           this.store.lastScene = this.scene;
           this.runtimeSession = null;
@@ -661,12 +658,12 @@ export class StudioServer {
           });
           return;
         }
-        const opRes = pathname === '/api/undo' ? this.store.undo(body) : this.store.redo(body);
+        const operation = pathname === '/api/undo' ? 'undo' : 'redo';
+        const opRes = this.persistence.commit(this.store, beforeCommit => this.store[operation](body, { beforeCommit }));
         if (!opRes.ok) {
           sendJson(res, 400, opRes);
           return;
         }
-        this.persistence.persistTransaction(this.store, this.store.lastHistoryRecord);
         this.scene = opRes.scene;
         this.runtimeSession = null;
         const payload = {

@@ -59,6 +59,54 @@ function resolveStepRefs(value, stepRefs, cmdIdx, isRoot) {
   return out;
 }
 
+export function applyCommandBatch(workingDoc, commands, { pageId = null, projectDir = null } = {}) {
+  const allAffected = new Set();
+  const contractEvolutionResults = [];
+  const interactionValidationQueue = [];
+  const stepRefs = new Map(); // as 名 → 本步 affectedIds(scoped id)
+  const resolvedCommands = new Array(commands.length); // 实际应用的命令(as/$ref 已解析)
+  let cachedIndex = buildNodeIndex(workingDoc);
+  let needsInteractionNormalize = false;
+  let canInheritNodeCache = true;
+  for (let i = 0; i < commands.length; i++) {
+    const raw = commands[i];
+    const asName = raw && typeof raw === 'object' && typeof raw.as === 'string' && raw.as ? raw.as : null;
+    const cmd = (asName !== null || commandHasStepRef(raw)) ? resolveStepRefs(raw, stepRefs, i, true) : raw;
+    resolvedCommands[i] = cmd;
+    if (!cachedIndex) cachedIndex = buildNodeIndex(workingDoc);
+    const affected = applySingleCommand(workingDoc, cmd, i, pageId, cachedIndex, contractEvolutionResults, {
+      projectDir,
+      interactionValidationQueue,
+      recordCommand: resolved => { resolvedCommands[i] = resolved; },
+    });
+    for (const id of affected) allAffected.add(id);
+    if (asName !== null) stepRefs.set(asName, affected);
+    const props = cmd.properties || cmd.props;
+    if (
+      INTERACTION_MUTATING_COMMANDS.has(cmd.type) ||
+      (props && ('on' in props || 'onClick' in props || 'interactions' in props || 'goto' in props || 'children' in props || 'states' in props || 'template' in props))
+    ) {
+      needsInteractionNormalize = true;
+    }
+    if (
+      !SAFE_NODE_CACHE_COMMANDS.has(cmd.type) ||
+      (props && ('children' in props || 'states' in props || 'template' in props))
+    ) {
+      canInheritNodeCache = false;
+    }
+    if (!NON_STRUCTURAL_COMMANDS.has(cmd.type) || props && ['children', 'states', 'template'].some(key => key in props)) {
+      cachedIndex = null;
+    }
+  }
+  for (const {spec, cmdIdx, nodeId} of interactionValidationQueue) validateInteractionAssignments(spec, workingDoc, cmdIdx, nodeId);
+  if (needsInteractionNormalize) {
+    for (const page of workingDoc.pages || []) normalizeNodeInteractions(page.root);
+    for (const component of Object.values(workingDoc.components || {})) normalizeNodeInteractions(component.root);
+  }
+  finalizeDesignDecisions(workingDoc);
+  return { allAffected, contractEvolutionResults, resolvedCommands, canInheritNodeCache };
+}
+
 export class StudioDocumentStore {
   constructor(initialDoc, { onCommit = null, maxSnapshots = 120, maxHistoryBytes = 8 * 1024 * 1024, projectDir = null } = {}) {
     this.projectDir = projectDir;
@@ -150,7 +198,13 @@ export class StudioDocumentStore {
     return { ...structuredClone(previous.result), ok: true, idempotentReplay: true };
   }
 
-  applyTransaction(request) {
+  _publishDocument(doc, scene, record, beforeCommit) {
+    beforeCommit?.(record);
+    this.doc = doc;
+    this.lastScene = scene;
+  }
+
+  applyTransaction(request, { beforeCommit } = {}) {
     // 1. Validate request identity and basic structure
     if (!request || typeof request !== 'object') {
       return { ok: false, status: 'failed', code: 'E_INVALID_REQUEST', message: '事务请求必须是非空 JSON 对象' };
@@ -230,57 +284,17 @@ export class StudioDocumentStore {
       }
     }
     const workingDoc = structuredClone(this.doc);
-    const allAffected = new Set();
-    const contractEvolutionResults = [];
-    const interactionValidationQueue = [];
-    const stepRefs = new Map(); // as 名 → 本步 affectedIds(scoped id)
-    const resolvedCommands = new Array(request.commands.length); // 实际应用的命令(as/$ref 已解析)
-    let resolvedScene = null;
-
+    let resolvedScene, edit;
     try {
-      let cachedIndex = buildNodeIndex(workingDoc);
-      let needsInteractionNormalize = false;
-      let canInheritNodeCache = true;
-      for (let i = 0; i < request.commands.length; i++) {
-        const raw = request.commands[i];
-        const asName = raw && typeof raw === 'object' && typeof raw.as === 'string' && raw.as ? raw.as : null;
-        const cmd = (asName !== null || commandHasStepRef(raw)) ? resolveStepRefs(raw, stepRefs, i, true) : raw;
-        resolvedCommands[i] = cmd;
-        if (!cachedIndex) cachedIndex = buildNodeIndex(workingDoc);
-        const affected = applySingleCommand(workingDoc, cmd, i, request.pageId || null, cachedIndex, contractEvolutionResults, { projectDir: this.projectDir, interactionValidationQueue });
-        for (const id of affected) allAffected.add(id);
-        if (asName !== null) stepRefs.set(asName, affected);
-        const props = cmd.properties || cmd.props;
-        if (
-          INTERACTION_MUTATING_COMMANDS.has(cmd.type) ||
-          (props && ('on' in props || 'onClick' in props || 'interactions' in props || 'goto' in props || 'children' in props || 'states' in props || 'template' in props))
-        ) {
-          needsInteractionNormalize = true;
-        }
-        if (
-          !SAFE_NODE_CACHE_COMMANDS.has(cmd.type) ||
-          (props && ('children' in props || 'states' in props || 'template' in props))
-        ) {
-          canInheritNodeCache = false;
-        }
-        if (!NON_STRUCTURAL_COMMANDS.has(cmd.type) || props && ['children', 'states', 'template'].some(key => key in props)) {
-          cachedIndex = null;
-        }
-      }
-      for (const {spec, cmdIdx, nodeId} of interactionValidationQueue) validateInteractionAssignments(spec, workingDoc, cmdIdx, nodeId);
-      if (needsInteractionNormalize) {
-        for (const page of workingDoc.pages || []) normalizeNodeInteractions(page.root);
-        for (const component of Object.values(workingDoc.components || {})) normalizeNodeInteractions(component.root);
-      }
-      finalizeDesignDecisions(workingDoc);
+      edit = applyCommandBatch(workingDoc, request.commands, { pageId: request.pageId, projectDir: this.projectDir });
       if (request.selectionGuard) {
         const outside = diffDocuments(this.doc, workingDoc, { limit: Infinity }).changes.filter(change => !request.selectionGuard.paths.some(path => path.every((part, index) => change.path[index] === part)));
         if (outside.length) throw cmdError('E_SELECTION_SCOPE', '修改超出绑定选区，整笔未写入', { extra: { outsidePaths: outside.slice(0, 8).map(change => change.path) } });
       }
       workingDoc.diagnostics = currentDocumentDiagnostics(workingDoc);
       Object.defineProperty(workingDoc, '_diagnosticsCurrent', { value: true, enumerable: false, configurable: true });
-      if (canInheritNodeCache && allAffected.size > 0) {
-        inheritCleanCanonicalCache(beforeDoc, workingDoc, allAffected);
+      if (edit.canInheritNodeCache && edit.allAffected.size > 0) {
+        inheritCleanCanonicalCache(beforeDoc, workingDoc, edit.allAffected);
       }
       workingDoc.contentHash = computeContentHash(workingDoc, { cacheNodes: true });
       // Verify the entire document resolves cleanly (catches component cycles, size dependency loops, etc.)
@@ -307,7 +321,9 @@ export class StudioDocumentStore {
       };
     }
 
-    // 5. Commit transaction & compute transitive impact + semantic diff
+    const { allAffected, contractEvolutionResults, resolvedCommands } = edit;
+
+    // 5. Prepare the transaction record and compute the impact before publication.
     workingDoc.revision = this.doc.revision + 1;
     workingDoc.updatedAt = new Date().toISOString();
     resolvedScene.revision = workingDoc.revision;
@@ -388,8 +404,7 @@ export class StudioDocumentStore {
       afterSnapshot,
     };
 
-    this.doc = workingDoc;
-    this.lastScene = resolvedScene;
+    this._publishDocument(workingDoc, resolvedScene, txRecord, beforeCommit);
     this.history.push(txRecord);
     this.redoStack = []; // New forward edit invalidates redo branch
     this.trimHistory();
@@ -440,7 +455,7 @@ export class StudioDocumentStore {
     return result;
   }
 
-  undo({ expectedRevision = null, expectedHeadTxId = null, actor = { kind: 'human', id: 'default' } } = {}) {
+  undo({ expectedRevision = null, expectedHeadTxId = null, actor = { kind: 'human', id: 'default' } } = {}, { beforeCommit } = {}) {
     if (expectedRevision !== null && expectedRevision !== undefined && Number(expectedRevision) !== this.doc.revision) {
       return {
         status: 'failed',
@@ -473,31 +488,28 @@ export class StudioDocumentStore {
     restored.revision = this.doc.revision + 1;
     restored.updatedAt = new Date().toISOString();
     restored.contentHash = computeContentHash(restored);
-    this.history.pop();
-    this.redoStack.push(headTx);
-    this.doc = restored;
-    this._saveSnapshot(this.doc);
-
     const undoRecord = {
-      txId: `undo_r${this.doc.revision}_${headTx.txId}`,
+      txId: `undo_r${restored.revision}_${headTx.txId}`,
       kind: 'undo',
       baseRevision: beforeSnapshot.revision,
       restoreSnapshotRevision: headTx.beforeSnapshot.revision,
       beforeSnapshot,
-      afterSnapshot: structuredClone(this.doc),
+      afterSnapshot: structuredClone(restored),
       undoneTxId: headTx.txId,
-      revision: this.doc.revision,
+      revision: restored.revision,
       actor,
       label: `撤销: ${headTx.label}`,
-      timestamp: this.doc.updatedAt,
+      timestamp: restored.updatedAt,
       affectedNodeIds: headTx.affectedNodeIds,
       beforeContentHash: headTx.afterContentHash,
-      afterContentHash: this.doc.contentHash,
+      afterContentHash: restored.contentHash,
     };
+    const resolvedUndoScene = resolveDocumentScene(restored, { projectDir: this.projectDir });
+    this._publishDocument(restored, resolvedUndoScene, undoRecord, beforeCommit);
+    this.history.pop();
+    this.redoStack.push(headTx);
+    this._saveSnapshot(undoRecord.afterSnapshot, { alreadyCloned: true });
     this.lastHistoryRecord = undoRecord;
-
-    const resolvedUndoScene = resolveDocumentScene(this.doc, { projectDir: this.projectDir });
-    this.lastScene = resolvedUndoScene;
     const result = {
       ok: true,
       status: 'completed',
@@ -517,7 +529,7 @@ export class StudioDocumentStore {
     return result;
   }
 
-  redo({ expectedRevision = null, actor = { kind: 'human', id: 'default' } } = {}) {
+  redo({ expectedRevision = null, actor = { kind: 'human', id: 'default' } } = {}, { beforeCommit } = {}) {
     if (expectedRevision !== null && expectedRevision !== undefined && Number(expectedRevision) !== this.doc.revision) {
       return {
         status: 'failed',
@@ -540,39 +552,34 @@ export class StudioDocumentStore {
     reapplied.revision = this.doc.revision + 1;
     reapplied.updatedAt = new Date().toISOString();
     reapplied.contentHash = computeContentHash(reapplied);
-    this.redoStack.pop();
-
-    const pushedTx = {
-      ...nextTx,
-      revision: reapplied.revision,
-      baseRevision: beforeSnapshot.revision,
-      beforeSnapshot: structuredClone(this.doc),
-      afterSnapshot: structuredClone(reapplied),
-    };
-    this.history.push(pushedTx);
-    this.doc = reapplied;
-    this._saveSnapshot(this.doc);
-
     const redoRecord = {
-      txId: `redo_r${this.doc.revision}_${nextTx.txId}`,
+      txId: `redo_r${reapplied.revision}_${nextTx.txId}`,
       kind: 'redo',
       baseRevision: beforeSnapshot.revision,
       restoreSnapshotRevision: nextTx.afterSnapshot.revision,
       beforeSnapshot,
-      afterSnapshot: structuredClone(this.doc),
+      afterSnapshot: structuredClone(reapplied),
       redoneTxId: nextTx.txId,
-      revision: this.doc.revision,
+      revision: reapplied.revision,
       actor,
       label: `重做: ${nextTx.label}`,
-      timestamp: this.doc.updatedAt,
+      timestamp: reapplied.updatedAt,
       affectedNodeIds: nextTx.affectedNodeIds,
       beforeContentHash: nextTx.beforeContentHash,
-      afterContentHash: this.doc.contentHash,
+      afterContentHash: reapplied.contentHash,
     };
+    const resolvedRedoScene = resolveDocumentScene(reapplied, { projectDir: this.projectDir });
+    this._publishDocument(reapplied, resolvedRedoScene, redoRecord, beforeCommit);
+    this.redoStack.pop();
+    this.history.push({
+      ...nextTx,
+      revision: reapplied.revision,
+      baseRevision: beforeSnapshot.revision,
+      beforeSnapshot,
+      afterSnapshot: redoRecord.afterSnapshot,
+    });
+    this._saveSnapshot(redoRecord.afterSnapshot, { alreadyCloned: true });
     this.lastHistoryRecord = redoRecord;
-
-    const resolvedRedoScene = resolveDocumentScene(this.doc, { projectDir: this.projectDir });
-    this.lastScene = resolvedRedoScene;
     const result = {
       ok: true,
       status: 'completed',

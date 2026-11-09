@@ -113,13 +113,13 @@ check('T-E-6：approvedBy 记录 MCP 调用方 mcp-ai，而非 human', () => {
   const anchor = file.anchors.find(a => a.pageId === 'g7sparse');
   assert.equal(anchor.approvedBy, 'mcp-ai');
 });
-check('T-E-6：显式 approvedBy 透传（人工认可可写 human）', async () => {
+await checkAsync('T-E-6：显式 approvedBy 透传（人工认可可写 human）', async () => {
   const manual = await studioHandlers.studio_design_anchors({ projectDir: dir, action: 'approve', pageId: 'g7sparse', approvedBy: 'human' });
   assert.equal(manual.ok, true);
   const file = JSON.parse(readFileSync(join(dir, 'design-anchors.json'), 'utf8'));
   assert.equal(file.anchors.find(a => a.pageId === 'g7sparse').approvedBy, 'human');
 });
-check('T-ER-2：extract 同页覆盖保留既有认可标记（不再状态依赖绕过）', async () => {
+await checkAsync('T-ER-2：extract 同页覆盖保留既有认可标记（不再状态依赖绕过）', async () => {
   const again = await studioHandlers.studio_design_anchors({ projectDir: dir, action: 'extract', pageId: 'g7sparse' });
   assert.equal(again.ok, true);
   const file = JSON.parse(readFileSync(join(dir, 'design-anchors.json'), 'utf8'));

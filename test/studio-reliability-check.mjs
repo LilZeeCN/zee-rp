@@ -2,12 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { execFile } from 'node:child_process';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, renameSync, rmdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { StudioPersistence } from '../studio/persistence.mjs';
+import { startStudioServer } from '../studio/server.mjs';
 import { StudioDocumentStore } from '../studio/commands.mjs';
 import { createEmptyStudioDocument, buildNodeIndex } from '../studio/document.mjs';
 import { studioHandlers } from '../studio/mcp-adapter.mjs';
@@ -193,4 +194,144 @@ test('Studio reports a legacy server fingerprint and checks a reused instance be
   projectDir = join(dir, 'different-project');
   await assert.rejects(studioHandlers.studio_command({ projectDir: dir, commands: [] }), { code: 'E_NO_STUDIO_INSTANCE' });
   assert.equal(commandRequests, 0);
+});
+
+async function postStudio(studio, route, body) {
+  const response = await fetch(studio.url + route, { method: 'POST', body: JSON.stringify(body) });
+  return { status: response.status, body: await response.json() };
+}
+
+async function withBlockedPath(path, run) {
+  const saved = path + '.test-backup';
+  if (existsSync(path)) renameSync(path, saved);
+  mkdirSync(path);
+  try {
+    return await run();
+  } finally {
+    rmdirSync(path);
+    if (existsSync(saved)) renameSync(saved, path);
+  }
+}
+
+async function startDurabilityFixture(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-http-durable-'));
+  const { studio } = await startStudioServer({ projectDir: dir, domain: 'web', port: 0 });
+  t.after(async () => {
+    await studio.close();
+    rmSync(dir, { recursive: true, force: true });
+  });
+  const request = {
+    baseRevision: 1, idempotencyKey: 'create-title',
+    commands: [{ type: 'addNode', node: { id: 'title', type: 'label', text: 'A', w: 120, h: 28 } }],
+  };
+  return { dir, studio, request };
+}
+
+test('failed WAL append leaves the command unpublished and permits the same idempotency key to retry', async t => {
+  const { dir, studio, request } = await startDurabilityFixture(t);
+  const beforeHash = studio.store.doc.contentHash;
+  await withBlockedPath(studio.persistence.transactionsPath, async () => {
+    const failed = await postStudio(studio, '/api/commands', request);
+    assert.equal(failed.body.ok, false);
+    assert.equal(failed.body.appliedRevision, 1);
+    assert.equal(failed.body.durableRevision, 1);
+    assert.equal(studio.store.doc.contentHash, beforeHash);
+    assert.equal(studio.scene.revision, 1);
+    assert.equal(studio.store.lastScene.revision, 1);
+    assert.equal(studio.store.history.length, 0);
+    assert.equal(studio.store.idempotencyMap.has(request.idempotencyKey), false);
+  });
+  const retried = await postStudio(studio, '/api/commands', request);
+  assert.equal(retried.status, 200, JSON.stringify(retried.body));
+  assert.equal(retried.body.idempotentReplay, false);
+  assert.equal(retried.body.appliedRevision, 2);
+  assert.equal(retried.body.durableRevision, 2);
+  assert.equal(studio.scene.revision, 2);
+  const duplicate = await postStudio(studio, '/api/commands', request);
+  assert.equal(duplicate.body.idempotentReplay, true);
+  assert.equal(duplicate.body.txId, retried.body.txId);
+  assert.equal(duplicate.body.durableRevision, 2);
+  assert.equal(readFileSync(studio.persistence.transactionsPath, 'utf8').trim().split('\n').length, 1);
+  const reopened = new StudioPersistence(dir).initOrLoad().store;
+  assert.equal(reopened.appliedRevision, 2);
+  assert.equal(title(reopened), 'A');
+});
+
+test('WAL failure does not consume the undo or redo head', async t => {
+  const { studio, request } = await startDurabilityFixture(t);
+  const created = await postStudio(studio, '/api/commands', request);
+  assert.equal(created.body.ok, true);
+  for (const [route, revision, undoCount, redoCount, expectedText] of [
+    ['/api/undo', 2, 1, 0, 'A'],
+    ['/api/redo', 3, 0, 1, undefined],
+  ]) {
+    const head = studio.store.history.at(-1)?.txId;
+    const command = { expectedRevision: revision, ...(head ? { expectedHeadTxId: head } : {}) };
+    const hash = studio.store.doc.contentHash;
+    await withBlockedPath(studio.persistence.transactionsPath, async () => {
+      const failed = await postStudio(studio, route, command);
+      assert.equal(failed.body.ok, false);
+      assert.equal(studio.store.appliedRevision, revision);
+      assert.equal(studio.store.durableRevision, revision);
+      assert.equal(studio.scene.revision, revision);
+      assert.equal(studio.store.doc.contentHash, hash);
+      assert.equal(studio.store.history.length, undoCount);
+      assert.equal(studio.store.redoStack.length, redoCount);
+      assert.equal(title(studio.store), expectedText);
+    });
+    const retried = await postStudio(studio, route, command);
+    assert.equal(retried.status, 200, JSON.stringify(retried.body));
+    assert.equal(retried.body.appliedRevision, revision + 1);
+    assert.equal(retried.body.durableRevision, revision + 1);
+  }
+  assert.equal(title(studio.store), 'A');
+});
+
+test('an fsynced edit remains committed if the idempotency sidecar fails and is recovered from WAL', async t => {
+  const { dir, studio, request } = await startDurabilityFixture(t);
+  request.commands.push(
+    { type: 'createInstance', componentId: 'button' },
+    { type: 'setInteraction', nodeId: 'title', actions: [{ type: 'set-var', name: 'later', value: 1 }] },
+    { type: 'setVariable', name: 'later', value: 0 },
+  );
+  await withBlockedPath(studio.persistence.idempotencyPath, async () => {
+    const result = await postStudio(studio, '/api/commands', request);
+    assert.equal(result.status, 200, JSON.stringify(result.body));
+    assert.equal(result.body.appliedRevision, 2);
+    assert.equal(result.body.durableRevision, 2);
+    assert.equal(result.body.persistenceWarning?.code, 'W_CHECKPOINT_PENDING');
+    assert.equal(studio.scene.revision, 2);
+    const retry = await postStudio(studio, '/api/commands', request);
+    assert.equal(retry.body.idempotentReplay, true);
+    assert.equal(retry.body.txId, result.body.txId);
+    assert.equal(retry.body.durableRevision, 2);
+    const reopened = new StudioPersistence(dir).initOrLoad();
+    assert.equal(reopened.recoveryReport.replayedTransactions, 1);
+    assert.equal(title(reopened.store), 'A');
+    assert.equal(reopened.store.doc.contentHash, result.body.contentHash);
+    assert.equal(reopened.store.getIdempotentResult(request).txId, result.body.txId);
+  });
+});
+
+test('a committed undo reopens correctly when the earlier checkpoint omitted its restore target', async t => {
+  const { dir, studio, request } = await startDurabilityFixture(t);
+  const created = await postStudio(studio, '/api/commands', request);
+  assert.equal(created.status, 200);
+  const edited = await postStudio(studio, '/api/commands', {
+    baseRevision: 2, idempotencyKey: 'edit-title',
+    commands: [{ type: 'setText', nodeId: 'title', text: 'B' }],
+  });
+  assert.equal(edited.status, 200);
+  rmSync(join(studio.persistence.snapshotsDir, 'rev-2.json'));
+  await withBlockedPath(studio.persistence.idempotencyPath, async () => {
+    const undone = await postStudio(studio, '/api/undo', { expectedRevision: 3 });
+    assert.equal(undone.status, 200, JSON.stringify(undone.body));
+    assert.equal(undone.body.durableRevision, 4);
+    const { store, recoveryReport } = new StudioPersistence(dir).initOrLoad();
+    assert.equal(recoveryReport.replayedTransactions, 1);
+    assert.equal(store.doc.contentHash, created.body.contentHash);
+    assert.equal(title(store), 'A');
+    assert.equal(store.redo().ok, true);
+    assert.equal(title(store), 'B');
+  });
 });
