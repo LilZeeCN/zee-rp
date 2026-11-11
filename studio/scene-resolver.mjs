@@ -1168,47 +1168,11 @@ function canUseRootChildSlices(pg) {
 }
 
 function computeRootShellKey(pg) {
-  const r = pg.root || {};
-  return JSON.stringify({
-    id: pg.id,
-    name: pg.name,
-    device: pg.device,
-    domain: pg.domain,
-    canvas: pg.canvas,
-    root: {
-      id: r.id,
-      name: r.name,
-      type: r.type,
-      layout: r.layout,
-      x: r.x,
-      y: r.y,
-      w: r.w,
-      h: r.h,
-      minW: r.minW,
-      maxW: r.maxW,
-      minH: r.minH,
-      maxH: r.maxH,
-      padding: r.padding,
-      gap: r.gap,
-      fill: r.fill,
-      stroke: r.stroke,
-      strokeWidth: r.strokeWidth,
-      color: r.color,
-      radius: r.radius,
-      opacity: r.opacity,
-      visible: r.visible,
-      hidden: r.hidden,
-      locked: r.locked,
-      clip: r.clip,
-      overflow: r.overflow,
-      css: r.css,
-      on: r.on,
-      childCount: Array.isArray(r.children) ? r.children.length : 0,
-    },
-  });
+  const { children, ...root } = pg.root;
+  return JSON.stringify({ ...pg, root, childCount: children.length });
 }
 
-export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState = null, projectDir = null } = {}) {
+export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState = null, projectDir = null, useCache = true } = {}) {
   const layoutDocument = (runtimeState?.datasets || runtimeState?.variables || runtimeState?.datasetPages)
     ? {
         ...doc,
@@ -1224,6 +1188,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
   const allClipDiagnostics = [];
 
   const globalContextKey = JSON.stringify({
+    domain: doc.domain,
     c: doc.components,
     t: doc.tokens,
     p: doc.palette,
@@ -1242,9 +1207,9 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
   });
 
   for (const pg of doc.pages || []) {
-    const pgCanon = getCachedNodeCanonical(pg);
-    const pageCacheKey = pgCanon ? `${globalContextKey}::canon::${pgCanon}` : `${globalContextKey}::${JSON.stringify(pg)}`;
-    const cachedPage = pageSceneCache.get(pageCacheKey);
+    const pgCanon = useCache && getCachedNodeCanonical(pg);
+    const pageCacheKey = useCache ? `${globalContextKey}::${pgCanon ? 'canon::' + pgCanon : JSON.stringify(pg)}` : null;
+    const cachedPage = useCache && pageSceneCache.get(pageCacheKey);
     if (cachedPage) {
       allFontDiagnostics.push(...cachedPage.fontReport.diagnostics);
       allClipDiagnostics.push(...(cachedPage.fontReport.clipDiagnostics || []));
@@ -1264,7 +1229,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
     const totalH = screenH + shellPad * 2;
 
     const sliceCacheId = `${doc.documentId || 'doc'}::${pg.id}`;
-    const canSlice = canUseRootChildSlices(pg);
+    const canSlice = useCache && canUseRootChildSlices(pg);
     const rootShellKey = canSlice ? computeRootShellKey(pg) : null;
     const prevSliceEntry = canSlice ? lastPageSceneByKey.get(sliceCacheId) : null;
     const reusableChildSlices = (
@@ -1618,8 +1583,8 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
       },
     };
     Object.defineProperty(pageObj, 'rootTree', { value: tree, enumerable: false, configurable: true });
-    pageSceneCache.set(pageCacheKey, pageObj);
-    if (canSlice && nextChildSlices) {
+    if (useCache) pageSceneCache.set(pageCacheKey, pageObj);
+    if (canSlice && !tree.children.some(child => child.after)) {
       lastPageSceneByKey.set(sliceCacheId, {
         globalContextKey,
         rootShellKey,
@@ -1641,7 +1606,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
     typographyStats: getTypographyCacheStats(),
   };
   Object.defineProperty(sceneObj, 'nodesByScopedId', { value: nodesByScopedId, enumerable: false, configurable: true });
-  if (doc && typeof doc === 'object') {
+  if (useCache) {
     docLastSceneWeakMap.set(doc, sceneObj);
   }
   return sceneObj;

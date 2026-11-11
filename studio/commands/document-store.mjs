@@ -16,6 +16,40 @@ import { SAFE_NODE_CACHE_COMMANDS, INTERACTION_MUTATING_COMMANDS, NON_STRUCTURAL
 import { cmdError, defineRecordEntry, stackUnplacedChildDiagnostics, validateInteractionAssignments } from './helpers.mjs';
 import { applySingleCommand } from './apply.mjs';
 
+function prepareLocalEdit(doc, commands, pageId) {
+  if (commands.length !== 1) return null;
+  const command = commands[0];
+  if (!['setText', 'moveNode'].includes(command?.type) || typeof command.nodeId !== 'string' ||
+      command.nodeId.includes('__') || commandHasStepRef(command)) return null;
+  const entry = buildNodeIndex(doc).resolve(command.nodeId, command.pageId || pageId);
+  const path = entry?.path.match(/^\/pages\/(\d+)\/root((?:\/children\/\d+)+)$/);
+  if (!path) return null;
+  if (command.type === 'moveNode' && (
+    !['stack', 'free'].includes(entry.parent?.layout || 'stack') ||
+    typeof entry.node.right === 'number' || typeof entry.node.bottom === 'number'
+  )) return null;
+
+  // These handlers write only their target. Copy its ancestry so clean pages
+  // and root children keep their cached canonical and resolved identities.
+  const pageIndex = Number(path[1]);
+  const childIndices = [...path[2].matchAll(/\/children\/(\d+)/g)].map(match => Number(match[1]));
+  const workingDoc = structuredClone({ ...doc, pages: [] });
+  workingDoc.pages = [...doc.pages];
+  const page = doc.pages[pageIndex];
+  let node = { ...page.root };
+  workingDoc.pages[pageIndex] = { ...page, root: node };
+  let parent;
+  for (const index of childIndices) {
+    parent = node;
+    parent.children = [...parent.children];
+    node = parent.children[index] = { ...parent.children[index] };
+  }
+  // Instance text overrides mutate the nested overrides object.
+  node = parent.children[childIndices.at(-1)] = structuredClone(entry.node);
+  const index = { resolve: () => ({ ...entry, node, parent }) };
+  return { workingDoc, index, previous: entry.node, node, pageId: page.id, childIndices };
+}
+
 // ---- 批处理步引用($ref,figcraft batch 语义) ----
 // 命令可携带顶层 `as: "name"` 命名本步产出(scoped id 数组);同事务中后续步骤的
 // 任意字段可写 {"$ref":"name"} 引用该 id(单产出解析为字符串)。解析发生在
@@ -59,13 +93,13 @@ function resolveStepRefs(value, stepRefs, cmdIdx, isRoot) {
   return out;
 }
 
-export function applyCommandBatch(workingDoc, commands, { pageId = null, projectDir = null } = {}) {
+export function applyCommandBatch(workingDoc, commands, { pageId = null, projectDir = null, index = null } = {}) {
   const allAffected = new Set();
   const contractEvolutionResults = [];
   const interactionValidationQueue = [];
   const stepRefs = new Map(); // as 名 → 本步 affectedIds(scoped id)
   const resolvedCommands = new Array(commands.length); // 实际应用的命令(as/$ref 已解析)
-  let cachedIndex = buildNodeIndex(workingDoc);
+  let cachedIndex = index || buildNodeIndex(workingDoc);
   let needsInteractionNormalize = false;
   let canInheritNodeCache = true;
   for (let i = 0; i < commands.length; i++) {
@@ -283,17 +317,24 @@ export class StudioDocumentStore {
         beforeScene = { pages: [] };
       }
     }
-    const workingDoc = structuredClone(this.doc);
-    let resolvedScene, edit;
+    let workingDoc, resolvedScene, edit, sourceNodePatch;
     try {
-      edit = applyCommandBatch(workingDoc, request.commands, { pageId: request.pageId, projectDir: this.projectDir });
+      const local = prepareLocalEdit(beforeDoc, request.commands, request.pageId);
+      workingDoc = local?.workingDoc || structuredClone(beforeDoc);
+      edit = applyCommandBatch(workingDoc, request.commands, { pageId: request.pageId, projectDir: this.projectDir, index: local?.index });
       if (request.selectionGuard) {
         const outside = diffDocuments(this.doc, workingDoc, { limit: Infinity }).changes.filter(change => !request.selectionGuard.paths.some(path => path.every((part, index) => change.path[index] === part)));
         if (outside.length) throw cmdError('E_SELECTION_SCOPE', '修改超出绑定选区，整笔未写入', { extra: { outsidePaths: outside.slice(0, 8).map(change => change.path) } });
       }
-      workingDoc.diagnostics = currentDocumentDiagnostics(workingDoc);
+      if (!local) workingDoc.diagnostics = currentDocumentDiagnostics(workingDoc);
       Object.defineProperty(workingDoc, '_diagnosticsCurrent', { value: true, enumerable: false, configurable: true });
-      if (edit.canInheritNodeCache && edit.allAffected.size > 0) {
+      if (local) {
+        if (canonicalJson(local.previous) === canonicalJson(local.node)) {
+          workingDoc.pages = beforeDoc.pages;
+        } else {
+          sourceNodePatch = { pageId: local.pageId, childIndices: local.childIndices, node: local.node };
+        }
+      } else if (edit.canInheritNodeCache && edit.allAffected.size > 0) {
         inheritCleanCanonicalCache(beforeDoc, workingDoc, edit.allAffected);
       }
       workingDoc.contentHash = computeContentHash(workingDoc, { cacheNodes: true });
@@ -431,6 +472,7 @@ export class StudioDocumentStore {
       idempotentReplay: false,
       scene: resolvedScene,
     };
+    if (sourceNodePatch) Object.defineProperty(result, 'sourceNodePatch', { value: sourceNodePatch });
 
     if (idempotencyKey) {
       const storedRes = { ...result };
@@ -487,7 +529,7 @@ export class StudioDocumentStore {
     const restored = structuredClone(headTx.beforeSnapshot);
     restored.revision = this.doc.revision + 1;
     restored.updatedAt = new Date().toISOString();
-    restored.contentHash = computeContentHash(restored);
+    restored.contentHash = computeContentHash(restored, { cacheNodes: true });
     const undoRecord = {
       txId: `undo_r${restored.revision}_${headTx.txId}`,
       kind: 'undo',
@@ -551,7 +593,7 @@ export class StudioDocumentStore {
     const reapplied = structuredClone(nextTx.afterSnapshot);
     reapplied.revision = this.doc.revision + 1;
     reapplied.updatedAt = new Date().toISOString();
-    reapplied.contentHash = computeContentHash(reapplied);
+    reapplied.contentHash = computeContentHash(reapplied, { cacheNodes: true });
     const redoRecord = {
       txId: `redo_r${reapplied.revision}_${nextTx.txId}`,
       kind: 'redo',

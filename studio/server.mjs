@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isDeepStrictEqual } from 'node:util';
 import { canonicalJson, computeContentHash, sha256 } from './document.mjs';
 import { resolveDocumentScene, RENDERER_VERSION } from './scene-resolver.mjs';
 import { StudioPersistence } from './persistence.mjs';
@@ -547,37 +548,45 @@ export class StudioServer {
 
         let scenePatch = null;
         if (!txResult.idempotentReplay) {
+          const previousScene = this.scene;
           this.scene = txResult.scene || resolveDocumentScene(this.store.doc, { projectDir: this.projectDir });
           this.store.lastScene = this.scene;
           this.runtimeSession = null;
 
-          const totalSceneNodes = (this.scene?.pages || []).reduce((acc, p) => acc + (p.nodes?.length || 0), 0);
-          const canSendScenePatch =
-            totalSceneNodes > 500 &&
-            Array.isArray(txResult.affectedNodeIds) &&
-            txResult.affectedNodeIds.length > 0 &&
-            txResult.affectedNodeIds.length <= 120 &&
-            (txResult.semanticDiff?.structureChanges || []).every(c => c.kind === 'geometry-changed') &&
-            (txResult.semanticDiff?.componentDefinitionChanges || []).length === 0 &&
-            (txResult.semanticDiff?.tokenChanges || []).length === 0 &&
-            !commands.some(c => ['addPage', 'removePage', 'deletePage', 'renamePage', 'setPageShell', 'restoreDocument'].includes(c?.type));
-
-          if (canSendScenePatch) {
-            const affectedSet = new Set(txResult.affectedNodeIds || []);
-            const patchedNodesByPage = {};
-            for (const pg of this.scene.pages) {
-              const patched = pg.nodes.filter(n => affectedSet.has(n.scopedId) || affectedSet.has(n.id));
-              if (patched.length > 0) patchedNodesByPage[pg.id] = patched;
+          const source = txResult.sourceNodePatch;
+          const totalSceneNodes = this.scene.pages.reduce((sum, page) => sum + page.nodes.length, 0);
+          if (source && totalSceneNodes > 500 && previousScene.revision === txResult.baseRevision) {
+            const page = this.scene.pages.find(candidate => candidate.id === source.pageId);
+            const oldPage = previousScene.pages.find(candidate => candidate.id === source.pageId);
+            const sameOtherPages = this.scene.pages.every((candidate, index) => candidate === page || candidate === previousScene.pages[index]);
+            if (oldPage && sameOtherPages && page.nodes.length === oldPage.nodes.length && isDeepStrictEqual(page.board, oldPage.board)) {
+              const changed = [];
+              let sameOrder = true;
+              for (let i = 0; i < page.nodes.length; i++) {
+                const node = page.nodes[i], oldNode = oldPage.nodes[i];
+                if (node.scopedId !== oldNode.scopedId) { sameOrder = false; break; }
+                if (!isDeepStrictEqual(node, oldNode)) changed.push(node);
+                if (changed.length > 120) break;
+              }
+              if (sameOrder && changed.length <= 120) {
+                scenePatch = {
+                  baseRevision: txResult.baseRevision,
+                  appliedRevision: this.store.appliedRevision,
+                  contentHash: this.store.doc.contentHash,
+                  updatedAt: this.store.doc.updatedAt,
+                  source,
+                  patchedNodesByPage: { [page.id]: changed },
+                  pageFontReport: page.fontReport,
+                  fontDiagnostics: this.scene.fontDiagnostics,
+                  clipDiagnostics: this.scene.clipDiagnostics,
+                  assetDiagnostics: this.scene.assetDiagnostics,
+                  typographyStats: this.scene.typographyStats,
+                };
+              }
             }
-            scenePatch = {
-              baseRevision: txResult.baseRevision,
-              appliedRevision: this.store.appliedRevision,
-              contentHash: this.store.doc.contentHash,
-              patchedNodesByPage,
-              fontDiagnostics: this.scene.fontDiagnostics,
-              clipDiagnostics: this.scene.clipDiagnostics,
-              assetDiagnostics: this.scene.assetDiagnostics,
-            };
+          }
+
+          if (scenePatch) {
             this.broadcastSse({
               type: 'revision',
               instanceId: this.instanceId,

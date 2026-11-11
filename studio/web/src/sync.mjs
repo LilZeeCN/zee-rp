@@ -17,7 +17,7 @@ export async function applyServerSnapshot(payload, effects) {
     }
   }
   if (!payload.doc && payload.scenePatch) {
-    if (!state.doc || !state.scene || state.appliedRevision !== payload.scenePatch.baseRevision) {
+    if (!state.doc || !state.scene || state.sessionId !== payload.sessionId || state.appliedRevision !== payload.scenePatch.baseRevision) {
       const fullRes = await fetch('/api/context');
       if (fullRes.ok) {
         await applyServerSnapshot(await fullRes.json(), effects);
@@ -37,14 +37,20 @@ export async function applyServerSnapshot(payload, effects) {
     const patch = payload.scenePatch;
     state.doc.revision = patch.appliedRevision;
     state.doc.contentHash = patch.contentHash;
+    state.doc.updatedAt = patch.updatedAt;
+    const sourcePage = state.doc.pages.find(page => page.id === patch.source.pageId);
+    const sourceParent = patch.source.childIndices.slice(0, -1).reduce((node, index) => node.children[index], sourcePage.root);
+    sourceParent.children[patch.source.childIndices.at(-1)] = patch.source.node;
     state.scene.revision = patch.appliedRevision;
     state.scene.contentHash = patch.contentHash;
     if (patch.fontDiagnostics) state.scene.fontDiagnostics = patch.fontDiagnostics;
     if (patch.clipDiagnostics) state.scene.clipDiagnostics = patch.clipDiagnostics;
     if (patch.assetDiagnostics) state.scene.assetDiagnostics = patch.assetDiagnostics;
+    state.scene.typographyStats = patch.typographyStats;
     for (const [pgId, patchedNodes] of Object.entries(patch.patchedNodesByPage || {})) {
       const pg = state.scene.pages.find(p => p.id === pgId);
       if (!pg) continue;
+      pg.fontReport = patch.pageFontReport;
       if (!pg._nodeMap || !pg._indexByScopedId) {
         pg._nodeMap = new Map(pg.nodes.map(n => [n.scopedId, n]));
         pg._indexByScopedId = new Map(pg.nodes.map((n, i) => [n.scopedId, i]));
@@ -102,32 +108,22 @@ export async function applyServerSnapshot(payload, effects) {
 
   let patchedFast = false;
   let hasPatchedImage = false;
+  const patchedNodes = payload.scenePatch?.patchedNodesByPage?.[activePageScene?.id];
   if (
     state.mode === 'design' &&
     previousTokenStyles === tokenCss() &&
     !interruptedGesture &&
     state.renderedRevision > 0 &&
     !payload.forceSync &&
-    Array.isArray(payload.affectedNodeIds) &&
-    payload.affectedNodeIds.length > 0 &&
-    payload.affectedNodeIds.length <= 120 &&
-    activePageScene
+    patchedNodes?.length
   ) {
     const screenRoot = document.getElementById('screen-root');
     if (screenRoot && screenRoot.getAttribute('data-page-id') === activePageScene.id) {
       const nodeMap = activePageScene._nodeMap || (activePageScene._nodeMap = new Map(activePageScene.nodes.map(n => [n.scopedId, n])));
       let allFound = true;
       const toPatch = [];
-      for (const scopedId of payload.affectedNodeIds) {
-        if (String(scopedId).startsWith('component:') || String(scopedId).startsWith('token:')) {
-          allFound = false;
-          break;
-        }
-        const [pgPrefix] = String(scopedId).split('/');
-        if (pgPrefix && pgPrefix !== activePageScene.id) {
-          continue;
-        }
-        const n = nodeMap.get(scopedId);
+      for (const n of patchedNodes) {
+        const { scopedId } = n;
         if (n && n.type === 'phone-shell') {
           continue;
         }
@@ -135,7 +131,7 @@ export async function applyServerSnapshot(payload, effects) {
         if (n && !n.visible && !el) {
           continue;
         }
-        if (!n || !el || n.type === 'dynamic-panel' || n.type === 'repeater' || n.repeaterTemplateOwner) {
+        if (!el || n.type === 'dynamic-panel' || n.type === 'repeater' || n.repeaterTemplateOwner) {
           allFound = false;
           break;
         }
