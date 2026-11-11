@@ -326,6 +326,7 @@
     "studio/pixel-truth.mjs",
     "studio/png-decode.mjs",
     "studio/runtime.mjs",
+    "studio/prototype-runtime.mjs",
     "studio/scenario-executors.mjs",
     "studio/scenarios.mjs",
     "studio/scene-resolver.mjs",

@@ -6,10 +6,12 @@ import path from 'node:path';
 import http from 'node:http';
 import { once } from 'node:events';
 import { connect } from 'node:net';
+import { pathToFileURL } from 'node:url';
 
 import { importToStudioDocument as normalizeDocument, computeContentHash } from '../studio/document.mjs';
 import { exportStudioDocumentToCode } from '../studio/export-code.mjs';
 import { StudioPersistence } from '../studio/persistence.mjs';
+import { StudioDocumentStore } from '../studio/commands.mjs';
 import { startStudioServer } from '../studio/server.mjs';
 import { studioHandlers } from '../studio/mcp-adapter.mjs';
 import { launchChrome } from '../studio/cdp.mjs';
@@ -550,4 +552,95 @@ test('layered paint and inline styles reach Studio and the standalone export', a
     await exported?.close();
     await studio.close();
   }
+});
+
+test('Studio and relocated HTML run the same expression and conditional interaction scenario', async t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-runtime-parity-'));
+  const source = path.join(dir, 'source.json');
+  const exportedDir = path.join(dir, 'portable');
+  const doc = normalizeDocument({ domain: 'web', variables: { count: 0 }, pages: [{
+    id: 'home', root: { id: 'root', type: 'box', w: 480, h: 320, children: [
+      { id: 'run', type: 'button', text: 'Run', x: 20, y: 20, w: 120, h: 36 },
+      { id: 'message', type: 'label', text: 'Ready', x: 20, y: 88, w: 400, h: 36 },
+      { id: 'hint', type: 'label', text: 'Hint', x: 20, y: 150, w: 160, h: 36, visible: false },
+      { id: 'same', type: 'label', text: 'Root', x: 20, y: 216, w: 160, h: 36 },
+      { id: 'panel', type: 'dynamic-panel', x: 218, y: 180, w: 224, h: 118, states: [{
+        id: 'only', root: { id: 'panel-body', type: 'box', w: 224, h: 118, children: [
+          { id: 'scope', type: 'button', text: 'Scope', x: 10, y: 10, w: 96, h: 32 },
+          { id: 'local-message', name: 'same', type: 'label', text: 'Local', x: 10, y: 58, w: 176, h: 36 },
+        ] },
+      }] },
+    ] },
+  }] });
+  const store = new StudioDocumentStore(doc);
+  const edit = store.applyTransaction({ commands: [{
+    type: 'setInteraction', nodeId: 'run', actions: { cases: [
+      { when: '=$count === 0', break: false, actions: [
+        { type: 'set-variable', name: 'count', value: '=number("1")' },
+        { type: 'set-text', target: 'message', text: '=concat("hello ", lower("WORLD"), " $count @message var.count")' },
+      ] },
+      { when: '=$count === 1', actions: [
+        { setVar: { count: '=$count + 1' } },
+        { when: '=contains("hello", "ell")', then: [{ type: 'show', target: 'hint' }] },
+      ] },
+      { else: true, actions: [
+        { type: 'set-text', target: 'message', text: '=concat("again ", text($count))' },
+        { hide: 'hint' },
+      ] },
+    ] },
+  }, {
+    type: 'setInteraction', nodeId: 'scope',
+    actions: [{ type: 'set-text', target: 'same', text: '=concat(@same, " updated")' }],
+  }] });
+  assert.equal(edit.ok, true, JSON.stringify({ code: edit.code, message: edit.message }));
+  const steps = [
+    { action: 'click', target: 'run', expect: {
+      variables: { count: 2 }, text: { message: 'hello world $count @message var.count' }, visible: { hint: true },
+    } },
+    { action: 'click', target: 'run', expect: {
+      variables: { count: 2 }, text: { message: 'again 2' }, visible: { hint: false },
+    } },
+    { action: 'click', target: 'home/panel/only/scope', expect: {
+      text: { 'home/same': 'Root', 'home/panel/only/local-message': 'Local updated' },
+    } },
+  ];
+  fs.writeFileSync(source, JSON.stringify(store.doc));
+  const { studio } = await startStudioServer({ projectDir: path.join(dir, 'project'), sourcePath: source, port: 0 });
+  let offlinePage;
+  t.after(async () => {
+    await offlinePage?.close();
+    await studio.close();
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  const studioResult = await studioHandlers.studio_scenario({
+    url: studio.url, startPageId: 'home', hitTest: true, verbose: true, steps,
+  });
+  const browser = studioResult.browserLayer;
+  assert.equal(studioResult.ok, true, JSON.stringify(browser ? {
+    message: browser.message,
+    lastStep: browser.history.at(-1)?.failures,
+    text: browser.history.at(-1)?.actual.widgets.filter(widget => widget.name === 'same'),
+  } : studioResult.failures || studioResult.message));
+  assert.equal(studioResult.hitTest?.passed, true);
+  assert.equal(studioResult.assertionCount, 8);
+
+  const stagingDir = path.join(dir, 'staging');
+  const exported = await exportStudioDocumentToCode(store.doc, { outDir: stagingDir, registerExport: false });
+  assert.equal(exported.ok, true);
+  fs.renameSync(stagingDir, exportedDir);
+  offlinePage = await studio.managedChrome.openPage(pathToFileURL(path.join(exportedDir, 'index.html')).href);
+  await offlinePage.waitForFunction('Boolean(window.__STUDIO_EXPORT_APP__)');
+  const offline = await offlinePage.evaluate(`(() => {
+    const app = window.__STUDIO_EXPORT_APP__;
+    const result = app.runScenario(${JSON.stringify(steps)});
+    return {
+      result,
+      rendered: document.querySelector('[data-node-id="message"]').textContent,
+      conditions: app.trace.filter(event => event.type === 'click').map(event => event.executed.filter(action => action.action === 'condition')),
+    };
+  })()`);
+  assert.equal(offline.result.ok, true, JSON.stringify(offline.result.failures));
+  assert.equal(offline.rendered, 'again 2');
+  assert.deepEqual(offline.conditions, studioResult.stepResults.map(step => step.executed.filter(action => action.action === 'condition')));
+  assert.equal(offlinePage.scriptErrors.length, 0);
 });

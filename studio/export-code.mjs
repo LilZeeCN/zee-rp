@@ -2,6 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { sha256 } from './document.mjs';
 import { resolveDocumentScene } from './scene-resolver.mjs';
+import { evaluatePrototypeExpression, executePrototypeInteraction } from './prototype-runtime.mjs';
 import { textSpanCss, visualCss } from './visual-style.mjs';
 import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
 import { locateDiagnostic } from './diagnostics.mjs';
@@ -586,6 +587,9 @@ function buildAppJs(bundlePayload) {
 (function () {
   'use strict';
 
+  ${evaluatePrototypeExpression.toString()}
+  ${executePrototypeInteraction.toString()}
+
   const BUNDLE = ${JSON.stringify(bundlePayload)};
 
   class ExportRuntimeApp {
@@ -628,17 +632,17 @@ function buildAppJs(bundlePayload) {
         );
       }
 
-      const collectFormulas = (spec, pageId) => {
+      const collectFormulas = (spec, context) => {
         if (!spec || typeof spec !== 'object') return;
-        if (Array.isArray(spec)) { spec.forEach(s => collectFormulas(s, pageId)); return; }
+        if (Array.isArray(spec)) { spec.forEach(s => collectFormulas(s, context)); return; }
         if (spec.type === 'set-text' && spec.target) {
           const expr = spec.text ?? spec.value;
           if (typeof expr === 'string' && expr.includes('dataset.')) {
-            const key = this.targetKey(spec.target, pageId);
-            if (!this.textFormulas[key]) this.textFormulas[key] = { pageId, expr };
+            const target = this.findNodeInPage(context.pageId, spec.target, context);
+            if (target && !this.textFormulas[target.scopedId]) this.textFormulas[target.scopedId] = { ...context, expr };
           }
         }
-        for (const k of ['actions', 'then', 'else', 'cases']) if (spec[k]) collectFormulas(spec[k], pageId);
+        for (const k of ['actions', 'then', 'else', 'cases']) if (spec[k]) collectFormulas(spec[k], context);
       };
 
       for (const pg of pages) {
@@ -658,7 +662,7 @@ function buildAppJs(bundlePayload) {
             if (Number.isInteger(n.pageSize) && n.pageSize > 0) this.datasetPageSizes[dsKey] = n.pageSize;
             if (Number.isInteger(n.page) && n.page >= 1) this.datasetPages[dsKey] = n.page;
           }
-          if (n.on?.click) collectFormulas(n.on.click, pg.id);
+          if (n.on?.click) collectFormulas(n.on.click, { pageId: pg.id, scopePrefix: this.nodeScope(n) });
         }
       }
       this.render();
@@ -685,7 +689,11 @@ function buildAppJs(bundlePayload) {
       return baseNodes;
     }
 
-    findNodeInPage(pageId, targetId) {
+    nodeScope(node) {
+      return node.scopedId.slice(0, -node.id.length - 1);
+    }
+
+    findNodeInPage(pageId, targetId, { scopePrefix = this.interactionScope } = {}) {
       const raw = String(targetId?.ref ?? targetId);
       const explicitPage = this.bundle.pages.find(p => raw.startsWith(p.id + '/'));
       const pg = explicitPage || this.bundle.pages.find(p => p.id === pageId);
@@ -693,10 +701,15 @@ function buildAppJs(bundlePayload) {
       const all = new Map((pg.nodes || []).map(n => [n.scopedId, n]));
       for (const states of Object.values(pg.panelStateNodes || {})) for (const nodes of Object.values(states)) for (const n of nodes) all.set(n.scopedId, n);
       const full = explicitPage ? raw : pg.id + '/' + raw;
-      let matches = [...all.values()].filter(n => n.scopedId === full);
+      const nodes = [...all.values()];
+      let matches = nodes.filter(n => n.scopedId === full);
+      if (!raw.includes('/') && scopePrefix && scopePrefix !== pg.id) {
+        const local = nodes.filter(n => this.nodeScope(n) === scopePrefix && (n.id === raw || n.name === raw));
+        if (local.length) matches = local;
+      }
       if (!matches.length && !raw.includes('/')) {
-        matches = [...all.values()].filter(n => n.id === raw || n.name === raw);
-        const local = matches.filter(n => n.scopedId.slice(0, -n.id.length - 1) === this.interactionScope);
+        matches = nodes.filter(n => n.id === raw || n.name === raw);
+        const local = matches.filter(n => this.nodeScope(n) === scopePrefix);
         const active = new Set(this.getActiveNodesForPage(pg.id).map(n => n.scopedId));
         if (local.length) matches = local;
         else if (matches.some(n => active.has(n.scopedId))) matches = matches.filter(n => active.has(n.scopedId));
@@ -727,60 +740,26 @@ function buildAppJs(bundlePayload) {
       return true;
     }
 
-    getWidgetText(widgetId) {
-      const node = this.findNodeInPage(this.currentPageId, widgetId);
+    getWidgetText(widgetId, { pageId = this.currentPageId, scopePrefix = this.interactionScope } = {}) {
+      const node = this.findNodeInPage(pageId, widgetId, { scopePrefix });
       if (!node) return '';
       const scoped = node.scopedId;
       if (scoped in this.inputs) return String(this.inputs[scoped] ?? '');
       if (scoped in this.textOverrides) return String(this.textOverrides[scoped] ?? '');
       const raw = String(node.rawText ?? node.text ?? node.value ?? '');
-      if (raw.startsWith('=')) return String(this.evaluateExpression(raw));
+      if (raw.startsWith('=')) {
+        return String(this.evaluateExpression(raw, null, { pageId: node.pageId, scopePrefix: this.nodeScope(node) }) ?? '');
+      }
       return raw;
     }
 
-    evaluateExpression(expr, itemRow = null) {
-      if (expr === null || expr === undefined) return '';
-      if (typeof expr === 'number' || typeof expr === 'boolean') return expr;
-      const str = String(expr).trim();
-      if (!str.startsWith('=')) {
-        if (itemRow && str.includes('\${item.')) {
-          return str.replace(/\\$\\{\\s*item\\.([a-zA-Z0-9_]+)\\s*\\}/g, (_, k) => String(itemRow[k] ?? ''));
-        }
-        if (itemRow && str.includes('{{')) {
-          return str.replace(/\\{\\{\\s*([a-zA-Z0-9_]+)\\s*\\}\\}/g, (_, k) => String(itemRow[k] ?? ''));
-        }
-        return str;
-      }
-      const body = str.slice(1).trim();
-      if (itemRow && /^item\\.([a-zA-Z0-9_]+)$/.test(body)) {
-        const k = body.slice(5);
-        return itemRow[k] ?? '';
-      }
-      const textAddMatch = body.match(/^text\\(\\s*(\\d+)\\s*\\+\\s*(?:var\\.|\\$)([a-zA-Z0-9_]+)\\s*\\)$/);
-      if (textAddMatch) {
-        return String(Number(textAddMatch[1]) + Number(this.variables[textAddMatch[2]] || 0));
-      }
-      const textVarMatch = body.match(/^text\\(\\s*(?:var\\.|\\$)([a-zA-Z0-9_]+)\\s*\\)$/);
-      if (textVarMatch) {
-        return String(this.variables[textVarMatch[1]] ?? '');
-      }
-      const atWidgetMatch = body.match(/^@([a-zA-Z0-9_/-]+)$/);
-      if (atWidgetMatch) {
-        return this.getWidgetText(atWidgetMatch[1]);
-      }
-      const jsExpr = body
-        .replace(/dataset\\.([a-zA-Z0-9_-]+)\\.([a-zA-Z0-9_.]+)/g, (_, dsName, propPath) => JSON.stringify(this.resolveDatasetPath(dsName, propPath)))
-        .replace(/item\\.([a-zA-Z0-9_]+)/g, (_, k) => JSON.stringify(itemRow ? (itemRow[k] ?? '') : ''))
-        .replace(/@([a-zA-Z0-9_-]+)/g, (_, id) => JSON.stringify(this.getWidgetText(id)))
-        .replace(/widget\\.([a-zA-Z0-9_-]+)\\.text/g, (_, id) => JSON.stringify(this.getWidgetText(id)))
-        .replace(/var\\.([a-zA-Z0-9_]+)/g, (_, name) => JSON.stringify(this.variables[name] ?? ''))
-        .replace(/\\$([a-zA-Z0-9_]+)/g, (_, name) => JSON.stringify(this.variables[name] ?? ''));
-      try {
-        const fn = new Function('return (' + jsExpr + ');');
-        return fn();
-      } catch {
-        return str;
-      }
+    evaluateExpression(expr, itemRow = null, context = {}) {
+      return evaluatePrototypeExpression(expr, {
+        variables: this.variables,
+        getWidgetText: target => this.getWidgetText(target, context),
+        resolveDatasetPath: (name, prop) => this.resolveDatasetPath(name, prop),
+        itemRow,
+      });
     }
 
     getDatasetPageSize(dsName, fallback = null) {
@@ -839,9 +818,7 @@ function buildAppJs(bundlePayload) {
 
     _refreshDatasetBoundText() {
       for (const [key, info] of Object.entries(this.textFormulas)) {
-        const before = this.currentPageId;
-        try { this.currentPageId = info.pageId; this.textOverrides[key] = String(this.evaluateExpression(info.expr)); }
-        finally { this.currentPageId = before; }
+        this.textOverrides[key] = String(this.evaluateExpression(info.expr, null, info));
       }
     }
 
@@ -920,8 +897,10 @@ function buildAppJs(bundlePayload) {
       const executed = [];
       if (clickSpec && !['disabled', 'loading'].includes(node.state)) {
         const before = this.interactionScope;
-        this.interactionScope = node.scopedId.slice(0, -node.id.length - 1);
-        try { this._executeInteractionSpec(clickSpec, node, executed, rowContext); }
+        this.interactionScope = this.nodeScope(node);
+        try {
+          executePrototypeInteraction(this, clickSpec, executed, { declaredVariables: this.bundle.variables, rowContext });
+        }
         finally { this.interactionScope = before; }
       }
       this.trace.push({
@@ -935,146 +914,8 @@ function buildAppJs(bundlePayload) {
       return this.getState();
     }
 
-    _executeInteractionSpec(spec, sourceNode, executed, rowContext = null) {
-      if (!spec) return;
-      if (Array.isArray(spec)) {
-        for (const item of spec) this._executeInteractionSpec(item, sourceNode, executed, rowContext);
-        return;
-      }
-      if (typeof spec === 'string') {
-        this.navigate(spec);
-        executed.push({ action: 'link', to: spec });
-        return;
-      }
-      if (typeof spec !== 'object') return;
-      if (Array.isArray(spec.cases)) {
-        for (const c of spec.cases) {
-          const cond = c.when ?? c.if ?? c.condition;
-          const matched = cond === undefined || cond === 'else' || c.else === true || Boolean(this.evaluateExpression(cond, rowContext));
-          if (matched) {
-            this._executeActionObject(c, sourceNode, executed, rowContext);
-            if (c.break !== false) break;
-          }
-        }
-        return;
-      }
-      if (spec.when !== undefined || spec.if !== undefined) {
-        const cond = spec.when ?? spec.if;
-        if (Boolean(this.evaluateExpression(cond, rowContext))) {
-          this._executeActionObject(spec.then || spec, sourceNode, executed, rowContext);
-        } else if (spec.else) {
-          this._executeInteractionSpec(spec.else, sourceNode, executed, rowContext);
-        }
-        return;
-      }
-      this._executeActionObject(spec, sourceNode, executed, rowContext);
-    }
-
     _setNodeVisibility(targetId, vis) {
       this.visibility[this.targetKey(targetId)] = vis;
-    }
-
-    _executeActionObject(act, sourceNode, executed, rowContext = null) {
-      if (!act || typeof act !== 'object') return;
-      if (Array.isArray(act)) {
-        for (const item of act) this._executeInteractionSpec(item, sourceNode, executed, rowContext);
-        return;
-      }
-      const assignVariable = (name, value) => {
-        const declared = this.bundle.variables?.[name];
-        if (declared !== undefined) {
-          const initial = declared && typeof declared === 'object' && 'value' in declared ? declared.value : declared;
-          if (typeof value !== typeof initial) throw Object.assign(new Error('变量 ' + name + ' 需要 ' + typeof initial + '，表达式返回 ' + typeof value), { code: 'E_TYPE', field: name, expected: typeof initial, actual: typeof value });
-        }
-        this.variables[name] = value;
-      };
-      if (act.setVar && typeof act.setVar === 'object') {
-        for (const [varName, expr] of Object.entries(act.setVar)) {
-          const val = this.evaluateExpression(expr, rowContext);
-          assignVariable(varName, val);
-          executed.push({ action: 'set-var', name: varName, value: val });
-        }
-      }
-      if (act.type === 'set-var' || act.type === 'set-variable' || act.action === 'set-var' || act.action === 'set-variable') {
-        const val = this.evaluateExpression(act.value ?? act.expr, rowContext);
-        assignVariable(act.name || act.variable, val);
-        executed.push({ action: 'set-var', name: act.name || act.variable, value: val });
-      }
-      if (act.show) {
-        const targets = Array.isArray(act.show) ? act.show : [act.show];
-        for (const t of targets) {
-          this._setNodeVisibility(t, true);
-          executed.push({ action: 'show', target: String(t).split('/').pop() });
-        }
-      }
-      if (act.hide) {
-        const targets = Array.isArray(act.hide) ? act.hide : [act.hide];
-        for (const t of targets) {
-          this._setNodeVisibility(t, false);
-          executed.push({ action: 'hide', target: String(t).split('/').pop() });
-        }
-      }
-      if (act.type === 'show' || act.type === 'hide' || act.type === 'toggle') {
-        const stripped = this.targetKey(act.target);
-        const cur = this.isNodeVisible(stripped);
-        const vis = act.type === 'toggle' ? !cur : act.type === 'show';
-        this._setNodeVisibility(act.target, vis);
-        executed.push({ action: act.type, target: stripped });
-      }
-      if (act.setText && typeof act.setText === 'object') {
-        for (const [targetId, expr] of Object.entries(act.setText)) {
-          const stripped = this.targetKey(targetId);
-          if (typeof expr === 'string' && expr.includes('dataset.')) {
-            this.textFormulas[stripped] = { pageId: this.currentPageId, expr };
-          }
-          const val = String(this.evaluateExpression(expr, rowContext));
-          this.textOverrides[stripped] = val;
-          executed.push({ action: 'set-text', target: stripped, text: val });
-        }
-      }
-      if (act.type === 'set-text') {
-        const stripped = this.targetKey(act.target);
-        const rawExpr = act.text ?? act.value;
-        if (typeof rawExpr === 'string' && rawExpr.includes('dataset.')) {
-          this.textFormulas[stripped] = { pageId: this.currentPageId, expr: rawExpr };
-        }
-        const val = String(this.evaluateExpression(rawExpr, rowContext));
-        this.textOverrides[stripped] = val;
-        executed.push({ action: 'set-text', target: stripped, text: val });
-      }
-      const panelAct = act.setPanelState || (act.type === 'set-panel-state' ? act : null);
-      if (panelAct) {
-        const list = Array.isArray(panelAct) ? panelAct : [panelAct];
-        for (const item of list) {
-          const panelId = this.targetKey(item.target || item.panel);
-          const panelNode = this.findNodeInPage(this.currentPageId, panelId);
-          let nextState = item.state;
-          const curState = this.panelStates[panelId] || panelNode?.activeStateId || panelNode?.states?.[0]?.id;
-          if ((nextState === 'next' || nextState === 'toggle' || nextState === 'flip') && panelNode?.states?.length) {
-            const idx = panelNode.states.findIndex(s => s.id === curState);
-            nextState = panelNode.states[(idx + 1) % panelNode.states.length].id;
-          } else if (nextState === 'prev' && panelNode?.states?.length) {
-            const idx = panelNode.states.findIndex(s => s.id === curState);
-            nextState = panelNode.states[(idx - 1 + panelNode.states.length) % panelNode.states.length].id;
-          }
-          if (panelNode) this.panelStates[panelNode.scopedId] = nextState;
-          this.panelStates[panelId] = nextState;
-          executed.push({ action: 'set-panel-state', panel: panelId, state: nextState });
-        }
-      }
-      if (act.datasetAction || act.type?.startsWith('dataset-') || act.type?.startsWith('repeater-')) {
-        this._executeDatasetAction(act.datasetAction || act, executed, rowContext);
-      }
-      const linkTarget = act.link || (act.type === 'link' || act.type === 'navigate' ? act.page || act.to || act.target : null);
-      if (linkTarget) {
-        this.navigate(linkTarget);
-        executed.push({ action: 'link', to: linkTarget });
-      }
-      if (Array.isArray(act.actions)) {
-        for (const sub of act.actions) {
-          this._executeInteractionSpec(sub, sourceNode, executed, rowContext);
-        }
-      }
     }
 
     _executeDatasetAction(act, executed, rowContext = null) {

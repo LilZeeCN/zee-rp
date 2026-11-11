@@ -1,4 +1,5 @@
-import { resolveDocumentScene, evaluateSimpleDisplayFormula } from './scene-resolver.mjs';
+import { resolveDocumentScene } from './scene-resolver.mjs';
+import { evaluatePrototypeExpression, executePrototypeInteraction } from './prototype-runtime.mjs';
 import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
 
 export const SCENARIO_STEP_SCHEMA = {
@@ -206,59 +207,11 @@ export class StudioRuntimeSession {
   }
 
   evaluateExpression(expr, context = {}) {
-    if (expr === null || expr === undefined) return '';
-    if (typeof expr === 'number' || typeof expr === 'boolean') return expr;
-    const str = String(expr).trim();
-    if (!str.startsWith('=')) return str;
-
-    const body = str.slice(1).trim();
-
-    // Check simple display formulas first
-    const textAddMatch = body.match(/^text\(\s*(\d+)\s*\+\s*(?:var\.|\$)([a-zA-Z0-9_]+)\s*\)$/);
-    if (textAddMatch) {
-      return String(Number(textAddMatch[1]) + Number(this.variables[textAddMatch[2]] || 0));
-    }
-    const textVarMatch = body.match(/^text\(\s*(?:var\.|\$)([a-zA-Z0-9_]+)\s*\)$/);
-    if (textVarMatch) {
-      return String(this.variables[textVarMatch[1]] ?? '');
-    }
-
-    // Check @widget shorthand (e.g. =@note or =@location)
-    const atWidgetMatch = body.match(/^@([a-zA-Z0-9_/-]+)$/);
-    if (atWidgetMatch) {
-      return this.getWidgetText(atWidgetMatch[1], context);
-    }
-
-    // Replace dataset.<ds>.<path>, @<id>, widget.<id>.text, var.<name>, $<name>
-    const jsExpr = body.replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|dataset\.[a-zA-Z0-9_-]+\.[a-zA-Z0-9_.]+|widget\.[a-zA-Z0-9_-]+\.text|var\.[a-zA-Z0-9_-]+|@[a-zA-Z0-9_/-]+|\$[a-zA-Z0-9_-]+|[a-zA-Z_][a-zA-Z0-9_-]*/g, (token, offset) => {
-      if (token.startsWith('"') || token.startsWith("'")) return token;
-      if (token.startsWith('dataset.')) {
-        const [, name, ...path] = token.split('.');
-        return JSON.stringify(this.resolveDatasetPath(name, path.join('.')));
-      }
-      if (token.startsWith('@')) return JSON.stringify(this.getWidgetText(token.slice(1), context));
-      if (token.startsWith('widget.')) return JSON.stringify(this.getWidgetText(token.slice(7, -5), context));
-      if (token.startsWith('var.')) return JSON.stringify(this.variables[token.slice(4)] ?? '');
-      if (token.startsWith('$')) return JSON.stringify(this.variables[token.slice(1)] ?? '');
-      if (Object.hasOwn(this.variables, token) && !body.slice(offset + token.length).trimStart().startsWith('(')) return JSON.stringify(this.variables[token]);
-      return token;
+    return evaluatePrototypeExpression(expr, {
+      variables: this.variables,
+      getWidgetText: target => this.getWidgetText(target, context),
+      resolveDatasetPath: (name, prop) => this.resolveDatasetPath(name, prop),
     });
-
-    try {
-      // Safe expression evaluation for arithmetic/boolean/string expressions
-      const functions = {
-        text: value => String(value ?? ''), number: value => Number(value) || 0,
-        concat: (...values) => values.map(value => String(value ?? '')).join(''),
-        contains: (value, part) => String(value).includes(String(part)),
-        length: value => String(value).length, lower: value => String(value).toLowerCase(),
-        upper: value => String(value).toUpperCase(), not: value => !value,
-        remove: (value, part) => String(value).split(String(part)).join(''),
-      };
-      const fn = new Function(...Object.keys(functions), `return (${jsExpr});`);
-      return fn(...Object.values(functions));
-    } catch {
-      return evaluateSimpleDisplayFormula(str, this.variables);
-    }
   }
 
   getDatasetPageSize(dsName) {
@@ -425,7 +378,9 @@ export class StudioRuntimeSession {
     if (clickSpec && !['disabled', 'loading'].includes(node.state)) {
       const previousScope = this.interactionScope;
       this.interactionScope = entry.scopePrefix;
-      try { this._executeInteractionSpec(clickSpec, node, executed); }
+      try {
+        executePrototypeInteraction(this, clickSpec, executed, { declaredVariables: this.docSnapshot.variables });
+      }
       finally { this.interactionScope = previousScope; }
     }
 
@@ -439,169 +394,6 @@ export class StudioRuntimeSession {
     });
 
     return this.getState();
-  }
-
-  _executeInteractionSpec(spec, sourceNode, executed) {
-    if (!spec) return;
-    if (Array.isArray(spec)) {
-      for (const item of spec) this._executeInteractionSpec(item, sourceNode, executed);
-      return;
-    }
-    if (typeof spec === 'string') {
-      this.navigate(spec);
-      executed.push({ action: 'link', to: spec });
-      return;
-    }
-    if (typeof spec !== 'object') return;
-
-    // Conditional cases (`cases` array or `if`/`when`)
-    if (Array.isArray(spec.cases)) {
-      for (const [caseIndex, c] of spec.cases.entries()) {
-        const cond = c.when ?? c.if ?? c.condition;
-        const value = cond === undefined || cond === 'else' ? true : this.evaluateExpression(cond);
-        const matched = Boolean(value);
-        executed.push({ action: 'condition', caseIndex, expression: cond ?? 'else', value, matched });
-        if (matched) {
-          this._executeActionObject(c, sourceNode, executed);
-          if (c.break !== false) break;
-        }
-      }
-      return;
-    }
-
-    if (spec.when !== undefined || spec.if !== undefined) {
-      const cond = spec.when ?? spec.if;
-      const value = this.evaluateExpression(cond);
-      const matched = Boolean(value);
-      executed.push({ action: 'condition', expression: cond, value, matched });
-      if (matched) {
-        this._executeActionObject(spec.then || spec, sourceNode, executed);
-      } else if (spec.else) {
-        this._executeInteractionSpec(spec.else, sourceNode, executed);
-      }
-      return;
-    }
-
-    this._executeActionObject(spec, sourceNode, executed);
-  }
-
-  _executeActionObject(act, sourceNode, executed) {
-    if (!act || typeof act !== 'object') return;
-    if (Array.isArray(act)) {
-      for (const item of act) this._executeInteractionSpec(item, sourceNode, executed);
-      return;
-    }
-
-    const assignVariable = (name, value) => {
-      const declared = this.docSnapshot.variables?.[name];
-      if (declared !== undefined) {
-        const initial = declared && typeof declared === 'object' && 'value' in declared ? declared.value : declared;
-        if (typeof value !== typeof initial) throw Object.assign(new Error(`变量 ${name} 需要 ${typeof initial}，表达式返回 ${typeof value}`), {code:'E_TYPE', field:name, expected:typeof initial, actual:typeof value});
-      }
-      this.variables[name] = value;
-    };
-    // 1. Set variables (`setVar` map or `type: 'set-var'` / `'set-variable'`)
-    if (act.setVar && typeof act.setVar === 'object') {
-      for (const [varName, expr] of Object.entries(act.setVar)) {
-        const val = this.evaluateExpression(expr);
-        assignVariable(varName, val);
-        executed.push({ action: 'set-var', name: varName, value: val });
-      }
-    }
-    if (act.type === 'set-var' || act.type === 'set-variable' || act.action === 'set-var' || act.action === 'set-variable') {
-      const val = this.evaluateExpression(act.value ?? act.expr);
-      assignVariable(act.name || act.variable, val);
-      executed.push({ action: 'set-var', name: act.name || act.variable, value: val });
-    }
-
-    // 2. Show / Hide widgets
-    if (act.show) {
-      const targets = Array.isArray(act.show) ? act.show : [act.show];
-      for (const t of targets) {
-        const target = this.targetKey(t);
-        this.visibility[target] = true;
-        executed.push({ action: 'show', target });
-      }
-    }
-    if (act.hide) {
-      const targets = Array.isArray(act.hide) ? act.hide : [act.hide];
-      for (const t of targets) {
-        const target = this.targetKey(t);
-        this.visibility[target] = false;
-        executed.push({ action: 'hide', target });
-      }
-    }
-    if (act.type === 'show' || act.type === 'hide' || act.type === 'toggle') {
-      const target = this.targetKey(act.target);
-      const authored = this.findNodeInPage(this.currentPageId, act.target);
-      const current = this.visibility[target] ?? (authored?.visible !== false && authored?.hidden !== true);
-      const vis = act.type === 'toggle' ? !current : act.type === 'show';
-      this.visibility[target] = vis;
-      executed.push({ action: act.type, target });
-    }
-
-    // 3. Set widget text
-    if (act.setText && typeof act.setText === 'object') {
-      for (const [targetId, expr] of Object.entries(act.setText)) {
-        const target = this.targetKey(targetId);
-        if (typeof expr === 'string' && expr.includes('dataset.')) {
-          this.textFormulas[target] = { pageId: this.currentPageId, scopePrefix: this.interactionScope, expr };
-        }
-        const val = String(this.evaluateExpression(expr));
-        this.textOverrides[target] = val;
-        executed.push({ action: 'set-text', target, text: val });
-      }
-    }
-    if (act.type === 'set-text') {
-      const target = this.targetKey(act.target);
-      const rawExpr = act.text ?? act.value;
-      if (typeof rawExpr === 'string' && rawExpr.includes('dataset.')) {
-        this.textFormulas[target] = { pageId: this.currentPageId, scopePrefix: this.interactionScope, expr: rawExpr };
-      }
-      const val = String(this.evaluateExpression(rawExpr));
-      this.textOverrides[target] = val;
-      executed.push({ action: 'set-text', target, text: val });
-    }
-
-    // 4. Set dynamic panel state (including study-card flip / next / prev / toggle)
-    const panelAct = act.setPanelState || (act.type === 'set-panel-state' ? act : null);
-    if (panelAct) {
-      const list = Array.isArray(panelAct) ? panelAct : [panelAct];
-      for (const item of list) {
-        const panelId = this.targetKey(item.target || item.panel);
-        const panelNode = this.findNodeInPage(this.currentPageId, panelId);
-        let nextState = item.state;
-        const curState = this.panelStates[panelId] || panelNode?.activeState || panelNode?.states?.[0]?.id;
-        if ((nextState === 'next' || nextState === 'toggle' || nextState === 'flip') && panelNode?.states?.length) {
-          const idx = panelNode.states.findIndex(s => s.id === curState);
-          nextState = panelNode.states[(idx + 1) % panelNode.states.length].id;
-        } else if (nextState === 'prev' && panelNode?.states?.length) {
-          const idx = panelNode.states.findIndex(s => s.id === curState);
-          nextState = panelNode.states[(idx - 1 + panelNode.states.length) % panelNode.states.length].id;
-        }
-        this.panelStates[panelId] = nextState;
-        executed.push({ action: 'set-panel-state', panel: panelId, state: nextState });
-      }
-    }
-
-    // 5. Dataset / Repeater operations (add, update, delete, select, filter, sort)
-    if (act.datasetAction || act.type?.startsWith('dataset-') || act.type?.startsWith('repeater-')) {
-      this._executeDatasetAction(act.datasetAction || act, executed);
-    }
-
-    // 6. Page navigation (`link` or `to` or `page` or `navigate`)
-    const linkTarget = act.link || (act.type === 'link' || act.type === 'navigate' ? act.page || act.to || act.target : null);
-    if (linkTarget) {
-      this.navigate(linkTarget);
-      executed.push({ action: 'link', to: linkTarget });
-    }
-
-    // 7. Nested `actions` array
-    if (Array.isArray(act.actions)) {
-      for (const sub of act.actions) {
-        this._executeInteractionSpec(sub, sourceNode, executed);
-      }
-    }
   }
 
   _executeDatasetAction(act, executed) {

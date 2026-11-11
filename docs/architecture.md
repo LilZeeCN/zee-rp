@@ -88,6 +88,8 @@ agent ──MCP──▶ bin/mcp.mjs ──▶ scripts/mcp-tools.mjs ──▶ s
 
 ## 出口矩阵
 
+Studio 预览与独立 HTML 共用 `prototype-runtime.mjs` 的表达式求值、变量类型和交互分支执行。代码导出把同一实现写入 `app.js`，移动导出目录后仍可直接打开 `index.html`。两边各自提供节点查询、页面切换与数据集状态。
+
 | 出口 | 文件 | 说明 |
 |---|---|---|
 | 原生 .rp | `export-rp.mjs` | 三级兼容契约(native-editable/栅格化/unsupported)+ 逐节点报告 |
