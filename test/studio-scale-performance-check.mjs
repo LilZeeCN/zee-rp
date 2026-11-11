@@ -24,16 +24,24 @@ test('performance evidence rejects stale source bindings instead of accepting hi
 
 test('seeded local edits and history agree with full scene resolution', () => {
   const fixture = makePerfFixture({ size: 400, category: 'multipage' });
+  fixture.datasets.repeater = { rows: [{ id: 'row1', title: 'Clipped text in a narrow row template' }] };
   fixture.pages[0].root.children.push({
     type: 'box', id: 'flow', layout: 'row', x: 30, y: 20, w: 'hug', h: 40,
     children: [
       { type: 'label', id: 'flow-text', text: 'a', w: 'hug', h: 36 },
       { type: 'label', id: 'flow-sibling', text: 'next', w: 'hug', h: 36 },
     ],
+  }, {
+    id: 'repeater', type: 'repeater', dataset: 'repeater', x: 12, y: 12, w: 90, h: 50, rowHeight: 26,
+    template: {
+      id: 'row', type: 'box', w: 90, h: 26,
+      children: [{ id: 'row-text', type: 'label', x: 0, y: 0, w: 25, h: 14, wrap: true, text: '{{title}}' }],
+    },
   });
   const store = new StudioDocumentStore(normalizeStudioDocument(fixture));
   let seed = 17;
   let previousScene = resolveDocumentScene(store.doc);
+  assert.ok(previousScene.clipDiagnostics.some(issue => issue.nodeId === 'row-text' && issue.rowId === 'row1'));
   const cleanPage = previousScene.pages[1];
   for (let i = 0; i < 28; i++) {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
@@ -54,6 +62,16 @@ test('seeded local edits and history agree with full scene resolution', () => {
     previousScene = tx.scene;
   }
   assert.deepEqual(previousScene.pages[1], cleanPage);
+
+  const formula = store.applyTransaction({ pageId: 'p0', commands: [
+    { type: 'setText', nodeId: 'probe', text: '=dataset.repeater.count' },
+  ] });
+  assert.equal(formula.scene.nodesByScopedId['p0/probe'].text, '1');
+  const filtered = store.applyTransaction({ pageId: 'p0', commands: [
+    { type: 'repeaterSetFilter', nodeId: 'repeater', filter: { field: 'title', equals: 'unmatched' } },
+  ] });
+  assert.equal(filtered.scene.nodesByScopedId['p0/probe'].text, '0');
+  assert.deepEqual(filtered.scene.pages, resolveDocumentScene(store.doc, { useCache: false }).pages);
 });
 
 test('large-canvas local patches preserve browser source, scene and paint across pan and zoom', async t => {

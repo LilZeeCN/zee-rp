@@ -1220,7 +1220,8 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
 
   for (const pg of doc.pages || []) {
     const pgCanon = useCache && getCachedNodeCanonical(pg);
-    const pageCacheKey = useCache ? `${globalContextKey}::${pgCanon ? 'canon::' + pgCanon : JSON.stringify(pg)}` : null;
+    const pageSource = useCache ? pgCanon || JSON.stringify(pg) : null;
+    const pageCacheKey = useCache ? `${globalContextKey}::${pgCanon ? 'canon::' : ''}${pageSource}` : null;
     const cachedPage = useCache && pageSceneCache.get(pageCacheKey);
     if (cachedPage) {
       allFontDiagnostics.push(...cachedPage.fontReport.diagnostics);
@@ -1241,7 +1242,8 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
     const totalH = screenH + shellPad * 2;
 
     const sliceCacheId = `${doc.documentId || 'doc'}::${pg.id}`;
-    const canSlice = useCache && canUseRootChildSlices(pg);
+    // Display formulas can read a repeater view in a sibling subtree.
+    const canSlice = useCache && !pageSource.includes('dataset.') && canUseRootChildSlices(pg);
     const rootShellKey = canSlice ? computeRootShellKey(pg) : null;
     const prevSliceEntry = canSlice ? lastPageSceneByKey.get(sliceCacheId) : null;
     const reusableChildSlices = (
@@ -1506,6 +1508,8 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
         for (const ch of n.children) {
           if (isSliceRoot && ch._reusedSlice) {
             const slice = ch._reusedSlice;
+            fontReport.clipDiagnostics.push(...slice.rowClipDiagnostics);
+            allClipDiagnostics.push(...slice.rowClipDiagnostics);
             const startOrder = destination.length + 1;
             if (startOrder === slice.startRenderOrder) {
               for (let i = 0; i < slice.resolvedNodes.length; i++) {
@@ -1531,6 +1535,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
           if (isSliceRoot) {
             const startIdx = destination.length;
             const startOrder = startIdx + 1;
+            const beforeRowClips = fontReport.clipDiagnostics.length;
             collectResolved(ch, scopePrefix, offsetX, offsetY, depth + 1, nextClip, isVisible, n, panelOwnerId, scopedId, destination, register);
             const resolvedNodes = destination.slice(startIdx);
             const newSlice = {
@@ -1541,6 +1546,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
               requestedFamilies: ch._sliceMeta ? [...ch._sliceMeta.requestedFamilies] : [],
               delayedFamilies: ch._sliceMeta ? ch._sliceMeta.delayedFamilies : [],
               clipDiagnostics: ch._sliceMeta ? ch._sliceMeta.clipDiagnostics : [],
+              rowClipDiagnostics: fontReport.clipDiagnostics.slice(beforeRowClips),
             };
             ch._reusedSlice = newSlice;
             nextChildSlices.set(ch.id, newSlice);
