@@ -24,6 +24,7 @@ export class CdpSession {
   constructor(ws, { onClose = null } = {}) {
     this.ws = ws;
     this.onClose = onClose;
+    this.closed = false;
     this.nextId = 1;
     this.pending = new Map();
     this.listeners = new Map();
@@ -44,6 +45,7 @@ export class CdpSession {
       }
     });
     ws.addEventListener('close', () => {
+      this.closed = true;
       for (const [, entry] of this.pending) {
         entry.reject(new Error(`CDP WebSocket closed during ${entry.method}`));
       }
@@ -52,6 +54,9 @@ export class CdpSession {
   }
 
   send(method, params = {}, timeoutMs = 15000) {
+    if (this.closed || (typeof this.ws?.readyState === 'number' && this.ws.readyState !== 1)) {
+      return Promise.reject(new Error(`CDP WebSocket is closed (${method})`));
+    }
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
       const timer = setTimeout(() => {
@@ -63,7 +68,13 @@ export class CdpSession {
         resolve: val => { clearTimeout(timer); resolve(val); },
         reject: err => { clearTimeout(timer); reject(err); },
       });
-      this.ws.send(JSON.stringify({ id, method, params }));
+      try {
+        this.ws.send(JSON.stringify({ id, method, params }));
+      } catch (err) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(err);
+      }
     });
   }
 
@@ -193,14 +204,48 @@ export async function launchChrome({ headless = true, width = 1440, height = 900
   ];
 
   const ownedOperation=Boolean(process.env.ZEE_STUDIO_OPERATION_DIR);
-  // Linux Chrome puts its singleton socket under TMPDIR (108-byte socket path
-  // limit). Operation-owned temp paths can be much longer; keep the profile
-  // owned by the operation, but use the short system temp root for sockets.
-  const env = process.platform === 'linux' ? { ...process.env, TMPDIR: '/tmp' } : process.env;
+  // Linux (108-byte) and macOS (104-byte) Unix domain socket limits break Chrome's
+  // SingletonSocket when TMPDIR is a deep operation directory. Keep userDataDir
+  // owned by Node's tmpdir(), while using /tmp for Chrome's internal sockets.
+  const env = (process.platform === 'linux' || process.platform === 'darwin')
+    ? { ...process.env, TMPDIR: '/tmp' }
+    : process.env;
   const proc = spawn(bin, args, { stdio: ['ignore', 'ignore', 'pipe'], detached: !ownedOperation, env });
+  const isProcExited = () => proc.exitCode !== null || proc.signalCode !== null;
+  const isProcessGroupAlive = () => {
+    if (!proc.pid) return false;
+    if (!ownedOperation) {
+      try {
+        process.kill(-proc.pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    return !isProcExited();
+  };
   const killProcessTree = sig => {
-    if(!ownedOperation)try { process.kill(-proc.pid, sig); } catch {}
+    if (!ownedOperation && proc.pid) {
+      try { process.kill(-proc.pid, sig); } catch {}
+    }
     try { proc.kill(sig); } catch {}
+  };
+  const waitProcessGroupExit = async timeoutMs => {
+    const deadline = Date.now() + timeoutMs;
+    while (isProcessGroupAlive() && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 15));
+    }
+    return !isProcessGroupAlive();
+  };
+  const removeProfileDir = async () => {
+    for (let attempt = 0; attempt < 6; attempt++) {
+      try {
+        rmSync(userDataDir, { recursive: true, force: true, maxRetries: 15, retryDelay: 40 });
+      } catch {}
+      if (!existsSync(userDataDir)) return;
+      killProcessTree('SIGKILL');
+      await new Promise(r => setTimeout(r, 40));
+    }
   };
   const onNodeExit = () => killProcessTree('SIGKILL');
   process.once('exit', onNodeExit);
@@ -220,13 +265,15 @@ export async function launchChrome({ headless = true, width = 1440, height = 900
         resolve(match[1]);
       }
     });
-    proc.on('exit', code => {
+    proc.on('exit', (code, sig) => {
       clearTimeout(timer);
-      reject(new Error(`Chrome exited early (${code}): ${stderrBuf}`));
+      reject(new Error(`Chrome exited early (${code ?? sig}): ${stderrBuf}`));
     });
-  }).catch(error=>{
-    process.removeListener('exit',onNodeExit);killProcessTree('SIGKILL');
-    try{rmSync(userDataDir,{recursive:true,force:true});}catch{}
+  }).catch(async error => {
+    killProcessTree('SIGKILL');
+    await waitProcessGroupExit(600);
+    await removeProfileDir();
+    process.removeListener('exit', onNodeExit);
     throw error;
   });
 
@@ -246,7 +293,7 @@ export async function launchChrome({ headless = true, width = 1440, height = 900
     const session = new CdpSession(ws, {
       onClose: async () => {
         activeSessions.delete(session);
-        if (target?.id && proc.exitCode === null) {
+        if (target?.id && !isProcExited()) {
           await fetch(`http://127.0.0.1:${debugPort}/json/close/${target.id}`).catch(() => {});
         }
       },
@@ -266,24 +313,21 @@ export async function launchChrome({ headless = true, width = 1440, height = 900
   }
 
   async function close() {
-    process.removeListener('exit', onNodeExit);
-    for (const session of activeSessions) {
+    for (const session of [...activeSessions]) {
       try { await session.close(); } catch {}
     }
     activeSessions.clear();
     killProcessTree('SIGTERM');
     await Promise.race([
-      proc.exitCode !== null ? Promise.resolve() : new Promise(r => proc.once('exit', r)),
-      new Promise(r => setTimeout(r, 150)),
+      isProcExited() ? Promise.resolve() : new Promise(r => proc.once('exit', r)),
+      new Promise(r => setTimeout(r, 250)),
     ]);
-    if (proc.exitCode === null) {
+    if (isProcessGroupAlive()) {
       killProcessTree('SIGKILL');
-      await Promise.race([
-        new Promise(r => proc.once('exit', r)),
-        new Promise(r => setTimeout(r, 100)),
-      ]);
+      await waitProcessGroupExit(1000);
     }
-    try { rmSync(userDataDir, { recursive: true, force: true }); } catch {}
+    await removeProfileDir();
+    process.removeListener('exit', onNodeExit);
   }
 
   return { proc, debugPort, wsEndpoint, userDataDir, openPage, close };

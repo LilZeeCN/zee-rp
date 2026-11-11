@@ -11,22 +11,48 @@ import { decodePng } from './png-decode.mjs';
 
 export async function ensureManagedBrowserPage(server) {
     if (server.managedChrome && server.managedPage) {
-      const currentHref = await server.managedPage.evaluate('location.href').catch(() => '');
-      if (currentHref.startsWith(server.url)) {
-        return server.managedPage;
+      const procDead = Boolean(
+        server.managedChrome.proc &&
+        (server.managedChrome.proc.exitCode !== null || server.managedChrome.proc.signalCode !== null)
+      );
+      if (!procDead && !server.managedPage.closed) {
+        try {
+          const currentHref = await server.managedPage.evaluate('location.href').catch(() => '');
+          if (currentHref.startsWith(server.url)) {
+            return server.managedPage;
+          }
+          await server.managedPage.navigate(`${server.url}/?clientId=managed_renderer`);
+          await server.managedPage.waitForFunction('Boolean(window.__STUDIO_APP__ && window.__STUDIO_RENDERED_REVISION__ >= 1)', 10000);
+          return server.managedPage;
+        } catch (err) {
+          if (!server.ownsManagedChrome) throw err;
+        }
+      } else if (!server.ownsManagedChrome) {
+        throw Object.assign(new Error('共享浏览器连接已关闭，无法执行截图渲染'), { code: 'E_RENDERER_CLOSED' });
       }
-      await server.managedPage.navigate(`${server.url}/?clientId=managed_renderer`);
-      await server.managedPage.waitForFunction('Boolean(window.__STUDIO_APP__ && window.__STUDIO_RENDERED_REVISION__ >= 1)', 10000);
-      return server.managedPage;
+      if (server.ownsManagedChrome) {
+        try { await server.managedChrome.close(); } catch {}
+        server.managedChrome = null;
+        server.managedPage = null;
+      }
     }
-    server.managedChrome = await launchChrome({ headless: true, width: 1440, height: 1050, dpr: 2 });
-    server.managedPage = await server.managedChrome.openPage(`${server.url}/?clientId=managed_renderer`);
+    const chrome = await launchChrome({ headless: true, width: 1440, height: 1050, dpr: 2 });
+    let page = null;
     try {
-      await server.managedPage.waitForFunction('Boolean(window.__STUDIO_APP__ && window.__STUDIO_RENDERED_REVISION__ >= 1)', 10000);
+      page = await chrome.openPage(`${server.url}/?clientId=managed_renderer`);
+      await page.waitForFunction('Boolean(window.__STUDIO_APP__ && window.__STUDIO_RENDERED_REVISION__ >= 1)', 10000);
     } catch (error) {
-      const state = await server.managedPage.evaluate('({url:location.href,ready:document.readyState,app:!!window.__STUDIO_APP__,revision:window.__STUDIO_RENDERED_REVISION__})').catch(()=>null);
-      throw Object.assign(new Error(`画布初始化未完成：${JSON.stringify({state,errors:server.managedPage.scriptErrors})}`),{code:'E_RENDERER_STARTUP',stage:'browser-initialization',cause:error});
+      const state = page
+        ? await page.evaluate('({url:location.href,ready:document.readyState,app:!!window.__STUDIO_APP__,revision:window.__STUDIO_RENDERED_REVISION__})').catch(() => null)
+        : null;
+      const scriptErrors = page?.scriptErrors || [];
+      try { await chrome.close(); } catch {}
+      server.managedChrome = null;
+      server.managedPage = null;
+      throw Object.assign(new Error(`画布初始化未完成：${JSON.stringify({ state, errors: scriptErrors })}`), { code: 'E_RENDERER_STARTUP', stage: 'browser-initialization', cause: error });
     }
+    server.managedChrome = chrome;
+    server.managedPage = page;
     return server.managedPage;
   }
 

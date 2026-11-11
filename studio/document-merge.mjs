@@ -1219,6 +1219,7 @@ export function executeStudioMerge({
   resolutions = {},
   previewHash = null,
   idempotencyKey = null,
+  simulateCrashStage = null,
 } = {}) {
   if (!store) throw mergeError('E_MERGE_STORE_REQUIRED', 'executeStudioMerge 需要有效的 StudioDocumentStore');
   if (!['preview', 'apply'].includes(mode)) {
@@ -1410,26 +1411,7 @@ export function executeStudioMerge({
     })
   );
 
-  const txResult = store.applyTransaction({
-    baseRevision: store.appliedRevision,
-    idempotencyKey,
-    sourceIdentity,
-    clientId: 'studio-merge',
-    source: 'studio-merge',
-    label: externalSourceInfo ? '合并外部源文件更新' : '并发三方安全合并',
-    commands: [
-      {
-        type: 'restoreDocument',
-        versionId: mergeVersionId,
-        expectedContentHash,
-        previewHash: restorePreviewHash,
-        document: mergedSnapshot,
-      },
-    ],
-  });
-
-  if (!txResult.ok) return txResult;
-  const finalOut = {
+  const buildFinalOut = txRes => ({
     ok: true,
     applied: true,
     mode: 'apply',
@@ -1442,21 +1424,55 @@ export function executeStudioMerge({
     resolutionLog: mergeResult.resolutionLog,
     externalSource: externalSourceInfo,
     doc: store.doc,
-    scene: txResult.scene,
+    scene: txRes.scene,
+    ...(txRes.persistenceWarning ? { persistenceWarning: txRes.persistenceWarning } : {}),
+  });
+
+  const applyMerge = beforeCommit => {
+    const res = store.applyTransaction({
+      baseRevision: store.appliedRevision,
+      idempotencyKey,
+      sourceIdentity,
+      clientId: 'studio-merge',
+      source: 'studio-merge',
+      label: externalSourceInfo ? '合并外部源文件更新' : '并发三方安全合并',
+      commands: [
+        {
+          type: 'restoreDocument',
+          versionId: mergeVersionId,
+          expectedContentHash,
+          previewHash: restorePreviewHash,
+          document: mergedSnapshot,
+        },
+      ],
+    }, { beforeCommit });
+    if (res.ok) {
+      const record = store.idempotencyMap.get(idempotencyKey);
+      if (record) {
+        const { doc, scene, ...receipt } = buildFinalOut(res);
+        record.result = { ...record.result, ...receipt, durableRevision: store.durableRevision };
+      }
+    }
+    return res;
   };
-  const record = store.idempotencyMap.get(idempotencyKey);
-  if (record) {
-    const { doc, scene, ...receipt } = finalOut;
-    record.result = { ...record.result, ...receipt };
-  }
-  if (persistence) {
-    if (typeof persistence.persistTransaction === 'function' && store.lastHistoryRecord) {
-      persistence.persistTransaction(store, store.lastHistoryRecord);
-    } else if (typeof persistence.saveFullSnapshot === 'function') {
-      persistence.saveFullSnapshot(store.doc);
+
+  let txResult;
+  if (persistence && typeof persistence.commit === 'function') {
+    txResult = persistence.commit(store, applyMerge, { simulateCrashStage });
+  } else {
+    txResult = applyMerge();
+    if (txResult.ok && persistence) {
+      if (typeof persistence.persistTransaction === 'function' && store.lastHistoryRecord) {
+        persistence.persistTransaction(store, store.lastHistoryRecord);
+      } else if (typeof persistence.saveFullSnapshot === 'function') {
+        persistence.saveFullSnapshot(store.doc);
+      }
     }
   }
-  finalOut.durableRevision = store.durableRevision;
+
+  if (!txResult.ok) return txResult;
+  const finalOut = buildFinalOut(txResult);
+  const record = store.idempotencyMap.get(idempotencyKey);
   if (record) record.result.durableRevision = store.durableRevision;
   return finalOut;
 }

@@ -10,7 +10,7 @@ const scriptsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts'
 
 async function axurePorts() {
   const { stdout } = await run('/usr/sbin/lsof', ['-nP', '-iTCP', '-sTCP:LISTEN']);
-  return new Set(stdout.split('\n').filter(line => /^Axure/.test(line)).flatMap(line => [...line.matchAll(/127\.0\.0\.1:(\d+)/g)].map(m => Number(m[1]))));
+  return new Set(stdout.split('\n').filter(line => /^Axure/.test(line)).flatMap(line => [...line.matchAll(/(?:127\.0\.0\.1|\*|\[::1?\]|localhost):(\d+)/g)].map(m => Number(m[1]))));
 }
 
 // Opens only a new, owned export. A fresh preview server is mandatory so an old

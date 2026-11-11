@@ -326,7 +326,7 @@ export class StudioDocumentStore {
         const outside = diffDocuments(this.doc, workingDoc, { limit: Infinity }).changes.filter(change => !request.selectionGuard.paths.some(path => path.every((part, index) => change.path[index] === part)));
         if (outside.length) throw cmdError('E_SELECTION_SCOPE', '修改超出绑定选区，整笔未写入', { extra: { outsidePaths: outside.slice(0, 8).map(change => change.path) } });
       }
-      if (!local) workingDoc.diagnostics = currentDocumentDiagnostics(workingDoc);
+      if (!local || !beforeDoc._diagnosticsCurrent) workingDoc.diagnostics = currentDocumentDiagnostics(workingDoc);
       Object.defineProperty(workingDoc, '_diagnosticsCurrent', { value: true, enumerable: false, configurable: true });
       if (local) {
         if (canonicalJson(local.previous) === canonicalJson(local.node)) {

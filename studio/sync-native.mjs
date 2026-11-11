@@ -417,6 +417,7 @@ export async function syncNativeRpToStudio({
   allowFormulaOverwrite = false,
   rebuildRp = false,
   outRpPath = null,
+  simulateCrashStage = null,
 } = {}) {
   if (!['preview', 'apply'].includes(mode)) {
     fail('E_NATIVE_SYNC_MODE', `mode 必须为 preview 或 apply（收到 ${mode}）`);
@@ -1342,12 +1343,24 @@ export async function syncNativeRpToStudio({
 
   let transactionResult = null;
   if (commands.length > 0) {
-    transactionResult = store.applyTransaction({
+    const applySync = beforeCommit => store.applyTransaction({
       baseRevision: currentDoc.revision,
       idempotencyKey: idempotencyKey || `sync-native-${computedPreviewHash.slice(0, 16)}`,
       source: 'native-sync',
       commands,
-    });
+    }, { beforeCommit });
+    if (persistence && typeof persistence.commit === 'function') {
+      transactionResult = persistence.commit(store, applySync, { simulateCrashStage });
+    } else {
+      transactionResult = applySync();
+      if (transactionResult.ok && persistence) {
+        if (typeof persistence.persistTransaction === 'function') {
+          persistence.persistTransaction(store, store.lastHistoryRecord || store.history?.at(-1));
+        } else if (typeof persistence.saveDocument === 'function') {
+          persistence.saveDocument(store.doc, { reason: 'sync-native', commands });
+        }
+      }
+    }
     if (!transactionResult.ok) {
       return {
         ok: false,
@@ -1359,13 +1372,6 @@ export async function syncNativeRpToStudio({
         commands,
         changes,
       };
-    }
-    if (persistence) {
-      if (typeof persistence.persistTransaction === 'function') {
-        persistence.persistTransaction(store, store.lastHistoryRecord || store.history?.at(-1));
-      } else if (typeof persistence.saveDocument === 'function') {
-        persistence.saveDocument(store.doc, { reason: 'sync-native', commands });
-      }
     }
   }
 
@@ -1388,6 +1394,8 @@ export async function syncNativeRpToStudio({
     documentId: store.doc.documentId,
     previousRevision: currentDoc.revision,
     appliedRevision: store.doc.revision,
+    durableRevision: store.durableRevision,
+    ...(transactionResult?.persistenceWarning ? { persistenceWarning: transactionResult.persistenceWarning } : {}),
     contentHash: store.doc.contentHash,
     previewHash: computedPreviewHash,
     syncStatus: {

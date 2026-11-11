@@ -167,6 +167,40 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
       await page.navigate('about:blank');
       await page.navigate(url);
       await page.waitForFunction(`(${observeAxure.toString()})(${JSON.stringify({ names: [...names], variables: Object.keys(doc.variables || {}) })}).ready`);
+      if (startPageId) {
+        const targetPage = (doc.pages || []).find(p => p.id === startPageId || p.name === startPageId);
+        if (targetPage) {
+          const cur = await read();
+          if (cur.page !== targetPage.id && cur.page !== targetPage.name) {
+            const sitemapHref = await page.evaluate(`(() => {
+              const targetName = ${JSON.stringify(targetPage.name)};
+              const windows = [window];
+              const findNode = nodes => {
+                for (const n of nodes || []) {
+                  if (n.pageName === targetName && n.url) return n.url;
+                  const sub = findNode(n.children);
+                  if (sub) return sub;
+                }
+                return null;
+              };
+              for (let i = 0; i < windows.length && i < 20; i++) {
+                const w = windows[i];
+                try {
+                  const found = findNode(w.$axure?.document?.sitemap?.rootNodes);
+                  if (found) return new URL(found, w.location.href).href;
+                  for (let j = 0; j < w.frames.length; j++) windows.push(w.frames[j]);
+                } catch {}
+              }
+              return null;
+            })()`);
+            if (sitemapHref) {
+              await page.navigate('about:blank');
+              await page.navigate(sitemapHref);
+              await page.waitForFunction(`(() => { const o = (${observeAxure.toString()})(${JSON.stringify({ names: [...names], variables: Object.keys(doc.variables || {}) })}); return o.ready && o.page === ${JSON.stringify(targetPage.name)}; })()`);
+            }
+          }
+        }
+      }
     } else {
       await page.navigate(`${new URL(await page.evaluate('location.href')).origin}/?clientId=scenario_executor`);
       await page.waitForFunction('Boolean(window.__STUDIO_APP__ && window.__STUDIO_RENDERED_REVISION__)');

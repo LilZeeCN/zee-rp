@@ -30,12 +30,12 @@ export class StudioVersions {
   for(const name of previews.slice(20))rmSync(join(previewDir,name));
   return {ok:true,version:value.metadata,baseRevision:store.appliedRevision,currentContentHash:store.doc.contentHash,targetContentHash:value.metadata.contentHash,previewHash,diff,detailsPath,restores:['pages','components','tokens','variables','datasets','assetsManifest','fonts','designDecisions'],note:'恢复生成新事务，保留当前分支和原始命名版本；资源字节必须仍与清单一致。'};
  }
- restore(store,{versionId,baseRevision,previewHash,idempotencyKey}={}){
+ restore(store,{versionId,baseRevision,previewHash,idempotencyKey}={},{beforeCommit}={}){
   const value=this.read(versionId),command={type:'restoreDocument',document:value.document,expectedContentHash:value.metadata.contentHash,versionId,previewHash};
   const replay=store.getIdempotentResult({idempotencyKey,commands:[command]});if(replay)return replay;
   const preview=this.preview(store,{versionId,baseRevision});if(preview.previewHash!==previewHash)fail('E_VERSION_PREVIEW_STALE','恢复预览已变化或缺失，请查看当前差异后重试');
   if(!idempotencyKey)fail('E_IDEMPOTENCY_REQUIRED','恢复版本需要唯一idempotencyKey');
   for(const [path,asset] of Object.entries(value.document.assetsManifest||{})){if(!/^assets\/[a-zA-Z0-9_.-]+$/.test(path)||!existsSync(join(this.persistence.projectDir,path))||sha256(readFileSync(join(this.persistence.projectDir,path)))!==asset.sha256)fail('E_VERSION_ASSET_DRIFT',`版本资源缺失或变化：${path}`);}
-  const result=store.applyTransaction({baseRevision,idempotencyKey,label:`恢复版本：${value.metadata.name}`,source:'version-restore',commands:[command]});return {...result,version:value.metadata};
+  const result=store.applyTransaction({baseRevision,idempotencyKey,label:`恢复版本：${value.metadata.name}`,source:'version-restore',commands:[command]},{beforeCommit});return {...result,version:value.metadata};
  }
 }

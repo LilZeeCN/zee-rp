@@ -1,8 +1,8 @@
 import { StudioSelections } from './selection.mjs';
 import { studioSourceFingerprint } from './source-fingerprint.mjs';
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 'node:fs';
-import { dirname, extname, join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { canonicalJson, computeContentHash, sha256 } from './document.mjs';
@@ -61,11 +61,27 @@ const MIME_TYPES = {
   '.woff2': 'font/woff2',
 };
 
-function readJsonBody(req) {
+const MAX_JSON_BODY_BYTES = 32 * 1024 * 1024;
+
+function readJsonBody(req, maxBytes = MAX_JSON_BODY_BYTES) {
   return new Promise((resolveBody, rejectBody) => {
     const chunks = [];
-    req.on('data', chunk => chunks.push(chunk));
+    let totalBytes = 0;
+    let settled = false;
+    req.on('data', chunk => {
+      if (settled) return;
+      totalBytes += chunk.length;
+      if (totalBytes > maxBytes) {
+        settled = true;
+        rejectBody(Object.assign(new Error(`Request JSON body exceeds ${maxBytes} bytes`), { code: 'E_PAYLOAD_TOO_LARGE' }));
+        try { req.destroy(); } catch {}
+        return;
+      }
+      chunks.push(chunk);
+    });
     req.on('end', () => {
+      if (settled) return;
+      settled = true;
       try {
         const raw = Buffer.concat(chunks).toString('utf8').trim();
         resolveBody(raw ? JSON.parse(raw) : {});
@@ -73,11 +89,45 @@ function readJsonBody(req) {
         rejectBody(Object.assign(new Error(`Invalid JSON body: ${err.message}`), { code: 'E_INVALID_JSON' }));
       }
     });
-    req.on('error', rejectBody);
+    req.on('error', err => {
+      if (settled) return;
+      settled = true;
+      rejectBody(err);
+    });
   });
 }
 
+function resolveSafeSubpath(rootDir, rawSubpath) {
+  let decoded;
+  try {
+    decoded = decodeURIComponent(rawSubpath);
+  } catch {
+    throw Object.assign(new Error('非法编码路径'), { code: 'E_PATH_TRAVERSAL' });
+  }
+  if (!decoded || decoded.includes('\0')) {
+    return { status: 'missing', fullPath: null };
+  }
+  const absRoot = resolve(rootDir);
+  const candidate = resolve(absRoot, decoded.replace(/^[/\\]+/, ''));
+  if (candidate === absRoot || !candidate.startsWith(absRoot + sep)) {
+    throw Object.assign(new Error('禁止访问工程资源根目录之外的路径'), { code: 'E_PATH_TRAVERSAL' });
+  }
+  if (!existsSync(candidate)) {
+    return { status: 'missing', fullPath: null };
+  }
+  const realRoot = existsSync(absRoot) ? realpathSync(absRoot) : absRoot;
+  const realCandidate = realpathSync(candidate);
+  if (realCandidate === realRoot || !realCandidate.startsWith(realRoot + sep)) {
+    throw Object.assign(new Error('禁止通过符号链接越界读取文件'), { code: 'E_PATH_TRAVERSAL' });
+  }
+  if (!statSync(realCandidate).isFile()) {
+    return { status: 'missing', fullPath: null };
+  }
+  return { status: 'ok', fullPath: realCandidate };
+}
+
 function sendJson(res, status, payload) {
+  if (res.headersSent) return;
   const body = JSON.stringify(payload);
   res.writeHead(status, {
     'Content-Type': 'application/json; charset=utf-8',
@@ -184,6 +234,15 @@ export class StudioServer {
   }
 
   openProject({ projectDir, sourcePath = null, name = 'Studio Project', domain = 'mobile' }) {
+    const switchingProject = Boolean(this.store);
+    if (switchingProject) {
+      this.sessionId = `sess_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+      for (const w of this.renderWaiters) {
+        clearTimeout(w.timer);
+        w.reject(Object.assign(new Error('工程已切换，取消旧工程渲染等待'), { code: 'E_PROJECT_SWITCHED' }));
+      }
+      this.renderWaiters = [];
+    }
     this.projectDir = resolve(projectDir);
     this.operations = new StudioOperations(this.projectDir);
     this.persistence = new StudioPersistence(this.projectDir);
@@ -328,10 +387,21 @@ export class StudioServer {
       const parsedUrl = new URL(req.url || '/', `http://${this.host}:${this.port}`);
       const pathname = parsedUrl.pathname;
 
-      // Static Web UI files(/src/** 为画布前端拆分模块;URL 点段已被 new URL 规范化,无目录穿越)
+      // Static Web UI files(/src/** 为画布前端拆分模块;经安全子路径解析防穿越与目录读取)
       if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html' || pathname === '/styles.css' || pathname === '/visual-style.mjs' || pathname === '/clipboard.mjs' || pathname === '/vector-paths.mjs' || pathname.startsWith('/src/'))) {
-        const relFile = pathname === '/' ? 'index.html' : pathname.slice(1);
-        const fullPath = join(['/visual-style.mjs', '/clipboard.mjs', '/vector-paths.mjs'].includes(pathname) ? HERE : WEB_DIR, relFile);
+        let fullPath;
+        if (pathname.startsWith('/src/')) {
+          const resolved = resolveSafeSubpath(join(WEB_DIR, 'src'), pathname.slice('/src/'.length));
+          if (resolved.status !== 'ok') {
+            res.writeHead(404);
+            res.end('Not found');
+            return;
+          }
+          fullPath = resolved.fullPath;
+        } else {
+          const relFile = pathname === '/' ? 'index.html' : pathname.slice(1);
+          fullPath = join(['/visual-style.mjs', '/clipboard.mjs', '/vector-paths.mjs'].includes(pathname) ? HERE : WEB_DIR, relFile);
+        }
         const content = readFileSync(fullPath);
         res.writeHead(200, {
           'Content-Type': MIME_TYPES[extname(fullPath)] || 'application/octet-stream',
@@ -342,13 +412,13 @@ export class StudioServer {
       }
 
       if (req.method === 'GET' && pathname.startsWith('/assets/')) {
-        const assetRel = decodeURIComponent(pathname.slice('/assets/'.length));
-        const assetPath = join(this.projectDir, 'assets', assetRel);
-        if (!existsSync(assetPath)) {
+        const resolved = resolveSafeSubpath(join(this.projectDir, 'assets'), pathname.slice('/assets/'.length));
+        if (resolved.status !== 'ok') {
           res.writeHead(404);
           res.end('Not found');
           return;
         }
+        const assetPath = resolved.fullPath;
         const buf = readFileSync(assetPath);
         res.writeHead(200, {
           'Content-Type': MIME_TYPES[extname(assetPath).toLowerCase()] || 'application/octet-stream',
@@ -359,13 +429,13 @@ export class StudioServer {
       }
 
       if (req.method === 'GET' && pathname.startsWith('/fonts/')) {
-        const fontRel = decodeURIComponent(pathname.slice('/fonts/'.length));
-        const fontPath = join(this.projectDir, 'fonts', fontRel);
-        if (!existsSync(fontPath)) {
+        const resolved = resolveSafeSubpath(join(this.projectDir, 'fonts'), pathname.slice('/fonts/'.length));
+        if (resolved.status !== 'ok') {
           res.writeHead(404);
           res.end('Not found');
           return;
         }
+        const fontPath = resolved.fullPath;
         const buf = readFileSync(fontPath);
         res.writeHead(200, {
           'Content-Type': MIME_TYPES[extname(fontPath).toLowerCase()] || 'font/ttf',
@@ -413,8 +483,14 @@ export class StudioServer {
 
       sendJson(res, 404, { ok: false, code: 'E_NOT_FOUND', message: `Unknown endpoint: ${pathname}` });
     } catch (err) {
+      if (res.headersSent) {
+        try { res.end(); } catch {}
+        return;
+      }
       const code = err.code || 'E_INTERNAL_ERROR';
       const status = code === 'E_RENDER_TIMEOUT' ? 504
+        : code === 'E_PAYLOAD_TOO_LARGE' ? 413
+        : code === 'E_PATH_TRAVERSAL' ? 403
         : ['E_WAL_WRITE', 'E_WRITE_OUTCOME_UNKNOWN'].includes(code) ? 500 : 400;
       sendJson(res, status, {
         ok: false,
@@ -733,15 +809,20 @@ export class StudioServer {
 
   async routePostVersions(req, res, { parsedUrl, pathname }) {
         const body=await readJsonBody(req);
-        const unknown=Object.keys(body).filter(key=>!['action','name','versionId','baseRevision','previewHash','idempotencyKey','projectDir','url','port'].includes(key));
+        const unknown=Object.keys(body).filter(key=>!['action','name','versionId','baseRevision','previewHash','idempotencyKey','projectDir','url','port','simulateCrashStage'].includes(key));
         if(unknown.length) throw Object.assign(new Error(`版本操作不接受字段 ${unknown.join(', ')}`),{code:'E_VERSION_INPUT'});
         if(body.action==='list' || body.action===undefined)return sendJson(res,200,{ok:true,versions:this.versions.list(),revision:this.store.appliedRevision});
         if(body.action==='create')return sendJson(res,200,this.versions.create(this.store,body));
         if(body.action==='preview')return sendJson(res,200,this.versions.preview(this.store,body));
         if(body.action==='restore') {
-          const result=this.versions.restore(this.store,body);
-          if(result.ok&&!result.idempotentReplay){this.persistence.persistTransaction(this.store,this.store.history.at(-1));this.scene=result.scene;this.runtimeSession=null;this.broadcastSse({type:'revision',...this.buildContextPayload()});}
-          return sendJson(res,result.ok?200:409,{...result,durableRevision:this.store.durableRevision,doc:this.store.doc,scene:this.scene});
+          const result=this.persistence.commit(
+            this.store,
+            beforeCommit => this.versions.restore(this.store, body, { beforeCommit }),
+            { simulateCrashStage: body.simulateCrashStage || null }
+          );
+          if(result.ok&&!result.idempotentReplay){this.scene=result.scene;this.runtimeSession=null;this.broadcastSse({type:'revision',...this.buildContextPayload()});}
+          const status = result.ok ? 200 : (['E_STALE_REVISION','E_IDEMPOTENCY_CONFLICT','E_VERSION_PREVIEW_STALE'].includes(result.code) ? 409 : 400);
+          return sendJson(res,status,{...result,durableRevision:this.store.durableRevision,doc:this.store.doc,scene:this.scene});
         }
         throw Object.assign(new Error('action应为list/create/preview/restore'),{code:'E_VERSION_INPUT'});
   }
@@ -1301,6 +1382,13 @@ export class StudioServer {
       }
     }
 
+    if (!this.server) {
+      throw Object.assign(
+        new Error(`端口 ${this.requestedPort}..${candidatePort - 1} 均被占用，Studio 服务无法绑定`),
+        { code: 'E_PORT_EXHAUSTED', requestedPort: this.requestedPort }
+      );
+    }
+
     const record = {
       instanceId: this.instanceId,
       sessionId: this.sessionId,
@@ -1459,6 +1547,11 @@ export class StudioServer {
   async close() {
     try { this.persistence?.flushPendingSnapshot?.(); } catch {}
     unregisterInstanceRecord(this.instanceId);
+    for (const w of this.renderWaiters) {
+      clearTimeout(w.timer);
+      try { w.reject(Object.assign(new Error('Studio 服务已关闭'), { code: 'E_SERVER_CLOSED' })); } catch {}
+    }
+    this.renderWaiters = [];
     for (const res of this.sseClients) {
       try { res.end(); } catch {}
     }
