@@ -13,7 +13,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const STUDIO = join(ROOT, 'studio');
 const WEB = join(STUDIO, 'web');
-const WEB_SHARED = new Set(['clipboard.mjs', 'visual-style.mjs'].map(file => join(STUDIO, file)));
+const WEB_SHARED = new Set(['clipboard.mjs', 'visual-style.mjs', 'vector-paths.mjs'].map(file => join(STUDIO, file)));
 const NODE_BUILTINS = new Set(builtinModules);
 const isWeb = file => file.startsWith(WEB + sep);
 const violations = [];

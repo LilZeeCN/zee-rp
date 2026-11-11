@@ -256,8 +256,8 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
     value: n.value ?? '',
     src: rewrittenSrc,
     objectFit: n.objectFit || 'cover',
-    fill: n.fill || null,
-    stroke: n.stroke || null,
+    fill: n.booleanRect && n.fill === '#FFFFFF00' ? null : n.fill || null,
+    stroke: n.booleanRect && n.stroke === '#FFFFFF00' ? null : n.stroke || null,
     strokeWidth: n.strokeWidth ?? 0,
     strokeStyle: n.strokeStyle || 'solid',
     radius: n.radius ?? 0,
@@ -283,8 +283,8 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
     padY: n.padY ?? 0,
     textPaddingX: n.textPaddingX ?? null,
     textPaddingY: n.textPaddingY ?? null,
-    visible: Boolean(n.visible),
-    ownVisible: Boolean(n.ownVisible),
+    visible: Boolean(n.visible && (!n.booleanRect || n.svgD)),
+    ownVisible: Boolean(n.ownVisible && (!n.booleanRect || n.svgD)),
     state: n.state || 'default',
     interactive: Boolean(n.interactive),
     on: n.on ? structuredClone(n.on) : null,
@@ -304,7 +304,8 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
     direction: n.direction || 'column',
     // Vector path metadata
     svgD: n.svgD || null,
-    svgViewBox: n.svgViewBox || null,
+    svgViewBox: n.viewBox || null,
+    ...(n.booleanRect ? { booleanRect: n.booleanRect } : {}),
     fillRule: n.fillRule || 'nonzero',
     strokeLinecap: n.strokeLinecap || 'round',
     strokeLinejoin: n.strokeLinejoin || 'round',
@@ -364,6 +365,7 @@ function renderStaticInitialNodeHtml(n) {
   else if (rawTransform) styleParts.push(`transform:rotate(${n.rotation || 0}deg)`);
   else if (n.rotation) styleParts.push(`transform:rotate(${n.rotation}deg)`);
   if (n.clip || n.overflow === 'hidden') styleParts.push('overflow:hidden');
+  if (n.booleanRect) styleParts.push('pointer-events:none');
 
   const unsupAttr = (n.unsupportedInteractions?.length
     ? ` data-unsupported-interaction="${escapeHtml(n.unsupportedInteractions.map(u => u.reason).join('; '))}" aria-disabled="true"`
@@ -373,7 +375,10 @@ function renderStaticInitialNodeHtml(n) {
   if (n.type === 'path' && n.svgD) {
     const vb = n.svgViewBox || { x: 0, y: 0, w: n.w || 100, h: n.h || 100 };
     const dashAttr = n.strokeDasharray ? ` stroke-dasharray="${escapeHtml(n.strokeDasharray)}"` : '';
-    return `<div class="export-node export-node-path" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="path"${roleAttr}${unsupAttr} style="${escapeHtml(styleParts.join(';'))}"><svg class="export-vector-svg" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" width="100%" height="100%" preserveAspectRatio="none"><path d="${escapeHtml(n.svgD)}" fill="${escapeHtml(n.fill || 'none')}" fill-rule="${escapeHtml(n.fillRule || 'nonzero')}" stroke="${escapeHtml(n.stroke || 'none')}" stroke-width="${n.stroke ? (n.strokeWidth ?? 1) : 0}" stroke-linecap="${escapeHtml(n.strokeLinecap || 'round')}" stroke-linejoin="${escapeHtml(n.strokeLinejoin || 'round')}"${dashAttr}/></svg></div>`;
+    const rect = n.booleanRect;
+    const position = rect ? ` style="position:absolute;left:${rect.x}px;top:${rect.y}px;width:${rect.w}px;height:${rect.h}px;pointer-events:none"` : '';
+    const hit = rect ? ' pointer-events="visiblePainted"' : '';
+    return `<div class="export-node export-node-path" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="path"${roleAttr}${unsupAttr} style="${escapeHtml(styleParts.join(';'))}"><svg class="export-vector-svg" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" width="100%" height="100%" preserveAspectRatio="none"${position}><path d="${escapeHtml(n.svgD)}" fill="${escapeHtml(n.fill || 'none')}" fill-rule="${escapeHtml(n.fillRule || 'nonzero')}" stroke="${escapeHtml(n.stroke || 'none')}" stroke-width="${n.stroke ? (n.strokeWidth ?? 1) : 0}" stroke-linecap="${escapeHtml(n.strokeLinecap || 'round')}" stroke-linejoin="${escapeHtml(n.strokeLinejoin || 'round')}"${dashAttr}${hit}/></svg></div>`;
   }
 
   if (n.type === 'image') {
@@ -1346,6 +1351,7 @@ function buildAppJs(bundlePayload) {
       if (n.threeDTransform) el.style.transform = n.threeDTransform;
       else if (n.rotation) el.style.transform = 'rotate(' + n.rotation + 'deg)';
       if (n.clip || n.overflow === 'hidden') el.style.overflow = 'hidden';
+      if (n.booleanRect) el.style.pointerEvents = 'none';
 
       if (n.type === 'path' && n.svgD) {
         const vb = n.svgViewBox || { x: 0, y: 0, w: n.w || 100, h: n.h || 100 };
@@ -1356,7 +1362,15 @@ function buildAppJs(bundlePayload) {
         svg.setAttribute('width', '100%');
         svg.setAttribute('height', '100%');
         svg.setAttribute('preserveAspectRatio', 'none');
+        if (n.booleanRect) {
+          const rect = n.booleanRect;
+          Object.assign(svg.style, {
+            position: 'absolute', left: rect.x + 'px', top: rect.y + 'px', width: rect.w + 'px', height: rect.h + 'px',
+            pointerEvents: 'none',
+          });
+        }
         const path = document.createElementNS(svgNS, 'path');
+        if (n.booleanRect) path.setAttribute('pointer-events', 'visiblePainted');
         path.setAttribute('d', n.svgD);
         path.setAttribute('fill', n.fill || 'none');
         path.setAttribute('fill-rule', n.fillRule || 'nonzero');
@@ -1557,7 +1571,7 @@ export async function exportStudioDocumentToCode(
       );
     };
 
-    const allNodes = (pg.nodes || []).map(enrichNode);
+    const allNodes = (pg.nodes || []).filter(n => !n.booleanOperand).map(enrichNode);
     const repeaterTemplates = {};
     for (const n of pg.nodes || []) {
       if (n.type === 'repeater') {
@@ -1596,7 +1610,7 @@ export async function exportStudioDocumentToCode(
         });
         const stPg = stScene.pages.find(x => x.id === pg.id);
         const stSubtree = (stPg?.nodes || [])
-          .filter(cand => cand.panelOwnerId === pNode.id)
+          .filter(cand => cand.panelOwnerId === pNode.id && !cand.booleanOperand)
           .map(enrichNode);
         panelStateNodes[pNode.id][st.id] = stSubtree;
       }

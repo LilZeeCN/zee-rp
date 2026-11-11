@@ -503,7 +503,7 @@ function patchAndVerifyRpVectors(absOutRp, scene) {
     if (!rpPage || rpPage.record === undefined) continue;
 
     for (const resNode of pgScene.nodes) {
-      if (resNode.type !== 'path' || !Array.isArray(resNode.subpaths) || resNode.subpaths.length === 0) continue;
+      if (resNode.type !== 'path' || resNode.booleanOperand || !resNode.subpaths?.length) continue;
       const esc = String(resNode.id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       const primaryRe = new RegExp(`^(?:[a-z]+-)+${esc}-[0-9a-f]{8,16}$`);
       const bgRe = new RegExp(`^bg-(?:[a-z]+-)+${esc}-[0-9a-f]{8,16}$`);
@@ -549,7 +549,8 @@ function patchAndVerifyRpVectors(absOutRp, scene) {
     for (const { resNode, widgetId } of items) {
       const widget = graph.objects.get(Number(widgetId));
       if (!widget?.body) continue;
-      const cpSubpaths = buildRp9ControlPointsForSubpaths(resNode.subpaths, resNode.w, resNode.h, {
+      const { w, h } = resNode.booleanRect || resNode;
+      const cpSubpaths = buildRp9ControlPointsForSubpaths(resNode.subpaths, w, h, {
         fillRule: resNode.fillRule || 'nonzero',
       });
       const encodedSubpaths = list(
@@ -741,6 +742,20 @@ function decorateExportNode(out, node) {
 }
 
 function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false, exportCtx = null } = {}) {
+  if (node._booleanResult) {
+    const { rect, points, viewBox, svgD } = node._booleanResult;
+    compatEntries.push({
+      pageId, nodeId: node.id, classification: 'unsupported', feature: 'booleanOp.live',
+      browserPreserved: true, reason: 'RP9 文件保存布尔结果轮廓，实时操作数关系由 Studio 工程保存',
+      fallback: svgD ? '当前轮廓导出为原生可编辑形状' : '当前轮廓为空，省略该形状',
+    });
+    if (!svgD) return null;
+    node = {
+      ...node, type: 'path', children: undefined, points, viewBox,
+      w: rect.w, h: rect.h, _w: rect.w, _h: rect.h,
+      _relX: (node._relX ?? 0) + rect.x, _relY: (node._relY ?? 0) + rect.y,
+    };
+  }
   if(STUDIO_SOURCE_ONLY_MACROS.has(node.type)&&!node.children?.length)throw Object.assign(new Error(`尚未展开的Studio节点 ${node.type} 不能按可见画布导出；请使用完整RP/1原生入口`),{code:'E_EXPORT_UNEXPANDED_MACRO',nodeId:`${pageId}/${node.id}`,field:'type'});
   classifyNodeCompatibility(node, pageId, compatEntries);
 
@@ -766,7 +781,7 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
           compatEntries,
           { exportCtx }
         )
-      ),
+      ).filter(Boolean),
     };
   }
 
@@ -986,7 +1001,7 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
         _relY: (ch._y ?? 0) - (node._y ?? 0),
       };
       return resolvedTreeToRp1Node(childCopy, pageId, compatEntries, { exportCtx });
-    });
+    }).filter(Boolean);
   }
 
   return decorateExportNode(out, node);
@@ -1190,11 +1205,14 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
         // Repeater widgets live in the row template's coordinate plane, not at
         // their first-row preview position on the page.
         const templateOwner=resNode.repeaterTemplateOwner?pgScene.nodes.find(node=>node.scopedId===resNode.repeaterTemplateOwner):null;
-        const expectedX=resNode.pageGlobalX-(templateOwner?.pageGlobalX||0),expectedY=resNode.pageGlobalY-(templateOwner?.pageGlobalY||0);
+        const rect = resNode.booleanRect;
+        const expectedX = resNode.pageGlobalX - (templateOwner?.pageGlobalX || 0) + (rect?.x || 0);
+        const expectedY = resNode.pageGlobalY - (templateOwner?.pageGlobalY || 0) + (rect?.y || 0);
+        const expectedW = rect?.w ?? resNode.w, expectedH = rect?.h ?? resNode.h;
         const dx = Math.abs(rpWidget.x - expectedX);
         const dy = Math.abs(rpWidget.y - expectedY);
-        const dw = Math.abs(rpWidget.w - resNode.w);
-        const dh = Math.abs(rpWidget.h - resNode.h);
+        const dw = Math.abs(rpWidget.w - expectedW);
+        const dh = Math.abs(rpWidget.h - expectedH);
         const err = Math.max(dx, dy, dw, dh);
         totalCompared++;
         if (err <= 1) within1PxCount++;
@@ -1203,7 +1221,7 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
           nodeAlignmentDetails.push({
             pageId: pgScene.id,
             nodeId: resNode.id,
-            resolved: { x: expectedX, y: expectedY, w: resNode.w, h: resNode.h },
+            resolved: { x: expectedX, y: expectedY, w: expectedW, h: expectedH },
             ...(templateOwner?{coordinateSpace:'repeater-template',ownerId:templateOwner.scopedId}:{}),
             exported: { x: rpWidget.x, y: rpWidget.y, w: rpWidget.w, h: rpWidget.h },
             errorPx: err,

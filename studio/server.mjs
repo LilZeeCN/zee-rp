@@ -329,9 +329,9 @@ export class StudioServer {
       const pathname = parsedUrl.pathname;
 
       // Static Web UI files(/src/** 为画布前端拆分模块;URL 点段已被 new URL 规范化,无目录穿越)
-      if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html' || pathname === '/styles.css' || pathname === '/visual-style.mjs' || pathname === '/clipboard.mjs' || pathname.startsWith('/src/'))) {
+      if (req.method === 'GET' && (pathname === '/' || pathname === '/index.html' || pathname === '/styles.css' || pathname === '/visual-style.mjs' || pathname === '/clipboard.mjs' || pathname === '/vector-paths.mjs' || pathname.startsWith('/src/'))) {
         const relFile = pathname === '/' ? 'index.html' : pathname.slice(1);
-        const fullPath = join(['/visual-style.mjs', '/clipboard.mjs'].includes(pathname) ? HERE : WEB_DIR, relFile);
+        const fullPath = join(['/visual-style.mjs', '/clipboard.mjs', '/vector-paths.mjs'].includes(pathname) ? HERE : WEB_DIR, relFile);
         const content = readFileSync(fullPath);
         res.writeHead(200, {
           'Content-Type': MIME_TYPES[extname(fullPath)] || 'application/octet-stream',

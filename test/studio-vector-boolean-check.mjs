@@ -3,12 +3,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 
 import {
   parseSvgPathD,
   parseSvgMarkup,
   hitTestVectorPath,
   booleanVectorPaths,
+  buildRp9ControlPointsForSubpaths,
   normalizeVectorNodeSpec,
 } from '../studio/vector-paths.mjs';
 import {
@@ -18,6 +20,7 @@ import { StudioPersistence } from '../studio/persistence.mjs';
 import { resolveDocumentScene } from '../studio/scene-resolver.mjs';
 import { StudioDocumentStore } from '../studio/commands.mjs';
 import { exportStudioDocumentToRp } from '../studio/export-rp.mjs';
+import { exportStudioDocumentToCode } from '../studio/export-code.mjs';
 import { syncNativeRpToStudio } from '../studio/sync-native.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 import { readRecords, encodeRecord, replaceRecord } from '../scripts/rp-records.mjs';
@@ -372,7 +375,7 @@ test('V01-4: browser SVG path rendering, control-point handle drag, and booleanP
                 type: 'path',
                 name: '矢量B',
                 x: 90,
-                y: 120,
+                y: 152,
                 w: 100,
                 h: 100,
                 d: 'M 0 0 L 100 0 L 100 100 L 0 100 Z',
@@ -459,11 +462,12 @@ test('V01-4: browser SVG path rendering, control-point handle drag, and booleanP
     })`);
 
     const afterBool = await cdp.evaluate(`(() => {
-      const n = window.__STUDIO_APP__.state.scene.pages[0].nodes.find(x => x.id === 'vec_a');
-      return { rev: window.__STUDIO_APP__.state.renderedRevision, w: n.w, h: n.h, svgD: n.svgD };
+      const n = window.__STUDIO_APP__.state.scene.pages[0].nodes.find(x => x.id === 'vec_a_union');
+      return { rev: window.__STUDIO_APP__.state.renderedRevision, w: n.booleanRect.w, svgD: n.svgD, children: n.childrenIds };
     })()`);
     assert.equal(afterBool.rev, 3);
     assert.ok(afterBool.w >= 145, `Union of x=40..160 and x=90..190 should have width >= 145, got ${afterBool.w}`);
+    assert.deepEqual(afterBool.children, ['web_vec_page/vec_a', 'web_vec_page/vec_b']);
 
     // Capture screenshot and verify non-zero pixel contrast inside the rendered vector shape
     const shotRes = await cdp.send('Page.captureScreenshot', { format: 'png' });
@@ -481,6 +485,82 @@ test('V01-4: browser SVG path rendering, control-point handle drag, and booleanP
       else if (r > 235 && g > 235 && b > 235) bgPixels++;
     }
     assert.ok(greenPixels > 500 && bgPixels > 500, `Expected non-zero pixel contrast for vector fill (#2E6F57), got greenPixels=${greenPixels}, bgPixels=${bgPixels}`);
+
+    const groupPath = '[data-node-id="vec_a_union"] > svg > path';
+    const readPath = () => cdp.evaluate(`document.querySelector(${JSON.stringify(groupPath)}).getAttribute('d')`);
+    const operand = await cdp.evaluate(`(() => {
+      window.__STUDIO_APP__.selectNodes(['vec_b']);
+      const r = document.querySelector('[data-node-id="vec_b"]').getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    })()`);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...operand, button: 'left', clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: operand.x + 32, y: operand.y, buttons: 1 });
+    assert.notEqual(await readPath(), afterBool.svgD, 'group updates before releasing pointer');
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: operand.x + 32, y: operand.y, button: 'left', clickCount: 1 });
+    await cdp.waitForFunction('window.__STUDIO_RENDERED_REVISION__ === 4');
+    const changedD = await readPath();
+    assert.notEqual(changedD, afterBool.svgD);
+    assert.ok(server.studio.store.history.at(-1).affectedNodeIds.includes('web_vec_page/vec_a_union'));
+
+    const hit = await cdp.evaluate(`(() => {
+      window.__STUDIO_APP__.selectNodes([]);
+      const p = document.querySelector(${JSON.stringify(groupPath)});
+      const r = p.ownerSVGElement.getBoundingClientRect();
+      return [
+        document.elementFromPoint(r.left + 10, r.top + 10)?.closest('.studio-node')?.dataset.nodeId,
+        document.elementFromPoint(r.right - 5, r.top + 4)?.closest('.studio-node')?.dataset.nodeId,
+      ];
+    })()`);
+    assert.equal(hit[0], 'vec_a_union');
+    assert.notEqual(hit[1], 'vec_a_union', 'empty corner of the result rectangle stays transparent to pointers');
+
+    const requestHistory = action => cdp.evaluate(`fetch('/api/' + ${JSON.stringify(action)}, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }).then(res => res.json())`);
+    assert.equal((await requestHistory('undo')).ok, true);
+    await cdp.waitForFunction('window.__STUDIO_RENDERED_REVISION__ === 5');
+    assert.equal(await readPath(), afterBool.svgD);
+    assert.equal((await requestHistory('redo')).ok, true);
+    await cdp.waitForFunction('window.__STUDIO_RENDERED_REVISION__ === 6');
+    assert.equal(await readPath(), changedD);
+
+    const reopened = new StudioPersistence(tmpDir).recoverAndLoad().store.doc;
+    const reopenedScene = resolveDocumentScene(reopened, { useCache: false });
+    const group = reopenedScene.nodesByScopedId['web_vec_page/vec_a_union'];
+    assert.equal(group.svgD, changedD);
+    const outDir = path.join(tmpDir, 'html');
+    assert.equal((await exportStudioDocumentToCode(reopened, { outDir, registerExport: false })).ok, true);
+    const offline = await managed.openPage(pathToFileURL(path.join(outDir, 'index.html')).href);
+    await offline.waitForFunction('Boolean(window.__STUDIO_EXPORT_APP__)');
+    assert.deepEqual(await offline.evaluate(`(() => ({
+      d: document.querySelector(${JSON.stringify(groupPath)}).getAttribute('d'),
+      operands: document.querySelectorAll('[data-node-id="vec_a"],[data-node-id="vec_b"]').length,
+    }))()`), { d: changedD, operands: 0 });
+    await offline.close();
+
+    if (!nativeTemplateSkipReason()) {
+      const outRpPath = path.join(tmpDir, 'boolean.rp');
+      const native = await exportStudioDocumentToRp(reopened, { outRpPath });
+      assert.equal(native.ok, true, native.message);
+      assert.equal(native.report.vectorAlignment.nativeShape300Count, 1);
+      assert.equal(native.report.summary.threeZerosPassed, true);
+      const parsed = readRp(fs.readFileSync(outRpPath), { path: outRpPath, includeVectors: true });
+      const shape = parsed.pages[0].widgets.find(widget => widget.shape === 300);
+      assert.deepEqual([shape.x, shape.y, shape.w, shape.h], [
+        group.x + group.booleanRect.x, group.y + group.booleanRect.y, group.booleanRect.w, group.booleanRect.h,
+      ]);
+      assert.deepEqual(shape.controlPoints, buildRp9ControlPointsForSubpaths(group.subpaths, shape.w, shape.h, { fillRule: group.fillRule }));
+    }
+
+    const handle = await cdp.evaluate(`(() => {
+      window.__STUDIO_APP__.selectNodes(['vec_b']);
+      const r = document.querySelector('[data-node-id="vec_b"][data-vector-point="0:1:anchor"]').getBoundingClientRect();
+      return { x: Math.round(r.left + r.width / 2), y: Math.round(r.top + r.height / 2) };
+    })()`);
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...handle, button: 'left', clickCount: 1 });
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: handle.x + 12, y: handle.y - 9, buttons: 1 });
+    assert.notEqual(await readPath(), changedD, 'editing an operand point previews the recomputed result');
+    await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', x: handle.x + 12, y: handle.y - 9, button: 'left', clickCount: 1 });
+    await cdp.waitForFunction('window.__STUDIO_RENDERED_REVISION__ === 7');
+    assert.notEqual(await readPath(), changedD);
   } finally {
     if (managed) await managed.close();
     if (server?.studio) await server.studio.close();

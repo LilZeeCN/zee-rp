@@ -131,7 +131,7 @@ export async function applyServerSnapshot(payload, effects) {
         if (n && !n.visible && !el) {
           continue;
         }
-        if (!el || n.type === 'dynamic-panel' || n.type === 'repeater' || n.repeaterTemplateOwner) {
+        if (!el || n.booleanOp || n.booleanOperand || n.type === 'dynamic-panel' || n.type === 'repeater' || n.repeaterTemplateOwner) {
           allFound = false;
           break;
         }

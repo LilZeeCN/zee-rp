@@ -1,7 +1,7 @@
 import { copyNodeSnapshots } from '/clipboard.mjs';
 import { isInputFocused, showToast } from './ui.mjs';
 import { findDropContainer, getActivePageScene, nodeViewportBounds, padList, selectedRootNodes, updateWorkspaceChrome } from './view.mjs';
-import { parseRotationDeg, pointerMapper, positionNodeElement, renderSelectionOverlay, withRotationDeg } from './render.mjs';
+import { parseRotationDeg, pointerMapper, positionNodeElement, refreshBooleanPreview, renderSelectionOverlay, withRotationDeg } from './render.mjs';
 import { state } from './state.mjs';
 
 function restoreGesturePreview(ds) {
@@ -28,6 +28,11 @@ function restoreGesturePreview(ds) {
   } else if (ds.kind === 'pan') {
     state.panX = ds.origPanX;
     state.panY = ds.origPanY;
+  } else if (ds.kind === 'vector-point') {
+    const node = pg?.nodes.find(item => item.id === ds.nodeId);
+    const point = node?.subpaths?.[ds.subpathIndex]?.points?.[ds.pointIndex];
+    const handle = ds.handleKind === 'anchor' ? point : point?.[ds.handleKind];
+    if (handle) Object.assign(handle, { x: ds.origX, y: ds.origY });
   } else if (ds.kind === 'marquee') state.selectedIds = ds.prevSelectedIds || [];
 }
 
@@ -514,6 +519,7 @@ export function setupCanvasInteractions({
           if (item.el) {
             positionNodeElement(item.el, item.node, pg);
           }
+          refreshBooleanPreview(item.node, pg);
         }
         renderSelectionOverlay();
         return;
@@ -539,6 +545,7 @@ export function setupCanvasInteractions({
       if (ds.el) {
         positionNodeElement(ds.el, node, pg);
       }
+      refreshBooleanPreview(node, pg);
       renderSelectionOverlay();
     } else if (ds.kind === 'resize') {
       const pg = getActivePageScene();
@@ -580,6 +587,7 @@ export function setupCanvasInteractions({
         el.style.width = `${nextW}px`;
         el.style.height = `${nextH}px`;
       }
+      refreshBooleanPreview(node, pg);
       renderSelectionOverlay();
     } else if (ds.kind === 'rotate') {
       const pg = getActivePageScene();
@@ -598,6 +606,7 @@ export function setupCanvasInteractions({
       }
       const el = document.querySelector(`#screen-root .studio-node[data-node-id="${CSS.escape(ds.nodeId)}"]`);
       if (el) el.style.transform = ds.pure2d ? `rotate(${nextDeg}deg)` : (nextTransform || '');
+      refreshBooleanPreview(node, pg);
       renderSelectionOverlay();
     } else if (ds.kind === 'vector-point') {
       const pg = getActivePageScene();
@@ -616,6 +625,7 @@ export function setupCanvasInteractions({
           pt[ds.handleKind].y = nextY;
         }
       }
+      refreshBooleanPreview(node, pg);
       renderSelectionOverlay();
     } else if (ds.kind === 'marquee') {
       const mq = document.getElementById('marquee-box');

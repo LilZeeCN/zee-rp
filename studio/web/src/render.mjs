@@ -1,4 +1,5 @@
 import { textSpanCss, visualCss } from '/visual-style.mjs';
+import { resolveBooleanGroupPath } from '/vector-paths.mjs';
 import { escapeHtml, renderIconSvg } from './ui.mjs';
 import { applyCanvasTransform, fitWorkspace as fitViewport, getActivePageScene, nodeViewportBounds, revealActiveArtboard as revealArtboard, updateZoomLabel, workspaceBounds } from './view.mjs';
 import { state } from './state.mjs';
@@ -65,11 +66,12 @@ export function renderTextContentHtml(n) {
 }
 
 export function buildNodeElementHtml(n, pageId, childrenHtml = '', parent = null) {
-  if (!n.visible || n.type === 'phone-shell') return '';
+  if (!n.visible || n.type === 'phone-shell' || (n.booleanOperand && state.mode !== 'design')) return '';
   const fontStack = n.fontStackCss || `'${n.fontFamily || 'PingFang SC'}', 'PingFang SC', 'Inter', sans-serif`;
+  const parentBorder = parent?.type === 'path' ? 0 : parent?.strokeWidth || 0;
   const styles = [
-    `left:${n.x - (parent?.x || 0) - (parent?.strokeWidth || 0)}px`,
-    `top:${n.y - (parent?.y || 0) - (parent?.strokeWidth || 0)}px`,
+    `left:${n.x - (parent?.x || 0) - parentBorder}px`,
+    `top:${n.y - (parent?.y || 0) - parentBorder}px`,
     `width:${n.w}px`,
     `height:${n.h}px`,
     `border-radius:${n.radius || 0}px`,
@@ -118,7 +120,7 @@ export function buildNodeElementHtml(n, pageId, childrenHtml = '', parent = null
   const css = visualCss(n);
   const style = extra => escapeHtml([...styles, extra || '', ...Object.entries(css).map(([key, value]) => `${key}:${value}`)].join(';'));
   const textClass = ['button', 'label', 'paragraph', 'badge'].includes(n.type) ? ' studio-text' : '';
-  const commonAttrs = `class="studio-node studio-${n.type}${textClass}" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-page-id="${escapeHtml(pageId)}" data-node-type="${escapeHtml(n.type)}" data-locked="${n.locked ? 'true' : 'false'}"`;
+  const commonAttrs = `class="studio-node studio-${n.type}${textClass}" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-page-id="${escapeHtml(pageId)}" data-node-type="${escapeHtml(n.type)}" data-locked="${n.locked ? 'true' : 'false'}"${n.booleanOperand ? ' data-boolean-operand' : ''}`;
 
   if (n.type === 'path') {
     const vb = n.viewBox && typeof n.viewBox === 'object'
@@ -132,7 +134,9 @@ export function buildNodeElementHtml(n, pageId, childrenHtml = '', parent = null
     const dashAttr = n.strokeDasharray
       ? ` stroke-dasharray="${escapeHtml(Array.isArray(n.strokeDasharray) ? n.strokeDasharray.join(' ') : String(n.strokeDasharray))}"`
       : '';
-    return `<div ${commonAttrs} data-fill-rule="${escapeHtml(n.fillRule || 'nonzero')}" data-native-vector="${n.nativeVectorCompatible ? 'true' : 'false'}" style="${style('overflow:visible')}"><svg class="studio-vector-svg" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" width="100%" height="100%" preserveAspectRatio="none" style="display:block;overflow:visible;pointer-events:none;"><path class="studio-vector-path" d="${escapeHtml(n.svgD || '')}" fill="${escapeHtml(svgFill)}" fill-rule="${escapeHtml(n.fillRule || 'nonzero')}" stroke="${escapeHtml(svgStroke)}" stroke-width="${svgStrokeW}" stroke-linecap="${escapeHtml(n.strokeLinecap || 'round')}" stroke-linejoin="${escapeHtml(n.strokeLinejoin || 'round')}"${dashAttr} /></svg>${childrenHtml}</div>`;
+    const resultStyle = n.booleanRect ? booleanSvgPosition(n.booleanRect) : '';
+    const hitStyle = n.booleanOp ? ' pointer-events="visiblePainted"' : '';
+    return `<div ${commonAttrs} data-fill-rule="${escapeHtml(n.fillRule || 'nonzero')}" data-native-vector="${n.nativeVectorCompatible ? 'true' : 'false'}" style="${style(n.booleanOp ? 'overflow:visible;pointer-events:none' : 'overflow:visible')}"><svg class="studio-vector-svg" viewBox="${vb.x} ${vb.y} ${vb.w} ${vb.h}" width="100%" height="100%" preserveAspectRatio="none" style="display:block;overflow:visible;pointer-events:none;${resultStyle}"><path class="studio-vector-path" d="${escapeHtml(n.svgD || '')}" fill="${escapeHtml(svgFill)}" fill-rule="${escapeHtml(n.fillRule || 'nonzero')}" stroke="${escapeHtml(svgStroke)}" stroke-width="${svgStrokeW}" stroke-linecap="${escapeHtml(n.strokeLinecap || 'round')}" stroke-linejoin="${escapeHtml(n.strokeLinejoin || 'round')}"${dashAttr}${hitStyle} /></svg>${childrenHtml}</div>`;
   }
 
   if (n.type === 'icon') {
@@ -197,6 +201,29 @@ export function buildNodeElementHtml(n, pageId, childrenHtml = '', parent = null
   return `<div ${commonAttrs} style="${style()}">${childrenHtml}</div>`;
 }
 
+function booleanSvgPosition(rect) {
+  return `position:absolute;left:${rect.x}px;top:${rect.y}px;width:${rect.w}px;height:${rect.h}px`;
+}
+
+export function refreshBooleanPreview(operand, page) {
+  if (!operand?.booleanOperand) return;
+  const group = page.nodes.find(node => node.scopedId === operand.parentScopedId);
+  const svg = document.querySelector(`[data-scoped-id="${CSS.escape(group.scopedId)}"] > .studio-vector-svg`);
+  if (!svg) return;
+  const operands = group.childrenIds.map(id => page.nodes.find(node => node.scopedId === id));
+  let geometry;
+  try {
+    geometry = resolveBooleanGroupPath(group.booleanOp, operands, {
+      x: group.x, y: group.y, allowSelfIntersection: group.booleanAllowSelfIntersection,
+    });
+  } catch {
+    return; // A transient drag can cross a degenerate point before the next valid frame.
+  }
+  svg.style.cssText = `display:block;overflow:visible;pointer-events:none;${booleanSvgPosition(geometry.rect)}`;
+  svg.setAttribute('viewBox', `0 0 ${geometry.rect.w} ${geometry.rect.h}`);
+  svg.firstElementChild.setAttribute('d', geometry.svgD);
+}
+
 export function renderNodeTree(source,pageId) {
   const nodes = source.filter(n => n.visible && n.type !== 'phone-shell'&&!n.repeaterTemplateOwner);
   const byId = new Map(nodes.map(n => [n.scopedId, n]));
@@ -218,8 +245,9 @@ export function tokenCss() {
 
 export function positionNodeElement(el, node, pg) {
   const parent = pg.nodes.find(n => n.scopedId === node.parentScopedId && n.type !== 'phone-shell');
-  el.style.left = `${node.x - (parent?.x || 0) - (parent?.strokeWidth || 0)}px`;
-  el.style.top = `${node.y - (parent?.y || 0) - (parent?.strokeWidth || 0)}px`;
+  const parentBorder = parent?.type === 'path' ? 0 : parent?.strokeWidth || 0;
+  el.style.left = `${node.x - (parent?.x || 0) - parentBorder}px`;
+  el.style.top = `${node.y - (parent?.y || 0) - parentBorder}px`;
 }
 
 export function pointerMapper(nodeEl) {
@@ -366,6 +394,8 @@ export function withRotationDeg(transformStr, deg) {
 export function renderSelectionOverlay() {
   const overlay = document.getElementById('overlay-layer');
   if (!overlay) return;
+  const stage = document.getElementById('canvas-stage');
+  stage.querySelectorAll('[data-selected-boolean-operand]').forEach(el => el.removeAttribute('data-selected-boolean-operand'));
   if (state.mode !== 'design' || !state.selectedIds.length) {
     overlay.innerHTML = '';
     return;
@@ -384,6 +414,9 @@ export function renderSelectionOverlay() {
   for (const id of state.selectedIds) {
     const n = pg.nodes.find(x => x.id === id);
     if (!n || !n.visible) continue;
+    if (n.booleanOperand) {
+      stage.querySelector(`[data-scoped-id="${CSS.escape(n.scopedId)}"]`)?.setAttribute('data-selected-boolean-operand', '');
+    }
     const bounds = nodeViewportBounds(n);
     const vx = Math.round(bounds?.x ?? ((originX + n.x) * state.zoom + state.panX));
     const vy = Math.round(bounds?.y ?? ((originY + n.y) * state.zoom + state.panY));
@@ -394,7 +427,7 @@ export function renderSelectionOverlay() {
       : parseRotationDeg(n.threeDTransform);
 
     let vectorHandlesHtml = '';
-    if (state.selectedIds.length === 1 && n.type === 'path' && Array.isArray(n.subpaths)) {
+    if (state.selectedIds.length === 1 && n.type === 'path' && !n.booleanOp && Array.isArray(n.subpaths)) {
       const vb = n.viewBox && typeof n.viewBox === 'object'
         ? n.viewBox
         : { x: 0, y: 0, w: Math.max(1, n.w || 100), h: Math.max(1, n.h || 100) };

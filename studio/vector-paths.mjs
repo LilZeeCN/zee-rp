@@ -1463,6 +1463,36 @@ function simplifyCollinearRing(ring) {
   return simplified.length >= 3 ? simplified : pts;
 }
 
+export function resolveBooleanGroupPath(operation, operands, { x = 0, y = 0, allowSelfIntersection = false } = {}) {
+  const paths = operands.map(node => {
+    const vb = node.viewBox;
+    const sx = node.w / vb.w, sy = node.h / vb.h;
+    const dx = node.x - x, dy = node.y - y;
+    let matrix = [sx, 0, 0, sy, dx - vb.x * sx, dy - vb.y * sy];
+    if (node.rotation) {
+      const rotation = parseVectorTransform(`rotate(${node.rotation})`, { x: dx + node.w / 2, y: dy + node.h / 2 });
+      matrix = multiplyMatrices(rotation, matrix);
+    }
+    return { points: { subpaths: bakeVectorTransform(node.subpaths, matrix), fillRule: node.fillRule } };
+  });
+  const result = booleanVectorPaths(operation, paths[0], paths[1], { allowSelfIntersection });
+  const left = Math.floor(result.bounds.minX), top = Math.floor(result.bounds.minY);
+  const rect = {
+    x: left, y: top,
+    w: Math.max(1, Math.ceil(result.bounds.maxX) - left),
+    h: Math.max(1, Math.ceil(result.bounds.maxY) - top),
+  };
+  const points = {
+    subpaths: bakeVectorTransform(result.subpaths, [1, 0, 0, 1, -left, -top]),
+    fillRule: result.fillRule,
+    strokeLinecap: operands[0].strokeLinecap,
+    strokeLinejoin: operands[0].strokeLinejoin,
+    strokeDasharray: operands[0].strokeDasharray,
+  };
+  const viewBox = { x: 0, y: 0, w: rect.w, h: rect.h };
+  return { rect, points, viewBox, svgD: subpathsToSvgD(points.subpaths) };
+}
+
 export function booleanVectorPaths(operation, pathA, pathB, options = {}) {
   const op = String(operation || '').toLowerCase();
   const VALID_OPS = new Set(['union', 'subtract', 'intersect', 'exclude', 'xor']);

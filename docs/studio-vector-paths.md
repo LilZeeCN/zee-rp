@@ -57,6 +57,8 @@ Studio 中的矢量节点统一归一化为 `type: 'path'`，同时支持在权�
   - `operation: 'set-fill-rule'`: 切换 `nonzero` / `evenodd`。
 - **`booleanPathOp`**:
   - 支持 `operation: 'union' | 'subtract' | 'intersect' | 'exclude'`。
+  - 传 `editable: true` 创建实时布尔组。两个闭合二维路径须同属一个自由布局容器，`nodeIds` 的顺序决定减法方向。`resultId` 可指定组 ID。画布双选路径后，属性面板的布尔按钮使用此模式。
+  - 从图层列表选择组内操作数，拖动路径或编辑控制点时可以看到结果实时更新。撤销、重做和项目重开从源操作数重算。
   - 将两个闭合矢量路径投影至统一画布平面，执行平面线段求交细分、法向内点采样分类与环方向规整（外环正面积、内孔负面积 `hole: true`）。
   - **显式诊断边界**:
     - 未闭合路径返回 `E_VECTOR_NOT_CLOSED`；
@@ -69,6 +71,8 @@ Studio 中的矢量节点统一归一化为 `type: 'path'`，同时支持在权�
 ## 3. Axure RP 9 原生 `Shape: 300` 与节点级降级边界
 
 Studio 导出 `.rp` 时将 `type: 'path'` 编译并修补为 Axure RP 9 原生 `VectorShape`（`Shape: 300`，含 `CompoundType` 与 `ControlPoints` 数组），并在 `syncNativeRpToStudio` 中支持检测 RP9 端对 `ControlPoints` 的编辑回填（生成 `editPath` 命令）。
+
+可编辑布尔组在独立 HTML 和 RP9 中使用导出时的结果轮廓。RP9 将非空结果写成可编辑的 `Shape: 300`，并在兼容报告列出 `booleanOp.live`。实时操作数关系由 Studio 源文档保存，原生结果的控制点无法映射回两个操作数。
 
 | 矢量特征 | 画布与代码出口 (`canvas` / `G01`) | Axure RP 9 导出 (`.rp`) | 节点级兼容性分类 (`classifyVectorNativeCompatibility`) |
 | --- | --- | --- | --- |

@@ -15,7 +15,7 @@ import {
   validateComponentInstanceAgainstContract,
   resolveContractPropsAndStateOverrides,
 } from './component-contracts.mjs';
-import { normalizeVectorNodeSpec } from './vector-paths.mjs';
+import { normalizeVectorNodeSpec, resolveBooleanGroupPath } from './vector-paths.mjs';
 export { RENDERER_VERSION };
 
 export function parsePadding(pad) {
@@ -1119,6 +1119,18 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
       if (node.type === 'repeater' && node.template) {
         layout(node.template, 0, 0, node._w, Number(node.rowHeight || 56), 0, 0);
       }
+      if (node.booleanOp) {
+        const operands = node.children || [];
+        if (operands.length !== 2 || operands.some(child => child.type !== 'path' || child.children?.length || child.threeDTransform || child.css?.transform)) {
+          throw Object.assign(new Error(`布尔组 ${node.id} 需要两个闭合的二维路径`), { code: 'E_VECTOR_BOOLEAN_OPERANDS', nodeId: node.id });
+        }
+        const geometry = resolveBooleanGroupPath(node.booleanOp, operands.map(child => ({
+          ...child._vectorSpec, x: child._x, y: child._y, w: child._w, h: child._h, rotation: child.rotation,
+        })), { x: node._x, y: node._y, allowSelfIntersection: node.booleanAllowSelfIntersection });
+        const { rect, points, viewBox } = geometry;
+        const path = { ...node, type: 'path', children: undefined, w: rect.w, h: rect.h, points, viewBox };
+        node._booleanResult = { ...geometry, spec: normalizeVectorNodeSpec(path) };
+      }
     } finally {
       activeSliceMeta = prevMeta;
     }
@@ -1254,7 +1266,8 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
       const scopedId = `${scopePrefix}/${n.id}`;
       const visibilityKey = scopedId;
       const ownVisible = runtimeState?.visibility && visibilityKey in runtimeState.visibility ? Boolean(runtimeState.visibility[visibilityKey]) : n.visible !== false && n.hidden !== true;
-      const isVisible = visibleAncestor && ownVisible;
+      const isVisible = visibleAncestor && ownVisible &&
+        (!runtimeState || (!parentNode?.booleanOp && (!n._booleanResult || Boolean(n._booleanResult.svgD))));
       const screenX = offsetX + n._x;
       const screenY = offsetY + n._y;
       const pageGlobalX = shellPad + screenX;
@@ -1277,7 +1290,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
       }
 
       const assetEntry = n.type === 'image' && n.src ? (doc.assetsManifest?.[n.src] || null) : null;
-      const vectorSpec = n.type === 'path' ? (n._vectorSpec || normalizeVectorNodeSpec({ ...n, w: n._w, h: n._h })) : null;
+      const vectorSpec = n._booleanResult?.spec ?? (n.type === 'path' ? (n._vectorSpec || normalizeVectorNodeSpec({ ...n, w: n._w, h: n._h })) : null);
 
       const resolvedNode = {
         id: n.id,
@@ -1289,7 +1302,13 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
         panelOwnerId: panelOwnerId || null,
         renderOrder: destination.length + 1,
         name: n.name || n.id,
-        type: n.type,
+        type: n._booleanResult ? 'path' : n.type,
+        ...(n._booleanResult ? {
+          booleanOp: n.booleanOp,
+          booleanAllowSelfIntersection: Boolean(n.booleanAllowSelfIntersection),
+          booleanRect: n._booleanResult.rect,
+        } : {}),
+        ...(parentNode?.booleanOp ? { booleanOperand: true } : {}),
         role: n.role || null,
         variant: n.variant || n.tone || n._instanceVariant || n.variants?.[n.variantKey] || null,
         component: n.componentSource?.componentId || n.component || null,
@@ -1323,9 +1342,9 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
         textAlign: n.textAlign || n.align || n._inheritedAlign || (n.type === 'button' ? 'center' : 'left'),
         fill: n._resolvedFill,
         rawFill: n.fill ?? null,
-        stroke: n._resolvedStroke,
+        stroke: n._booleanResult && !n._resolvedStroke && !n._resolvedFill ? n._resolvedColor : n._resolvedStroke,
         rawStroke: n.stroke ?? null,
-        strokeWidth: Number(n.strokeWidth ?? (n._resolvedStroke && n._resolvedStroke !== '#FFFFFF00' ? 1 : 0)),
+        strokeWidth: Number(n.strokeWidth ?? (n._resolvedStroke && n._resolvedStroke !== '#FFFFFF00' ? 1 : n._booleanResult && !n._resolvedFill ? 2 : 0)),
         color: n._resolvedColor,
         rawColor: n.color ?? null,
         radius: Number(n.radius || 0),

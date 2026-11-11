@@ -168,6 +168,15 @@ pre, code { user-select: text; font-size: 12px; line-height: 1.7; }
   transition: none;
 }
 
+.studio-node[data-boolean-operand]:not([data-selected-boolean-operand]) {
+  visibility: hidden;
+}
+
+.studio-node[data-selected-boolean-operand] {
+  opacity: 0.35 !important;
+  pointer-events: auto;
+}
+
 .studio-node[data-locked="true"] {
   pointer-events: none;
 }

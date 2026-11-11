@@ -465,7 +465,7 @@ export function computeCommandImpactAndDiff({
 
       // 矢量路径内容 diff：editPath/import-svg 只替换 points/svgD、外接盒不变时，
       // 不计入任何现有类别会落进「无实质视觉或结构变更」（T-HR-1 摘要不敏感）。
-      if (bNode.svgD !== aNode.svgD) {
+      if (bNode.svgD !== aNode.svgD || differs(bNode.booleanRect, aNode.booleanRect)) {
         vectorChanges.push({ pageId, scopedId, nodeId: aNode.id, beforeD: bNode.svgD ?? null, afterD: aNode.svgD ?? null });
       }
 
@@ -547,6 +547,7 @@ export function computeCommandImpactAndDiff({
       ...affectedComponentInstanceIds,
       ...affectedTokenConsumerIds,
       ...affectedInteractionBindingIds,
+      ...vectorChanges.map(change => change.scopedId),
       ...shiftedSiblingAndDescendantIds,
       ...affectedAncestorIds,
     ]),

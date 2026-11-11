@@ -9,6 +9,7 @@ import {
   computeVectorBounds,
 } from '../../vector-paths.mjs';
 import { cmdError, resolveTargetOrSubnode } from '../helpers.mjs';
+import { parsePadding, resolveDocumentScene } from '../../scene-resolver.mjs';
 
 function editPath({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
       const targetInfo = resolveTargetOrSubnode(doc, index, cmd.nodeId, pageScope, cmdIdx);
@@ -209,7 +210,7 @@ function editPath({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
       }
 }
 
-function booleanPathOp({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
+function booleanPathOp({ doc, cmd, cmdIdx, index, pageScope, sceneOptions, affectedIds }) {
       const op = cmd.op || cmd.operation;
       const pairIds = Array.isArray(cmd.nodeIds) && cmd.nodeIds.length === 2
         ? cmd.nodeIds
@@ -234,6 +235,50 @@ function booleanPathOp({ doc, cmd, cmdIdx, index, pageScope, affectedIds }) {
           commandIndex: cmdIdx,
           nodeId: nodeA.type !== 'path' ? nodeA.id : nodeB.id,
         });
+      }
+
+      if (cmd.editable) {
+        const a = infoA.entry, b = infoB.entry;
+        const parent = a.parent;
+        if (!parent || parent !== b.parent || a.node === b.node || parent.booleanOp ||
+            !['stack', 'free'].includes(parent.layout || 'stack') || !doc.pages.some(page => page.id === a.pageId)) {
+          throw cmdError('E_VECTOR_BOOLEAN_SCOPE', '可编辑布尔组需要同一自由布局容器内的两个独立路径', { commandIndex: cmdIdx });
+        }
+        const scene = resolveDocumentScene(doc, { ...sceneOptions, useCache: false });
+        const aShape = scene.nodesByScopedId[a.scopedId], bShape = scene.nodesByScopedId[b.scopedId];
+        const frame = aShape && scene.nodesByScopedId[aShape.parentScopedId];
+        if (!aShape || !bShape || !frame) {
+          throw cmdError('E_VECTOR_BOOLEAN_SCOPE', '请在当前可见的面板状态中组合路径', { commandIndex: cmdIdx });
+        }
+        const left = Math.min(aShape.x, bShape.x), top = Math.min(aShape.y, bShape.y);
+        const padding = parsePadding(frame.padding);
+        const baseId = `${nodeA.id}_${op}`;
+        let id = cmd.resultId || baseId;
+        for (let suffix = 2; !cmd.resultId && index.byScopedId.has(`${a.scope}/${id}`); suffix++) id = `${baseId}_${suffix}`;
+        if (index.byScopedId.has(`${a.scope}/${id}`)) {
+          throw cmdError('E_DUPLICATE_ID', `节点 ${id} 已存在`, { commandIndex: cmdIdx, field: 'resultId' });
+        }
+        const placeOperand = (node, shape) => {
+          const copy = { ...node, x: shape.x - left, y: shape.y - top, w: shape.w, h: shape.h };
+          for (const field of ['after', 'afterGap', 'alignX', 'pin', 'pinGap', 'right', 'bottom', 'anchor']) delete copy[field];
+          return copy;
+        };
+        const group = {
+          id, name: cmd.name || id, type: 'box', layout: 'stack', booleanOp: op,
+          ...(cmd.allowSelfIntersection ? { booleanAllowSelfIntersection: true } : {}),
+          x: left - frame.x - padding[3], y: top - frame.y - padding[0],
+          w: Math.max(aShape.x + aShape.w, bShape.x + bShape.w) - left,
+          h: Math.max(aShape.y + aShape.h, bShape.y + bShape.h) - top,
+          ...Object.fromEntries(['fill', 'stroke', 'strokeWidth', 'color', 'opacity', 'z']
+            .filter(field => nodeA[field] !== undefined).map(field => [field, nodeA[field]])),
+          children: [placeOperand(nodeA, aShape), placeOperand(nodeB, bShape)],
+        };
+        // Keep the result in the first operand's layer position.
+        parent.children.splice(Math.max(a.index, b.index), 1);
+        parent.children.splice(Math.min(a.index, b.index), 1);
+        parent.children.splice(a.index - Number(b.index < a.index), 0, group);
+        affectedIds.push(`${a.scope}/${group.id}`, a.scopedId, b.scopedId);
+        return;
       }
 
       const specA = normalizeVectorNodeSpec(nodeA);

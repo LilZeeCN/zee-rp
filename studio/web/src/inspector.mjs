@@ -361,10 +361,10 @@ function renderInspectorContent({ dispatchCommands, renderAll, resetRuntimePrevi
   if (state.selectedIds.length >= 2) {
     const selNodes = state.selectedIds.map(id => pgScene.nodes.find(n => n.id === id)).filter(Boolean);
     const first = selNodes[0] || {};
-    const canBoolean = selNodes.length === 2 && selNodes.every(n => n.type === 'path' && !n.locked);
+    const canBoolean = selNodes.length === 2 && selNodes.every(n => n.type === 'path' && !n.locked && !n.booleanOp && !n.booleanOperand && n.parentScopedId === first.parentScopedId && ['stack', 'free'].includes(n.parentLayout));
     const booleanGroupHtml = canBoolean
       ? `<div class="prop-group">
-          <div class="prop-group-title">矢量布尔运算 (${escapeHtml(selNodes[0].id)} ⊕ ${escapeHtml(selNodes[1].id)})</div>
+          <div class="prop-group-title">可编辑布尔组 (${escapeHtml(selNodes[0].id)} ⊕ ${escapeHtml(selNodes[1].id)})</div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button id="insp-bool-union" data-bool-op="union">∪ 并集 (Union)</button>
             <button id="insp-bool-subtract" data-bool-op="subtract">− 减去 (Subtract)</button>
@@ -431,10 +431,11 @@ function renderInspectorContent({ dispatchCommands, renderAll, resetRuntimePrevi
           type: 'booleanPathOp',
           pageId: state.activePageId,
           operation: op,
+          editable: true,
           nodeIds: [selNodes[0].id, selNodes[1].id],
         });
         if (res) {
-          state.selectedIds = [selNodes[0].id];
+          state.selectedIds = [res.directAffectedNodeIds[0].split('/').at(-1)];
           renderAll();
         }
       });
@@ -759,7 +760,7 @@ function renderInspectorContent({ dispatchCommands, renderAll, resetRuntimePrevi
       </div>
     </div>
     ${
-      node.type === 'path'
+      node.type === 'path' && !node.booleanOp
         ? `<div class="prop-group" id="insp-vector-path-group">
             <div class="prop-group-title">矢量路径与曲线 (Vector Path)</div>
             <div style="font-size:11px;margin-bottom:8px;color:${node.nativeVectorCompatible ? '#8df0ca' : '#fbbf24'};">

@@ -245,6 +245,12 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
       true
     );
   }
+  if (type === 'box' && ['booleanOp', 'booleanAllowSelfIntersection'].includes(field)) {
+    consumes(['booleanOp', 'booleanAllowSelfIntersection'], 'studio/scene-resolver.mjs:measureAndLayoutTree',
+      '按顺序组合两个闭合路径，操作数随源文档保留');
+    result.surfaces.native = fact('partial', '导出时保留当前轮廓为可编辑形状，实时布尔关系保留在 Studio',
+      'studio/export-rp.mjs:resolvedTreeToRp1Node');
+  }
 
   // 5. Container layout fields
   if (containerTypes.has(type)) {
