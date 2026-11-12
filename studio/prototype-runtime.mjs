@@ -1,6 +1,6 @@
 // These functions have no module dependencies. The code exporter embeds them
 // in its standalone script so it also works when index.html is opened directly.
-export function evaluatePrototypeExpression(expression, { variables, getWidgetText, resolveDatasetPath, itemRow = null }) {
+export function evaluatePrototypeExpression(expression, { variables, getWidgetText, getWidgetState, resolveDatasetPath, itemRow = null }) {
   if (expression == null) return '';
   if (typeof expression === 'number' || typeof expression === 'boolean') return expression;
   const source = String(expression).trim();
@@ -93,9 +93,13 @@ export function evaluatePrototypeExpression(expression, { variables, getWidgetTe
         i += dsMatch[0].length;
         continue;
       }
-      const wMatch = rest.match(/^widget\.([a-zA-Z0-9_-]+)\.text(?![a-zA-Z0-9_])/);
+      const wMatch = rest.match(/^widget\.([a-zA-Z0-9_/-]+)\.(text|checked|selected|value)(?![a-zA-Z0-9_])/);
       if (wMatch) {
-        list.push({ type: 'val', value: getWidgetText ? getWidgetText(wMatch[1]) : '' });
+        const wProp = wMatch[2];
+        const wVal = (wProp === 'checked' || wProp === 'selected')
+          ? (getWidgetState ? getWidgetState(wMatch[1], wProp) : false)
+          : (getWidgetText ? getWidgetText(wMatch[1]) : '');
+        list.push({ type: 'val', value: wVal });
         i += wMatch[0].length;
         continue;
       }
@@ -384,6 +388,20 @@ export function executePrototypeInteraction(runtime, spec, executed, { declaredV
       for (const [target, expr] of Object.entries(action.setText)) setText(target, expr);
     }
     if (type === 'set-text') setText(action.target, action.text ?? action.value);
+    if (type === 'set-check' && typeof runtime.setChecked === 'function') {
+      const rawChk = action.checked !== undefined ? action.checked : action.value;
+      const val = rawChk === 'toggle' ? 'toggle' : Boolean(evaluate(rawChk));
+      runtime.setChecked(action.target, val, executed);
+    }
+    if (type === 'set-selected' && typeof runtime.setSelected === 'function') {
+      const rawSel = action.selected !== undefined ? action.selected : action.value;
+      const val = rawSel === 'toggle' ? 'toggle' : Boolean(evaluate(rawSel));
+      runtime.setSelected(action.target, val, executed);
+    }
+    if (type === 'set-option' && typeof runtime.setOption === 'function') {
+      const val = evaluate(action.value ?? action.option ?? action.selected);
+      runtime.setOption(action.target, val, executed);
+    }
 
     const panels = action.setPanelState || (type === 'set-panel-state' ? action : null);
     if (panels) for (const item of Array.isArray(panels) ? panels : [panels]) {

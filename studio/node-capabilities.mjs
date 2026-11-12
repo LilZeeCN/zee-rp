@@ -66,7 +66,7 @@ const layout = [
 
 const cardMacroFields = [
   'title', 'subtitle', 'body', 'tag', 'tagTone', 'tone',
-  'variant', 'actionText', 'goto', 'titleFontSize',
+  'rightBadge', 'rightTone', 'variant', 'actionText', 'goto', 'titleFontSize',
 ];
 
 const listItemMacroFields = [
@@ -76,6 +76,31 @@ const listItemMacroFields = [
 ];
 
 const statRowMacroFields = ['items', 'valueFontSize', 'cardPadding', 'equalHeight'];
+
+const progressBarMacroFields = [
+  'value', 'max', 'percent', 'label', 'text', 'rightText', 'showValue',
+  'barColor', 'barFill', 'trackColor', 'trackFill', 'barHeight', 'trackHeight',
+];
+
+const navBarMacroFields = [
+  'title', 'subtitle', 'titleFontSize', 'back', 'backText', 'backGoto', 'backPage',
+  'rightText', 'rightGoto', 'rightPage',
+];
+
+const tabBarMacroFields = [
+  'items', 'tabs', 'active', 'activeIndex', 'activeColor', 'inactiveColor',
+  'activeFill', 'inactiveFill', 'itemHeight',
+];
+
+const formCheckFields = [
+  'text', 'checked', 'selected', 'disabled', 'selectionGroup',
+  'fontFamily', 'font', 'fontSize', 'size', 'fontWeight', 'color', 'textAlign', 'align', 'textPaddingX',
+];
+
+const formOptionFields = [
+  'options', 'selected', 'selectedIndex', 'disabled', 'selectionGroup',
+  'fontFamily', 'font', 'fontSize', 'size', 'fontWeight', 'color', 'textAlign', 'align', 'textPaddingX',
+];
 
 const phoneShellFields = [
   'device', 'statusBar', 'darkIsland', 'showHomeIndicator',
@@ -101,7 +126,8 @@ const nonClickEventFields = new Set([
 
 const gotoCapableTypes = new Set([
   'box', 'label', 'paragraph', 'button', 'badge',
-  'image', 'icon', 'input', 'card', 'list-item', 'path', 'sparkline',
+  'image', 'icon', 'input', 'checkbox', 'radio', 'combobox', 'listbox',
+  'card', 'list-item', 'path', 'sparkline',
 ]);
 
 const fact = (status, reason, consumer = null) => ({
@@ -273,13 +299,39 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
     consumes(['icon'], 'studio/web/src/render.mjs:renderIconSvg', '按已知图标名绘制；原生是否可编辑由逐节点导出报告决定', true);
   }
   if (type === 'input') {
-    consumes(['placeholder', 'value'], 'studio/runtime.mjs:setInput + studio/web/src/render.mjs:buildNodeElementHtml', '输入控件显示与运行态文本', true);
+    consumes(['placeholder', 'value', 'disabled', 'selected', 'selectionGroup', 'multiline'], 'studio/runtime.mjs:setInput + studio/web/src/render.mjs:buildNodeElementHtml', '输入控件显示、多行文本域与运行态文本', true);
+    if (field === 'multiline') {
+      result.surfaces.native = fact('partial', '导出为同尺寸原生可编辑 TextBox，并在兼容报告中披露多行退化边界', 'studio/export-rp.mjs:resolvedTreeToRp1Node');
+    }
+  }
+  if (type === 'checkbox' || type === 'radio') {
+    consumes([...formCheckFields, ...(type === 'radio' ? ['group'] : [])], 'studio/scene-resolver.mjs:measure + studio/web/src/render.mjs:buildNodeElementHtml + studio/runtime.mjs', '原生勾选/单选控件度量、运行态切换与组互斥', true);
+    if (matched) {
+      result.surfaces.native = fact('implemented', `导出为 Axure RP9 原生可编辑 ${type === 'checkbox' ? 'Checkbox' : 'RadioButton'}`, 'studio/export-rp.mjs:resolvedTreeToRp1Node');
+    }
+  }
+  if (type === 'combobox' || type === 'listbox') {
+    consumes([...formOptionFields, ...(type === 'listbox' ? ['multiple', 'selectedIndices'] : [])], 'studio/scene-resolver.mjs:measure + studio/web/src/render.mjs:buildNodeElementHtml + studio/runtime.mjs', '原生下拉框/列表框选项、运行态选择与读数', true);
+    if (matched) {
+      result.surfaces.native = fact('implemented', `导出为 Axure RP9 原生可编辑 ${type === 'combobox' ? 'Droplist' : 'ListBox'}`, 'studio/export-rp.mjs:resolvedTreeToRp1Node');
+    }
   }
   if (type === 'button' || type === 'badge') {
-    consumes(['variant', 'tone'], 'studio/scene-resolver.mjs:prepareTree', '按语义变体设置按钮或徽标默认配色', true);
+    consumes(['variant', 'tone', 'selected', 'disabled', 'selectionGroup'], 'studio/scene-resolver.mjs:prepareTree', '按语义变体或选中态设置按钮或徽标配色', true);
+  } else if (['label', 'paragraph'].includes(type) && ['selected', 'disabled', 'selectionGroup'].includes(field)) {
+    consumes(['selected', 'disabled', 'selectionGroup'], 'studio/runtime.mjs', '参与 set-selected 选中态与禁用标记', true);
   }
   if (type === 'phone-shell') {
     consumes(phoneShellFields, 'studio/scene-resolver.mjs:expandMacroNode + studio/web/src/render.mjs:renderCanvasStage', '设置手机画板机型、灵动岛、状态栏与屏幕底色', true);
+  }
+  if (type === 'progress-bar') {
+    consumes(progressBarMacroFields, 'studio/scene-resolver.mjs:expandMacroNode', '提供 value/percent/label 时自动展开进度条轨道与百分比文案', true);
+  }
+  if (type === 'nav-bar') {
+    consumes(navBarMacroFields, 'studio/scene-resolver.mjs:expandMacroNode', '提供 title/backText/rightText 时自动展开导航栏结构', true);
+  }
+  if (type === 'tab-bar') {
+    consumes(tabBarMacroFields, 'studio/scene-resolver.mjs:expandMacroNode', '提供 items/tabs 时自动展开标签栏条目与跳转交互', true);
   }
   if (type === 'card') {
     consumes(cardMacroFields, 'studio/scene-resolver.mjs:expandMacroNode', '无显式children时展开宏内容及标题字号；有children时不自动生成子节点', true);
@@ -338,7 +390,7 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
     consumes([...instanceFields, 'text'], 'studio/scene-resolver.mjs:expandComponentInstance', '根据组件契约解析props、状态和覆盖；实际子节点通过instance-override改稿', true);
   }
   if (type === 'dynamic-panel') {
-    consumes(['states', 'activeState'], 'studio/scene-resolver.mjs:collectResolved + studio/runtime.mjs', '解析当前面板状态及受支持的切态动作', true);
+    consumes(['states', 'activeState', 'tabs'], 'studio/scene-resolver.mjs:collectResolved + studio/runtime.mjs', '解析当前面板状态、可选分段头部 tabs 及受支持的切态动作', true);
   }
 
   // 7. Click interactions (on, onClick, goto)
@@ -414,6 +466,10 @@ export function nodeCapabilitySummary(type, { node = null, target = null, source
     ...(type === 'stat-row' ? ['items', 'valueFontSize'] : []),
     ...(type === 'repeater' ? ['rows', 'filter', 'sort', 'template'] : []),
     ...(type === 'divider' ? ['direction', 'color'] : []),
+    ...(type === 'checkbox' ? ['text', 'checked', 'disabled'] : []),
+    ...(type === 'radio' ? ['text', 'checked', 'group', 'disabled'] : []),
+    ...(type === 'combobox' ? ['options', 'selected', 'selectedIndex', 'disabled'] : []),
+    ...(type === 'listbox' ? ['options', 'selected', 'selectedIndex', 'multiple', 'disabled'] : []),
     ...(['path', 'sparkline'].includes(type) ? ['points', 'content', 'smooth', 'fill', 'stroke', 'strokeWidth'] : []),
   ];
   const macroFields = [...new Set([target?.property, ...Object.values(target?.propertyMap || {})])].filter(Boolean);
@@ -463,16 +519,24 @@ export function assertKnownNodeEffects(node, properties, { commandIndex = 0, nod
   }
 }
 
+export function hasStudioMacroExpansionParams(node) {
+  if (!node || typeof node !== 'object') return false;
+  if (node.type === 'progress-bar') return node.value !== undefined || node.percent !== undefined || node.label !== undefined;
+  if (node.type === 'tab-bar') return (Array.isArray(node.items) && node.items.length > 0) || (Array.isArray(node.tabs) && node.tabs.length > 0);
+  if (node.type === 'nav-bar') return node.title !== undefined || node.backText !== undefined || node.rightText !== undefined || node.back === true;
+  return false;
+}
+
 export function assertCanvasNodeType(node, { commandIndex = 0 } = {}) {
-  if (rawMacros.has(node.type) && !node.component && !node.children?.length) {
+  if (rawMacros.has(node.type) && !node.component && !node.children?.length && !hasStudioMacroExpansionParams(node)) {
     throw Object.assign(new Error(`${node.type}尚无Studio宏展开，不能作为空白构件创建`), {
       code: 'E_STUDIO_MACRO_UNEXPANDED',
       commandIndex,
       nodeId: node.id,
       field: 'type',
       suggestion: node.type === 'nav-bar'
-        ? '使用createInstance(componentId:"nav-bar",props:{title:"..."})，或完整RP/1原生入口'
-        : '使用显式box/row/column/label等构图，或完整generate_prototype原生入口；已有源字段不会被删除。',
+        ? '使用createInstance(componentId:"nav-bar",props:{title:"..."})、提供 title 参数，或完整RP/1原生入口'
+        : '提供该宏的内容参数、使用显式box/row/column/label构图，或完整generate_prototype原生入口；已有源字段不会被删除。',
     });
   }
 }

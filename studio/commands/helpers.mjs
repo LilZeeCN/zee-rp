@@ -65,8 +65,12 @@ export function validateInteractionAssignments(spec, doc, cmdIdx, nodeId) {
           }
           if (spec.type === 'set-var' || spec.type === 'set-variable') validateAssignment(spec.variable || spec.name, spec.value ?? spec.expr);
           if (spec.setVar && typeof spec.setVar === 'object') for (const [name, value] of Object.entries(spec.setVar)) validateAssignment(name, value);
-          const text = spec.type === 'set-text' ? spec.text ?? spec.value : undefined;
-          if (typeof text === 'string' && text.trim().startsWith('=')) formulaChecks.push({ expr: text, variables: variableTypes, field: `${path}/text` });
+          const text = spec.type === 'set-text' ? spec.text ?? spec.value : spec.type === 'set-option' ? spec.value ?? spec.option : undefined;
+          if (typeof text === 'string' && text.trim().startsWith('=')) formulaChecks.push({ expr: text, ...(spec.type === 'set-option' ? { expected: 'text' } : {}), variables: variableTypes, field: `${path}/${spec.type === 'set-option' ? 'value' : 'text'}` });
+          if (spec.type === 'set-check' || spec.type === 'set-selected') {
+            const flag = spec.type === 'set-check' ? spec.checked ?? spec.value : spec.selected ?? spec.value;
+            if (typeof flag === 'string' && flag.trim().startsWith('=')) formulaChecks.push({ expr: flag, expected: 'boolean', variables: variableTypes, field: `${path}/${spec.type === 'set-check' ? 'checked' : 'selected'}` });
+          }
           for (const key of ['cases', 'actions', 'then', 'else']) visit(spec[key], `${path}/${key}`);
         };
         visit(spec);
@@ -194,6 +198,90 @@ export function validatePropertiesObject(props, nodeId, cmdIdx, {creation=false,
       throw cmdError(err.code || 'E_INVALID_VECTOR', `节点 "${nodeId}" 的路径数据非法: ${err.message}`, {
         commandIndex: cmdIdx, nodeId, field: err.field || 'points',
       });
+    }
+  }
+  const checkColorStr = (val, field) => {
+    const c = String(val);
+    if (!c.startsWith('$') && !/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(c) && !/^rgba?\(/.test(c)) {
+      throw cmdError('E_INVALID_COLOR', `节点 "${nodeId}" 的颜色属性 ${field}="${c}" 格式非法`, {
+        commandIndex: cmdIdx, nodeId, field,
+      });
+    }
+  };
+  if ('fills' in props && props.fills !== null && props.fills !== undefined) {
+    if (!Array.isArray(props.fills)) {
+      throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 fills 必须是数组`, { commandIndex: cmdIdx, nodeId, field: 'fills' });
+    }
+    props.fills.forEach((item, idx) => {
+      if (typeof item === 'string') {
+        if (!item.trim()) throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 fills[${idx}] 不能为空字符串`, { commandIndex: cmdIdx, nodeId, field: `fills[${idx}]` });
+      } else if (item && typeof item === 'object' && !Array.isArray(item)) {
+        if (item.type !== undefined && !['solid', 'linear-gradient', 'radial-gradient', 'image'].includes(item.type)) {
+          throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 fills[${idx}].type 不受支持: ${item.type}`, { commandIndex: cmdIdx, nodeId, field: `fills[${idx}].type` });
+        }
+        if (item.color !== undefined && item.color !== null) checkColorStr(item.color, `fills[${idx}].color`);
+        if (item.opacity !== undefined && (typeof item.opacity !== 'number' || !Number.isFinite(item.opacity) || item.opacity < 0 || item.opacity > 1)) {
+          throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 fills[${idx}].opacity 必须在 [0, 1] 范围内`, { commandIndex: cmdIdx, nodeId, field: `fills[${idx}].opacity` });
+        }
+      } else {
+        throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 fills[${idx}] 必须是字符串或填充对象`, { commandIndex: cmdIdx, nodeId, field: `fills[${idx}]` });
+      }
+    });
+  }
+  if ('shadows' in props && props.shadows !== null && props.shadows !== undefined) {
+    if (!Array.isArray(props.shadows)) {
+      throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 shadows 必须是数组`, { commandIndex: cmdIdx, nodeId, field: 'shadows' });
+    }
+    props.shadows.forEach((item, idx) => {
+      if (typeof item === 'string') {
+        if (!item.trim()) throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 shadows[${idx}] 不能为空字符串`, { commandIndex: cmdIdx, nodeId, field: `shadows[${idx}]` });
+      } else if (item && typeof item === 'object' && !Array.isArray(item)) {
+        for (const numKey of ['x', 'y', 'blur', 'spread']) {
+          if (item[numKey] !== undefined && (typeof item[numKey] !== 'number' || !Number.isFinite(item[numKey]))) {
+            throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 shadows[${idx}].${numKey} 必须是有限数值`, { commandIndex: cmdIdx, nodeId, field: `shadows[${idx}].${numKey}` });
+          }
+        }
+        if (item.color !== undefined && item.color !== null) checkColorStr(item.color, `shadows[${idx}].color`);
+      } else {
+        throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 shadows[${idx}] 必须是字符串或阴影对象`, { commandIndex: cmdIdx, nodeId, field: `shadows[${idx}]` });
+      }
+    });
+  }
+  if ('spans' in props && props.spans !== null && props.spans !== undefined) {
+    if (!Array.isArray(props.spans)) {
+      throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 spans 必须是富文本片段数组`, { commandIndex: cmdIdx, nodeId, field: 'spans' });
+    }
+    props.spans.forEach((span, idx) => {
+      if (!span || typeof span !== 'object' || Array.isArray(span) || typeof span.text !== 'string') {
+        throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 spans[${idx}] 必须包含字符串 text`, { commandIndex: cmdIdx, nodeId, field: `spans[${idx}]` });
+      }
+      const spFs = span.fontSize ?? span.size;
+      if (spFs !== undefined && (typeof spFs !== 'number' || !Number.isFinite(spFs) || spFs <= 0 || spFs > 120)) {
+        throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 spans[${idx}].fontSize 必须在 (0, 120] 范围内`, { commandIndex: cmdIdx, nodeId, field: `spans[${idx}].fontSize` });
+      }
+      if (span.color !== undefined && span.color !== null) checkColorStr(span.color, `spans[${idx}].color`);
+    });
+  }
+  if ('options' in props && props.options !== null && props.options !== undefined) {
+    if (!Array.isArray(props.options) || !props.options.length || props.options.some(opt => typeof opt !== 'string' || !opt.length)) {
+      throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 options 必须是非空字符串数组`, { commandIndex: cmdIdx, nodeId, field: 'options' });
+    }
+  }
+  for (const boolKey of ['checked', 'disabled', 'multiple', 'multiline']) {
+    if (boolKey in props && props[boolKey] !== null && props[boolKey] !== undefined && typeof props[boolKey] !== 'boolean') {
+      throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 ${boolKey} 必须是布尔值`, { commandIndex: cmdIdx, nodeId, field: boolKey });
+    }
+  }
+  if ('selectedIndex' in props && props.selectedIndex !== null && props.selectedIndex !== undefined) {
+    const si = props.selectedIndex;
+    if (!Number.isInteger(si) || si < 0 || (Array.isArray(props.options) && si >= props.options.length)) {
+      throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 selectedIndex 必须是有效选项下标`, { commandIndex: cmdIdx, nodeId, field: 'selectedIndex' });
+    }
+  }
+  if ('selectedIndices' in props && props.selectedIndices !== null && props.selectedIndices !== undefined) {
+    const sis = props.selectedIndices;
+    if (!Array.isArray(sis) || sis.some(i => !Number.isInteger(i) || i < 0 || (Array.isArray(props.options) && i >= props.options.length)) || new Set(sis).size !== sis.length) {
+      throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 selectedIndices 必须是不重复的有效选项下标数组`, { commandIndex: cmdIdx, nodeId, field: 'selectedIndices' });
     }
   }
 }

@@ -107,6 +107,32 @@ function normalizeSingleExportAction(act, exportCtx = null) {
     if (typeof c.text === 'string' && c.text.trim().startsWith('=') || c.text && typeof c.text === 'object') c.text = { fn: 'text', args: [c.text] };
     return c;
   }
+  if (c.type === 'set-check') {
+    const rawChk = c.checked !== undefined ? c.checked : c.value;
+    delete c.value;
+    c.checked = rawChk === 'toggle'
+      ? { fn: 'not', args: [{ widget: c.target }] }
+      : toRp1RuntimeValue(rawChk);
+    return c;
+  }
+  if (c.type === 'set-selected') {
+    const rawSel = c.selected !== undefined ? c.selected : c.value;
+    delete c.value;
+    c.selected = rawSel === 'toggle' ? true : toRp1RuntimeValue(rawSel);
+    return c;
+  }
+  if (c.type === 'set-option') {
+    if (c.option !== undefined && c.value === undefined) {
+      c.value = c.option;
+      delete c.option;
+    }
+    if (c.selected !== undefined && c.value === undefined) {
+      c.value = c.selected;
+      delete c.selected;
+    }
+    c.value = toRp1RuntimeValue(c.value);
+    return c;
+  }
   if (c.type === 'navigate') {
     c.type = 'link';
     if (c.to && !c.page) {
@@ -846,6 +872,7 @@ export function classifyNodeCompatibility(node, pageId, entries) {
     });
   }
   if (node.type === 'input' && node.rotation) entries.push({ ...baseInfo, classification: 'native-init-action', feature: 'input.rotation', browserPreserved: true, nativePreviewPreserved: true, reason: 'RP9 TextBox 静态旋转不参与预览；导出保留角度，并生成原生 OnLoad 绝对旋转动作，输入框仍可编辑', strategy: 'native-widget-onload-rotate', editorStaticRotationSupported: false });
+  if (node.type === 'input' && node.multiline) entries.push({ ...baseInfo, classification: 'unsupported', feature: 'input.multiline', browserPreserved: true, reason: '当前原生出口将 input 映射为单行 TextBox，multiline 多行输入仅在浏览器侧与代码出口生效', fallback: '导出为原生可编辑输入框（保留坐标、尺寸、占位符与文本），不栅格化' });
   if(node.type==='repeater')for(const key of ['filter','sort','pageSize','page','on']){
     const value=key==='on'?nodeEvents(node):node[key];
     const hasValue=value!==undefined&&value!==null&&(typeof value!=='object'||Object.keys(value).length>0);
@@ -1136,6 +1163,43 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
     return decorateExportNode(out, node);
   }
 
+  const isFormCheck = out.type === 'checkbox' || out.type === 'radio';
+  const isFormOption = out.type === 'combobox' || out.type === 'listbox';
+  if (isFormCheck || isFormOption) {
+    if (node._resolvedFill) out.fill = node._resolvedFill;
+    else if (node.fill) out.fill = node.fill;
+    if (node._resolvedStroke) out.stroke = node._resolvedStroke;
+    else if (node.stroke) out.stroke = node.stroke;
+    if (node.strokeWidth !== undefined) out.strokeWidth = node.strokeWidth;
+    if (node.radius !== undefined) out.radius = node.radius;
+    if (node._resolvedColor) out.color = node._resolvedColor;
+    else if (node.color) out.color = node.color;
+    if (node._resolvedFontFamily || node.fontFamily) out.fontFamily = node._resolvedFontFamily || node.fontFamily;
+    if (node.fontSize !== undefined) out.fontSize = Number(node.fontSize);
+    if (node.fontWeight !== undefined) out.fontWeight = Number(node.fontWeight);
+    if (node.align || node._inheritedAlign) out.align = node.align || node._inheritedAlign;
+    if (typeof node.textPaddingX === 'number') out.textPaddingX = Number(node.textPaddingX);
+    if (node.disabled) out.disabled = true;
+    if (node.selectionGroup) out.selectionGroup = node.selectionGroup;
+    if (isFormCheck) {
+      if (node.text !== undefined) out.text = String(node.text);
+      if (node.checked !== undefined || node.selected !== undefined) out.checked = Boolean(node.checked ?? node.selected);
+      if (out.type === 'radio' && node.group) out.group = node.group;
+    } else {
+      out.options = Array.isArray(node.options) && node.options.length ? [...node.options] : ['选项 1'];
+      if (out.type === 'listbox' && node.multiple) out.multiple = true;
+      if (out.type === 'listbox' && Array.isArray(node.selectedIndices) && node.selectedIndices.length) {
+        out.selectedIndices = [...node.selectedIndices];
+      } else if (typeof node.selectedIndex === 'number' && node.selectedIndex >= 0 && node.selectedIndex < out.options.length) {
+        out.selectedIndex = node.selectedIndex;
+      } else if (typeof node.selected === 'string' && out.options.includes(node.selected)) {
+        out.selectedIndex = out.options.indexOf(node.selected);
+      }
+    }
+    if (nodeEvents(node)) out.on = normalizeExportOn(nodeEvents(node), exportCtx);
+    return decorateExportNode(out, node);
+  }
+
   const isBoxLike = ['box', 'card', 'button', 'badge', 'input', 'label', 'paragraph', 'icon'].includes(out.type);
   const isTextLike = ['label', 'paragraph', 'button', 'badge', 'input'].includes(out.type);
 
@@ -1216,6 +1280,9 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
       if (node.italic) out.italic = true;
       if (node.underline) out.underline = true;
       if (node.strikethrough) out.strikethrough = true;
+      if (typeof node.selected === 'boolean') out.selected = node.selected;
+      if (node.disabled) out.disabled = true;
+      if (node.selectionGroup) out.selectionGroup = node.selectionGroup;
       if (out.type === 'paragraph' && typeof node.textPaddingX === 'number' && out.padding === undefined) {
         out.padding = Number(node.textPaddingX);
       }

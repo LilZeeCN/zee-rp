@@ -76,16 +76,44 @@ function editableInfo(node, index, entries) {
       body: { property: 'body', propertyMap: { text: 'body', fontSize: 'bodyFontSize' } },
       action: { property: 'actionText', propertyMap: { text: 'actionText' } },
       tag: { property: 'tag', propertyMap: { text: 'tag' } },
+      right_badge: { property: 'rightBadge', propertyMap: { text: 'rightBadge' } },
     };
+    const rightBadgeProp = owner?.node?.rightBadge !== undefined ? 'rightBadge' : 'badge';
     const listItemFields = {
       title: { property: 'title', propertyMap: { text: 'title', fontSize: 'titleFontSize' } },
       sub: { property: 'subtitle', propertyMap: { text: 'subtitle', fontSize: 'subtitleFontSize' } },
       right: { property: 'rightText', propertyMap: { text: 'rightText', fontSize: 'rightFontSize' } },
-      badge: { property: 'badge', propertyMap: { text: 'badge' } },
+      badge: { property: rightBadgeProp, propertyMap: { text: rightBadgeProp } },
+      right_badge: { property: 'rightBadge', propertyMap: { text: 'rightBadge' } },
+      tag: { property: 'tag', propertyMap: { text: 'tag' } },
       idx: { property: 'index', propertyMap: { text: 'index' } },
     };
-    const table = isMacro && owner.node.type === 'card' ? cardFields : isMacro && owner.node.type === 'list-item' ? listItemFields : null;
-    const hit = table ? Object.entries(table).find(([suffix]) => node.id === `${owner.node.id}_${suffix}`)?.[1] : null;
+    const progressFields = {
+      label: { property: 'label', propertyMap: { text: 'label' } },
+      val: { property: 'value', propertyMap: { text: 'rightText' } },
+      bar: { property: 'value', propertyMap: { w: 'value' } },
+      fill: { property: 'value', propertyMap: { w: 'value' } },
+    };
+    const navBarFields = {
+      title: { property: 'title', propertyMap: { text: 'title', fontSize: 'titleFontSize' } },
+      back: { property: 'backText', propertyMap: { text: 'backText' } },
+      right: { property: 'rightText', propertyMap: { text: 'rightText' } },
+    };
+    const table = isMacro && owner.node.type === 'card'
+      ? cardFields
+      : isMacro && owner.node.type === 'list-item'
+        ? listItemFields
+        : isMacro && owner.node.type === 'progress-bar'
+          ? progressFields
+          : isMacro && owner.node.type === 'nav-bar'
+            ? navBarFields
+            : null;
+    let hit = table ? Object.entries(table).find(([suffix]) => node.id === `${owner.node.id}_${suffix}`)?.[1] : null;
+    if (!hit && isMacro && owner.node.type === 'stat-row' && node.id.startsWith(`${owner.node.id}_`) && /^_(?:stat|val|lbl|sub)_\d+$/.test(node.id.slice(owner.node.id.length))) {
+      hit = { property: 'items', propertyMap: { text: 'items', fontSize: 'valueFontSize' } };
+    } else if (!hit && isMacro && owner.node.type === 'tab-bar' && node.id.startsWith(`${owner.node.id}_tab_`)) {
+      hit = { property: 'items', propertyMap: { text: 'items' } };
+    }
     const property = hit?.property || null;
     return { source, owner: isMacro ? owner : null, target: {
       kind: property ? 'macro-parameter' : 'controlled', nodeId: isMacro ? owner.scopedId : null,
@@ -238,7 +266,7 @@ export function queryAuthoringNodes({ doc, scene, args = {} }) {
   const total = nodes.length;
   const sourceIndex = buildNodeIndex(doc);
   const entries = [...new Set(sourceIndex.byScopedId.values())];
-  const available = new Set(['id', 'scopedId', 'pageId', 'name', 'type', 'role', 'text', 'textLength', 'textTruncated', 'visible', 'locked', 'bounds', 'editableTargetId', 'target', 'source', 'layoutContext', 'controls', 'interactions', 'suggestedEdit']);
+  const available = new Set(['id', 'scopedId', 'pageId', 'name', 'type', 'role', 'text', 'textLength', 'textTruncated', 'visible', 'locked', 'bounds', 'editableTargetId', 'target', 'capabilities', 'source', 'layoutContext', 'vector', 'controls', 'interactions', 'suggestedEdit']);
   if (shape.view === 'full') { available.clear(); available.add('authoring'); for (const node of all) for (const key of Object.keys(node)) available.add(key); }
   if (shape.fields) for (const field of shape.fields) if (!available.has(field)) fail('E_QUERY_FIELDS', `当前 ${shape.view} 视图没有字段 ${field}`, { candidates: [...available].sort() });
   const result = nodes.slice(offset, offset + shape.limit).map(node => {

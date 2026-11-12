@@ -1519,6 +1519,10 @@ class Frontend:
                 return {"item": parts[1]}
             if parts[0] == "caller" and len(parts) == 2 and parts[1]:
                 return {"caller": parts[1]}
+            if parts[0] == "var" and len(parts) == 2 and parts[1]:
+                return {"variable": parts[1]}
+            if parts[0] == "widget" and len(parts) == 3 and parts[1] and parts[2] in ("text", "checked", "selected", "value"):
+                return {"widget": parts[1]}
             avail_env = sorted(k for k in env.keys() if not k.startswith("_"))
             hint = difflib.get_close_matches(parts[0], avail_env, n=3)
             fail("E_DATA_NAME", path, f"Unknown data name '{parts[0]}'", suggestions=hint)

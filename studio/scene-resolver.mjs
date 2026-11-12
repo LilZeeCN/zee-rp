@@ -16,6 +16,7 @@ import {
   resolveContractPropsAndStateOverrides,
 } from './component-contracts.mjs';
 import { normalizeVectorNodeSpec, resolveBooleanGroupPath } from './vector-paths.mjs';
+import { hasStudioMacroExpansionParams } from './node-capabilities.mjs';
 export { RENDERER_VERSION };
 
 export function parsePadding(pad) {
@@ -36,9 +37,22 @@ export function resolveColorValue(val, palette = {}) {
     if (palette[key]) return palette[key];
     if (key === 'muted' && palette['ink-2']) return palette['ink-2'];
     if (key === 'error' && palette.danger) return palette.danger;
+    if (key === 'danger' && palette.error) return palette.error;
+    if (key === 'warning') return '#D97706';
+    if (key === 'success') return '#16A34A';
+    if (key === 'accent-soft') return palette['brand-soft'] || '#FEF3C7';
   }
   if (palette[val]) return palette[val];
   return val;
+}
+
+function resolveToneBadgeColors(tone) {
+  if (tone === 'error' || tone === 'danger') return { fill: '#FEE2E2', color: '$danger' };
+  if (tone === 'warning' || tone === 'warn') return { fill: '#FEF3C7', color: '$warning' };
+  if (tone === 'success') return { fill: '#DCFCE7', color: '$success' };
+  if (tone === 'accent') return { fill: '$accent-soft', color: '$accent' };
+  if (tone === 'neutral' || tone === 'muted') return { fill: '$surface-2', color: '$ink-2' };
+  return { fill: '$brand-soft', color: '$brand' };
 }
 
 export function measureLineWidth(line, fontSize = 14, fontWeight = 400, letterSpacing = 0, fontFamily = 'PingFang SC') {
@@ -65,7 +79,7 @@ export function measureTextBox(node, availableW = null, options = {}) {
   return measureTextBoxExact(node, availableW, options);
 }
 
-function expandMacroNode(node, palette) {
+function expandMacroNode(node, palette, macroCtx = {}) {
   const n = {
     ...node,
     ...(node.css && typeof node.css === 'object' ? { css: { ...node.css } } : {}),
@@ -80,38 +94,86 @@ function expandMacroNode(node, palette) {
     if ((!Array.isArray(n.children) || n.children.length === 0) && Array.isArray(n.body)) {
       n.children = structuredClone(n.body);
     }
-  } else if (n.type === 'card' && (!Array.isArray(n.children) || n.children.length === 0) && (n.title || n.body || n.subtitle || n.tag)) {
+  } else if (n.type === 'card' && (!Array.isArray(n.children) || n.children.length === 0) && (n.title || n.body || n.subtitle || n.tag || (n.rightBadge !== undefined && n.rightBadge !== null && String(n.rightBadge) !== '') || n.actionText)) {
     const children = [];
     const tagTone = n.tagTone || n.tone;
-    if (n.tag) {
+    const hasRightBadge = n.rightBadge !== undefined && n.rightBadge !== null && String(n.rightBadge) !== '';
+    const tagColors = resolveToneBadgeColors(tagTone);
+    const rightColors = resolveToneBadgeColors(n.rightTone || n.badgeVariant);
+    const tagNode = n.tag ? {
+      type: 'button',
+      id: `${n.id}_tag`,
+      name: `${n.id}_tag`,
+      text: String(n.tag),
+      h: 24,
+      w: 'hug',
+      fontSize: 11,
+      fontWeight: 600,
+      radius: 12,
+      fill: tagColors.fill,
+      color: tagColors.color,
+      controlledByMacro: n.id,
+    } : null;
+    const rightBadgeNode = hasRightBadge ? {
+      type: 'badge',
+      id: `${n.id}_right_badge`,
+      name: `${n.id}_right_badge`,
+      text: String(n.rightBadge),
+      h: 24,
+      w: 'hug',
+      fontSize: 11,
+      fontWeight: 600,
+      radius: 12,
+      fill: rightColors.fill,
+      color: rightColors.color,
+      controlledByMacro: n.id,
+    } : null;
+    const titleNode = n.title ? {
+      type: 'label',
+      id: `${n.id}_title`,
+      name: `${n.id}_title`,
+      text: String(n.title),
+      w: 'fill',
+      h: 'hug',
+      fontSize: n.titleFontSize ?? 16,
+      fontWeight: 600,
+      color: '$ink',
+      controlledByMacro: n.id,
+    } : null;
+
+    if (hasRightBadge && tagNode) {
       children.push({
-        type: 'button',
-        id: `${n.id}_tag`,
-        name: `${n.id}_tag`,
-        text: String(n.tag),
-        h: 24,
-        w: 'hug',
-        fontSize: 11,
-        fontWeight: 600,
-        radius: 12,
-        fill: tagTone === 'error' || tagTone === 'danger' ? '#FEE2E2' : '$brand-soft',
-        color: tagTone === 'error' || tagTone === 'danger' ? '$danger' : '$brand',
-        controlledByMacro: n.id,
-      });
-    }
-    if (n.title) {
-      children.push({
-        type: 'label',
-        id: `${n.id}_title`,
-        name: `${n.id}_title`,
-        text: String(n.title),
+        type: 'box',
+        id: `${n.id}_hdr`,
+        name: `${n.id}_hdr`,
+        layout: 'row',
         w: 'fill',
         h: 'hug',
-        fontSize: n.titleFontSize ?? 16,
-        fontWeight: 600,
-        color: '$ink',
+        align: 'center',
+        justify: 'space-between',
+        gap: 8,
         controlledByMacro: n.id,
+        children: [tagNode, rightBadgeNode],
       });
+      if (titleNode) children.push(titleNode);
+    } else if (hasRightBadge && titleNode) {
+      children.push({
+        type: 'box',
+        id: `${n.id}_hdr`,
+        name: `${n.id}_hdr`,
+        layout: 'row',
+        w: 'fill',
+        h: 'hug',
+        align: 'center',
+        justify: 'space-between',
+        gap: 8,
+        controlledByMacro: n.id,
+        children: [{ ...titleNode, w: undefined, flex: 1 }, rightBadgeNode],
+      });
+    } else {
+      if (tagNode) children.push(tagNode);
+      if (rightBadgeNode) children.push(rightBadgeNode);
+      if (titleNode) children.push(titleNode);
     }
     if (n.subtitle) {
       children.push({
@@ -170,23 +232,29 @@ function expandMacroNode(node, palette) {
     n.layout = 'row';
     n.gap = n.gap ?? 10;
     const cardPad = n.cardPadding ?? 12;
-    n.children = n.items.map((it, idx) => ({
-      type: 'box',
-      id: `${n.id}_stat_${idx}`,
-      name: `${n.id}_stat_${idx}`,
-      layout: 'column',
-      flex: 1,
-      h: n.equalHeight ? 'fill' : 'hug',
-      padding: cardPad,
-      gap: 4,
-      fill: '$surface',
-      radius: 12,
-      controlledByMacro: n.id,
-      children: [
-        { type: 'label', id: `${n.id}_val_${idx}`, name: `${n.id}_val_${idx}`, text: String(it.value ?? ''), fontSize: it.valueFontSize ?? n.valueFontSize ?? 20, fontWeight: 700, color: it.color || '$brand', w: 'fill', h: 'hug', controlledByMacro: n.id },
-        { type: 'label', id: `${n.id}_lbl_${idx}`, name: `${n.id}_lbl_${idx}`, text: String(it.label ?? ''), fontSize: 12, fontWeight: 500, color: '$ink', w: 'fill', h: 'hug', controlledByMacro: n.id },
-      ],
-    }));
+    n.children = n.items.map((it, idx) => {
+      const sub = it.sub ?? it.unit;
+      return {
+        type: 'box',
+        id: `${n.id}_stat_${idx}`,
+        name: `${n.id}_stat_${idx}`,
+        layout: 'column',
+        flex: 1,
+        h: n.equalHeight ? 'fill' : 'hug',
+        padding: cardPad,
+        gap: 4,
+        fill: '$surface',
+        radius: 12,
+        controlledByMacro: n.id,
+        children: [
+          { type: 'label', id: `${n.id}_val_${idx}`, name: `${n.id}_val_${idx}`, text: String(it.value ?? ''), fontSize: it.valueFontSize ?? n.valueFontSize ?? 20, fontWeight: 700, color: it.color || '$brand', w: 'fill', h: 'hug', controlledByMacro: n.id },
+          { type: 'label', id: `${n.id}_lbl_${idx}`, name: `${n.id}_lbl_${idx}`, text: String(it.label ?? ''), fontSize: 12, fontWeight: 500, color: '$ink', w: 'fill', h: 'hug', controlledByMacro: n.id },
+          ...(sub !== undefined && sub !== null && String(sub) !== ''
+            ? [{ type: 'label', id: `${n.id}_sub_${idx}`, name: `${n.id}_sub_${idx}`, text: String(sub), fontSize: 11, fontWeight: 400, color: '$ink-2', w: 'fill', h: 'hug', controlledByMacro: n.id }]
+            : []),
+        ],
+      };
+    });
   } else if (n.type === 'list-item' && (!Array.isArray(n.children) || n.children.length === 0)) {
     n.layout = 'row';
     n.align = 'center';
@@ -195,8 +263,12 @@ function expandMacroNode(node, palette) {
     n.fill = n.fill || '$surface';
     n.radius = n.radius ?? 12;
     const subText = n.subtitle ?? n.meta;
-    const rightBadge = n.rightBadge ?? n.badge ?? n.tag ?? n.value ?? n.rightText ?? n.status;
-    const rightTone = n.rightTone || n.badgeVariant || n.tagTone || n.tone || n.rightVariant;
+    const explicitRight = n.rightBadge ?? n.badge ?? n.value ?? n.rightText ?? n.status;
+    const hasBothTagAndRight = n.tag !== undefined && n.tag !== null && String(n.tag) !== '' && explicitRight !== undefined && explicitRight !== null && String(explicitRight) !== '';
+    const rightBadge = hasBothTagAndRight ? explicitRight : (explicitRight ?? n.tag);
+    const rightTone = n.rightTone || n.badgeVariant || (!hasBothTagAndRight ? n.tagTone : null) || n.tone || n.rightVariant;
+    const rightColors = resolveToneBadgeColors(rightTone);
+    const tagColors = resolveToneBadgeColors(n.tagTone || n.tone);
     n.children = [
       ...(n.index !== undefined && n.index !== null ? [{
         type: 'badge',
@@ -235,6 +307,20 @@ function expandMacroNode(node, palette) {
           ...(subText ? [{ type: 'label', id: `${n.id}_sub`, name: `${n.id}_sub`, text: String(subText), fontSize: 12, fontWeight: 400, color: '$ink-2', w: 'fill', h: 'hug', controlledByMacro: n.id }] : []),
         ],
       },
+      ...(hasBothTagAndRight ? [{
+        type: 'badge',
+        id: `${n.id}_tag`,
+        name: `${n.id}_tag`,
+        text: String(n.tag),
+        w: 'hug',
+        h: 24,
+        fontSize: 11,
+        fontWeight: 600,
+        radius: 12,
+        fill: tagColors.fill,
+        color: tagColors.color,
+        controlledByMacro: n.id,
+      }] : []),
       ...(rightBadge ? [{
         type: 'button',
         id: `${n.id}_badge`,
@@ -245,8 +331,8 @@ function expandMacroNode(node, palette) {
         fontSize: 11,
         fontWeight: 600,
         radius: 13,
-        fill: rightTone === 'error' || rightTone === 'danger' ? '#FEE2E2' : '$brand-soft',
-        color: rightTone === 'error' || rightTone === 'danger' ? '$danger' : '$brand',
+        fill: rightColors.fill,
+        color: rightColors.color,
         controlledByMacro: n.id,
       }] : []),
     ];
@@ -254,6 +340,234 @@ function expandMacroNode(node, palette) {
     if (targetPage && !n.on) {
       n.on = { click: [{ type: 'link', page: targetPage }] };
     }
+  } else if (n.type === 'dynamic-panel' && Array.isArray(n.tabs) && n.tabs.length > 0 && Array.isArray(n.states) && n.states.length > 0) {
+    n.states = n.states.map((st, stIdx) => {
+      if (!st || typeof st !== 'object') return st;
+      const tabBarId = `${n.id}_${st.id}_tabs`;
+      const existingRoot = st.root ? structuredClone(st.root) : { type: 'box', id: `${n.id}_${st.id}_root`, layout: 'column', w: 'fill', h: 'hug', children: [] };
+      if (Array.isArray(existingRoot.children) && existingRoot.children.some(ch => ch?.id === tabBarId)) {
+        return { ...st, root: existingRoot };
+      }
+      const tabBar = {
+        type: 'box',
+        id: tabBarId,
+        name: tabBarId,
+        layout: 'row',
+        w: 'fill',
+        h: 36,
+        padding: 3,
+        gap: 4,
+        fill: '$surface-2',
+        radius: 10,
+        controlledByMacro: n.id,
+        children: n.tabs.map((tabLabel, tIdx) => {
+          const targetSt = n.states[tIdx] || n.states[0];
+          const isActive = targetSt?.id === st.id || tIdx === stIdx;
+          return {
+            type: 'button',
+            id: `${n.id}_${st.id}_tab_${tIdx}`,
+            name: `${n.id}_${st.id}_tab_${tIdx}`,
+            text: String(tabLabel),
+            flex: 1,
+            h: 30,
+            fontSize: 12,
+            fontWeight: isActive ? 600 : 500,
+            radius: 8,
+            fill: isActive ? '$surface' : '#FFFFFF00',
+            color: isActive ? '$ink' : '$ink-2',
+            on: { click: [{ type: 'set-panel-state', target: n.id, state: targetSt.id }] },
+            controlledByMacro: n.id,
+          };
+        }),
+      };
+      if (existingRoot.type === 'box' && existingRoot.layout === 'column') {
+        existingRoot.children = [tabBar, ...(existingRoot.children || [])];
+        return { ...st, root: existingRoot };
+      }
+      return {
+        ...st,
+        root: {
+          type: 'box',
+          id: `${n.id}_${st.id}_tabwrap`,
+          name: `${n.id}_${st.id}_tabwrap`,
+          layout: 'column',
+          w: 'fill',
+          h: 'hug',
+          gap: 10,
+          controlledByMacro: n.id,
+          children: [tabBar, existingRoot],
+        },
+      };
+    });
+  } else if (n.type === 'progress-bar' && (!Array.isArray(n.children) || n.children.length === 0) && hasStudioMacroExpansionParams(n)) {
+    const varsMap = macroCtx.variables || {};
+    let resolvedVal = n.value;
+    if (resolvedVal && typeof resolvedVal === 'object' && typeof resolvedVal.variable === 'string') {
+      const entry = varsMap[resolvedVal.variable];
+      resolvedVal = entry && typeof entry === 'object' && 'value' in entry ? entry.value : entry;
+    } else if (typeof resolvedVal === 'string' && resolvedVal.trim().startsWith('=')) {
+      resolvedVal = macroCtx.evaluateText
+        ? macroCtx.evaluateText(resolvedVal, { pageId: macroCtx.pageId, scopePrefix: macroCtx.scopePrefix })
+        : evaluateSimpleDisplayFormula(resolvedVal, varsMap);
+    }
+    const maxVal = Math.max(1, Number(n.max ?? 100) || 100);
+    const numVal = Number.isFinite(Number(resolvedVal)) ? Number(resolvedVal) : 0;
+    const ratio = n.percent !== undefined
+      ? Math.max(0, Math.min(1, (Number(n.percent) || 0) / 100))
+      : Math.max(0, Math.min(1, numVal / maxVal));
+    const barH = Math.max(4, Number(n.barHeight ?? 8) || 8);
+    const barColor = n.barFill || (n.tone === 'danger' || n.tone === 'error' ? '$danger' : n.tone === 'warning' ? '$warning' : n.tone === 'success' ? '$success' : '$brand');
+    const labelText = n.label ?? n.title;
+    const showVal = n.showValue !== false;
+    const valDisplay = n.valueText !== undefined
+      ? String(n.valueText)
+      : n.percent !== undefined
+        ? `${Math.round(ratio * 100)}%`
+        : `${numVal}/${maxVal}`;
+    const children = [];
+    if (labelText !== undefined || showVal) {
+      children.push({
+        type: 'box',
+        id: `${n.id}_hdr`,
+        name: `${n.id}_hdr`,
+        layout: 'row',
+        w: 'fill',
+        h: 'hug',
+        align: 'center',
+        justify: 'space-between',
+        gap: 8,
+        controlledByMacro: n.id,
+        children: [
+          { type: 'label', id: `${n.id}_label`, name: `${n.id}_label`, text: String(labelText ?? ''), flex: 1, h: 'hug', fontSize: 12, fontWeight: 500, color: '$ink', controlledByMacro: n.id },
+          ...(showVal ? [{ type: 'label', id: `${n.id}_val`, name: `${n.id}_val`, text: valDisplay, w: 'hug', h: 'hug', fontSize: 12, fontWeight: 600, color: '$ink-2', controlledByMacro: n.id }] : []),
+        ],
+      });
+    }
+    const trackChildren = [];
+    if (ratio >= 1) {
+      trackChildren.push({ type: 'box', id: `${n.id}_bar`, name: `${n.id}_bar`, w: 'fill', h: barH, radius: Math.round(barH / 2), fill: barColor, controlledByMacro: n.id });
+    } else if (ratio > 0) {
+      trackChildren.push(
+        { type: 'box', id: `${n.id}_bar`, name: `${n.id}_bar`, flex: ratio, h: barH, radius: Math.round(barH / 2), fill: barColor, controlledByMacro: n.id },
+        { type: 'spacer', id: `${n.id}_rest`, name: `${n.id}_rest`, flex: 1 - ratio, h: barH, controlledByMacro: n.id },
+      );
+    } else {
+      trackChildren.push({ type: 'box', id: `${n.id}_bar`, name: `${n.id}_bar`, w: 0, h: barH, radius: Math.round(barH / 2), fill: barColor, visible: false, controlledByMacro: n.id });
+    }
+    children.push({
+      type: 'box',
+      id: `${n.id}_track`,
+      name: `${n.id}_track`,
+      layout: 'row',
+      w: 'fill',
+      h: barH,
+      radius: Math.round(barH / 2),
+      fill: n.trackFill || '$surface-2',
+      clip: true,
+      controlledByMacro: n.id,
+      children: trackChildren,
+    });
+    n.layout = 'column';
+    n.w = n.w ?? 'fill';
+    n.h = n.h ?? 'hug';
+    n.gap = n.gap ?? 6;
+    n.children = children;
+  } else if (n.type === 'nav-bar' && (!Array.isArray(n.children) || n.children.length === 0) && hasStudioMacroExpansionParams(n)) {
+    n.layout = 'row';
+    n.align = 'center';
+    n.justify = 'space-between';
+    n.w = n.w ?? 'fill';
+    n.h = n.h ?? 48;
+    n.padding = n.padding ?? [0, 16];
+    n.gap = n.gap ?? 8;
+    n.fill = n.fill ?? '$surface';
+    const hasBack = Boolean(n.backText || n.backGoto || n.showBack);
+    const hasRight = Boolean(n.rightText || n.rightGoto);
+    n.children = [
+      ...(hasBack
+        ? [{
+            type: 'button',
+            id: `${n.id}_back`,
+            name: `${n.id}_back`,
+            text: String(n.backText || '← 返回'),
+            variant: 'ghost',
+            w: 'hug',
+            h: 32,
+            fontSize: 13,
+            fontWeight: 500,
+            color: '$ink',
+            ...(n.backGoto ? { on: { click: [{ type: 'link', page: n.backGoto }] } } : {}),
+            controlledByMacro: n.id,
+          }]
+        : hasRight ? [{ type: 'spacer', id: `${n.id}_left_pad`, name: `${n.id}_left_pad`, w: 48, h: 1, controlledByMacro: n.id }] : []),
+      {
+        type: 'label',
+        id: `${n.id}_title`,
+        name: `${n.id}_title`,
+        text: String(n.title ?? n.text ?? ''),
+        flex: 1,
+        h: 'hug',
+        align: hasBack || hasRight ? 'center' : 'left',
+        fontSize: 16,
+        fontWeight: 600,
+        color: '$ink',
+        controlledByMacro: n.id,
+      },
+      ...(hasRight
+        ? [{
+            type: 'button',
+            id: `${n.id}_right`,
+            name: `${n.id}_right`,
+            text: String(n.rightText || '操作'),
+            variant: 'ghost',
+            w: 'hug',
+            h: 32,
+            fontSize: 13,
+            fontWeight: 600,
+            color: '$brand',
+            ...(n.rightGoto ? { on: { click: [{ type: 'link', page: n.rightGoto }] } } : {}),
+            controlledByMacro: n.id,
+          }]
+        : hasBack ? [{ type: 'spacer', id: `${n.id}_right_pad`, name: `${n.id}_right_pad`, w: 48, h: 1, controlledByMacro: n.id }] : []),
+    ];
+  } else if (n.type === 'tab-bar' && (!Array.isArray(n.children) || n.children.length === 0) && hasStudioMacroExpansionParams(n)) {
+    const rawItems = Array.isArray(n.items) ? n.items : Array.isArray(n.tabs) ? n.tabs : [];
+    n.layout = 'row';
+    n.align = 'center';
+    n.w = n.w ?? 'fill';
+    n.h = n.h ?? 52;
+    n.padding = n.padding ?? [6, 8];
+    n.gap = n.gap ?? 4;
+    n.fill = n.fill ?? '$surface';
+    if (n.borderTop === undefined) n.borderTop = true;
+    n.children = rawItems.map((it, idx) => {
+      const itemObj = typeof it === 'object' && it !== null ? it : { label: String(it) };
+      const label = String(itemObj.label ?? itemObj.text ?? itemObj.title ?? `Tab ${idx + 1}`);
+      const idKey = itemObj.id ?? label;
+      const isActive = n.active !== undefined
+        ? (String(n.active) === String(idKey) || Number(n.active) === idx)
+        : Boolean(itemObj.active ?? idx === 0);
+      const gotoPage = itemObj.goto || itemObj.page || itemObj.link;
+      return {
+        type: 'button',
+        id: `${n.id}_tab_${idx}`,
+        name: `${n.id}_tab_${idx}`,
+        text: label,
+        flex: 1,
+        h: 40,
+        fontSize: 12,
+        fontWeight: isActive ? 600 : 500,
+        radius: 10,
+        fill: isActive ? '$brand-soft' : '#FFFFFF00',
+        color: isActive ? '$brand' : '$ink-2',
+        ...(gotoPage
+          ? { on: { click: [{ type: 'link', page: gotoPage }] } }
+          : itemObj.panel && itemObj.state
+            ? { on: { click: [{ type: 'set-panel-state', target: itemObj.panel, state: itemObj.state }] } }
+            : {}),
+        controlledByMacro: n.id,
+      };
+    });
   }
   return n;
 }
@@ -530,19 +844,46 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
   let activeSliceMeta = null;
 
   function prepareTree(rawNode, parentLayout = null, isRoot = false, prefix = scopePrefix) {
-    let node = expandMacroNode(rawNode, palette);
+    let node = expandMacroNode(rawNode, palette, {
+      variables: runtimeState?.variables || doc.variables,
+      evaluateText: runtimeState?.evaluateText,
+      pageId,
+      scopePrefix: prefix,
+    });
     if (node.type === 'instance' || node.type === 'use' || node.component) {
       node = expandComponentInstance(node, doc, [], '');
     }
+    const fullScopedId = `${prefix}/${node.id}`;
     // Runtime text must enter the same measurement/layout path as authored text.
     // Patching only the flattened scene leaves hug sizes and line breaks stale.
     const values = node.type === 'input' ? runtimeState?.inputs : runtimeState?.textOverrides;
-    const textKey = values && (Object.hasOwn(values, `${prefix}/${node.id}`) ? `${prefix}/${node.id}` : null);
+    const textKey = values && (Object.hasOwn(values, fullScopedId) ? fullScopedId : null);
     if (textKey !== null && textKey !== undefined) {
       node.text = String(values[textKey] ?? '');
       delete node.spans;
     } else if (runtimeState?.evaluateText && typeof node.text === 'string' && node.text.startsWith('=')) {
       node.text = String(runtimeState.evaluateText(node.text, { pageId, scopePrefix: prefix }));
+    }
+    if (['checkbox', 'radio'].includes(node.type) && runtimeState?.checked && Object.hasOwn(runtimeState.checked, fullScopedId)) {
+      node.checked = Boolean(runtimeState.checked[fullScopedId]);
+    }
+    if (['combobox', 'listbox'].includes(node.type) && runtimeState?.selectedOptions && Object.hasOwn(runtimeState.selectedOptions, fullScopedId)) {
+      const selVal = runtimeState.selectedOptions[fullScopedId];
+      const opts = Array.isArray(node.options) ? node.options : [];
+      if (Array.isArray(selVal)) {
+        node.selectedIndices = selVal.map(v => typeof v === 'number' ? v : opts.indexOf(String(v))).filter(i => i >= 0);
+        delete node.selectedIndex;
+      } else {
+        const idx = typeof selVal === 'number' ? selVal : opts.indexOf(String(selVal));
+        if (idx >= 0) {
+          node.selectedIndex = idx;
+          node.selected = opts[idx];
+          delete node.selectedIndices;
+        }
+      }
+    }
+    if (runtimeState?.selectedNodes && Object.hasOwn(runtimeState.selectedNodes, fullScopedId)) {
+      node.selected = Boolean(runtimeState.selectedNodes[fullScopedId]);
     }
     normalizeVisualCss(node.css);
     validateNodeSizing(node, parentLayout);
@@ -585,10 +926,25 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
       ghost: { fill: null, color: palette.ink, stroke: null },
       soft: { fill: palette['brand-soft'] || palette['surface-2'], color: palette.brand },
       danger: { fill: palette.danger || palette.error, color: palette['ink-inv'] || '#FFFFFF' },
-    }[node.variant || node.tone || 'primary'] || { fill: palette.brand, color: '#FFFFFF' }) : {};
+    }[node.variant || node.tone || 'primary'] || { fill: palette.brand, color: '#FFFFFF' }) : (['combobox', 'listbox'].includes(node.type) ? {
+      fill: palette.surface || '#FFFFFF',
+      stroke: palette['line-strong'] || palette.line || '#CBD5CE',
+      color: palette.ink,
+    } : {});
     const defaultFill = node.type === 'divider' ? (node.color || node.stroke || '$line') : buttonPaint.fill;
-    node._resolvedFill = resolveColorValue(node.fill === undefined ? defaultFill : node.fill, palette);
-    node._resolvedStroke = resolveColorValue(node.stroke === undefined ? buttonPaint.stroke : node.stroke, palette);
+    const isSelectedVisual = typeof node.selected === 'boolean' && node.selected && ['label', 'paragraph', 'button', 'badge'].includes(node.type);
+    node._resolvedFill = resolveColorValue(
+      node.fill === undefined
+        ? (isSelectedVisual ? (palette['brand-soft'] || buttonPaint.fill) : defaultFill)
+        : node.fill,
+      palette
+    );
+    node._resolvedStroke = resolveColorValue(
+      node.stroke === undefined
+        ? (isSelectedVisual ? (palette.brand || buttonPaint.stroke) : buttonPaint.stroke)
+        : node.stroke,
+      palette
+    );
     node._resolvedColor = resolveColorValue(node.color === undefined ? buttonPaint.color : node.color, palette) || palette.ink || '#203B32';
 
     // Font resolution via real typography service
@@ -600,7 +956,7 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
     if (
       node.text !== undefined ||
       node.spans !== undefined ||
-      ['label', 'paragraph', 'button', 'input', 'badge'].includes(node.type)
+      ['label', 'paragraph', 'button', 'input', 'badge', 'checkbox', 'radio', 'combobox', 'listbox'].includes(node.type)
     ) {
       fontReport.requestedFamilies.add(requestedFamily);
       if (activeSliceMeta) activeSliceMeta.requestedFamilies.add(requestedFamily);
@@ -742,10 +1098,30 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
       const finalTm = node._textMetrics;
       if (h === null || node.h === 'hug') {
         const glyphH = Math.ceil(finalTm.lastBaselineOffset + finalTm.descentPx + finalTm.padY / 2);
-        h = Math.max(node.type === 'input' ? 40 : 0, finalTm.measuredH, glyphH);
+        const minInputH = node.type === 'input' ? (node.multiline ? 80 : 40) : 0;
+        h = Math.max(minInputH, finalTm.measuredH, glyphH);
       }
       node._firstBaselineOffset = finalTm.firstBaselineOffset;
       node._lastBaselineOffset = finalTm.lastBaselineOffset;
+    } else if (node.type === 'checkbox' || node.type === 'radio') {
+      const fSize = Number(node.fontSize || 14);
+      const textW = node.text ? measureLineWidth(String(node.text), fSize, Number(node.fontWeight || 400), Number(node.letterSpacing || 0), node._resolvedFontFamily) : 0;
+      if (w === null || node.w === 'hug') {
+        w = clampDim(26 + textW + padH + 4, node.minW, node.maxW);
+      }
+      if (h === null || node.h === 'hug') {
+        h = Math.max(24, Math.ceil(fSize * 1.5) + padV);
+      }
+    } else if (node.type === 'combobox' || node.type === 'listbox') {
+      const fSize = Number(node.fontSize || 14);
+      const opts = Array.isArray(node.options) && node.options.length ? node.options : ['选项 1'];
+      const maxOptW = Math.max(...opts.map(opt => measureLineWidth(String(opt ?? ''), fSize, Number(node.fontWeight || 400), 0, node._resolvedFontFamily)), 60);
+      if (w === null || node.w === 'hug') {
+        w = clampDim(Math.max(140, maxOptW + (node.type === 'combobox' ? 40 : 28) + padH), node.minW, node.maxW);
+      }
+      if (h === null || node.h === 'hug') {
+        h = node.type === 'combobox' ? 40 : Math.min(220, Math.max(76, opts.length * 32 + 8));
+      }
     }
 
     if (node.type === 'dynamic-panel' && Array.isArray(node.states)) {
@@ -953,7 +1329,8 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
           );
           node._textMetrics = tm;
           if (node.h === 'hug' || node.h === undefined || node.h === null) {
-            h = clampDim(Math.max(node.type === 'input' ? 40 : 0, tm.measuredH, Math.ceil(tm.lastBaselineOffset + tm.descentPx + tm.padY / 2)), node.minH, node.maxH);
+            const minInputH = node.type === 'input' ? (node.multiline ? 80 : 40) : 0;
+            h = clampDim(Math.max(minInputH, tm.measuredH, Math.ceil(tm.lastBaselineOffset + tm.descentPx + tm.padY / 2)), node.minH, node.maxH);
           }
         }
         const tm = node._textMetrics;
@@ -1212,6 +1589,9 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
     rps: runtimeState?.panelStates || null,
     visibility: runtimeState?.visibility || null,
     inputs: runtimeState?.inputs || null,
+    checked: runtimeState?.checked || null,
+    selectedOptions: runtimeState?.selectedOptions || null,
+    selectedNodes: runtimeState?.selectedNodes || null,
     textOverrides: runtimeState?.textOverrides || null,
     am: doc.assetsManifest || null,
     d: layoutDocument.datasets || null,
@@ -1279,14 +1659,16 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
       let displayText =
         n.type === 'path'
           ? ''
-          : (
-              n.text ??
-              n.value ??
-              n.content ??
-              (Array.isArray(n.spans) && n.spans.length > 0
-                ? n._textMetrics?.text || n.spans.map(s => s?.text ?? '').join('')
-                : '')
-            );
+          : n.type === 'combobox'
+            ? String((Array.isArray(n.options) ? n.options[n.selectedIndex ?? 0] : null) ?? n.selected ?? n.text ?? '')
+            : (
+                n.text ??
+                n.value ??
+                n.content ??
+                (Array.isArray(n.spans) && n.spans.length > 0
+                  ? n._textMetrics?.text || n.spans.map(s => s?.text ?? '').join('')
+                  : '')
+              );
       if (typeof displayText === 'string' && displayText.startsWith('=')) {
         displayText = evaluateSimpleDisplayFormula(displayText, runtimeState?.variables || doc.variables || {}, layoutDocument, pg.root);
       }
@@ -1373,6 +1755,20 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
         truncated: Boolean(n._textMetrics?.truncated),
         rawText: n.text ?? n.content ?? null,
         placeholder: n.placeholder ?? null,
+        ...(n.multiline ? { multiline: true } : {}),
+        ...(n.disabled ? { disabled: true } : {}),
+        ...(['checkbox', 'radio'].includes(n.type) ? { checked: Boolean(n.checked ?? n.selected) } : {}),
+        ...(typeof n.selected === 'boolean' ? { selected: n.selected } : {}),
+        ...(n.group ? { group: n.group } : {}),
+        ...(n.selectionGroup ? { selectionGroup: n.selectionGroup } : {}),
+        ...(['combobox', 'listbox'].includes(n.type)
+          ? {
+              options: Array.isArray(n.options) ? [...n.options] : [],
+              ...(typeof n.selectedIndex === 'number' ? { selectedIndex: n.selectedIndex } : {}),
+              ...(Array.isArray(n.selectedIndices) ? { selectedIndices: [...n.selectedIndices] } : {}),
+              ...(n.multiple ? { multiple: true } : {}),
+            }
+          : {}),
         spans: Array.isArray(n.spans) ? structuredClone(n.spans) : null,
         lines: n._textMetrics?.lines || (displayText ? [String(displayText)] : []),
         lineCount: n._textMetrics?.lineCount ?? (displayText ? 1 : 0),

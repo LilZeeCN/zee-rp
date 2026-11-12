@@ -5,7 +5,7 @@ import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
 export const SCENARIO_STEP_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
-    action: { type: 'string', enum: ['navigate', 'input', 'click', 'dataset', 'expect'] },
+    action: { type: 'string', enum: ['navigate', 'input', 'click', 'dataset', 'expect', 'assert'] },
     target: { type: 'string' }, id: { type: 'string' }, page: { type: 'string' },
     goto: { type: 'string' }, fill: { type: 'string' }, click: { type: 'string' },
     value: {}, text: { type: 'string' },
@@ -19,6 +19,8 @@ export const SCENARIO_STEP_SCHEMA = {
       visible: { type: 'object', minProperties: 1, additionalProperties: { type: 'boolean' } },
       text: { type: 'object', minProperties: 1 }, variables: { type: 'object', minProperties: 1 },
       panelState: { type: 'object', minProperties: 1, additionalProperties: { type: 'string' } },
+      checked: { type: 'object', minProperties: 1, additionalProperties: { type: 'boolean' } },
+      selected: { type: 'object', minProperties: 1 },
       datasetCount: { type: 'object', minProperties: 1, additionalProperties: { type: 'integer', minimum: 0 } },
       datasetFirstRow: { type: 'object', minProperties: 1 },
     } },
@@ -42,6 +44,9 @@ export class StudioRuntimeSession {
     }
 
     this.inputs = {};
+    this.checked = {};
+    this.selectedOptions = {};
+    this.selectedNodes = {};
     this.visibility = {};
     this.textOverrides = {};
     this.textFormulas = {};
@@ -85,6 +90,25 @@ export class StudioRuntimeSession {
     if (node.type === 'input') {
       const val = node.value !== undefined ? String(node.value) : '';
       this.inputs[scopedId] = val;
+    }
+    if (node.type === 'checkbox' || node.type === 'radio') {
+      this.checked[scopedId] = Boolean(node.checked ?? node.selected);
+    } else if (node.type === 'combobox' || node.type === 'listbox') {
+      const opts = Array.isArray(node.options) ? node.options : [];
+      if (Array.isArray(node.selectedIndices) && node.selectedIndices.length) {
+        this.selectedOptions[scopedId] = node.selectedIndices.map(i => opts[i]).filter(v => v !== undefined);
+      } else {
+        const idx = typeof node.selectedIndex === 'number'
+          ? node.selectedIndex
+          : typeof node.selected === 'string'
+            ? opts.indexOf(node.selected)
+            : node.type === 'combobox'
+              ? 0
+              : -1;
+        if (idx >= 0 && opts[idx] !== undefined) this.selectedOptions[scopedId] = opts[idx];
+      }
+    } else if (typeof node.selected === 'boolean') {
+      this.selectedNodes[scopedId] = node.selected;
     }
     if (node.type === 'dynamic-panel' && Array.isArray(node.states) && node.states.length > 0) {
       const active = node.activeState || node.states[0].id;
@@ -187,8 +211,16 @@ export class StudioRuntimeSession {
     if (!entry) return '';
     const scoped = entry.scopedId;
     if (scoped in this.inputs) return String(this.inputs[scoped] ?? '');
+    if (scoped in this.selectedOptions) {
+      const sel = this.selectedOptions[scoped];
+      return Array.isArray(sel) ? sel.join(', ') : String(sel ?? '');
+    }
     if (scoped in this.textOverrides) return String(this.textOverrides[scoped] ?? '');
     const node = entry.node;
+    if (node.type === 'combobox' || node.type === 'listbox') {
+      const opts = Array.isArray(node.options) ? node.options : [];
+      return String(opts[node.selectedIndex ?? 0] ?? '');
+    }
     const raw = String(node.text ?? node.value ?? '');
     if (raw.startsWith('=')) {
       return String(this.evaluateExpression(raw, { pageId: entry.pageId, scopePrefix: entry.scopePrefix }) ?? '');
@@ -196,11 +228,39 @@ export class StudioRuntimeSession {
     return raw;
   }
 
+  getWidgetState(widgetId, prop, { pageId = this.currentPageId, scopePrefix = this.interactionScope } = {}) {
+    const entry = this.findNodeEntry(pageId, widgetId, { scopePrefix });
+    if (!entry) return false;
+    const scoped = entry.scopedId;
+    if (prop === 'checked') {
+      return scoped in this.checked ? Boolean(this.checked[scoped]) : Boolean(entry.node.checked ?? entry.node.selected);
+    }
+    if (prop === 'selected') {
+      if (entry.node.type === 'checkbox' || entry.node.type === 'radio') {
+        return scoped in this.checked ? Boolean(this.checked[scoped]) : Boolean(entry.node.checked ?? entry.node.selected);
+      }
+      if (entry.node.type === 'combobox' || entry.node.type === 'listbox') {
+        if (scoped in this.selectedOptions) return this.selectedOptions[scoped];
+        const opts = Array.isArray(entry.node.options) ? entry.node.options : [];
+        return opts[entry.node.selectedIndex ?? 0] ?? '';
+      }
+      return scoped in this.selectedNodes ? Boolean(this.selectedNodes[scoped]) : Boolean(entry.node.selected);
+    }
+    return false;
+  }
+
   isNodeVisible(nodeId, pageId = this.currentPageId) {
     const nodes = resolveDocumentScene(this.docSnapshot, {
       projectDir: this.projectDir,
       activePanelStates: this.panelStates,
-      runtimeState: { variables: this.variables, panelStates: this.panelStates, visibility: this.visibility },
+      runtimeState: {
+        variables: this.variables,
+        panelStates: this.panelStates,
+        visibility: this.visibility,
+        checked: this.checked,
+        selectedOptions: this.selectedOptions,
+        selectedNodes: this.selectedNodes,
+      },
     }).pages.find(p => p.id === pageId)?.nodes || [];
     const entry = this.findNodeEntry(pageId, nodeId);
     return Boolean(entry && nodes.some(n => n.scopedId === entry.scopedId && n.visible));
@@ -210,6 +270,7 @@ export class StudioRuntimeSession {
     return evaluatePrototypeExpression(expr, {
       variables: this.variables,
       getWidgetText: target => this.getWidgetText(target, context),
+      getWidgetState: (target, prop) => this.getWidgetState(target, prop, context),
       resolveDatasetPath: (name, prop) => this.resolveDatasetPath(name, prop),
     });
   }
@@ -323,8 +384,100 @@ export class StudioRuntimeSession {
     return rows;
   }
 
+  _walkPageEntries(pageId, fn) {
+    const pg = (this.docSnapshot.pages || []).find(p => p.id === pageId);
+    if (!pg?.root) return;
+    const walk = (node, prefix) => {
+      if (!node || typeof node !== 'object') return;
+      const scopedId = `${prefix}/${node.id}`;
+      fn(node, scopedId);
+      for (const ch of node.children || []) walk(ch, prefix);
+      for (const st of node.states || []) if (st?.root) walk(st.root, `${scopedId}/${st.id}`);
+    };
+    walk(pg.root, pg.id);
+  }
+
+  setChecked(targetId, val, executed = null) {
+    const entry = this.findNodeEntry(this.currentPageId, targetId);
+    if (!entry) throw Object.assign(new Error(`页面 ${this.currentPageId} 中未找到目标 ${targetId}`), { code: 'E_RUNTIME_NODE_NOT_FOUND', pageId: this.currentPageId, targetId });
+    const scoped = entry.scopedId;
+    const cur = scoped in this.checked ? Boolean(this.checked[scoped]) : Boolean(entry.node.checked ?? entry.node.selected);
+    const next = val === 'toggle' ? !cur : Boolean(val);
+    if (entry.node.type === 'radio' && next) {
+      const grp = entry.node.group || entry.node.selectionGroup;
+      if (grp) {
+        this._walkPageEntries(entry.pageId, (cand, candScoped) => {
+          if (cand.type === 'radio' && (cand.group || cand.selectionGroup) === grp && candScoped !== scoped) {
+            this.checked[candScoped] = false;
+          }
+        });
+      }
+    }
+    this.checked[scoped] = next;
+    this._refreshDatasetBoundText();
+    if (executed) executed.push({ action: 'set-check', target: scoped, checked: next });
+    return next;
+  }
+
+  setSelected(targetId, val, executed = null) {
+    const entry = this.findNodeEntry(this.currentPageId, targetId);
+    if (!entry) throw Object.assign(new Error(`页面 ${this.currentPageId} 中未找到目标 ${targetId}`), { code: 'E_RUNTIME_NODE_NOT_FOUND', pageId: this.currentPageId, targetId });
+    const scoped = entry.scopedId;
+    const cur = scoped in this.selectedNodes ? Boolean(this.selectedNodes[scoped]) : Boolean(entry.node.selected);
+    const next = val === 'toggle' ? !cur : Boolean(val);
+    if (next && entry.node.selectionGroup) {
+      const grp = entry.node.selectionGroup;
+      this._walkPageEntries(entry.pageId, (cand, candScoped) => {
+        if (cand.selectionGroup === grp && candScoped !== scoped) {
+          this.selectedNodes[candScoped] = false;
+        }
+      });
+    }
+    this.selectedNodes[scoped] = next;
+    if (executed) executed.push({ action: 'set-selected', target: scoped, selected: next });
+    return next;
+  }
+
+  setOption(targetId, val, executed = null) {
+    const entry = this.findNodeEntry(this.currentPageId, targetId);
+    if (!entry) throw Object.assign(new Error(`页面 ${this.currentPageId} 中未找到目标 ${targetId}`), { code: 'E_RUNTIME_NODE_NOT_FOUND', pageId: this.currentPageId, targetId });
+    const scoped = entry.scopedId;
+    const opts = Array.isArray(entry.node.options) ? entry.node.options : [];
+    if (entry.node.type === 'listbox' && entry.node.multiple) {
+      if (Array.isArray(val)) {
+        this.selectedOptions[scoped] = val.map(v => typeof v === 'number' && opts[v] !== undefined ? opts[v] : String(v));
+      } else {
+        const curList = Array.isArray(this.selectedOptions[scoped]) ? [...this.selectedOptions[scoped]] : [];
+        const strVal = typeof val === 'number' && opts[val] !== undefined ? opts[val] : String(val ?? '');
+        const pos = curList.indexOf(strVal);
+        if (pos >= 0) curList.splice(pos, 1);
+        else curList.push(strVal);
+        this.selectedOptions[scoped] = curList;
+      }
+    } else {
+      const nextOpt = typeof val === 'number' && opts[val] !== undefined ? opts[val] : String(val ?? '');
+      this.selectedOptions[scoped] = nextOpt;
+    }
+    this._refreshDatasetBoundText();
+    if (executed) executed.push({ action: 'set-option', target: scoped, value: this.selectedOptions[scoped] });
+    return this.selectedOptions[scoped];
+  }
+
   setInput(targetId, value) {
-    const scoped = this.targetKey(targetId);
+    const entry = this.findNodeEntry(this.currentPageId, targetId);
+    if (!entry) throw Object.assign(new Error(`页面 ${this.currentPageId} 中未找到目标 ${targetId}`), { code: 'E_RUNTIME_NODE_NOT_FOUND', pageId: this.currentPageId, targetId });
+    const scoped = entry.scopedId;
+    if (entry.node.type === 'combobox' || entry.node.type === 'listbox') {
+      const selected = this.setOption(scoped, value);
+      this.trace.push({
+        step: this.trace.length + 1,
+        type: 'select-option',
+        pageId: this.currentPageId,
+        targetId: scoped,
+        value: selected,
+      });
+      return this.getState();
+    }
     this.inputs[scoped] = String(value);
     this.trace.push({
       step: this.trace.length + 1,
@@ -375,7 +528,15 @@ export class StudioRuntimeSession {
 
     const clickSpec = node.on?.click || node.onClick || node.interactions?.click;
     const executed = [];
-    if (clickSpec && !['disabled', 'loading'].includes(node.state)) {
+    const isDisabled = Boolean(node.disabled) || ['disabled', 'loading'].includes(node.state);
+    if (!isDisabled) {
+      if (node.type === 'checkbox') {
+        this.setChecked(entry.scopedId, 'toggle', executed);
+      } else if (node.type === 'radio') {
+        this.setChecked(entry.scopedId, true, executed);
+      }
+    }
+    if (clickSpec && !isDisabled) {
       const previousScope = this.interactionScope;
       this.interactionScope = entry.scopePrefix;
       try {
@@ -534,8 +695,8 @@ export class StudioRuntimeSession {
       const allowed = new Set(Object.keys(SCENARIO_STEP_SCHEMA.properties));
       const unknown = Object.keys(step).find(k => !allowed.has(k));
       if (unknown) return invalid(i, `未知步骤字段 ${unknown}；动作使用 action，断言使用 expect`);
-      if (step.action !== undefined && !['navigate', 'input', 'click', 'dataset', 'expect'].includes(step.action)) return invalid(i, `未知 action: ${step.action}`);
-      if (step.action === 'expect' && !step.expect) return invalid(i, 'expect 动作需要 expect 断言');
+      if (step.action !== undefined && !['navigate', 'input', 'click', 'dataset', 'expect', 'assert'].includes(step.action)) return invalid(i, `未知 action: ${step.action}`);
+      if ((step.action === 'expect' || step.action === 'assert') && !step.expect) return invalid(i, 'expect/assert 动作需要 expect 断言');
       if (step.action === 'dataset' && !['select', 'toggle-select', 'add', 'update', 'delete', 'filter', 'sort', 'page'].includes(step.op)) return invalid(i, 'dataset 动作需要受支持的 op');
       if (step.action && ['click', 'input'].includes(step.action) && !(step.target || step.id || step.fill || step.click)) return invalid(i, '动作缺少 target');
       if (step.expect !== undefined) {
@@ -545,6 +706,7 @@ export class StudioRuntimeSession {
           if (key === 'page') { if (typeof value !== 'string' || !value) return invalid(i, 'expect.page 需要页面 ID'); assertionCount++; continue; }
           if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.keys(value).length) return invalid(i, `expect.${key} 必须是非空对象`);
           if (key === 'visible' && Object.values(value).some(v => typeof v !== 'boolean')) return invalid(i, 'visible 的期望值必须为 true/false');
+          if (key === 'checked' && Object.values(value).some(v => typeof v !== 'boolean')) return invalid(i, 'checked 的期望值必须为 true/false');
           assertionCount += Object.keys(value).length;
         }
       }
@@ -599,6 +761,23 @@ export class StudioRuntimeSession {
           for (const [nodeId, expectedVis] of Object.entries(exp.visible)) {
             const actual = this.isNodeVisible(nodeId);
             assertions.push({ type: 'visible', target: nodeId, expected: Boolean(expectedVis), actual, passed: actual === Boolean(expectedVis) });
+          }
+        }
+        if (exp.checked) {
+          for (const [nodeId, expectedChk] of Object.entries(exp.checked)) {
+            const actual = Boolean(this.getWidgetState(nodeId, 'checked'));
+            assertions.push({ type: 'checked', target: nodeId, expected: Boolean(expectedChk), actual, passed: actual === Boolean(expectedChk) });
+          }
+        }
+        if (exp.selected) {
+          for (const [nodeId, expectedSel] of Object.entries(exp.selected)) {
+            const actual = this.getWidgetState(nodeId, 'selected');
+            const passed = typeof expectedSel === 'boolean'
+              ? Boolean(actual) === expectedSel
+              : Array.isArray(expectedSel)
+                ? JSON.stringify(actual) === JSON.stringify(expectedSel)
+                : String(actual) === String(expectedSel);
+            assertions.push({ type: 'selected', target: nodeId, expected: expectedSel, actual, passed });
           }
         }
         if (exp.datasetCount) {
@@ -663,6 +842,9 @@ export class StudioRuntimeSession {
         panelStates: this.panelStates,
         visibility: this.visibility,
         inputs: this.inputs,
+        checked: this.checked,
+        selectedOptions: this.selectedOptions,
+        selectedNodes: this.selectedNodes,
         textOverrides: this.textOverrides,
         evaluateText: (expression, context) => this.evaluateExpression(expression, context),
         datasets: Object.fromEntries(Object.entries(visibleDatasets).map(([name, value]) => [name, { rows: value.visibleRows }])),
@@ -684,6 +866,9 @@ export class StudioRuntimeSession {
       currentPageId: this.currentPageId,
       variables: structuredClone(this.variables),
       inputs: structuredClone(this.inputs),
+      checked: structuredClone(this.checked),
+      selectedOptions: structuredClone(this.selectedOptions),
+      selectedNodes: structuredClone(this.selectedNodes),
       panelStates: structuredClone(this.panelStates),
       visibility: structuredClone(this.visibility),
       datasets: visibleDatasets,

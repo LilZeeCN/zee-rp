@@ -5,8 +5,12 @@ import { readFileSync } from 'node:fs';
 const languageSchema = JSON.parse(readFileSync(new URL('../references/rp-language.schema.json', import.meta.url), 'utf8'));
 export const RP1_SOURCE_PROPERTIES_BY_TYPE = new Map(Object.entries(languageSchema['x-source-properties-by-type'] || {}).map(([type, fields]) => [type, new Set(fields)]));
 export const RP1_SOURCE_PROPERTY_CONDITIONS = languageSchema['x-source-property-conditions'] || {};
-const sourceFields = (languageSchema.$defs.node.anyOf || []).flatMap(shape => Object.keys(shape.properties || {}));
-const typedFields=new Set((languageSchema.$defs.node.anyOf||[]).filter(shape=>shape.properties?.type?.const).flatMap(shape=>Object.keys(shape.properties)));
+const nodeVariants = [
+  ...(languageSchema.$defs.node.anyOf || []),
+  ...(languageSchema.$defs.node.allOf || []).flatMap(rule => rule.then?.anyOf || (rule.then ? [rule.then] : [])),
+];
+const sourceFields = nodeVariants.flatMap(shape => Object.keys(shape.properties || {}));
+const typedFields=new Set(nodeVariants.filter(shape=>shape.properties?.type?.const).flatMap(shape=>Object.keys(shape.properties)));
 // The shorthand key in {card:{...}} names a node; it is not a property of an
 // already typed node. `use` remains an explicit Studio component alias.
 export const NODE_SYNTAX_ONLY_PROPERTIES=new Set(sourceFields.filter(key=>!typedFields.has(key)&&key!=='use'));
@@ -16,7 +20,7 @@ const studioFields = [
   'css', 'customFilter', 'threeDTransform', 'rotation', 'interactive', 'component', 'props',
   'overrides', 'slots', 'variantKey', 'activeState', 'rows', 'source', 'data',
   'filter', 'sort', 'activeFilter', 'activeSort', 'macroSource', 'controlledByMacro', 'componentSource',
-  'constraints', 'state', 'tone', 'content', 'clip', 'overflow',
+  'constraints', 'state', 'tone', 'content', 'clip', 'overflow', 'multiline',
   'mixBlendMode', 'shadows', 'fills', 'booleanOp', 'booleanAllowSelfIntersection',
 ];
 export const NODE_PROPERTY_NAMES = new Set([...sourceFields, ...studioFields]);
@@ -25,7 +29,10 @@ export const NODE_UNCONSUMED_PROPERTIES = new Set(['activeFilter','activeSort',.
 
 // W1 2026-11-02：rotate/rot 的编辑距离最近词是 state（距离 2 < rotation 的 4），
 // 模糊建议会重新引入已被 T-H-4 修复消除的误导候选；显式别名优先。
-const PROPERTY_ALIASES = { rotate: ['rotation'], rot: ['rotation'], turn: ['rotation'] };
+const PROPERTY_ALIASES = {
+  rotate: ['rotation'], rot: ['rotation'], turn: ['rotation'],
+  readonly: ['disabled'], multi: ['multiple', 'multiline'],
+};
 
 export function propertySuggestions(key) {
   const alias = PROPERTY_ALIASES[String(key).toLowerCase()];

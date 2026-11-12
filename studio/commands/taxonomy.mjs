@@ -1,7 +1,7 @@
 // 命令注册表(单一事实来源):节点类型、布局模式、命令分组与派生全集。
 // 命令 dispatch 表见 ./apply.mjs 的 COMMAND_HANDLERS;三方一致性由 test:studio-parity 门禁锁定。
 export const VALID_NODE_TYPES = new Set([
-  'box', 'card', 'label', 'paragraph', 'button', 'badge', 'input', 'image', 'icon', 'path',
+  'box', 'card', 'label', 'paragraph', 'button', 'badge', 'input', 'checkbox', 'radio', 'combobox', 'listbox', 'image', 'icon', 'path',
   'dynamic-panel', 'repeater', 'phone-shell', 'tab-bar', 'nav-bar',
   'stat-row', 'list-item', 'progress-bar', 'instance', 'use',
   // Full RP/1 names are retained for historical documents. Type-specific

@@ -155,11 +155,62 @@ export function buildNodeElementHtml(n, pageId, childrenHtml = '', parent = null
   if (n.type === 'input') {
     if (state.mode === 'interact') {
       const val = state.runtimeState?.inputs?.[n.scopedId] ?? n.text ?? '';
-      return `<input ${commonAttrs} value="${escapeHtml(val)}" placeholder="${escapeHtml(n.placeholder || '')}" style="${style('padding:0 12px')}" data-runtime-input="${escapeHtml(n.scopedId)}" />`;
+      if (n.multiline) {
+        return `<textarea ${commonAttrs} placeholder="${escapeHtml(n.placeholder || '')}" ${n.disabled ? 'disabled ' : ''}style="${style('padding:8px 12px;resize:none;font:inherit')}" data-runtime-input="${escapeHtml(n.scopedId)}">${escapeHtml(val)}</textarea>`;
+      }
+      return `<input ${commonAttrs} value="${escapeHtml(val)}" placeholder="${escapeHtml(n.placeholder || '')}" ${n.disabled ? 'disabled ' : ''}style="${style('padding:0 12px')}" data-runtime-input="${escapeHtml(n.scopedId)}" />`;
     }
     const disp = n.text || n.placeholder || '';
     const isPlaceholder = !n.text && n.placeholder;
+    if (n.multiline) {
+      return `<div ${commonAttrs} style="${style(`display:block;padding:8px 12px;white-space:pre-wrap;${isPlaceholder ? 'color:#6E8279' : ''}`)}">${escapeHtml(disp)}${childrenHtml}</div>`;
+    }
     return `<div ${commonAttrs} style="${style(`display:flex;align-items:center;padding:0 12px;${isPlaceholder ? 'color:#6E8279' : ''}`)}">${escapeHtml(disp)}${childrenHtml}</div>`;
+  }
+
+  if (n.type === 'checkbox' || n.type === 'radio') {
+    const isChecked = state.mode === 'interact' && state.runtimeState?.checked && Object.hasOwn(state.runtimeState.checked, n.scopedId)
+      ? Boolean(state.runtimeState.checked[n.scopedId])
+      : Boolean(n.checked);
+    const isRadio = n.type === 'radio';
+    const boxStyle = `width:16px;height:16px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;border-radius:${isRadio ? '50%' : '4px'};border:1.5px solid ${isChecked ? 'var(--brand,#2E6F57)' : 'var(--line-strong,#94A3B8)'};background:${isChecked ? 'var(--brand,#2E6F57)' : '#FFFFFF'};color:#FFFFFF;font-size:11px;line-height:1;`;
+    const indicatorInner = isChecked
+      ? (isRadio ? '<span style="width:6px;height:6px;border-radius:50%;background:#FFFFFF;display:block;"></span>' : '✓')
+      : '';
+    return `<div ${commonAttrs} data-checked="${isChecked}" style="${style(`display:flex;align-items:center;gap:8px;cursor:${n.disabled ? 'not-allowed' : 'pointer'};${n.disabled ? 'opacity:0.5;' : ''}`)}"><span style="${boxStyle}">${indicatorInner}</span><span>${renderTextContentHtml(n)}</span>${childrenHtml}</div>`;
+  }
+
+  if (n.type === 'combobox') {
+    const opts = Array.isArray(n.options) ? n.options : [];
+    const selOpt = state.mode === 'interact' && state.runtimeState?.selectedOptions && Object.hasOwn(state.runtimeState.selectedOptions, n.scopedId)
+      ? state.runtimeState.selectedOptions[n.scopedId]
+      : (opts[n.selectedIndex ?? 0] ?? n.text ?? '');
+    if (state.mode === 'interact') {
+      const optHtml = opts.map(opt => `<option value="${escapeHtml(opt)}"${String(opt) === String(selOpt) ? ' selected' : ''}>${escapeHtml(opt)}</option>`).join('');
+      return `<select ${commonAttrs} ${n.disabled ? 'disabled ' : ''}style="${style('padding:0 28px 0 12px;appearance:auto;cursor:pointer')}" data-runtime-select="${escapeHtml(n.scopedId)}">${optHtml}</select>`;
+    }
+    return `<div ${commonAttrs} style="${style('display:flex;align-items:center;justify-content:space-between;padding:0 12px')}"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(selOpt || opts[0] || '')}</span><span style="font-size:11px;opacity:0.65;margin-left:6px;">▾</span>${childrenHtml}</div>`;
+  }
+
+  if (n.type === 'listbox') {
+    const opts = Array.isArray(n.options) ? n.options : [];
+    const rtSel = state.mode === 'interact' && state.runtimeState?.selectedOptions && Object.hasOwn(state.runtimeState.selectedOptions, n.scopedId)
+      ? state.runtimeState.selectedOptions[n.scopedId]
+      : null;
+    const selValues = new Set(
+      rtSel !== null
+        ? (Array.isArray(rtSel) ? rtSel.map(String) : [String(rtSel)])
+        : Array.isArray(n.selectedIndices)
+          ? n.selectedIndices.map(i => String(opts[i] ?? ''))
+          : typeof n.selectedIndex === 'number' && opts[n.selectedIndex] !== undefined
+            ? [String(opts[n.selectedIndex])]
+            : []
+    );
+    const itemsHtml = opts.map(opt => {
+      const active = selValues.has(String(opt));
+      return `<div data-runtime-listbox="${escapeHtml(n.scopedId)}" data-runtime-listbox-option="${escapeHtml(opt)}" style="padding:6px 10px;border-radius:6px;cursor:${n.disabled ? 'not-allowed' : 'pointer'};background:${active ? 'var(--brand-soft,#DCEFE6)' : 'transparent'};color:${active ? 'var(--brand,#2E6F57)' : 'inherit'};font-weight:${active ? 600 : 400};">${escapeHtml(opt)}</div>`;
+    }).join('');
+    return `<div ${commonAttrs} style="${style('overflow-y:auto;padding:4px;display:flex;flex-direction:column;gap:2px')}">${itemsHtml}${childrenHtml}</div>`;
   }
 
   if (n.type === 'repeater') {
@@ -366,6 +417,22 @@ function bindRuntimeStageEvents(stage, onRuntimeInput, onRuntimeRowSelect) {
     inp.addEventListener('input', async e => {
       const targetId = e.target.getAttribute('data-runtime-input');
       await onRuntimeInput(targetId, e.target.value);
+    });
+  });
+
+  stage.querySelectorAll('[data-runtime-select]').forEach(sel => {
+    sel.addEventListener('change', async e => {
+      const targetId = e.target.getAttribute('data-runtime-select');
+      await onRuntimeInput(targetId, e.target.value);
+    });
+  });
+
+  stage.querySelectorAll('[data-runtime-listbox-option]').forEach(optEl => {
+    optEl.addEventListener('click', async e => {
+      e.stopPropagation();
+      const targetId = optEl.getAttribute('data-runtime-listbox');
+      const optVal = optEl.getAttribute('data-runtime-listbox-option');
+      await onRuntimeInput(targetId, optVal);
     });
   });
 

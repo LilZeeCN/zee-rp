@@ -43,7 +43,18 @@ export const handlers = {
         validateNode(node.template);
       };
       validateNode(newNode);
-      newNode.type = (newNode.type === 'svg' || newNode.type === 'sparkline') ? 'path' : (newNode.type || 'box');
+      const normalizeAliases = n => {
+        if (!n || typeof n !== 'object') return;
+        if (n.type === 'svg' || n.type === 'sparkline') n.type = 'path';
+        else if (n.type === 'panel') n.type = 'dynamic-panel';
+        else if (n.type === 'select' || n.type === 'droplist') n.type = 'combobox';
+        else if (n.type === 'textarea') { n.type = 'input'; if (n.multiline === undefined) n.multiline = true; }
+        else if (!n.type) n.type = 'box';
+        for (const ch of n.children || []) normalizeAliases(ch);
+        for (const st of n.states || []) if (st?.root) normalizeAliases(st.root);
+        if (n.template) normalizeAliases(n.template);
+      };
+      normalizeAliases(newNode);
       // 容器类型必须带 children 数组，否则 reorderNode 换父会被 E_INVALID_PARENT 拒收
       if (['box', 'card', 'phone-shell'].includes(newNode.type)) newNode.children = Array.isArray(newNode.children) ? newNode.children : [];
       validatePropertiesObject(Object.fromEntries(Object.entries(newNode).filter(([key]) => !['type','id','sourcePointer'].includes(key))), newNode.id, cmdIdx,{creation:true});

@@ -366,10 +366,18 @@ const SHORTHAND_KINDS = {
   icon: { type: 'icon' },
   image: { type: 'image' },
   input: { type: 'input' },
+  textarea: { type: 'input', multiline: true },
+  checkbox: { type: 'checkbox' },
+  radio: { type: 'radio' },
+  combobox: { type: 'combobox' },
+  droplist: { type: 'combobox' },
+  select: { type: 'combobox' },
+  listbox: { type: 'listbox' },
   divider: { type: 'divider' },
   spacer: { type: 'spacer' },
   repeater: { type: 'repeater' },
   'dynamic-panel': { type: 'dynamic-panel' },
+  panel: { type: 'dynamic-panel' },
   'phone-shell': { type: 'phone-shell' },
   card: { type: 'card' },
   'list-item': { type: 'list-item' },
@@ -379,6 +387,7 @@ const SHORTHAND_KINDS = {
   'master-detail': { type: 'master-detail' },
   'searchable-list': { type: 'searchable-list' },
   'progress-bar': { type: 'progress-bar' },
+  'nav-bar': { type: 'nav-bar' },
   'tab-bar': { type: 'tab-bar' },
   tabs: { type: 'tabs' },
   path: { type: 'path' },
@@ -393,6 +402,13 @@ function normalizeDslShorthand(node) {
     copy.type = 'box';
   } else if (copy.type === 'svg' || copy.type === 'sparkline') {
     copy.type = 'path';
+  } else if (copy.type === 'panel') {
+    copy.type = 'dynamic-panel';
+  } else if (copy.type === 'select' || copy.type === 'droplist') {
+    copy.type = 'combobox';
+  } else if (copy.type === 'textarea') {
+    copy.type = 'input';
+    if (copy.multiline === undefined) copy.multiline = true;
   }
   if (!copy.type) {
     for (const [kind, mapped] of Object.entries(SHORTHAND_KINDS)) {
@@ -400,6 +416,7 @@ function normalizeDslShorthand(node) {
       if (raw === undefined) continue;
       copy.type = mapped.type;
       if (mapped.layout) copy.layout = copy.layout || mapped.layout;
+      if (mapped.multiline && copy.multiline === undefined) copy.multiline = true;
       if ((kind === 'path' || kind === 'sparkline') && copy.id) {
         if (Array.isArray(raw)) copy.points = copy.points ?? raw;
         else if (typeof raw === 'string' && raw) {
@@ -413,14 +430,27 @@ function normalizeDslShorthand(node) {
       break;
     }
   }
+  if (copy.type === 'repeater' && copy.data !== undefined) {
+    if (typeof copy.data === 'string' && copy.dataset === undefined) {
+      copy.dataset = copy.data;
+      delete copy.data;
+    } else if (Array.isArray(copy.data) && copy.rows === undefined) {
+      copy.rows = copy.data;
+      delete copy.data;
+    }
+  }
   if (Array.isArray(copy.canvas) && copy.canvas.length === 2) {
     copy.canvas = { w: copy.canvas[0], h: copy.canvas[1] };
   }
   if (Array.isArray(copy.children)) copy.children = copy.children.map(normalizeDslShorthand);
   if (Array.isArray(copy.states)) {
-    copy.states = copy.states.map(state => (state && typeof state === 'object'
-      ? { ...state, root: normalizeDslShorthand(state.root) }
-      : state));
+    copy.states = copy.states.map(state => {
+      if (!state || typeof state !== 'object') return state;
+      const nextState = { ...state };
+      if (state.root !== undefined) nextState.root = normalizeDslShorthand(state.root);
+      if (Array.isArray(state.children)) nextState.children = state.children.map(normalizeDslShorthand);
+      return nextState;
+    });
   }
   if (copy.template) copy.template = normalizeDslShorthand(copy.template);
   return copy;
@@ -451,7 +481,7 @@ export function normalizeSpecShorthand(spec) {
   return out;
 }
 
-const supportsGotoSugar = node => !node.type || ['box', 'label', 'paragraph', 'button', 'badge', 'image', 'icon', 'input', 'path'].includes(node.type);
+const supportsGotoSugar = node => !node.type || ['box', 'label', 'paragraph', 'button', 'badge', 'image', 'icon', 'input', 'checkbox', 'radio', 'combobox', 'listbox', 'path'].includes(node.type);
 
 export function nodeEvents(node) {
   const on = Object.fromEntries(Object.entries(node.on || {}).map(([event, spec]) => [event, normalizeInteractionSpec(spec)]));
@@ -508,6 +538,13 @@ function normalizeNode(node, pageId, seenIds, pathPtr, assetCollector) {
   copy.type = copy.type || 'box';
   if (copy.type === 'svg' || copy.type === 'sparkline') {
     copy.type = 'path';
+  } else if (copy.type === 'panel') {
+    copy.type = 'dynamic-panel';
+  } else if (copy.type === 'select' || copy.type === 'droplist') {
+    copy.type = 'combobox';
+  } else if (copy.type === 'textarea') {
+    copy.type = 'input';
+    if (copy.multiline === undefined) copy.multiline = true;
   }
   copy.sourcePointer = copy.sourcePointer || pathPtr;
 

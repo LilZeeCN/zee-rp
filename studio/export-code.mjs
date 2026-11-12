@@ -21,6 +21,9 @@ const SUPPORTED_ACTION_TYPES = new Set([
   'set-var',
   'set-variable',
   'set-panel-state',
+  'set-check',
+  'set-selected',
+  'set-option',
   'dataset-select',
   'dataset-toggle-select',
   'dataset-add',
@@ -260,6 +263,16 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
     rawText: n.rawText ?? n.text ?? '',
     placeholder: n.placeholder || '',
     value: n.value ?? '',
+    multiline: Boolean(n.multiline),
+    disabled: Boolean(n.disabled),
+    ...(['checkbox', 'radio'].includes(n.type) ? { checked: Boolean(n.checked) } : {}),
+    ...(typeof n.selected === 'boolean' ? { selected: n.selected } : {}),
+    group: n.group || null,
+    selectionGroup: n.selectionGroup || null,
+    options: Array.isArray(n.options) ? [...n.options] : null,
+    selectedIndex: typeof n.selectedIndex === 'number' ? n.selectedIndex : null,
+    selectedIndices: Array.isArray(n.selectedIndices) ? [...n.selectedIndices] : null,
+    multiple: Boolean(n.multiple),
     src: rewrittenSrc,
     objectFit: n.objectFit || 'cover',
     fill: n.booleanRect && n.fill === '#FFFFFF00' ? null : n.fill || null,
@@ -399,9 +412,60 @@ function renderStaticInitialNodeHtml(n) {
       `color:${n.color || '#1E293B'}`,
       `font-size:${n.fontSize || 14}px`,
       `font-family:${escapeHtml(n.fontFamily || 'PingFang SC')}, sans-serif`,
-      'padding:0 12px'
+      n.multiline ? 'padding:8px 12px;resize:none' : 'padding:0 12px'
     );
-    return `<input class="export-node export-node-input" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="input"${roleAttr}${unsupAttr} type="text" value="${escapeHtml(n.value || n.text || '')}" placeholder="${escapeHtml(n.placeholder || '')}" style="${escapeHtml(styleParts.join(';'))}" />`;
+    const disAttr = n.disabled ? ' disabled' : '';
+    if (n.multiline) {
+      return `<textarea class="export-node export-node-input" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="input"${roleAttr}${unsupAttr}${disAttr} placeholder="${escapeHtml(n.placeholder || '')}" style="${escapeHtml(styleParts.join(';'))}">${escapeHtml(n.value || n.text || '')}</textarea>`;
+    }
+    return `<input class="export-node export-node-input" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="input"${roleAttr}${unsupAttr}${disAttr} type="text" value="${escapeHtml(n.value || n.text || '')}" placeholder="${escapeHtml(n.placeholder || '')}" style="${escapeHtml(styleParts.join(';'))}" />`;
+  }
+
+  if (n.type === 'checkbox' || n.type === 'radio') {
+    styleParts.push(
+      'display:' + (n.visible ? 'flex' : 'none'),
+      'align-items:center',
+      'gap:8px',
+      `color:${n.color || '#1E293B'}`,
+      `font-size:${n.fontSize || 14}px`,
+      `font-family:${escapeHtml(n.fontFamily || 'PingFang SC')}, sans-serif`,
+      `cursor:${n.disabled ? 'not-allowed' : 'pointer'}`
+    );
+    const isChecked = Boolean(n.checked);
+    const isRadio = n.type === 'radio';
+    const boxCss = `width:16px;height:16px;flex-shrink:0;display:inline-flex;align-items:center;justify-content:center;border-radius:${isRadio ? '50%' : '4px'};border:1.5px solid ${isChecked ? '#2E6F57' : '#94A3B8'};background:${isChecked ? '#2E6F57' : '#FFFFFF'};color:#FFFFFF;font-size:11px;line-height:1`;
+    const inner = isChecked ? (isRadio ? '<span style="width:6px;height:6px;border-radius:50%;background:#FFFFFF;display:block"></span>' : '✓') : '';
+    return `<div class="export-node export-node-${escapeHtml(n.type)} is-interactive" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="${escapeHtml(n.type)}" data-checked="${isChecked}"${roleAttr}${unsupAttr} style="${escapeHtml(styleParts.join(';'))}"><span style="${boxCss}">${inner}</span><span>${escapeHtml(n.text)}</span></div>`;
+  }
+
+  if (n.type === 'combobox') {
+    styleParts.push(
+      `color:${n.color || '#1E293B'}`,
+      `font-size:${n.fontSize || 14}px`,
+      `font-family:${escapeHtml(n.fontFamily || 'PingFang SC')}, sans-serif`,
+      'padding:0 28px 0 12px'
+    );
+    const opts = Array.isArray(n.options) ? n.options : [];
+    const sel = opts[n.selectedIndex ?? 0] ?? '';
+    const optHtml = opts.map(opt => `<option value="${escapeHtml(opt)}"${String(opt) === String(sel) ? ' selected' : ''}>${escapeHtml(opt)}</option>`).join('');
+    return `<select class="export-node export-node-combobox" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="combobox"${n.disabled ? ' disabled' : ''}${roleAttr}${unsupAttr} style="${escapeHtml(styleParts.join(';'))}">${optHtml}</select>`;
+  }
+
+  if (n.type === 'listbox') {
+    styleParts.push(
+      `color:${n.color || '#1E293B'}`,
+      `font-size:${n.fontSize || 14}px`,
+      `font-family:${escapeHtml(n.fontFamily || 'PingFang SC')}, sans-serif`,
+      'overflow-y:auto',
+      'padding:4px',
+      'display:' + (n.visible ? 'flex' : 'none'),
+      'flex-direction:column',
+      'gap:2px'
+    );
+    const opts = Array.isArray(n.options) ? n.options : [];
+    const selIndices = new Set(Array.isArray(n.selectedIndices) ? n.selectedIndices : typeof n.selectedIndex === 'number' ? [n.selectedIndex] : []);
+    const itemsHtml = opts.map((opt, idx) => `<div style="padding:6px 10px;border-radius:6px;background:${selIndices.has(idx) ? '#DCEFE6' : 'transparent'};color:${selIndices.has(idx) ? '#2E6F57' : 'inherit'};font-weight:${selIndices.has(idx) ? 600 : 400}">${escapeHtml(opt)}</div>`).join('');
+    return `<div class="export-node export-node-listbox" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="listbox"${roleAttr}${unsupAttr} style="${escapeHtml(styleParts.join(';'))}">${itemsHtml}</div>`;
   }
 
   const isTextBearing = ['label', 'paragraph', 'button', 'badge'].includes(n.type) || Boolean(n.text);
@@ -618,6 +682,9 @@ function buildAppJs(bundlePayload) {
         this.variables[k] = v && typeof v === 'object' && 'value' in v ? v.value : v;
       }
       this.inputs = {};
+      this.checked = {};
+      this.selectedOptions = {};
+      this.selectedNodes = {};
       this.visibility = {};
       this.textOverrides = {};
       this.textFormulas = {};
@@ -672,6 +739,19 @@ function buildAppJs(bundlePayload) {
           if (n.type === 'input') {
             const val = n.value !== undefined && n.value !== '' ? String(n.value) : '';
             this.inputs[n.scopedId] = val;
+          }
+          if (n.type === 'checkbox' || n.type === 'radio') {
+            this.checked[n.scopedId] = Boolean(n.checked);
+          } else if (n.type === 'combobox' || n.type === 'listbox') {
+            const opts = Array.isArray(n.options) ? n.options : [];
+            if (Array.isArray(n.selectedIndices) && n.selectedIndices.length) {
+              this.selectedOptions[n.scopedId] = n.selectedIndices.map(i => opts[i]).filter(v => v !== undefined);
+            } else {
+              const idx = typeof n.selectedIndex === 'number' ? n.selectedIndex : (n.type === 'combobox' ? 0 : -1);
+              if (idx >= 0 && opts[idx] !== undefined) this.selectedOptions[n.scopedId] = opts[idx];
+            }
+          } else if (typeof n.selected === 'boolean') {
+            this.selectedNodes[n.scopedId] = n.selected;
           }
           if (n.type === 'dynamic-panel' && n.activeStateId) {
             this.panelStates[n.scopedId] = n.activeStateId;
@@ -768,7 +848,15 @@ function buildAppJs(bundlePayload) {
       if (!node) return '';
       const scoped = node.scopedId;
       if (scoped in this.inputs) return String(this.inputs[scoped] ?? '');
+      if (scoped in this.selectedOptions) {
+        const sel = this.selectedOptions[scoped];
+        return Array.isArray(sel) ? sel.join(', ') : String(sel ?? '');
+      }
       if (scoped in this.textOverrides) return String(this.textOverrides[scoped] ?? '');
+      if (node.type === 'combobox' || node.type === 'listbox') {
+        const opts = Array.isArray(node.options) ? node.options : [];
+        return String(opts[node.selectedIndex ?? 0] ?? '');
+      }
       const raw = String(node.rawText ?? node.text ?? node.value ?? '');
       if (raw.startsWith('=')) {
         return String(this.evaluateExpression(raw, null, { pageId: node.pageId, scopePrefix: this.nodeScope(node) }) ?? '');
@@ -776,10 +864,32 @@ function buildAppJs(bundlePayload) {
       return raw;
     }
 
+    getWidgetState(widgetId, prop, { pageId = this.currentPageId, scopePrefix = this.interactionScope } = {}) {
+      const node = this.findNodeInPage(pageId, widgetId, { scopePrefix });
+      if (!node) return false;
+      const scoped = node.scopedId;
+      if (prop === 'checked') {
+        return scoped in this.checked ? Boolean(this.checked[scoped]) : Boolean(node.checked);
+      }
+      if (prop === 'selected') {
+        if (node.type === 'checkbox' || node.type === 'radio') {
+          return scoped in this.checked ? Boolean(this.checked[scoped]) : Boolean(node.checked);
+        }
+        if (node.type === 'combobox' || node.type === 'listbox') {
+          if (scoped in this.selectedOptions) return this.selectedOptions[scoped];
+          const opts = Array.isArray(node.options) ? node.options : [];
+          return opts[node.selectedIndex ?? 0] ?? '';
+        }
+        return scoped in this.selectedNodes ? Boolean(this.selectedNodes[scoped]) : Boolean(node.selected);
+      }
+      return false;
+    }
+
     evaluateExpression(expr, itemRow = null, context = {}) {
       return evaluatePrototypeExpression(expr, {
         variables: this.variables,
         getWidgetText: target => this.getWidgetText(target, context),
+        getWidgetState: (target, prop) => this.getWidgetState(target, prop, context),
         resolveDatasetPath: (name, prop) => this.resolveDatasetPath(name, prop),
         itemRow,
       });
@@ -900,8 +1010,92 @@ function buildAppJs(bundlePayload) {
       return this.getState();
     }
 
+    _allNodesForPage(pageId) {
+      const pg = (this.bundle.pages || []).find(p => p.id === pageId || p.name === pageId);
+      if (!pg) return [];
+      const all = new Map((pg.nodes || []).map(n => [n.scopedId, n]));
+      for (const states of Object.values(pg.panelStateNodes || {})) {
+        for (const stNodes of Object.values(states || {})) {
+          for (const sn of stNodes || []) all.set(sn.scopedId, sn);
+        }
+      }
+      return [...all.values()];
+    }
+
+    setChecked(targetId, val, executed = null) {
+      const node = this.findNodeInPage(this.currentPageId, targetId);
+      if (!node) throw new Error('未找到指定作用域目标: ' + targetId);
+      const scoped = node.scopedId;
+      const cur = scoped in this.checked ? Boolean(this.checked[scoped]) : Boolean(node.checked);
+      const next = val === 'toggle' ? !cur : Boolean(val);
+      if (node.type === 'radio' && next) {
+        const grp = node.group || node.selectionGroup;
+        if (grp) {
+          for (const cand of this._allNodesForPage(node.pageId)) {
+            if (cand.type === 'radio' && (cand.group || cand.selectionGroup) === grp && cand.scopedId !== scoped) {
+              this.checked[cand.scopedId] = false;
+            }
+          }
+        }
+      }
+      this.checked[scoped] = next;
+      this._refreshDatasetBoundText();
+      if (executed) executed.push({ action: 'set-check', target: scoped, checked: next });
+      return next;
+    }
+
+    setSelected(targetId, val, executed = null) {
+      const node = this.findNodeInPage(this.currentPageId, targetId);
+      if (!node) throw new Error('未找到指定作用域目标: ' + targetId);
+      const scoped = node.scopedId;
+      const cur = scoped in this.selectedNodes ? Boolean(this.selectedNodes[scoped]) : Boolean(node.selected);
+      const next = val === 'toggle' ? !cur : Boolean(val);
+      if (next && node.selectionGroup) {
+        for (const cand of this._allNodesForPage(node.pageId)) {
+          if (cand.selectionGroup === node.selectionGroup && cand.scopedId !== scoped) {
+            this.selectedNodes[cand.scopedId] = false;
+          }
+        }
+      }
+      this.selectedNodes[scoped] = next;
+      if (executed) executed.push({ action: 'set-selected', target: scoped, selected: next });
+      return next;
+    }
+
+    setOption(targetId, val, executed = null) {
+      const node = this.findNodeInPage(this.currentPageId, targetId);
+      if (!node) throw new Error('未找到指定作用域目标: ' + targetId);
+      const scoped = node.scopedId;
+      const opts = Array.isArray(node.options) ? node.options : [];
+      if (node.type === 'listbox' && node.multiple) {
+        if (Array.isArray(val)) {
+          this.selectedOptions[scoped] = val.map(v => typeof v === 'number' && opts[v] !== undefined ? opts[v] : String(v));
+        } else {
+          const curList = Array.isArray(this.selectedOptions[scoped]) ? [...this.selectedOptions[scoped]] : [];
+          const strVal = typeof val === 'number' && opts[val] !== undefined ? opts[val] : String(val ?? '');
+          const pos = curList.indexOf(strVal);
+          if (pos >= 0) curList.splice(pos, 1);
+          else curList.push(strVal);
+          this.selectedOptions[scoped] = curList;
+        }
+      } else {
+        this.selectedOptions[scoped] = typeof val === 'number' && opts[val] !== undefined ? opts[val] : String(val ?? '');
+      }
+      this._refreshDatasetBoundText();
+      if (executed) executed.push({ action: 'set-option', target: scoped, value: this.selectedOptions[scoped] });
+      return this.selectedOptions[scoped];
+    }
+
     setInput(targetId, value) {
-      const stripped = this.targetKey(targetId);
+      const node = this.findNodeInPage(this.currentPageId, targetId);
+      if (!node) throw new Error('未找到指定作用域目标: ' + targetId);
+      const stripped = node.scopedId;
+      if (node.type === 'combobox' || node.type === 'listbox') {
+        const sel = this.setOption(stripped, value);
+        this.trace.push({ step: this.trace.length + 1, type: 'select-option', pageId: this.currentPageId, targetId: stripped, value: sel });
+        this.render();
+        return this.getState();
+      }
       this.inputs[stripped] = String(value);
       this.trace.push({ step: this.trace.length + 1, type: 'input', pageId: this.currentPageId, targetId: stripped, value: String(value) });
       this.render();
@@ -918,7 +1112,12 @@ function buildAppJs(bundlePayload) {
       }
       const clickSpec = node.on?.click;
       const executed = [];
-      if (clickSpec && !['disabled', 'loading'].includes(node.state)) {
+      const isDisabled = Boolean(node.disabled) || ['disabled', 'loading'].includes(node.state);
+      if (!isDisabled) {
+        if (node.type === 'checkbox') this.setChecked(stripped, 'toggle', executed);
+        else if (node.type === 'radio') this.setChecked(stripped, true, executed);
+      }
+      if (clickSpec && !isDisabled) {
         const before = this.interactionScope;
         this.interactionScope = this.nodeScope(node);
         try {
@@ -1059,6 +1258,9 @@ function buildAppJs(bundlePayload) {
         currentPageId: this.currentPageId,
         variables: structuredClone(this.variables),
         inputs: structuredClone(this.inputs),
+        checked: structuredClone(this.checked),
+        selectedOptions: structuredClone(this.selectedOptions),
+        selectedNodes: structuredClone(this.selectedNodes),
         panelStates: structuredClone(this.panelStates),
         datasets: visibleDatasets,
         traceLength: this.trace.length,
@@ -1116,6 +1318,27 @@ function buildAppJs(bundlePayload) {
               const actualSt = this.panelStates[this.targetKey(panelId)];
               if (actualSt !== stId) {
                 failures.push('Expected panelState[' + panelId + ']=' + stId + ', got ' + actualSt);
+              }
+            }
+          }
+          if (step.expect.checked) {
+            for (const [nodeId, expChk] of Object.entries(step.expect.checked)) {
+              const actualChk = Boolean(this.getWidgetState(nodeId, 'checked'));
+              if (actualChk !== Boolean(expChk)) {
+                failures.push('Expected checked[' + nodeId + ']=' + expChk + ', got ' + actualChk);
+              }
+            }
+          }
+          if (step.expect.selected) {
+            for (const [nodeId, expSel] of Object.entries(step.expect.selected)) {
+              const actualSel = this.getWidgetState(nodeId, 'selected');
+              const ok = typeof expSel === 'boolean'
+                ? Boolean(actualSel) === expSel
+                : Array.isArray(expSel)
+                  ? JSON.stringify(actualSel) === JSON.stringify(expSel)
+                  : String(actualSel) === String(expSel);
+              if (!ok) {
+                failures.push('Expected selected[' + nodeId + ']=' + JSON.stringify(expSel) + ', got ' + JSON.stringify(actualSel));
               }
             }
           }
@@ -1336,12 +1559,21 @@ function buildAppJs(bundlePayload) {
 
     _createNodeElement(n, vis, rowContext) {
       const isBtn = n.type === 'button' && (n.hasSupportedInteraction || !n.unsupportedInteractions?.length);
-      const el = document.createElement(n.type === 'input' ? 'input' : isBtn ? 'button' : 'div');
+      const tagName = n.type === 'input'
+        ? (n.multiline ? 'textarea' : 'input')
+        : n.type === 'combobox'
+          ? 'select'
+          : isBtn
+            ? 'button'
+            : 'div';
+      const el = document.createElement(tagName);
       if (isBtn) el.type = 'button';
-      if (n.type === 'input') el.type = 'text';
+      if (n.type === 'input' && !n.multiline) el.type = 'text';
+      if (n.disabled && ['input', 'combobox'].includes(n.type)) el.disabled = true;
 
+      const isCheckOrRadio = n.type === 'checkbox' || n.type === 'radio';
       el.className = 'export-node export-node-' + n.type +
-        (n.hasSupportedInteraction ? ' is-interactive' : '') +
+        ((n.hasSupportedInteraction || isCheckOrRadio) ? ' is-interactive' : '') +
         (n.unsupportedInteractions?.length && !n.hasSupportedInteraction ? ' is-unsupported-interaction' : '');
       el.setAttribute('data-node-id', n.id);
       el.setAttribute('data-scoped-id', n.scopedId);
@@ -1357,11 +1589,14 @@ function buildAppJs(bundlePayload) {
       el.style.width = n.w + 'px';
       el.style.height = n.h + 'px';
       el.style.zIndex = String(n.renderOrder || 1);
-      el.style.display = vis ? (n.type === 'button' || n.textAlign === 'center' ? 'flex' : 'block') : 'none';
+      el.style.display = vis ? (n.type === 'button' || n.textAlign === 'center' || isCheckOrRadio || n.type === 'listbox' ? 'flex' : 'block') : 'none';
 
-      if (n.fill && n.type !== 'path') el.style.background = n.fill;
+      const isSelectedVisual = (n.scopedId in this.selectedNodes ? this.selectedNodes[n.scopedId] : n.selected) && ['label', 'paragraph', 'button', 'badge'].includes(n.type);
+      if (isSelectedVisual && !n.fill) el.style.background = '#DCEFE6';
+      else if (n.fill && n.type !== 'path') el.style.background = n.fill;
       for (const [key, value] of Object.entries(n.paint || {})) el.style.setProperty(key, value);
-      if (n.stroke && n.strokeWidth > 0 && n.type !== 'path') {
+      if (isSelectedVisual && !n.stroke) el.style.border = '1px solid #2E6F57';
+      else if (n.stroke && n.strokeWidth > 0 && n.type !== 'path') {
         el.style.border = n.strokeWidth + 'px ' + (n.strokeStyle || 'solid') + ' ' + n.stroke;
       }
       if (n.radius > 0) el.style.borderRadius = n.radius + 'px';
@@ -1419,11 +1654,95 @@ function buildAppJs(bundlePayload) {
         el.style.color = n.color || '#1E293B';
         el.style.fontSize = (n.fontSize || 14) + 'px';
         el.style.fontFamily = (n.fontFamily || 'PingFang SC') + ', sans-serif';
-        el.style.padding = '0 12px';
+        el.style.padding = n.multiline ? '8px 12px' : '0 12px';
+        if (n.multiline) el.style.resize = 'none';
         el.addEventListener('input', e => {
           const v = e.target.value;
           this.inputs[n.scopedId] = v;
         });
+      } else if (n.type === 'checkbox' || n.type === 'radio') {
+        const isChecked = n.scopedId in this.checked ? Boolean(this.checked[n.scopedId]) : Boolean(n.checked);
+        el.setAttribute('data-checked', String(isChecked));
+        el.style.alignItems = 'center';
+        el.style.gap = '8px';
+        el.style.color = n.color || '#1E293B';
+        el.style.fontSize = (n.fontSize || 14) + 'px';
+        el.style.fontFamily = (n.fontFamily || 'PingFang SC') + ', sans-serif';
+        const ind = document.createElement('span');
+        Object.assign(ind.style, {
+          width: '16px', height: '16px', flexShrink: '0', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          borderRadius: n.type === 'radio' ? '50%' : '4px',
+          border: '1.5px solid ' + (isChecked ? '#2E6F57' : '#94A3B8'),
+          background: isChecked ? '#2E6F57' : '#FFFFFF',
+          color: '#FFFFFF', fontSize: '11px', lineHeight: '1',
+        });
+        if (isChecked) {
+          if (n.type === 'radio') {
+            const dot = document.createElement('span');
+            Object.assign(dot.style, { width: '6px', height: '6px', borderRadius: '50%', background: '#FFFFFF', display: 'block' });
+            ind.appendChild(dot);
+          } else {
+            ind.textContent = '✓';
+          }
+        }
+        const lbl = document.createElement('span');
+        lbl.textContent = rowContext ? n.text : this.getWidgetText(n.scopedId);
+        el.appendChild(ind);
+        el.appendChild(lbl);
+      } else if (n.type === 'combobox') {
+        const opts = Array.isArray(n.options) ? n.options : [];
+        const sel = n.scopedId in this.selectedOptions ? this.selectedOptions[n.scopedId] : (opts[n.selectedIndex ?? 0] ?? '');
+        el.style.color = n.color || '#1E293B';
+        el.style.fontSize = (n.fontSize || 14) + 'px';
+        el.style.fontFamily = (n.fontFamily || 'PingFang SC') + ', sans-serif';
+        el.style.padding = '0 28px 0 12px';
+        for (const opt of opts) {
+          const optEl = document.createElement('option');
+          optEl.value = opt;
+          optEl.textContent = opt;
+          if (String(opt) === String(sel)) optEl.selected = true;
+          el.appendChild(optEl);
+        }
+        el.addEventListener('change', e => {
+          this.setInput(n.scopedId, e.target.value);
+        });
+      } else if (n.type === 'listbox') {
+        const opts = Array.isArray(n.options) ? n.options : [];
+        const rtSel = n.scopedId in this.selectedOptions ? this.selectedOptions[n.scopedId] : null;
+        const selSet = new Set(
+          rtSel !== null
+            ? (Array.isArray(rtSel) ? rtSel.map(String) : [String(rtSel)])
+            : Array.isArray(n.selectedIndices)
+              ? n.selectedIndices.map(i => String(opts[i] ?? ''))
+              : typeof n.selectedIndex === 'number' && opts[n.selectedIndex] !== undefined
+                ? [String(opts[n.selectedIndex])]
+                : []
+        );
+        el.style.flexDirection = 'column';
+        el.style.gap = '2px';
+        el.style.padding = '4px';
+        el.style.overflowY = 'auto';
+        el.style.color = n.color || '#1E293B';
+        el.style.fontSize = (n.fontSize || 14) + 'px';
+        el.style.fontFamily = (n.fontFamily || 'PingFang SC') + ', sans-serif';
+        for (const opt of opts) {
+          const itemEl = document.createElement('div');
+          const active = selSet.has(String(opt));
+          Object.assign(itemEl.style, {
+            padding: '6px 10px', borderRadius: '6px', cursor: n.disabled ? 'not-allowed' : 'pointer',
+            background: active ? '#DCEFE6' : 'transparent',
+            color: active ? '#2E6F57' : 'inherit',
+            fontWeight: active ? '600' : '400',
+          });
+          itemEl.textContent = opt;
+          if (!n.disabled) {
+            itemEl.addEventListener('click', e => {
+              e.stopPropagation();
+              this.setInput(n.scopedId, opt);
+            });
+          }
+          el.appendChild(itemEl);
+        }
       } else {
         const displayText = rowContext ? n.text : this.getWidgetText(n.scopedId);
         if (displayText || ['label', 'paragraph', 'button', 'badge'].includes(n.type)) {
@@ -1452,7 +1771,7 @@ function buildAppJs(bundlePayload) {
         }
       }
 
-      if (n.hasSupportedInteraction && n.on?.click) {
+      if ((n.hasSupportedInteraction && n.on?.click) || ((n.type === 'checkbox' || n.type === 'radio') && !n.disabled)) {
         el.addEventListener('click', e => {
           e.stopPropagation();
           const targetId = rowContext && n.id.includes('__') ? n.id.split('__')[0] : n.scopedId;

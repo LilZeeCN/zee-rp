@@ -168,14 +168,17 @@ export function setupCanvasInteractions({
     }
 
     if (state.mode === 'interact') {
+      if (e.target.closest('input, textarea, select, [data-runtime-select], [data-runtime-listbox-option]')) {
+        return;
+      }
       let nodeEl = e.target.closest('.studio-node');
       const nodes = state.runtimeState?.activePageScene?.nodes || [];
       while (nodeEl) {
         const node = nodes.find(n => n.scopedId === nodeEl.dataset.scopedId);
-        if (node?.interactive === false || node?.on?.click) break;
+        if (node?.interactive === false || node?.on?.click || node?.type === 'checkbox' || node?.type === 'radio') break;
         nodeEl = nodeEl.parentElement?.closest('.studio-node');
       }
-      if (nodeEl && nodeEl.tagName !== 'INPUT') {
+      if (nodeEl && !['INPUT', 'TEXTAREA', 'SELECT'].includes(nodeEl.tagName)) {
         const nodeId = nodeEl.getAttribute('data-scoped-id');
         try {
           await onRuntimeClick(nodeId);

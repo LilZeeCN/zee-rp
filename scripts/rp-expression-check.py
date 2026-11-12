@@ -50,6 +50,17 @@ def infer(node, variables):
     if "widget" in node:
         return "text"
     if "_auto_path" in node:
+        parts = str(node["_auto_path"]).split(".")
+        if parts[0] == "var" and len(parts) == 2 and parts[1]:
+            name = parts[1]
+            if name not in variables:
+                raise ValueError(failure("E_VARIABLE", f'Unknown variable "{name}"'))
+            return variables[name]
+        if parts[0] == "widget" and len(parts) == 3 and parts[1]:
+            if parts[2] == "checked":
+                return "boolean"
+            if parts[2] in ("text", "value"):
+                return "text"
         return None
     if "op" in node:
         left = infer(node.get("left"), variables)
