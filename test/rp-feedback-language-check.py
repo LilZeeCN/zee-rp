@@ -62,10 +62,12 @@ class FeedbackContracts(unittest.TestCase):
                 self.rejects(lambda:compile_language(s),code,'/pages/0/root/children/0/'+suffix)
 
     def test_macro_events_preserved_or_rejected(self):
+        s=spec([{'type':'form-card','id':'form','fields':[{'id':'name'}],'onMouseOver':{'set':{'@name':'Hovered'}}}])
+        rt=ReferenceRuntime(s);rt.trigger('form','mouseover')
+        self.assertEqual(rt.widgets[rt.resolve_trigger_name('name')]['text'],'Hovered')
         s=spec([{'type':'form-card','id':'form','fields':[{'id':'name'}],'onLoad':{'set':{'@name':'Loaded'}}}])
-        rt=ReferenceRuntime(s)
-        self.assertEqual(rt.widgets[rt.resolve_trigger_name('name')]['text'],'Loaded')
-        s['pages'][0]['root']['children'][0]['onChange']={'set':{'$hit':'bad'}}
+        self.rejects(lambda:compile_language(s),'E_EVENT_TARGET','/pages/0/root/children/0/onLoad')
+        s=spec([{'type':'form-card','id':'form','fields':[{'id':'name'}],'onChange':{'set':{'$hit':'bad'}}}])
         self.rejects(lambda:compile_language(s),'E_EVENT_TARGET','/pages/0/root/children/0/onChange')
 
     def test_macro_source_pointers_exist(self):

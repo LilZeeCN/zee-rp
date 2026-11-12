@@ -5,6 +5,7 @@
  *  - 过滤结果进入 language-ir（模板与行数一致）
  *  - 表达式非法时报 E_WHERE，而不是静默 0 行
  */
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -14,10 +15,10 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = mkdtempSync(join(tmpdir(), 'zee-where-'));
-let failures = 0;
-const check = (name, fn) => {
-  try { fn(); console.log(`  ok   ${name}`); } catch (err) { failures++; console.error(`  FAIL ${name}\n       ${err.message}`); }
-};
+after(() => {
+  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+});
+const check = (name, fn) => test(name, fn);
 
 const spec = join(dir, 'rows.rp1');
 writeFileSync(spec, [
@@ -61,6 +62,4 @@ try {
 }
 check('非法 where 明确报错', () => assert.match(badError, /E_WHERE|E_[A-Z]+/));
 
-try { rmSync(dir, { recursive: true, force: true }); } catch {}
-if (failures) { console.error(`\n${failures} 项失败`); process.exit(1); }
-console.log('\n全部通过');
+// 临时目录由 after() 钩子统一回收。

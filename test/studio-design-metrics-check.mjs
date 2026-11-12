@@ -5,20 +5,19 @@
  *  - 好页面必须不误伤
  *  - 不返回"审美总分"
  */
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { studioHandlers } from '../studio/mcp-adapter.mjs';
+import { closeInProcessStudioServer, studioHandlers } from '../studio/mcp-adapter.mjs';
 
-let failures = 0;
-const check = (name, fn) => {
-  try { fn(); console.log(`  ok   ${name}`); } catch (err) { failures++; console.error(`  FAIL ${name}\n       ${err.message}`); }
-};
-
+test('设计度量层（L1 指标 + 反 slop）', async (t) => {
+const checks = [];
+const check = (name, fn) => { checks.push([name, fn]); };
 const dir = mkdtempSync(join(tmpdir(), 'zee-metrics-'));
-
-const bad = await studioHandlers.studio_open_project({ projectDir: dir, name: '反例', port: 4531 });
+try {
+const bad = await studioHandlers.studio_open_project({ projectDir: dir, name: '反例', port: 0 });
 const rev0 = bad.appliedRevision;
 
 // 一屏典型的"AI 默认版式"
@@ -330,7 +329,11 @@ if (fixedBind.ok) {
   });
 }
 
-try { rmSync(dir, { recursive: true, force: true }); } catch {}
-if (failures) { console.error(`\n${failures} 项失败`); process.exit(1); }
-console.log('\n全部通过');
-process.exit(0);
+for (const [name, fn] of checks) {
+  await t.test(name, fn);
+}
+} finally {
+  await closeInProcessStudioServer();
+  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+}
+});

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { TEST_DIR } from './fixture-summary.mjs';
+import { fixturePath as resolveFixturePath, hasPrivateFixtures } from './native-inputs.mjs';
 import { validateSemantics, validateRecord } from './check-semantics.mjs';
 import { readRecords, replaceRecord, encodeRecord } from '../scripts/rp-records.mjs';
 import { parsePayload, encodePayload, field, walkNodes } from '../scripts/parse-payload.mjs';
@@ -15,7 +16,7 @@ export function runSemanticsChecks() {
     catch (err) { results.push({ name, passed: false, detail: err.message }); }
   };
 
-  const fixturePath = join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp');
+  const fixturePath = resolveFixturePath('var-set-counter-roundtrip.rp');
   const validBytes = readFileSync(fixturePath);
 
   check('正常原生 fixture 结构与语义闭环体检全部通过 (0 violations)', () => {
@@ -112,7 +113,7 @@ export function runSemanticsChecks() {
   });
 
   check('拦截负例: ReferenceDiagramObject 指向未在 DesignDocument 登记的 Master GUID', () => {
-    const masterFixture = join(TEST_DIR, 'fixtures', 'master-override-writer-image-roundtrip.rp');
+    const masterFixture = resolveFixturePath('master-override-writer-image-roundtrip.rp');
     const mBytes = readFileSync(masterFixture);
     const records = readRecords(mBytes);
     let targetRec = null, graph = null, rdo = null;
@@ -156,7 +157,7 @@ export function runSemanticsChecks() {
   });
 
   check('clonePageByIndex 复制含交互页面保留 tag 0x16 整数槽位与三零语义', () => {
-    const srcBytes = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
+    const srcBytes = readFileSync(resolveFixturePath('var-set-counter-roundtrip.rp'));
     const cloned = clonePageByIndex(srcBytes, 4, 'CLONED_INTERACTIVE_PAGE');
     const health = readRp(cloned.file, { full: true });
     assert.equal(health.records.unparseable, 0);
@@ -184,6 +185,10 @@ export function runSemanticsChecks() {
 }
 
 if (process.argv[1] && process.argv[1].endsWith('semantics-check.mjs')) {
+  if (!hasPrivateFixtures()) {
+    console.log('SKIP  semantics-check.mjs: 未检测到本地私有 .rp 样本包（设置 AXURE_FIXTURE_ROOT 可运行）');
+    process.exit(0);
+  }
   const results = runSemanticsChecks();
   console.log(JSON.stringify(results, null, 2));
   const failed = results.filter(r => !r.passed);

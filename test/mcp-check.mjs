@@ -1,3 +1,4 @@
+// 特殊形态保留理由（gaps #7）：单会话 MCP stdio 客户端顺序流门禁，在末行输出结构化 JSON 汇总供打包与发布脚本解析。
 import assert from 'node:assert/strict';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

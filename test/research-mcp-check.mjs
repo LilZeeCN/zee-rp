@@ -7,7 +7,13 @@ import { fileURLToPath } from 'node:url';
 import { readRp } from '../scripts/rp-read.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { field, parsePayload } from '../scripts/parse-payload.mjs';
-import { commitChainNode, openSession } from '../scripts/mcp-tools.mjs';
+import { commitChainNode, jobTools, listMcpTools, openSession } from '../scripts/mcp-tools.mjs';
+import { fixturePath, hasPrivateFixtures } from './native-inputs.mjs';
+
+if (!hasPrivateFixtures()) {
+  console.log('SKIP  research-mcp-check.mjs: 未检测到本地私有 .rp 样本包（设置 AXURE_FIXTURE_ROOT 可运行完整 MCP 样本回归）');
+  process.exit(0);
+}
 
 let Client, StdioClientTransport;
 try {
@@ -26,7 +32,7 @@ try {
 const skill = dirname(dirname(fileURLToPath(import.meta.url)));
 const serverRoot = process.env.AXURE_MCP_TEST_ROOT ?? skill;
 const work = mkdtempSync(join(tmpdir(), 'axure-mcp-check-'));
-const fixture = name => join(process.env.AXURE_FIXTURE_ROOT || join(skill, 'test/fixtures'), name);
+const fixture = name => fixturePath(name);
 const env = Object.fromEntries(Object.entries(process.env).filter(([, v]) => typeof v === 'string'));
 env.AXURE_WRITE_ROOT = work;
 const transport = new StdioClientTransport({ command: process.execPath, args: [join(serverRoot, 'bin/mcp.mjs')], env, stderr: 'pipe' });
@@ -43,11 +49,10 @@ process.env.AXURE_PROTECTED_PATHS = protectedPath;
 
 try {
   await client.connect(transport);
-  await check('stdio 初始化与注册表 30 命令', async () => {
+  await check('stdio 初始化与注册表全部命令工具对齐', async () => {
     const { tools } = await client.listTools();
-    // 会话层意图工具加入 listMcpTools 后，本断言的排除集同步扩展；命令工具数本身不变。
-    const sessionNames = new Set(['axure_open', 'axure_state', 'axure_save', 'locate', 'inspect', 'read_interactions', 'edit_text', 'set_widget_geometry', 'set_widget_style', 'verify', 'sync_prototype', 'generate_from_image']);
-    assert.equal(tools.filter(t => !t.name.startsWith('jobs_') && t.name !== 'gui_roundtrip' && !sessionNames.has(t.name)).length, 31);
+    const expected = [...listMcpTools(), ...jobTools].map(t => t.name).sort();
+    assert.deepEqual(tools.map(t => t.name).sort(), expected);
     for (const name of ['rp_read', 'add_interaction', 'fill_panel_state', 'set_widget_text']) {
       const schema = tools.find(t => t.name === name).inputSchema;
       assert.equal(schema.oneOf.length, 2);

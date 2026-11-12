@@ -33,7 +33,7 @@ def fixture():
 
 def cli(*args, ok=True):
     p = subprocess.run(['node', str(ROOT / 'scripts/proto.mjs'), *map(str, args)], capture_output=True, text=True)
-    raw = p.stdout if p.returncode == 0 else p.stderr
+    raw = (p.stdout or p.stderr).strip()
     try:
         result = json.loads(raw)
     except json.JSONDecodeError as error:
@@ -89,8 +89,11 @@ with tempfile.TemporaryDirectory() as td:
         check('invalid simulation steps ' + repr(invalid), lambda: cli('simulate', '--spec', source, '--steps', steps, ok=False))
 
 
+VALIDATOR = Draft202012Validator(language_schema())
+
+
 def parity(label, source, valid):
-    schema_valid = not list(Draft202012Validator(language_schema()).iter_errors(source))
+    schema_valid = not list(VALIDATOR.iter_errors(source))
     try:
         compile_language(source)
         compiler_valid = True
@@ -118,7 +121,7 @@ valid_programs = {
     'page load single action': {'language': 'rp/1', 'variables': {'count': 0}, 'pages': [{'id': 'main', 'canvas': [375, 812], 'root': {'label': 'title', 'text': 'Hello'}, 'onLoad': {'set': {'$count': 1}}}]},
     'conditional do sugar': program({'button': 'go', 'text': 'Go', 'onClick': {'cases': [{'when': True, 'do': {'set-variable': 'count', 'value': 1}}, {'else': True, 'actions': [{'set-variable': 'count', 'value': 2}]}]}}, variables={'count': 0}),
     'form-card': program({'form-card': 'edit', 'title': 'Edit', 'fields': [{'id': 'name', 'label': 'Name', 'h': 40}], 'onSubmit': {'set': {'@name': 'Done'}}}),
-    'macro load event': program({'form-card': 'edit', 'fields': [{'id': 'name'}], 'onLoad': {'set': {'$count': 1}}}, variables={'count': 0}),
+    'macro hover event': program({'form-card': 'edit', 'fields': [{'id': 'name'}], 'onMouseOver': {'set': {'$count': 1}}}, variables={'count': 0}),
     'kv-list': program({'type': 'kv-list', 'id': 'detail', 'items': [{'label': 'Title', 'value': 'Compiler'}]}),
     'searchable-list': program({'searchable-list': 'booksView', 'dataset': 'books', 'searchField': 'title', 'filterField': 'category', 'filters': [{'label': 'All', 'all': True}, {'label': 'CS', 'value': 'CS'}], 'template': {'label': 'title', 'text': '${row.title}'}}, **data),
     'searchable-list empty filters': program({'searchable-list': 'booksView', 'dataset': 'books', 'searchField': 'title', 'filters': [], 'template': {'label': 'title', 'text': '${row.title}'}}, **data),

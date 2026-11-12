@@ -3,6 +3,7 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import vm from 'node:vm';
 import { TEST_DIR } from './fixture-summary.mjs';
+import { fixturePath } from './native-inputs.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { field, parsePayload } from '../scripts/parse-payload.mjs';
 import { addInteractions, WIDGET_PATH_FCALLS, FCALL_SPECS } from '../scripts/ix-actions.mjs';
@@ -16,7 +17,7 @@ export async function runConditionExpressionChecks() {
   };
 
   await check('nested BinaryExpr and multi-argument FCall serialization', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
+    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
     const { file } = addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{
@@ -52,7 +53,7 @@ export async function runConditionExpressionChecks() {
   });
 
   await check('reject incomplete nested BinaryExpr before output', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
+    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{
@@ -68,7 +69,7 @@ export async function runConditionExpressionChecks() {
       { file: 'var-set-counter-roundtrip.rp', target: 'VALUE_PREVIEW', expected: 'SetWidgetRichText', value: 'VECTOR_WRITE_TEST' },
     ];
     for (const item of cases) {
-      const source = readFileSync(join(TEST_DIR, 'fixtures', item.file));
+      const source = readFileSync(fixturePath(item.file));
       const { file } = addInteractions(source, 'SET_BUTTON', [{
         event: 'OnClick',
         actions: [{ type: 'set-text', target: item.target, text: item.value }],
@@ -92,7 +93,7 @@ export async function runConditionExpressionChecks() {
   });
 
   await check('FCall function names outside the static registry are rejected', async () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
+    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ when: { op: '==', left: { fn: 'MadeUpFunction', args: [{ value: 'x' }] }, right: { value: 'y' } }, actions: [{ type: 'wait', ms: 1 }] }],
@@ -105,7 +106,7 @@ export async function runConditionExpressionChecks() {
   });
 
   await check('FCall argument arity mismatch is rejected before serialization', async () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
+    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{ when: { op: '==', left: { fn: 'ValueContains', args: [{ value: 'abc' }] }, right: { value: 'y' } }, actions: [{ type: 'wait', ms: 1 }] }],
@@ -123,7 +124,7 @@ export async function runConditionExpressionChecks() {
   });
 
   await check('{variable} condition side resolves to GetGlobalVariableValue FCall and GlobalVariableLiteral', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
+    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
     const { file } = addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
       cases: [{
@@ -150,7 +151,7 @@ export async function runConditionExpressionChecks() {
   });
 
   await check('FCall {widget, fn} gate rejects non-widget functions and unknown functions', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
+    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
     // 负例 1: 传两参函数 ValueContains 到单一元件路径入口
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
@@ -178,7 +179,7 @@ export async function runConditionExpressionChecks() {
   });
 
   await check('FCall argument category and shape contract enforcement', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
+    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
     // 负例 1: widgetPath 函数传纯 scalar
     assert.throws(() => addInteractions(source, 'SET_BUTTON', [{
       event: 'OnClick',
@@ -217,7 +218,7 @@ export async function runConditionExpressionChecks() {
     //   依据 ArrayExpr.rv2F/Bv2O 只序列化 `items`（REA），且 RP 9 原生预览实测行为正确。
     // **items 里不得套 OptionLiteral** —— 套了 RP 9 预览整页空白（7243 空白 vs 9024 正常）。
     // 参数形状不对（不是 { array: [...] }）仍必须报错，不能静默产出坏文件。
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
+    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
     for (const fn of ['IsValueOneOf', 'IsValueNotOneOf']) {
       const out = addInteractions(source, 'SET_BUTTON', [{
         event: 'OnClick',
@@ -277,7 +278,7 @@ export async function runConditionExpressionChecks() {
   });
 
   await check('condition side null、未定义操作符与歧义语义严谨拒绝', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
+    const source = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
 
     // 负例 1: side 为 null
     assert.throws(() => {

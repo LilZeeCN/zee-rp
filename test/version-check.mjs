@@ -12,6 +12,7 @@ import { execFileSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { TEST_DIR } from './fixture-summary.mjs';
+import { fixturePath, rp9FixturePath } from './native-inputs.mjs';
 import { readRecords, encodeRecord, replaceRecord } from '../scripts/rp-records.mjs';
 import { RP11_ONLY_KEYS, RP11_ONLY_DOA_CODES, DOA_BASE_MASK, DOA_RENAMED_SAME_SLOT, RP11_ONLY_FCALLS, RP11_ONLY_ACCESSORS, ACCESSOR_KEY_ALIASES, RP11_ONLY_EVENTS } from '../scripts/version-fields.mjs';
 import { REGISTERED_FCALLS, WIDGET_PATH_FCALLS, FCALL_SPECS } from '../scripts/ix-actions.mjs';
@@ -32,15 +33,15 @@ import { field } from '../scripts/parse-payload.mjs';
 const SKILL = join(TEST_DIR, '..');
 const SCRIPTS = join(SKILL, 'scripts');
 // RP 9 fixture 单独放：test/fixtures/ 由 manifest.json 驱动，不该混入未登记的样本。
-const RP9_FIXTURE = join(TEST_DIR, 'rp9-fixtures', 'rp9-clone-button.rp');
-const RP9_PANEL_FIXTURE = join(TEST_DIR, 'rp9-fixtures', 'rp9-panel-base.rp');
-const RP11_FIXTURE = join(TEST_DIR, 'fixtures', 'blank-ui-native.rp');
+const RP9_FIXTURE = rp9FixturePath('rp9-clone-button.rp');
+const RP9_PANEL_FIXTURE = rp9FixturePath('rp9-panel-base.rp');
+const RP11_FIXTURE = fixturePath('blank-ui-native.rp');
 // RP 9 原生母版真值：由 Axure RP 9 自己在 GUI 里建母版、粘贴内容后保存得到
-const RP9_MASTER_FIXTURE = join(TEST_DIR, 'rp9-fixtures', 'rp9-native-master-content.rp');
-const RP9_AV_FIXTURE = join(TEST_DIR, 'rp9-fixtures', 'rp9-adaptive-views.rp');
-const RP9_REPEATER_FIXTURE = join(TEST_DIR, 'rp9-fixtures', 'rp9-repeater-base.rp');
+const RP9_MASTER_FIXTURE = rp9FixturePath('rp9-native-master-content.rp');
+const RP9_AV_FIXTURE = rp9FixturePath('rp9-adaptive-views.rp');
+const RP9_REPEATER_FIXTURE = rp9FixturePath('rp9-repeater-base.rp');
 // 跨版本克隆的源：RP 11 内容（含 RP 11 专属键），用来验证克隆层会按目标版本裁剪
-const RP11_SOURCE_FOR_CROSS = join(TEST_DIR, 'rp9-fixtures', 'rp11-source-for-cross-version.rp');
+const RP11_SOURCE_FOR_CROSS = rp9FixturePath('rp11-source-for-cross-version.rp');
 
 // 【REA 真值】RP 9 Client.Mac.exe（sha256 0f40edf1…）各模型 rv2F 的字面锚点键集。
 // 恢复来源：rea/rp9-all-strings.json（31,264/31,264 处字符串调用命中，unmatched=0）。
@@ -227,7 +228,7 @@ export function runVersionChecks() {
   });
   check('阶段1 RP 11 路径保持 int 枚举与 Disabled（未回归）', () => {
     // 用 RP 11 fixture：取值必须仍是 int，且事件/Case/动作壳保留 Disabled
-    const rp11 = join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp');
+    const rp11 = fixturePath('var-set-counter-roundtrip.rp');
     const src = readFileSync(rp11);
     assert.equal(detectFileVersion(src), 11);
     const out = addInteractions(src, 'SET_BUTTON', [{ event: 'OnClick', actions: [{ type: 'enable' }] }]);
@@ -368,7 +369,7 @@ export function runVersionChecks() {
     try {
       const base = join(dir, 'b.rp');
       const out = join(dir, 'o.rp');
-      copyFileSync(join(TEST_DIR, 'rp9-fixtures', 'rp9-clone-button.rp'), base);
+      copyFileSync(rp9FixturePath('rp9-clone-button.rp'), base);
       execFileSync(process.execPath, [join(SCRIPTS, 'add-adaptive-view.mjs'), base, out, '768', '1024']);
       const fresh = readFileSync(out);
       assert.equal(objsOf(fresh, 'AdaptiveViewSet').length, 1, '现场产出应有 1 个视图集');
@@ -1015,7 +1016,7 @@ export function runVersionChecks() {
     //        RP 11 运行时有 onErrorSet/onErrorRemoved/ErrorState，RP 9 运行时全无。
     // 与 FCall 那次同类：名字在表里 ≠ 目标版本认得它。
     assert.deepEqual(RP11_ONLY_EVENTS, { OnErrorSet: 55, OnErrorRemoved: 56, OnBeforeItemLoad: 291 });
-    const src = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
+    const src = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
     for (const ev of Object.keys(RP11_ONLY_EVENTS)) {
       assert.throws(() => addInteractions(src, 'SET_BUTTON', [{ event: ev, actions: [{ type: 'wait', ms: 1 }] }], { version: 9 }),
         /RP 11-only/, `${ev} 在 RP 9 上必须被明确拒绝`);
@@ -1088,7 +1089,7 @@ export function runVersionChecks() {
     const rp9disable = run(mk('i.rp'), [{ type: 'disable' }], 'i-out.rp').bytes;
     assert.equal(readRp(rp9disable, { path: 'x' }).pages[0].widgets[0].interactions[0].cases[0].actions[0].type,
       'disable', 'RP 9 bool false 必须读成 disable');
-    const rp11 = readFileSync(join(TEST_DIR, 'fixtures', 'var-set-counter-roundtrip.rp'));
+    const rp11 = readFileSync(fixturePath('var-set-counter-roundtrip.rp'));
     const out11 = addInteractions(rp11, 'SET_BUTTON', [{ event: 'OnClick', actions: [{ type: 'enable' }] }]);
     assert.equal(readRp(out11.file, { path: 'x' }).pages[0].widgets
       .find(w => w.name === 'SET_BUTTON').interactions.at(-1).cases[0].actions[0].type,

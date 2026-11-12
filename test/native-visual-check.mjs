@@ -22,7 +22,7 @@ try {
   const page = plan.pages[0];
   check('native input keeps independent placeholder and requested text style', () => {
     assert.equal(page.nativeInputs[0].placeholder, '独立提示');
-    assert.deepEqual(page.nativeInputs[0].style, { fontSize: 16, fontWeight: 700, color: '#173A63', align: 'left', textPaddingX: 12 });
+    assert.deepEqual(page.nativeInputs[0].style, { fontSize: 16, fontWeight: 700, color: '#173A63', align: 'left', textPaddingX: 12, rotation: 0 });
   });
   check('repeater and panel scenes have no rectangular canvas under rounded content', () => {
     for (const scene of [page.repeaters[0].item.axvgPath, page.dynamicPanels[0].states[0].axvgPath])

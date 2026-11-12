@@ -1,60 +1,92 @@
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { resolveBlankTemplate } from '../scripts/blank-template.mjs';
+import { jobTools, listMcpTools } from '../scripts/mcp-tools.mjs';
+
+let Client, StdioClientTransport;
+try {
+  ({ Client } = await import('@modelcontextprotocol/sdk/client/index.js'));
+  ({ StdioClientTransport } = await import('@modelcontextprotocol/sdk/client/stdio.js'));
+} catch (err) {
+  if (process.argv.includes('--allow-missing-sdk') || process.env.AXURE_ALLOW_MISSING_SDK === '1') {
+    test('MCP jobs stdio check skipped (missing optional @modelcontextprotocol/sdk)', { skip: true }, () => {});
+    process.exit(0);
+  }
+  throw err;
+}
 
 const skill = dirname(dirname(fileURLToPath(import.meta.url)));
 const serverRoot = process.env.AXURE_MCP_TEST_ROOT ?? skill;
-const outputDir = resolve(process.argv[2] ?? 'gui-jobs-check');
-mkdirSync(outputDir, { recursive: true });
+const outputDir = mkdtempSync(join(tmpdir(), 'axure-mcp-jobs-check-'));
 const env = Object.fromEntries(Object.entries(process.env).filter(([, v]) => typeof v === 'string'));
 env.AXURE_WRITE_ROOT = outputDir;
-const client = new Client({ name: 'axure-mcp-gui-check', version: '1.0.0' });
+const client = new Client({ name: 'axure-mcp-jobs-check', version: '1.0.0' });
 const transport = new StdioClientTransport({ command: process.execPath, args: [join(serverRoot, 'bin/mcp.mjs')], env, stderr: 'pipe' });
-const results = [];
+
+after(async () => {
+  try { await client.close(); } catch {}
+  try { rmSync(outputDir, { recursive: true, force: true }); } catch {}
+});
+
 const call = async (name, input) => {
   const response = await client.callTool({ name, arguments: input });
-  assert.ok(!response.isError, response.content[0].text);
+  assert.ok(!response.isError, response.content?.[0]?.text);
   return JSON.parse(response.content[0].text);
 };
-const check = async (name, action) => {
-  try { await action(); results.push({ name, passed: true }); console.log(`PASS  ${name}`); }
-  catch (error) { results.push({ name, passed: false, detail: error.message }); console.log(`FAIL  ${name} — ${error.message}`); }
-};
-let handle;
-try {
-  await client.connect(transport);
-  await check('MCP 暴露 30 个命令、8 个意图与 4 个 job 工具', async () => assert.equal((await client.listTools()).tools.length, 42));
-  await check('gui_roundtrip 默认返回排队句柄', async () => {
-    handle = await call('gui_roundtrip', { source: join(skill, 'test/fixtures/var-set-counter-roundtrip.rp'), output: join(outputDir, 'mcp-gui-counter.rp') });
-    assert.equal(handle.status, 'queued'); assert.ok(handle.id);
-  });
-  await check('jobs_list/get 与排队取消', async () => {
-    assert.ok((await call('jobs_list', {})).some(j => j.id === handle.id));
-    const queued = await call('gui_roundtrip', { source: join(skill, 'test/fixtures/blank-ui-native.rp'), output: join(outputDir, 'cancelled-queued.rp') });
-    assert.equal((await call('jobs_cancel', { id: queued.id })).status, 'cancelled');
-    assert.equal((await call('jobs_get', { id: queued.id })).status, 'cancelled');
-  });
-  await check('真实 GUI 保存关闭重开与分层结果', async () => {
-    const deadline = Date.now() + 30000;
-    let job;
-    while (Date.now() < deadline) {
-      job = await call('jobs_get', { id: handle.id });
-      if (!['queued', 'running'].includes(job.status)) break;
-      await new Promise(r => setTimeout(r, 100));
-    }
-    writeFileSync(join(outputDir, 'mcp-job-result.json'), JSON.stringify(job, null, 2) + '\n', { flag: 'wx' });
-    assert.equal(job.status, 'completed', JSON.stringify(job));
-    for (const key of ['structure', 'guiSaved', 'closed', 'reopened']) assert.equal(job.validation[key], true);
-    assert.equal(job.validation.preview, false); assert.equal(job.validation.guiEdited, false);
-  });
-  await check('未知句柄和非法参数拒绝', async () => {
-    assert.ok((await client.callTool({ name: 'jobs_get', arguments: { id: 'missing' } })).isError);
-    assert.ok((await client.callTool({ name: 'jobs_list', arguments: { extra: true } })).isError);
-  });
-} finally { await client.close(); }
-const failed = results.filter(r => !r.passed).length;
-console.log(JSON.stringify({ total: results.length, passed: results.length - failed, failed, results }));
-process.exitCode = failed ? 1 : 0;
+
+await client.connect(transport);
+
+test('MCP 暴露完整注册表与 4 个 job 队列工具', async () => {
+  const expected = [...listMcpTools(), ...jobTools].map(t => t.name).sort();
+  const actual = (await client.listTools()).tools.map(t => t.name).sort();
+  assert.deepEqual(actual, expected);
+});
+
+test('异步队列提交、jobs_list/jobs_get 轮询与排队任务取消', async () => {
+  const firstOut = join(outputDir, 'async-first.rp');
+  const secondOut = join(outputDir, 'async-cancelled.rp');
+  const first = await call('generate_prototype', { recipe: 'mobile-cards', output: firstOut, async: true });
+  const second = await call('generate_prototype', { recipe: 'step-form', output: secondOut, async: true });
+  assert.ok(first.id);
+  assert.ok(second.id);
+  assert.ok(['queued', 'running'].includes(first.status));
+
+  const cancelled = await call('jobs_cancel', { id: second.id });
+  assert.equal(cancelled.status, 'cancelled');
+  assert.equal((await call('jobs_get', { id: second.id })).status, 'cancelled');
+
+  const list = await call('jobs_list', {});
+  assert.ok(list.some(j => j.id === first.id));
+
+  const deadline = Date.now() + 45000;
+  let finalJob = await call('jobs_get', { id: first.id });
+  while (Date.now() < deadline && ['queued', 'running'].includes(finalJob.status)) {
+    await new Promise(r => setTimeout(r, 150));
+    finalJob = await call('jobs_get', { id: first.id });
+  }
+  assert.equal(finalJob.status, 'completed', JSON.stringify(finalJob));
+  assert.equal(existsSync(firstOut), true);
+});
+
+test('未知句柄和非法参数拒绝', async () => {
+  assert.ok((await client.callTool({ name: 'jobs_get', arguments: { id: 'missing-job-id' } })).isError);
+  assert.ok((await client.callTool({ name: 'jobs_list', arguments: { extra: true } })).isError);
+});
+
+test('可选真实 macOS GUI 保存关闭重开往返', { skip: process.env.AXURE_RUN_LIVE_GUI !== '1' }, async () => {
+  const handle = await call('gui_roundtrip', { source: resolveBlankTemplate(), output: join(outputDir, 'mcp-gui-roundtrip.rp') });
+  const deadline = Date.now() + 45000;
+  let job = handle;
+  while (Date.now() < deadline && ['queued', 'running'].includes(job.status)) {
+    await new Promise(r => setTimeout(r, 150));
+    job = await call('jobs_get', { id: handle.id });
+  }
+  assert.equal(job.status, 'completed', JSON.stringify(job));
+  for (const key of ['structure', 'guiSaved', 'closed', 'reopened']) {
+    assert.equal(job.validation[key], true);
+  }
+});

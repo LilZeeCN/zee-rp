@@ -4,6 +4,7 @@ import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TEST_DIR } from './fixture-summary.mjs';
+import { fixturePath } from './native-inputs.mjs';
 import { setWidgetRichText } from '../scripts/set-widget-richtext.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { field, parsePayload } from '../scripts/parse-payload.mjs';
@@ -17,7 +18,7 @@ export function runRichTextParameterChecks() {
   };
 
   check('RichText paragraph lineSpacing writes native Float64 and preserves defaults', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'richtext-v2-gui-edit.rp'));
+    const source = readFileSync(fixturePath('richtext-v2-gui-edit.rp'));
     const { file } = setWidgetRichText(source, {
       page: 'Page 1', widget: 'RICH_TEXT',
       paragraphs: [
@@ -43,7 +44,7 @@ export function runRichTextParameterChecks() {
   });
 
   check('RichText paragraph lineSpacing rejects negative and non-finite values', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'richtext-v2-gui-edit.rp'));
+    const source = readFileSync(fixturePath('richtext-v2-gui-edit.rp'));
     for (const lineSpacing of [-1, Infinity, NaN]) {
       assert.throws(() => setWidgetRichText(source, {
         page: 'Page 1', widget: 'RICH_TEXT',
@@ -53,7 +54,7 @@ export function runRichTextParameterChecks() {
   });
 
   check('RichText run links clone native targets and preserve linked run text', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'richtext-hyperlink-template.rp'));
+    const source = readFileSync(fixturePath('richtext-hyperlink-template.rp'));
     const { file, report } = setWidgetRichText(source, {
       page: 'Page 1', widget: 'RICH_TEXT',
       paragraphs: [
@@ -97,7 +98,7 @@ export function runRichTextParameterChecks() {
   });
 
   check('RichText links reject missing pages and non-HTTP URL schemes', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'richtext-hyperlink-template.rp'));
+    const source = readFileSync(fixturePath('richtext-hyperlink-template.rp'));
     assert.throws(() => setWidgetRichText(source, {
       page: 'Page 1', widget: 'RICH_TEXT', paragraphs: [{ runs: [{ text: 'bad', link: { page: 'Missing' } }] }],
     }), /Expected exactly one page named/);
@@ -107,7 +108,7 @@ export function runRichTextParameterChecks() {
   });
 
   check('RichText paragraph list writes native ListInfo levels and preserves key order', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'richtext-v2-gui-edit.rp'));
+    const source = readFileSync(fixturePath('richtext-v2-gui-edit.rp'));
     const { file } = setWidgetRichText(source, {
       page: 'Page 1', widget: 'RICH_TEXT',
       paragraphs: [
@@ -138,7 +139,7 @@ export function runRichTextParameterChecks() {
   });
 
   check('RichText paragraph list rejects out-of-range levels', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'richtext-v2-gui-edit.rp'));
+    const source = readFileSync(fixturePath('richtext-v2-gui-edit.rp'));
     for (const list of [4, -1, 1.5, 'bullet']) {
       assert.throws(() => setWidgetRichText(source, {
         page: 'Page 1', widget: 'RICH_TEXT', paragraphs: [{ list, runs: [{ text: 'invalid' }] }],
@@ -147,7 +148,7 @@ export function runRichTextParameterChecks() {
   });
 
   check('RichText run full-range native keys write weight/style/stretch/characterSpacing/baseline', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'richtext-v2-gui-edit.rp'));
+    const source = readFileSync(fixturePath('richtext-v2-gui-edit.rp'));
     const { file } = setWidgetRichText(source, {
       page: 'Page 1', widget: 'RICH_TEXT',
       paragraphs: [{ runs: [{ text: 'Full range', style: { weight: 800, style: 2, stretch: 3, characterSpacing: 2.5, baseline: 1 } }] }],
@@ -176,7 +177,7 @@ export function runRichTextParameterChecks() {
   });
 
   check('RichText paragraph wrapping and trimming write native u32 keys', () => {
-    const source = readFileSync(join(TEST_DIR, 'fixtures', 'richtext-v2-gui-edit.rp'));
+    const source = readFileSync(fixturePath('richtext-v2-gui-edit.rp'));
     const { file } = setWidgetRichText(source, {
       page: 'Page 1', widget: 'RICH_TEXT',
       paragraphs: [{ wrapping: 1, trimming: 3, runs: [{ text: 'No wrap ellipsis' }] }],
@@ -205,7 +206,7 @@ export function runRichTextParameterChecks() {
       ],
       rowHeights: [30, 30], columnWidths: [100, 100],
     }));
-    execFileSync(process.execPath, [join(TEST_DIR, '..', 'scripts', 'set-native-table.mjs'), join(TEST_DIR, 'fixtures', 'table-native-writer-roundtrip.rp'), out, spec]);
+    execFileSync(process.execPath, [join(TEST_DIR, '..', 'scripts', 'set-native-table.mjs'), fixturePath('table-native-writer-roundtrip.rp'), out, spec]);
     const health = readRp(readFileSync(out));
     assert.equal(health.records.unparseable, 0);
     assert.equal(health.counts.danglingRefs, 0);
@@ -247,7 +248,7 @@ export function runRichTextParameterChecks() {
       rowHeights: [30, 30], columnWidths: [100, 100],
     }));
     assert.throws(() => {
-      execFileSync(process.execPath, [join(TEST_DIR, '..', 'scripts', 'set-native-table.mjs'), join(TEST_DIR, 'fixtures', 'table-native-writer-roundtrip.rp'), outErr, specBoldWeight], { stdio: 'pipe' });
+      execFileSync(process.execPath, [join(TEST_DIR, '..', 'scripts', 'set-native-table.mjs'), fixturePath('table-native-writer-roundtrip.rp'), outErr, specBoldWeight], { stdio: 'pipe' });
     }, /bold and weight both write the native Weight key/);
 
     // 负例 2: italic 与 style 冲突拒绝
@@ -260,7 +261,7 @@ export function runRichTextParameterChecks() {
       rowHeights: [30, 30], columnWidths: [100, 100],
     }));
     assert.throws(() => {
-      execFileSync(process.execPath, [join(TEST_DIR, '..', 'scripts', 'set-native-table.mjs'), join(TEST_DIR, 'fixtures', 'table-native-writer-roundtrip.rp'), outErr, specItalicStyle], { stdio: 'pipe' });
+      execFileSync(process.execPath, [join(TEST_DIR, '..', 'scripts', 'set-native-table.mjs'), fixturePath('table-native-writer-roundtrip.rp'), outErr, specItalicStyle], { stdio: 'pipe' });
     }, /italic and style both write the native Style key/);
 
     rmSync(tmp, { recursive: true, force: true });

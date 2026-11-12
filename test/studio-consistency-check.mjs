@@ -6,19 +6,19 @@
  *  2) explore 不得推荐越界更严重的候选
  *  3) 提交 best 后，实跑 containment 不得比仿真更差
  */
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { studioHandlers } from '../studio/mcp-adapter.mjs';
+import { closeInProcessStudioServer, studioHandlers } from '../studio/mcp-adapter.mjs';
 
+test('度量、探索与提交结果口径一致性', async (t) => {
 const dir = mkdtempSync(join(tmpdir(), 'zee-consistency-'));
-let failures = 0;
-const check = (name, fn) => {
-  try { fn(); console.log(`  ok   ${name}`); } catch (err) { failures++; console.error(`  FAIL ${name}\n       ${err.message}`); }
-};
-
-const open = await studioHandlers.studio_open_project({ projectDir: dir, name: '一致性', domain: 'web', port: 4730 });
+const checks = [];
+const check = (name, fn) => { checks.push([name, fn]); };
+try {
+const open = await studioHandlers.studio_open_project({ projectDir: dir, name: '一致性', domain: 'web', port: 0 });
 const built = await studioHandlers.studio_apply_commands({
   projectDir: dir,
   baseRevision: open.appliedRevision,
@@ -78,7 +78,11 @@ if (candidate) {
   });
 }
 
-try { rmSync(dir, { recursive: true, force: true }); } catch {}
-if (failures) { console.error(`\n${failures} 项失败`); process.exit(1); }
-console.log('\n全部通过');
-process.exit(0);
+for (const [name, fn] of checks) {
+  await t.test(name, fn);
+}
+} finally {
+  await closeInProcessStudioServer();
+  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+}
+});

@@ -159,6 +159,15 @@ def language_schema():
         shorthand = obj(shorthand_props, [kind, *required])
         return [standard, shorthand]
 
+    by_type = {}
+    by_short = {}
+
+    def add_variants(kind, variants):
+        standard, shorthand = variants
+        by_type.setdefault(kind, []).append(standard)
+        by_short.setdefault(kind, []).append(shorthand)
+        nodes.extend(variants)
+
     nodes = []
     for kind, fields in NODE_PROPS.items():
         props = {**common, **{k: property_shape(k) for k in fields}}
@@ -169,50 +178,55 @@ def language_schema():
         elif "align" in fields:
             props["align"] = enum_expr(["left", "center", "right"])
         required = ["dataset", "template"] if kind == "repeater" else ["states"] if kind == "dynamic-panel" else ["src"] if kind == "image" else ["options"] if kind in OPTION_KINDS else []
-        nodes.extend(node_variants(kind, props, required))
+        add_variants(kind, node_variants(kind, props, required))
     base_props = {shape["properties"]["type"]["const"]: {key: value for key, value in shape["properties"].items() if key != "type"}
                   for shape in nodes if "type" in shape["properties"]}
     canonical_box_fields = set(base_props["box"])
     # These source shapes are consumed by the same normalizer that handles
     # content sugar before canonical AST validation.
-    for shape in node_variants("box", base_props["label"], ["text"]):
+    box_label_variants = node_variants("box", base_props["label"], ["text"])
+    for shape in box_label_variants:
         shape["not"] = {"anyOf": [{"required": [key]} for key in ("children",) + BOX_TEXT_CONTAINER_KEYS]}
-        nodes.append(shape)
+    add_variants("box", box_label_variants)
     text_box_props = {**base_props["box"], "text": base_props["label"]["text"],
                       **{key: base_props["label"][key] for key in BOX_TEXT_STYLE_KEYS}}
-    for shape in node_variants("box", text_box_props, ["text"]):
+    text_box_variants = node_variants("box", text_box_props, ["text"])
+    for shape in text_box_variants:
         shape["not"] = {"required": ["children"]}
         shape["anyOf"] = [{"required": [key]} for key in BOX_TEXT_CONTAINER_KEYS]
-        nodes.append(shape)
+    add_variants("box", text_box_variants)
     card_content_props = {**base_props["card"], **{key: property_shape(key) for key in CARD_CONTENT_KEYS + CARD_CONTENT_OPTIONS}}
-    for shape in node_variants("card", card_content_props):
+    card_content_variants = node_variants("card", card_content_props)
+    for shape in card_content_variants:
         shape["anyOf"] = [{"required": [key]} for key in CARD_CONTENT_KEYS]
-        nodes.append(shape)
+    add_variants("card", card_content_variants)
     droplist_props = {**common, **{key: property_shape(key) for key in NODE_PROPS["combobox"]}}
     droplist_props["align"] = enum_expr(["left", "center", "right"])
-    nodes.extend(node_variants("droplist", droplist_props, ["options"]))
+    add_variants("droplist", node_variants("droplist", droplist_props, ["options"]))
     for alias in ("row", "column", "grid", "stack"):
         props = {**common, **{k: property_shape(k) for k in NODE_PROPS["box"]}}
         props.pop("font")
         props["align"] = enum_expr(["start", "center", "end", "stretch"])
-        nodes.extend(node_variants(alias, props))
+        add_variants(alias, node_variants(alias, props))
     panel_alias_props = {**common, **{k: property_shape(k) for k in NODE_PROPS["dynamic-panel"]}}
     panel_alias_props.pop("font", None)
-    nodes.extend(node_variants("panel", panel_alias_props, ["states"]))
+    add_variants("panel", node_variants("panel", panel_alias_props, ["states"]))
     repeat_props = {k: common[k] for k in {"id", "size"} | GEOMETRY}
     repeat_props.update({k: special[k] for k in ("dataset", "as", "key", "template")})
-    nodes.extend(node_variants("repeat", repeat_props, ["dataset", "template"]))
+    add_variants("repeat", node_variants("repeat", repeat_props, ["dataset", "template"]))
     when_props = {k: common[k] for k in {"id", "size"} | GEOMETRY}
     when_props.update({"condition": ref("value"), "then": ref("node"), "else": ref("node"), "layout": special["layout"], "gap": numeric})
-    nodes.extend(node_variants("when", when_props, ["condition", "then"]))
+    add_variants("when", node_variants("when", when_props, ["condition", "then"]))
     # Inline component argument names are declared by the source's components map.
     # JSON Schema cannot validate those cross-object names; check does so strictly.
     use_props = {"id": ident, "component": ident, "args": {"type": "object", "additionalProperties": ref("dataValue")}}
-    for variant in node_variants("use", use_props, ["component"]):
+    use_variants = node_variants("use", use_props, ["component"])
+    for variant in use_variants:
         variant["additionalProperties"] = ref("dataValue")
-        nodes.append(variant)
+    add_variants("use", use_variants)
     inline_use = obj({"use": ident, "id": ident, "args": {"type": "object", "additionalProperties": ref("dataValue")}}, ["use", "id"])
     inline_use["additionalProperties"] = ref("dataValue")
+    by_short.setdefault("use", []).append(inline_use)
     nodes.append(inline_use)
 
     macro_required = {
@@ -256,8 +270,39 @@ def language_schema():
                 props[list_name] = array(item, 1)
         if kind in ("kv-list", "detail-card"):
             props["rowHeight"] = {"type": "number", "minimum": 4}
-        nodes.extend(node_variants(kind, props, macro_required.get(kind, [])))
-    defs["node"] = {"anyOf": nodes}
+        add_variants(kind, node_variants(kind, props, macro_required.get(kind, [])))
+
+    # 用 O(1) if/then 判别器替代扁平 60 分支 anyOf，避免递归容器子树触发 O(K^depth) 指数级回溯。
+    prop_owners = {}
+    for kind, items in by_short.items():
+        for shape in items:
+            for prop_name in shape.get("properties", {}):
+                if prop_name != kind:
+                    prop_owners.setdefault(prop_name, set()).add(kind)
+
+    def node_branch(items):
+        return items[0] if len(items) == 1 else {"anyOf": items}
+
+    node_rules = [
+        {"if": {"required": ["type"], "properties": {"type": {"const": kind}}}, "then": node_branch(items)}
+        for kind, items in sorted(by_type.items())
+    ]
+    for kind, items in sorted(by_short.items()):
+        owners = set(prop_owners.get(kind, ()))
+        if kind != "use":
+            owners.add("use")
+        blockers = [{"required": ["type"]}, *[{"required": [owner]} for owner in sorted(owners)]]
+        guard = blockers[0] if len(blockers) == 1 else {"anyOf": blockers}
+        node_rules.append({"if": {"not": guard, "required": [kind]}, "then": node_branch(items)})
+
+    defs["node"] = {
+        "type": "object",
+        "anyOf": [
+            {"required": ["type"], "properties": {"type": {"enum": sorted(by_type)}}},
+            *[{"not": {"required": ["type"]}, "required": [kind]} for kind in sorted(by_short)],
+        ],
+        "allOf": node_rules,
+    }
 
     actions = []
     for kind, fields in ACTION_PROPS.items():

@@ -5,19 +5,19 @@
  *  - 给出槽位、模板、示例与可提交命令
  *  - 不假装会写文案（caveat 必须有），也不自动改文档
  */
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { studioHandlers } from '../studio/mcp-adapter.mjs';
+import { closeInProcessStudioServer, studioHandlers } from '../studio/mcp-adapter.mjs';
 
+test('内容脚手架（studio_design_content_plan）', async (t) => {
 const dir = mkdtempSync(join(tmpdir(), 'zee-content-'));
-let failures = 0;
-const check = (name, fn) => {
-  try { fn(); console.log(`  ok   ${name}`); } catch (err) { failures++; console.error(`  FAIL ${name}\n       ${err.message}`); }
-};
-
-const open = await studioHandlers.studio_open_project({ projectDir: dir, name: '内容', domain: 'web', port: 4890 });
+const checks = [];
+const check = (name, fn) => { checks.push([name, fn]); };
+try {
+const open = await studioHandlers.studio_open_project({ projectDir: dir, name: '内容', domain: 'web', port: 0 });
 const built = await studioHandlers.studio_apply_commands({
   projectDir: dir,
   baseRevision: open.appliedRevision,
@@ -74,7 +74,11 @@ check('提交后口号类问题消失', () => {
   assert.ok(!afterRules.has('vague-centered-hero'));
 });
 
-try { rmSync(dir, { recursive: true, force: true }); } catch {}
-if (failures) { console.error(`\n${failures} 项失败`); process.exit(1); }
-console.log('\n全部通过');
-process.exit(0);
+for (const [name, fn] of checks) {
+  await t.test(name, fn);
+}
+} finally {
+  await closeInProcessStudioServer();
+  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+}
+});

@@ -286,12 +286,21 @@ def expand_mobile_card_list(node, prefix="p1"):
         badge_txt = c.get("badge", "招领")
         badge_var = c.get("badgeVariant") or "secondary"
         badge_w = max(56, min(72, len(str(badge_txt)) * 10 + 12))
-        thumb_sz = 68 if card_h < 110 else 76
+        pad_y = 8 if card_h < 104 else (10 if card_h < 110 else 12)
+        thumb_sz = 64 if card_h < 104 else (68 if card_h < 110 else 76)
         title_str = str(c.get("title", ""))
         avail_title_w = cw - 24 - thumb_sz - 12 - badge_w - 6
         title_sz = 13
-        if measure_text(title_str, 13, 600)[0] - 8 > avail_title_w:
-            title_sz = 12 if measure_text(title_str, 12, 600)[0] - 8 <= avail_title_w else 11
+        for cand_sz in (13, 12, 11, 10):
+            title_sz = cand_sz
+            if (
+                measure_text(title_str, cand_sz, 600)[0] <= avail_title_w
+                and len(wrap_text(title_str, max(1, avail_title_w - 4), cand_sz, 600)) <= 1
+            ):
+                break
+        body_h = card_h - pad_y * 2
+        body_gap = 4 if card_h < 104 else 6
+        foot_btn_h = 20 if card_h < 104 else 22
         btn_txt = c.get("buttonText", "查看详情 >")
         btn_nm = c.get("buttonName", f"{prefix}-btn-detail-{cid}")
         list_children.append(
@@ -300,7 +309,7 @@ def expand_mobile_card_list(node, prefix="p1"):
                 layout="row",
                 w=cw,
                 h=card_h,
-                padding=[10 if card_h < 110 else 12, 12],
+                padding=[pad_y, 12],
                 gap=12,
                 align="center",
                 fill="$surface",
@@ -320,8 +329,8 @@ def expand_mobile_card_list(node, prefix="p1"):
                         f"grp-{prefix}-card-body-{cid}",
                         layout="column",
                         flex=1,
-                        h=card_h - 24,
-                        gap=6,
+                        h=body_h,
+                        gap=body_gap,
                         isGroup=True,
                         children=[
                             make_box(
@@ -344,7 +353,7 @@ def expand_mobile_card_list(node, prefix="p1"):
                                 isGroup=True,
                                 children=[
                                     make_label(f"{prefix}-time-{cid}", time_txt, size=11, weight=400, color="$ink-3", flex=1),
-                                    make_button(btn_nm, btn_txt, variant="outline", w=76, h=22, size=11, radius=12),
+                                    make_button(btn_nm, btn_txt, variant="outline", w=76, h=foot_btn_h, size=11, radius=12),
                                 ],
                             ),
                         ],

@@ -9,6 +9,7 @@
  * 期望：能映射到宏参数（title）就提升为参数；不能就明确报 unsupported，
  * 绝不产出一个语义非法的 spec。
  */
+import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -18,6 +19,9 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const dir = mkdtempSync(join(tmpdir(), 'zee-macro-lift-'));
+after(() => {
+  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+});
 
 const run = (script, args) => execFileSync(process.execPath, [join(ROOT, 'scripts', script), ...args], {
   encoding: 'utf8',
@@ -33,10 +37,7 @@ writeFileSync(spec, [
   '',
 ].join('\n'), 'utf8');
 
-let failures = 0;
-const check = (name, fn) => {
-  try { fn(); console.log(`  ok   ${name}`); } catch (err) { failures++; console.error(`  FAIL ${name}\n       ${err.message}`); }
-};
+const check = (name, fn) => test(name, fn);
 
 console.log('[1] 生成基线 .rp');
 const baseRp = join(dir, 'base.rp');
@@ -88,6 +89,4 @@ check('合入的源码保留新标题', () => {
 });
 check('重建的 .rp 存在且非空', () => assert.ok(readFileSync(mergedRp).length > 1000));
 
-try { rmSync(dir, { recursive: true, force: true }); } catch {}
-if (failures) { console.error(`\n${failures} 项失败`); process.exit(1); }
-console.log('\n全部通过');
+// 临时目录由 after() 钩子统一回收。

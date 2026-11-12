@@ -1,4 +1,4 @@
-import { fixturePath } from './native-inputs.mjs';
+import { fixturePath, hasPrivateFixtures } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -10,7 +10,12 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { readRp } from '../scripts/rp-read.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { field, parsePayload } from '../scripts/parse-payload.mjs';
-import { commitChainNode, openSession } from '../scripts/mcp-tools.mjs';
+import { commitChainNode, jobTools, listMcpTools, openSession } from '../scripts/mcp-tools.mjs';
+
+if (!hasPrivateFixtures()) {
+  console.log('SKIP  historical-mcp-check.mjs: 未检测到本地私有 .rp 样本包（设置 AXURE_FIXTURE_ROOT 可运行完整 MCP 历史回归）');
+  process.exit(0);
+}
 
 const skill = dirname(dirname(fileURLToPath(import.meta.url)));
 const serverRoot = process.env.AXURE_MCP_TEST_ROOT ?? skill;
@@ -32,11 +37,10 @@ process.env.AXURE_PROTECTED_PATHS = protectedPath;
 
 try {
   await client.connect(transport);
-  await check('stdio 初始化与注册表 31 命令', async () => {
+  await check('stdio 初始化与注册表全部命令工具对齐', async () => {
     const { tools } = await client.listTools();
-    // 31 command tools, twelve session tools, and four GUI/job tools.
-    const sessionNames = new Set(['axure_open', 'axure_state', 'axure_save', 'locate', 'inspect', 'read_interactions', 'edit_text', 'set_widget_geometry', 'set_widget_style', 'verify', 'sync_prototype', 'generate_from_image']);
-    assert.equal(tools.filter(t => !t.name.startsWith('jobs_') && t.name !== 'gui_roundtrip' && !sessionNames.has(t.name)).length, 31);
+    const expected = [...listMcpTools(), ...jobTools].map(t => t.name).sort();
+    assert.deepEqual(tools.map(t => t.name).sort(), expected);
     for (const name of ['rp_read', 'add_interaction', 'fill_panel_state', 'set_widget_text']) {
       const schema = tools.find(t => t.name === name).inputSchema;
       assert.equal(schema.oneOf.length, 2);

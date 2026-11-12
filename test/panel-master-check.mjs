@@ -1,4 +1,4 @@
-import { fixturePath } from './native-inputs.mjs';
+import { fixturePath, hasPrivateFixtures } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {dirname,join} from 'node:path';
@@ -10,7 +10,7 @@ import {removePanelStateContent,resolvePanelState} from '../scripts/remove-panel
 import {fillPanelState} from '../scripts/fill-panel-state.mjs';
 import {addInteractions} from '../scripts/ix-actions.mjs';
 import {guidKey} from '../scripts/duplicate-page.mjs';
-const root=dirname(fileURLToPath(import.meta.url)),read=n=>readFileSync(join(root,'fixtures',n));
+const root=dirname(fileURLToPath(import.meta.url)),read=n=>readFileSync(fixturePath(n));
 const guid=g=>g.roots.find(n=>n.tag===30).values[g.roots.find(n=>n.tag===18).value-1];
 const name=o=>field(field(o.body,'name-block')??{},'text')?.text;
 export function runPanelMasterChecks({log=()=>{}}={}){
@@ -218,4 +218,4 @@ export function runPanelMasterChecks({log=()=>{}}={}){
  });
  return results;
 }
-if(import.meta.url===pathToFileURL(process.argv[1]||'').href){const results=runPanelMasterChecks({log:console.log});console.log(`${results.filter(r=>r.passed).length}/${results.length}`);process.exitCode=results.some(r=>!r.passed)?1:0;}
+if(import.meta.url===pathToFileURL(process.argv[1]||'').href){if(!hasPrivateFixtures()){console.log('SKIP  panel-master-check.mjs: 未检测到本地私有 .rp 样本包（设置 AXURE_FIXTURE_ROOT 可运行）');process.exit(0);}const results=runPanelMasterChecks({log:console.log});console.log(`${results.filter(r=>r.passed).length}/${results.length}`);process.exitCode=results.some(r=>!r.passed)?1:0;}

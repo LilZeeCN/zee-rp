@@ -1,9 +1,11 @@
+// 特殊形态保留理由（gaps #7）：支持 --json 机器汇总报告并导出 runRegression() 供历史回归聚合。
 import { spawnSync } from 'node:child_process';
 import { readFileSync, rmSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { TEST_DIR, fixtures, summarizeFixture } from './fixture-summary.mjs';
+import { hasPrivateFixtures } from './native-inputs.mjs';
 import { runPanelMasterChecks } from './panel-master-check.mjs';
 import { runDirectImageChecks, runMasterDirectImageChecks } from './direct-image-check.mjs';
 import { runMasterRepeaterChecks } from './master-repeater-check.mjs';
@@ -17,7 +19,7 @@ import { runSemanticsChecks } from './semantics-check.mjs';
 import { runCopyPathSemanticsChecks } from './copy-path-semantics-check.mjs';
 import { runPageLinkChecks } from './page-link-check.mjs';
 
-export function runRegression({ log = () => {} } = {}) {
+export async function runRegression({ log = () => {} } = {}) {
   const results = [];
   const check = (name, passed, detail = '') => {
     results.push({ name, passed, ...(passed || !detail ? {} : { detail }) });
@@ -56,7 +58,18 @@ export function runRegression({ log = () => {} } = {}) {
   for (const result of runDirectImageChecks()) check(`direct-image ${result.name}`, result.passed, result.detail);
   for (const result of runMasterDirectImageChecks()) check(`master-direct-image ${result.name}`, result.passed, result.detail);
   for (const result of runMasterRepeaterChecks()) check(`master-repeater ${result.name}`, result.passed, result.detail);
-  for (const result of runConditionExpressionChecks()) check(`condition-expression ${result.name}`, result.passed, result.detail);
+  const unhandled = [];
+  const onUnhandled = (reason) => {
+    unhandled.push(reason instanceof Error ? reason.message : String(reason));
+  };
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    for (const result of await runConditionExpressionChecks()) check(`condition-expression ${result.name}`, result.passed, result.detail);
+  } finally {
+    await new Promise(resolve => setImmediate(resolve));
+    process.off('unhandledRejection', onUnhandled);
+  }
+  check('regression 零未捕获 Promise rejection (anti-fake-green 守卫)', unhandled.length === 0, unhandled.join('; '));
   for (const result of runRichTextParameterChecks()) check(`richtext ${result.name}`, result.passed, result.detail);
   for (const result of runStyleParameterChecks()) check(`style ${result.name}`, result.passed, result.detail);
   for (const result of runCreateGlobalVariableChecks()) check(`create-global-variable ${result.name}`, result.passed, result.detail);
@@ -76,7 +89,11 @@ export function runRegression({ log = () => {} } = {}) {
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const args = process.argv.slice(2);
   if (args.some(a => !['--json'].includes(a))) throw new Error('Usage: AXURE_FIXTURE_ROOT=/local/fixture-pack node test/historical-regression.mjs [--json]');
-  const report = runRegression({ log: args.includes('--json') ? () => {} : console.log });
+  if (!hasPrivateFixtures()) {
+    console.log('SKIP  historical-regression.mjs: 未检测到本地私有 .rp 样本包（设置 AXURE_FIXTURE_ROOT 可运行完整 41 样本回归）');
+    process.exit(0);
+  }
+  const report = await runRegression({ log: args.includes('--json') ? () => {} : console.log });
   if (args.includes('--json')) console.log(JSON.stringify(report, null, 2));
   process.exitCode = report.failed ? 1 : 0;
 }

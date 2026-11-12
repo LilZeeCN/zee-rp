@@ -1,9 +1,12 @@
+// 特殊形态保留理由（gaps #7）：支持 --update 刷新快照与 --json 机器汇总报告，并导出 runRegression() 供外部复用。
 import { spawnSync } from 'node:child_process';
 import { readFileSync, writeFileSync, rmSync, lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { TEST_DIR, fixtures, summarizeFixture } from './research-fixture-summary.mjs';
+import { TEST_DIR, fixtures, summarizeFixture } from './fixture-summary.mjs';
+import { hasPrivateFixtures, rp9FixturePath } from './native-inputs.mjs';
+import { existsSync } from 'node:fs';
 import { runPanelMasterChecks } from './panel-master-check.mjs';
 import { runDirectImageChecks, runMasterDirectImageChecks } from './direct-image-check.mjs';
 import { runMasterRepeaterChecks } from './master-repeater-check.mjs';
@@ -25,7 +28,7 @@ export async function runRegression({ update = false, log = () => {} } = {}) {
     log(`${passed ? 'PASS' : 'FAIL'}  ${name}${passed || !detail ? '' : ` — ${detail}`}`);
   };
   const entries = fixtures();
-  const snapshotPath = process.env.AXURE_SNAPSHOTS || join(TEST_DIR, 'snapshots.json');
+  const snapshotPath = process.env.AXURE_SNAPSHOTS || join(TEST_DIR, 'historical-snapshots.json');
   const actual = {};
   for (const entry of entries) {
     try {
@@ -82,7 +85,9 @@ export async function runRegression({ update = false, log = () => {} } = {}) {
   for (const result of runSemanticsChecks()) check(`semantics ${result.name}`, result.passed, result.detail);
   for (const result of runCopyPathSemanticsChecks()) check(`copy-path ${result.name}`, result.passed, result.detail);
   for (const result of runPageLinkChecks()) check(`page-link ${result.name}`, result.passed, result.detail);
-  for (const result of runVersionChecks()) check(`version ${result.name}`, result.passed, result.detail);
+  if (existsSync(rp9FixturePath('rp9-clone-button.rp'))) {
+    for (const result of runVersionChecks()) check(`version ${result.name}`, result.passed, result.detail);
+  }
   const failed = results.filter(r => !r.passed).length;
   const categories = {};
   for (const e of entries) categories[e.category] = (categories[e.category] ?? 0) + 1;
@@ -94,6 +99,10 @@ export async function runRegression({ update = false, log = () => {} } = {}) {
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
   const args = process.argv.slice(2);
   if (args.some(a => !['--update', '--json'].includes(a))) throw new Error('Usage: node test/regression.mjs [--update] [--json]');
+  if (!hasPrivateFixtures()) {
+    console.log('SKIP  research-regression.mjs: 未检测到本地私有 .rp 样本包（设置 AXURE_FIXTURE_ROOT 可运行完整样本回归）');
+    process.exit(0);
+  }
   const report = await runRegression({ update: args.includes('--update'), log: args.includes('--json') ? () => {} : console.log });
   if (args.includes('--json')) console.log(JSON.stringify(report, null, 2));
   process.exitCode = report.failed ? 1 : 0;

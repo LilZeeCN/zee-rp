@@ -148,6 +148,20 @@ export function validateRecord(record, graph, { docRecord = null, docGraph = nul
       }
     }
 
+    // 5. 规则 7: DiagramObjectPath 本地对象引用闭环
+    if (obj.className === 'Axure:DiagramObjectPath') {
+      for (const listName of ['items', 'rdo-path', 'repeater-path']) {
+        const listNode = field(obj.body, listName);
+        for (const item of listNode?.items ?? []) {
+          if (item?.tag === 3 && !graph.objects.has(item.value)) {
+            addViolation('interaction-path-integrity', `Record #${record.index}: DiagramObjectPath #${obj.id} ${listName} references non-existent widget #${item.value}`, {
+              record: record.index, pathId: obj.id, targetId: item.value
+            });
+          }
+        }
+      }
+    }
+
   }
 
   return violations;

@@ -66,7 +66,7 @@ for prop in ["navBar", "tabBar"]:
     reject("shell " + prop + " string", lambda s, k=prop: s["pages"][0].update(root={
         "type": "phone-shell", "id": "shell", k: "oops"}), "E_TYPE", "/" + prop)
 reject("fontSize zero", lambda s: child(s, 0).update(fontSize=0), "E_SIZE", "/fontSize")
-for value in [73, 100000]:
+for value in [121, 100000]:
     reject("fontSize over renderer limit " + str(value), lambda s, v=value: child(s, 0).update(fontSize=v), "E_SIZE", "/fontSize")
 reject("font shorthand oversize", lambda s: child(s, 0).update(font="100000/bold"), "E_SIZE", "/fontSize")
 reject("font size alias oversize", lambda s: child(s, 0).update(size=100000), "E_SIZE", "/fontSize")

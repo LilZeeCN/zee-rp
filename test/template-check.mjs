@@ -11,6 +11,7 @@ import { cloneLibraryWidget } from '../scripts/clone-library-widget.mjs';
 import { createGlobalVariable } from '../scripts/create-global-variable.mjs';
 import { addInteractions } from '../scripts/ix-actions.mjs';
 import { validateSemantics } from './check-semantics.mjs';
+import { fixturePath } from './native-inputs.mjs';
 
 const skill = dirname(dirname(fileURLToPath(import.meta.url)));
 const work = mkdtempSync(join(tmpdir(), 'axure-template-check-'));
@@ -37,7 +38,9 @@ try {
     const out = join(work, 'missing.rp'); assert.notEqual(run('create-blank-project', [out], join(work, 'no-template.rp')).status, 0); assert.ok(!existsSync(out));
   });
   check('非空模板拒绝且没有输出', () => {
-    const out = join(work, 'nonblank.rp'); assert.notEqual(run('create-blank-project', [out], join(skill, 'test/fixtures/var-set-counter-roundtrip.rp')).status, 0); assert.ok(!existsSync(out));
+    const out = join(work, 'nonblank.rp');
+    const nonBlank = existsSync(fixturePath('var-set-counter-roundtrip.rp')) ? fixturePath('var-set-counter-roundtrip.rp') : join(work, 'page.rp');
+    assert.notEqual(run('create-blank-project', [out], nonBlank).status, 0); assert.ok(!existsSync(out));
   });
   check('模板变量不能指向受保护成品', () => {
     const out = join(work, 'protected.rp');

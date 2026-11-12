@@ -8,9 +8,10 @@ import { resolvePanelState } from '../scripts/remove-panel-state-content.mjs';
 import { closureOf } from '../scripts/clone-closure.mjs';
 import { addInteractions } from '../scripts/ix-actions.mjs';
 import { validateSemantics } from './check-semantics.mjs';
+import { FIXTURE_DIR, fixturePath, hasPrivateFixtures } from './native-inputs.mjs';
 
-const fixtures = fileURLToPath(new URL('./fixtures/', import.meta.url));
-const read = name => readFileSync(fixtures + name);
+const fixtures = FIXTURE_DIR;
+const read = name => readFileSync(fixturePath(name));
 const state = (bytes, page) => resolvePanelState(bytes, { page, panel: 'MASTER_PANEL', state: 'Card' }).stateRecord;
 const overrideTargets = record => {
   const graph = parsePayload(record), guids = graph.roots.find(n => n.tag === 0x1e).values;
@@ -181,6 +182,10 @@ return results;
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  if (!hasPrivateFixtures()) {
+    console.log('SKIP  copy-path-semantics-check.mjs: 未检测到本地私有 .rp 样本包（设置 AXURE_FIXTURE_ROOT 可运行）');
+    process.exit(0);
+  }
   const results = runCopyPathSemanticsChecks({ log: console.log });
   console.log(`${results.filter(result => result.passed).length}/${results.length} copy/path semantic checks passed`);
   process.exitCode = results.some(result => !result.passed) ? 1 : 0;

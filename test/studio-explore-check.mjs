@@ -8,19 +8,20 @@
  *  3) 不返回审美总分
  *  4) 参数救了不了的项要明说（不许假装能修）
  */
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { studioHandlers } from '../studio/mcp-adapter.mjs';
+import { closeInProcessStudioServer, studioHandlers } from '../studio/mcp-adapter.mjs';
 
+test('批量探索与自动收敛（studio_design_explore）', async (t) => {
 const dir = mkdtempSync(join(tmpdir(), 'zee-explore-'));
-let failures = 0;
-const check = (name, fn) => {
-  try { fn(); console.log(`  ok   ${name}`); } catch (err) { failures++; console.error(`  FAIL ${name}\n       ${err.message}`); }
-};
-
-const open = await studioHandlers.studio_open_project({ projectDir: dir, name: '探索测试', domain: 'web', port: 4601 });
+const checks = [];
+const check = (name, fn) => { checks.push([name, fn]); };
+let exploreInstances = [];
+try {
+const open = await studioHandlers.studio_open_project({ projectDir: dir, name: '探索测试', domain: 'web', port: 0 });
 
 // 一屏内容：结构尚可，但间距/字阶都不在刻度上
 const built = await studioHandlers.studio_apply_commands({
@@ -172,11 +173,15 @@ check('结构轴候选能把未达标项降下来', () => {
     `best=${best.id} blocking=${best.score.blocking} baseline=${baseline?.score.blocking}`);
 });
 
-try { rmSync(dir, { recursive: true, force: true }); } catch {}
-// 关掉探针起的实例，避免事件循环挂着让测试"看起来卡住"
-for (const { url } of result?.openInstances || []) {
-  try { await fetch(`${url}/api/shutdown`, { method: 'POST' }).catch(() => {}); } catch {}
+exploreInstances = result?.openInstances || [];
+for (const [name, fn] of checks) {
+  await t.test(name, fn);
 }
-if (failures) { console.error(`\n${failures} 项失败`); process.exit(1); }
-console.log('\n全部通过');
-process.exit(0);
+} finally {
+  for (const { url } of exploreInstances) {
+    try { await fetch(`${url}/api/shutdown`, { method: 'POST' }).catch(() => {}); } catch {}
+  }
+  await closeInProcessStudioServer();
+  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+}
+});

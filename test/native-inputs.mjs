@@ -3,7 +3,25 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 export const TEST_DIR = dirname(fileURLToPath(import.meta.url));
 export const FIXTURE_DIR = resolve(process.env.AXURE_FIXTURE_ROOT || join(TEST_DIR, 'fixtures'));
-export const fixturePath = name => join(FIXTURE_DIR, name);
+export const RP9_FIXTURE_DIR = resolve(process.env.AXURE_RP9_FIXTURE_ROOT || join(FIXTURE_DIR, '..', 'rp9-fixtures'));
+export const hasPrivateFixtures = () => existsSync(join(FIXTURE_DIR, 'blank-ui-native.rp'));
+export const fixturePath = name => {
+  const direct = join(FIXTURE_DIR, name);
+  if (existsSync(direct)) return direct;
+  const extraDirs = (process.env.AXURE_EXTRA_FIXTURE_DIRS || '').split(':').filter(Boolean);
+  for (const dir of extraDirs) {
+    const candidate = join(resolve(dir), name);
+    if (existsSync(candidate)) return candidate;
+  }
+  const shipped = join(TEST_DIR, 'fixtures', name);
+  if (existsSync(shipped)) return shipped;
+  return direct;
+};
+export const rp9FixturePath = name => {
+  const direct = join(RP9_FIXTURE_DIR, name);
+  if (existsSync(direct)) return direct;
+  return join(TEST_DIR, 'rp9-fixtures', name);
+};
 export const settingsRoot = () => {
   const root = process.env.AXURE_SETTINGS_ROOT || (process.platform === 'darwin'
     ? '/Applications/Axure RP 11.app/Contents/Resources/DefaultSettings' : '');

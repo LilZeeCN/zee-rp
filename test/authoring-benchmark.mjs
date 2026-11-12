@@ -1,4 +1,5 @@
 // Repeatable tool-pipeline benchmark. This does not measure an AI's creative time.
+// 特殊形态保留理由（gaps #7）：本文件为接收位置参数输出目录（argv[2]）的独立基准脚本，非 node:test 单元测试。
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';

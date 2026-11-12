@@ -8,14 +8,17 @@
  *
  * 运行：node test/studio-compact-multi-check.mjs
  */
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { studioHandlers } from '../studio/mcp-adapter.mjs';
+import { closeInProcessStudioServer, studioHandlers } from '../studio/mcp-adapter.mjs';
 
+test('Studio MCP 多工程并行、响应预算与契约自修复', async (t) => {
 const opens = [];
 const dirs = [];
+const checks = [];
 
 function newDir(tag) {
   const dir = mkdtempSync(join(tmpdir(), `zee-studio-${tag}-`));
@@ -23,16 +26,8 @@ function newDir(tag) {
   return dir;
 }
 
-let failures = 0;
-function check(name, fn) {
-  try {
-    fn();
-    console.log(`  ok   ${name}`);
-  } catch (err) {
-    failures++;
-    console.error(`  FAIL ${name}\n       ${err.message}`);
-  }
-}
+const check = (name, fn) => { checks.push([name, fn]); };
+try {
 
 console.log('[1] 打开两个工程，应各自独立');
 const dirA = newDir('a');
@@ -193,19 +188,18 @@ try {
 } catch (err) { shapeText = String(err.message || err); }
 check('非法过滤器形状被拒', () => assert.ok(/E_FILTER_SHAPE|equals|in/.test(shapeText), shapeText.slice(0, 200)));
 
-console.log('[7] 关闭实例');
-for (const [dir, port] of [[dirA, openA.url], [dirB, openB.url]]) {
-  try {
-    await fetch(`${port}/api/shutdown`, { method: 'POST' }).catch(() => {});
-  } catch {}
+for (const [name, fn] of checks) {
+  await t.test(name, fn);
 }
-for (const dir of dirs) {
-  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+} finally {
+  for (const open of opens) {
+    if (open?.url) {
+      try { await fetch(`${open.url}/api/shutdown`, { method: 'POST' }).catch(() => {}); } catch {}
+    }
+  }
+  await closeInProcessStudioServer();
+  for (const dir of dirs) {
+    try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
 }
-
-if (failures) {
-  console.error(`\n${failures} 项失败`);
-  process.exit(1);
-}
-console.log('\n全部通过');
-process.exit(0);
+});

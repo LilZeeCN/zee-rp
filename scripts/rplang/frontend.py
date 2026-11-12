@@ -3373,7 +3373,7 @@ class Frontend:
                 if self.macro_calls[call] == "form-card" and path.startswith(call + "/on/click"):
                     error.diagnostic["pointer"] = path = call + "/onSubmit" + path[len(call + "/on/click"):]
                 if error.diagnostic["code"] == "E_EVENT_TARGET" and path == ptr(call, "on") and "on" not in raw_macro:
-                    unsupported = next((key for key in ("onChange", "onFocus", "onBlur", "onStateChange") if key in raw_macro), None)
+                    unsupported = next((key for key in ("onLoad", "onChange", "onFocus", "onBlur", "onStateChange") if key in raw_macro), None)
                     if unsupported:
                         fail(error.diagnostic["code"], ptr(call, unsupported), error.diagnostic["message"])
                 candidate = path

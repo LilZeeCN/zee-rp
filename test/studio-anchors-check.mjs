@@ -5,19 +5,19 @@
  *  - compare 对其他页给出可复现的偏离量，而不是"不够高级"
  *  - 没有锚点时明确报错，不编造参照
  */
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { studioHandlers } from '../studio/mcp-adapter.mjs';
+import { closeInProcessStudioServer, studioHandlers } from '../studio/mcp-adapter.mjs';
 
-let failures = 0;
-const check = (name, fn) => {
-  try { fn(); console.log(`  ok   ${name}`); } catch (err) { failures++; console.error(`  FAIL ${name}\n       ${err.message}`); }
-};
-
+test('锚点驱动参考（studio_design_anchors）', async (t) => {
+const checks = [];
+const check = (name, fn) => { checks.push([name, fn]); };
 const dir = mkdtempSync(join(tmpdir(), 'zee-anchors-'));
-const open = await studioHandlers.studio_open_project({ projectDir: dir, name: '锚点测试', domain: 'web', port: 4620 });
+try {
+const open = await studioHandlers.studio_open_project({ projectDir: dir, name: '锚点测试', domain: 'web', port: 0 });
 
 const empty = await studioHandlers.studio_design_anchors({ projectDir: dir, action: 'compare', pageId: 'home' });
 check('没有锚点时明确拒绝', () => assert.equal(empty.ok, false));
@@ -85,7 +85,11 @@ check('approve 标注真实调用方', () => {
 });
 check('approve 默认是追加而非替换', () => assert.equal(approved.mode, 'append'));
 
-try { rmSync(dir, { recursive: true, force: true }); } catch {}
-if (failures) { console.error(`\n${failures} 项失败`); process.exit(1); }
-console.log('\n全部通过');
-process.exit(0);
+for (const [name, fn] of checks) {
+  await t.test(name, fn);
+}
+} finally {
+  await closeInProcessStudioServer();
+  try { rmSync(dir, { recursive: true, force: true }); } catch {}
+}
+});

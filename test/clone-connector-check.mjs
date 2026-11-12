@@ -1,4 +1,4 @@
-import { fixturePath } from './native-inputs.mjs';
+import { fixturePath, hasPrivateFixtures } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync, rmSync, mkdtempSync } from 'node:fs';
 import { join } from 'node:path';
@@ -99,7 +99,13 @@ export function runCloneConnectorChecks() {
 }
 
 if (process.argv[1] && process.argv[1].endsWith('clone-connector-check.mjs')) {
-  for (const r of runCloneConnectorChecks()) {
+  if (!hasPrivateFixtures()) {
+    console.log('SKIP  clone-connector-check.mjs: 未检测到本地私有 .rp 样本包（设置 AXURE_FIXTURE_ROOT 可运行）');
+    process.exit(0);
+  }
+  const results = runCloneConnectorChecks();
+  for (const r of results) {
     console.log(`${r.passed ? 'PASS' : 'FAIL'}  ${r.name}${r.detail ? ` — ${r.detail}` : ''}`);
   }
+  process.exitCode = results.some(r => !r.passed) ? 1 : 0;
 }
