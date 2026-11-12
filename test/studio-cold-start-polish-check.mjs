@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { validateInput } from '../studio/schema-validation.mjs';
 import { closeInProcessStudioServer, studioHandlers, studioTools } from '../studio/mcp-adapter.mjs';
+import { nativeTemplateSkipReason } from './host-capabilities.mjs';
 
 test('合约发现与端口 Schema：port:0 校验、节点语法别名与批量查询、动作词表同步', async () => {
   const openSchema = studioTools.find(t => t.name === 'studio_open_project').inputSchema;
@@ -55,7 +56,7 @@ test('合约发现与端口 Schema：port:0 校验、节点语法别名与批量
   assert.ok(workflow.rules.some(r => r.includes('addPage')));
 });
 
-test('端到端全链路回归：内置宏零 L1 阻塞、容器 card、panel 冒号、fix_plan、非激活态 nativeReadiness、hitTest combobox/listbox 与 .rp 导出', async () => {
+test('端到端全链路回归：内置宏零 L1 阻塞、容器 card、panel 冒号、fix_plan、非激活态 nativeReadiness、hitTest combobox/listbox 与 .rp 导出', async t => {
   const dir = mkdtempSync(join(tmpdir(), 'zee-coldstart-polish-'));
   try {
     const opened = await studioHandlers.studio_open_project({
@@ -251,20 +252,22 @@ column #summary_body [fillxhug] gap=12
     assert.equal(badHitScenario.browserLayer?.failedStep?.stepIndex, 2);
 
     // P0 #1 & P2 #10: 含 progress-bar 与面板内交互的工程导出 .rp 成功，顶层返回 threeZerosPassed: true，interactionSources 含 contained-widget 且 matchesRpSummary: true
-    const outRpPath = join(dir, 'cold-start-polished.rp');
-    const exported = await studioHandlers.studio_export({
-      projectDir: dir,
-      format: 'rp',
-      outRpPath,
+    await t.test('P0 #1 & P2 #10: 原生 .rp 导出三零与子画布交互计数对账', { skip: nativeTemplateSkipReason() }, async () => {
+      const outRpPath = join(dir, 'cold-start-polished.rp');
+      const exported = await studioHandlers.studio_export({
+        projectDir: dir,
+        format: 'rp',
+        outRpPath,
+      });
+      assert.equal(exported.ok, true, JSON.stringify(exported));
+      assert.equal(exported.threeZerosPassed, true);
+      assert.equal(exported.report.threeZerosPassed, true);
+      assert.equal(exported.report.interactionCounts.matchesRpSummary, true);
+      assert.ok(
+        exported.report.interactionSources.some(row => row.owner === 'contained-widget'),
+        `interactionSources 应统计面板内部交互: ${JSON.stringify(exported.report.interactionCounts)}`
+      );
     });
-    assert.equal(exported.ok, true, JSON.stringify(exported));
-    assert.equal(exported.threeZerosPassed, true);
-    assert.equal(exported.report.threeZerosPassed, true);
-    assert.equal(exported.report.interactionCounts.matchesRpSummary, true);
-    assert.ok(
-      exported.report.interactionSources.some(row => row.owner === 'contained-widget'),
-      `interactionSources 应统计面板内部交互: ${JSON.stringify(exported.report.interactionCounts)}`
-    );
   } finally {
     await closeInProcessStudioServer(dir);
     rmSync(dir, { recursive: true, force: true });

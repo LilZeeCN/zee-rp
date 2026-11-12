@@ -13,6 +13,7 @@ import { exportStudioDocumentToRp } from '../studio/export-rp.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { parsePayload, field } from '../scripts/parse-payload.mjs';
+import { nativeTemplateSkipReason } from './host-capabilities.mjs';
 
 // 1x1 transparent PNG
 const TINY_PNG = Buffer.from(
@@ -281,7 +282,7 @@ test('code export handles nested dynamic panels in inactive states, CSS url() as
   assert.equal(sim.ok, true, JSON.stringify(sim));
 });
 
-test('RP9 export preserves multi-run RichText spans natively and propagates hidden/rotation on CSS-painted widgets', async t => {
+test('RP9 export preserves multi-run RichText spans natively and propagates hidden/rotation on CSS-painted widgets', { skip: nativeTemplateSkipReason() }, async t => {
   const dir = mkdtempSync(join(tmpdir(), 'studio-deep-rp-export-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
 

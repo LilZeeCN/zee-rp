@@ -19,6 +19,7 @@ import { exportStudioDocumentToCode } from '../studio/export-code.mjs';
 import { exportStudioDocumentToRp } from '../studio/export-rp.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
+import { nativeTemplateSkipReason } from './host-capabilities.mjs';
 
 test('B5.1 queryAuthoringNodes supports capabilities/vector fields, macro child mapping, and deep property validation', () => {
   const doc = normalizeStudioDocument({
@@ -436,26 +437,28 @@ column #checkout_form [420xhug] x=24 y=24 gap=12 padding=16
   assert.equal(app.getWidgetText('live_status'), 'true:Enterprise');
 
   // 3) Surface 3: Native RP9 (.rp) export & threeZeros verification
-  const outRp = join(dir, 'forms-parity.rp');
-  const rpExport = await exportStudioDocumentToRp(doc, {
-    projectDir: dir,
-    outRpPath: outRp,
-    registerExport: false,
-  });
-  assert.equal(rpExport.ok, true, JSON.stringify(rpExport));
-  assert.equal(rpExport.report.summary.threeZerosPassed, true, JSON.stringify(rpExport.report));
-  assert.equal(rpExport.report.geometryAlignment.passed99PercentWithin1Px, true, JSON.stringify(rpExport.report.geometryAlignment));
-  assert.ok(
-    rpExport.report.entries.some(item => item.nodeId === 'notes_box' && item.feature === 'input.multiline'),
-    'textarea (input.multiline) must disclose RP9 single-line TextBox compatibility note'
-  );
+  await t.test('Surface 3: Native RP9 (.rp) export & threeZeros verification', { skip: nativeTemplateSkipReason() }, async () => {
+    const outRp = join(dir, 'forms-parity.rp');
+    const rpExport = await exportStudioDocumentToRp(doc, {
+      projectDir: dir,
+      outRpPath: outRp,
+      registerExport: false,
+    });
+    assert.equal(rpExport.ok, true, JSON.stringify(rpExport));
+    assert.equal(rpExport.report.summary.threeZerosPassed, true, JSON.stringify(rpExport.report));
+    assert.equal(rpExport.report.geometryAlignment.passed99PercentWithin1Px, true, JSON.stringify(rpExport.report.geometryAlignment));
+    assert.ok(
+      rpExport.report.entries.some(item => item.nodeId === 'notes_box' && item.feature === 'input.multiline'),
+      'textarea (input.multiline) must disclose RP9 single-line TextBox compatibility note'
+    );
 
-  // Inspect actual .rp binary via readRp to confirm genuine native Axure form widget classes!
-  const rpParsed = readRp(readFileSync(outRp));
-  assert.equal(rpParsed.problems.length, 0);
-  const widgets = rpParsed.pages[0].widgets || [];
-  const widgetTypes = new Set(widgets.map(w => w.type));
-  for (const expectedClass of ['Checkbox', 'RadioButton', 'ComboBox', 'ListBox', 'TextBox']) {
-    assert.ok(widgetTypes.has(expectedClass), `Native .rp must contain ${expectedClass} (got ${[...widgetTypes].join(', ')})`);
-  }
+    // Inspect actual .rp binary via readRp to confirm genuine native Axure form widget classes!
+    const rpParsed = readRp(readFileSync(outRp));
+    assert.equal(rpParsed.problems.length, 0);
+    const widgets = rpParsed.pages[0].widgets || [];
+    const widgetTypes = new Set(widgets.map(w => w.type));
+    for (const expectedClass of ['Checkbox', 'RadioButton', 'ComboBox', 'ListBox', 'TextBox']) {
+      assert.ok(widgetTypes.has(expectedClass), `Native .rp must contain ${expectedClass} (got ${[...widgetTypes].join(', ')})`);
+    }
+  });
 });
