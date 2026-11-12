@@ -115,7 +115,9 @@ def language_schema():
             return adaptive
         if name == "size":
             return either(common["size"], numeric)
-        if name in {"weight", "textPaddingX", "letterSpacing", "opacity", "strokeWidth", "backdropBlur", "noise", "innerGlow", "max", "barHeight", "trackHeight", "rotation"}:
+        if name == "rotation":
+            return either(number, {"type": "string", "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"}, ref("compileExpression"))
+        if name in {"weight", "textPaddingX", "letterSpacing", "opacity", "strokeWidth", "backdropBlur", "noise", "innerGlow", "max", "barHeight", "trackHeight"}:
             return numeric
         if name in {"visible", "hidden", "showValue", "darkIsland", "showHomeIndicator"}:
             return {"type": "boolean"}

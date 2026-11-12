@@ -813,7 +813,7 @@ def complete_spec(spec, pointer="/"):
     return out
 
 
-def auto_heal_spec(spec, max_rounds=5):
+def auto_heal_spec(spec, max_rounds=5, base_dir=None):
     """Automatically heal static/layout/type diagnostics using pre-verified candidatePatches."""
     import sys
     cur_spec = copy.deepcopy(spec)
@@ -826,14 +826,15 @@ def auto_heal_spec(spec, max_rounds=5):
                     import tempfile
                     from proto import compile_spec_bundle
                     with tempfile.TemporaryDirectory(prefix="zee-rp-heal-") as _td:
-                        _bres = compile_spec_bundle(copy.deepcopy(cur_spec), _td, strict_audit=False)
+                        _bres = compile_spec_bundle(copy.deepcopy(cur_spec), _td, base_dir=base_dir, strict_audit=False)
                     if not _bres.get("structural_ok", True):
-                        for _f in _bres.get("failures", []):
-                            if _f.get("candidatePatches"):
+                        _raw_fails = _bres.get("failures") or (_bres.get("audit") or {}).get("failures") or []
+                        for _f in _raw_fails:
+                            if isinstance(_f, dict) and _f.get("candidatePatches"):
                                 fail(
                                     _f.get("code", "E_LAYOUT"),
                                     _f.get("pointer", "/"),
-                                    _f.get("detail", "Layout gate failed"),
+                                    _f.get("detail") or _f.get("message") or "Layout gate failed",
                                     candidate_patches=_f["candidatePatches"],
                                 )
                 except LanguageError:

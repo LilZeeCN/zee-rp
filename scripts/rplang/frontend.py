@@ -1904,9 +1904,9 @@ class Frontend:
                     self.typecheck(value, "number", pp)
                     if value < 0:
                         fail("E_SIZE", pp, "Size must be nonnegative")
-            elif key in {"x", "y", "right", "bottom", "flex", "gap", "columnGap", "rowGap", "radius", "fontSize", "fontWeight", "textPaddingX", "lineGap", "lineHeight", "letterSpacing", "opacity", "strokeWidth", "backdropBlur", "maxLines"}:
+            elif key in {"x", "y", "right", "bottom", "rotation", "flex", "gap", "columnGap", "rowGap", "radius", "fontSize", "fontWeight", "textPaddingX", "lineGap", "lineHeight", "letterSpacing", "opacity", "strokeWidth", "backdropBlur", "maxLines"}:
                 self.typecheck(value, "number", pp)
-                if key not in {"x", "y", "right", "bottom"} and value < 0:
+                if key not in {"x", "y", "right", "bottom", "rotation"} and value < 0:
                     fail("E_SIZE", pp, "Value must be nonnegative")
                 if key == "fontSize":
                     validate_font_size(value, pp)

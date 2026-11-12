@@ -1947,9 +1947,10 @@ def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, 
         except LanguageError:
             baseline_audit = None
         rejected = []
+        stage_dir = os.path.join(probe_dir, "candidate-out")
         try:
             candidate_ink = [] if ink_sink is not None else None
-            result = _compile_spec_bundle(copy.deepcopy(original), out_dir, ink_sink=candidate_ink,
+            result = _compile_spec_bundle(copy.deepcopy(original), stage_dir, ink_sink=candidate_ink,
                                          auto_heal=auto_heal, **options)
             audit = json.load(open(result["auditPath"], encoding="utf-8"))
             def failures(report):
@@ -1977,8 +1978,8 @@ def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, 
                        "rejectedChanges": changes, "rejectedDiagnostics": rejected,
                        "validation": "all compile and audit gates rerun on original source"}
         else:
-            if ink_sink is not None:
-                ink_sink.extend(candidate_ink)
+            result = _compile_spec_bundle(copy.deepcopy(original), out_dir, ink_sink=ink_sink,
+                                         auto_heal=auto_heal, **options)
             plan = json.load(open(result["planPath"], encoding="utf-8"))
             summary = {**plan.get("autoHeal", {}), "rolledBack": False,
                        "validation": "all compile and audit gates compared with original source"}
@@ -2046,6 +2047,22 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
         cw, ch = int(canvas["w"]), int(canvas["h"])
 
         p_schema_warnings = []
+        if "root" not in p_spec or not isinstance(p_spec["root"], dict):
+            if isinstance(p_spec.get("children"), list) or isinstance(p_spec.get("widgets"), list):
+                p_spec = {
+                    **p_spec,
+                    "root": {
+                        "type": "box",
+                        "id": f"{p_slug}_root",
+                        "layout": p_spec.get("layout", "stack"),
+                        "w": cw,
+                        "h": ch,
+                        "children": p_spec.get("children") if isinstance(p_spec.get("children"), list) else p_spec.get("widgets"),
+                    },
+                }
+            else:
+                from rp_language import fail
+                fail("E_SCHEMA", f"/pages/{idx}/root", f"Page '{p_name}' is missing required 'root' container object")
         validate_node_schema(p_spec["root"], warnings_out=p_schema_warnings, path=f"{p_slug}.root", allow_fallback=bool(language_ir))
         if heal_enabled:
             before_heal = copy.deepcopy(p_spec["root"])

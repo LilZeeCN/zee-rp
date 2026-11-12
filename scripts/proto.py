@@ -103,9 +103,9 @@ def main():
         spec_abs = os.path.abspath(args.spec)
         spec_obj = read_source(spec_abs)
         sink = []
-        tmp_dir = tempfile.mkdtemp(prefix="rp-measure-")
-        compile_spec_bundle(spec_obj, tmp_dir, theme_override=args.theme, base_dir=os.path.dirname(spec_abs),
-                            strict_audit=False, source_path=spec_abs, ink_sink=sink)
+        with tempfile.TemporaryDirectory(prefix="rp-measure-") as tmp_dir:
+            compile_spec_bundle(spec_obj, tmp_dir, theme_override=args.theme, base_dir=os.path.dirname(spec_abs),
+                                strict_audit=False, source_path=spec_abs, ink_sink=sink)
         _off = (sink[0].get("offset") if sink else None) or {"x": 0, "y": 0}
         print(json.dumps({"ok": True, "previewOffset": _off,
                           "note": "ink 坐标为页面坐标；若 offset 非 0，说明该页套了设备壳，预览图坐标 = ink + offset",
@@ -114,7 +114,7 @@ def main():
 
     if args.cmd == "tokens":
         print(json.dumps({"fontSize": FONT_SIZE_TOKENS, "fontWeight": FONT_WEIGHT_TOKENS,
-                          "radius": RADIUS_TOKENS, "spacing": RADIUS_TOKENS,
+                          "radius": RADIUS_TOKENS, "spacing": SPACING_TOKENS,
                           "inkRule": "文字在声明盒内垂直居中；墨迹高≈1.3×fontSize，带 fill/stroke 时另有 8px padding；"
                                      "相邻文字墨迹不得重叠，安全间距建议 ≥ fontSize×0.6",
                           "pillRadius": 999}, ensure_ascii=False, indent=2))
@@ -137,7 +137,7 @@ def main():
             if args.out and not str(args.out).endswith((".json", ".rp1")):
                 from rp_language import fail
                 fail("E_CLI", "/arguments/out", f"Unsupported output extension for check --auto-heal: {args.out} (expected .rp1 or .json)")
-            healed = auto_heal_spec(spec_obj)
+            healed = auto_heal_spec(spec_obj, base_dir=os.path.dirname(spec_abs))
             spec_obj = healed["spec"]
             ir = healed["ir"]
             if args.out:

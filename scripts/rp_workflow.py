@@ -76,9 +76,12 @@ def contextualize(diagnostic, spec, spans=None, source_text=None):
     if out.get("field") == "right" and node and node.get("type") == "phone-shell":
         out["nextAction"] = "phone-shell.right 是数字几何约束；右侧状态栏用 statusRight，顶栏按钮文案用 rightText，事件用 onRight。"
     if out.get("field") == "fontFamily":
-        out["nextAction"] = "RP/1 当前不开放字体族字段；使用 fontSize/fontWeight/letterSpacing 控制排版，字体回退须在实际 Axure 预览核对。"
+        if code == "E_TYPE":
+            out["nextAction"] = "fontFamily 须为非空字体族名称（如 \"Inter\" 或 \"PingFang SC\"）。"
+        else:
+            out["nextAction"] = "fontFamily 仅适用于文本与表单控件（label/paragraph/button/badge/checkbox/radio/combobox/listbox 或带 text 的 box/card）；纯容器或图形元件请改在子文本节点或 styles 状态样式上设置。"
     if "requires a native input" in out.get("message", ""):
-        out["nextAction"] = "enable/disable/focus 仅用于原生 input；普通按钮的提交拦截请使用条件 Case 守卫或显隐状态。"
+        out["nextAction"] = "enable/disable/focus 用于原生表单控件（input/checkbox/radio/combobox/listbox）；普通按钮的提交拦截请使用条件 Case 守卫或显隐状态。"
     out["location"] = " → ".join(str(v) for v in (out.get("pageName"), out.get("widgetName"), out.get("field")) if v)
     return out
 
@@ -90,7 +93,7 @@ def authoring_hints(spec, spans=None, source_text=None):
         if isinstance(node, dict):
             kind = node.get("type") or next((k for k in SHORTHAND_NODE_KINDS if isinstance(node.get(k), str)), None)
             height = node.get("h", node.get("size", [None, None])[1] if isinstance(node.get("size"), list) and len(node["size"]) == 2 else None)
-            if isinstance(kind, str) and kind in {"button", "badge", "input"} and isinstance(height, (int, float)) and height > 96:
+            if isinstance(kind, str) and kind in {"button", "badge", "input", "checkbox", "radio", "combobox"} and isinstance(height, (int, float)) and height > 96:
                 hint = contextualize({"code": "W_CONTROL_HEIGHT", "severity": "warning", "pointer": pointer + "/h",
                                       "message": f"Control height is {height}px; check width/height intent."}, spec, spans, source_text)
                 hint["nextAction"] = "尺寸简写 [WxH] 是宽×高；[fillx180] 为高 180。宽 180 的普通按钮用 [180x44] 或 w=180 h=44。若有意使用大控件，可保留。"

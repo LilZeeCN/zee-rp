@@ -178,7 +178,7 @@ def spec_to_dsl(spec):
     if not isinstance(spec, dict) or spec.get("language") != "rp/1":
         raise LanguageError("E_LANGUAGE", "/language", "Expected language 'rp/1'")
     lines = []
-    header_skip = {"language", "palette", "models", "datasets", "variables", "components", "product", "tabBar", "pages"}
+    header_skip = {"language", "palette", "models", "datasets", "variables", "computed", "components", "masters", "adaptiveViews", "product", "tabBar", "pages"}
     hdr_kvs = _fmt_kv_pairs(spec, skip=header_skip)
     lines.append(f"rp/1 {hdr_kvs}".rstrip())
 
@@ -210,6 +210,31 @@ def spec_to_dsl(spec):
                 lines.append(f"var ${vname} {_fmt_kv_pairs(vval)}")
             else:
                 lines.append(f"var ${vname} = {_fmt_inline(vval)}")
+
+    if "computed" in spec and isinstance(spec["computed"], dict):
+        for vname, vval in spec["computed"].items():
+            if isinstance(vval, dict):
+                lines.append(f"computed ${vname} {_fmt_kv_pairs(vval)}")
+            else:
+                lines.append(f"computed ${vname} = {_fmt_inline(vval)}")
+
+    if "adaptiveViews" in spec and isinstance(spec["adaptiveViews"], list):
+        for av in spec["adaptiveViews"]:
+            if isinstance(av, dict) and "id" in av:
+                av_kvs = _fmt_kv_pairs(av, skip={"id"})
+                lines.append(f"adaptive-view {av['id']} {av_kvs}".rstrip())
+
+    if "masters" in spec and isinstance(spec["masters"], dict):
+        for mname, mdef in spec["masters"].items():
+            if isinstance(mdef, dict):
+                m_kvs = _fmt_kv_pairs(mdef, skip={"root", "layout"})
+                lines.append(f"master {mname} {m_kvs}".rstrip())
+                if isinstance(mdef.get("root"), dict):
+                    _emit_node(mdef["root"], 1, lines)
+                elif isinstance(mdef.get("layout"), list):
+                    for mch in mdef["layout"]:
+                        if isinstance(mch, dict):
+                            _emit_node(mch, 1, lines)
 
     if "components" in spec and isinstance(spec["components"], dict):
         for cname, cdef in spec["components"].items():
@@ -466,7 +491,7 @@ def _parse_node_block(raw_lines, idx, base_indent, ptr_prefix, span_map):
             elif k.startswith("+"):
                 ev_sh = k[1:]
                 ev_parsed = _parse_value(v_raw, line_no)
-                if ev_sh in ("click", "change", "focus", "blur", "load", "statechange"):
+                if ev_sh in ("click", "change", "focus", "blur", "load", "statechange", "mouseover", "mouseout", "selectedchange", "selectionchange"):
                     node.setdefault("on", {})[ev_sh] = ev_parsed
                     span_map[f"{ptr_prefix}/on/{ev_sh}"] = {"line": line_no, "column": indent + saved + 1}
                 else:
@@ -522,7 +547,7 @@ def _parse_node_block(raw_lines, idx, base_indent, ptr_prefix, span_map):
             else:
                 ev_sh, val_pos = _scan_token(rest, 0, c_line_no)
                 ev_parsed = _parse_value(rest[val_pos:], c_line_no)
-            if ev_sh in ("click", "change", "focus", "blur", "load", "statechange"):
+            if ev_sh in ("click", "change", "focus", "blur", "load", "statechange", "mouseover", "mouseout", "selectedchange", "selectionchange"):
                 node.setdefault("on", {})[ev_sh] = ev_parsed
                 span_map[f"{ptr_prefix}/on/{ev_sh}"] = {"line": c_line_no, "column": c_indent + 1}
             else:
@@ -777,6 +802,29 @@ def dsl_to_spec(dsl_text, return_spans=False):
             else:
                 spec.setdefault("computed", {})[vname] = _parse_kv_tail(content, pos, lno)
             idx += 1
+        elif tok in ("adaptive-view", "adaptiveView"):
+            avid, pos = _scan_token(content, pos, lno)
+            av_obj = {"id": avid.lstrip("#"), **_parse_kv_tail(content, pos, lno)}
+            av_arr = spec.setdefault("adaptiveViews", [])
+            span_map[f"/adaptiveViews/{len(av_arr)}"] = {"line": lno, "column": indent + 1}
+            av_arr.append(av_obj)
+            idx += 1
+        elif tok == "master":
+            mname, pos = _scan_token(content, pos, lno)
+            mname = mname.lstrip("#")
+            mdef = _parse_kv_tail(content, pos, lno)
+            span_map[f"/masters/{mname}"] = {"line": lno, "column": indent + 1}
+            idx += 1
+            m_children = []
+            while idx < n and raw_lines[idx][1] > indent:
+                mch_ptr = f"/masters/{mname}/root" if not m_children else f"/masters/{mname}/layout/{len(m_children)}"
+                mnode, idx = _parse_node_block(raw_lines, idx, raw_lines[idx][1], mch_ptr, span_map)
+                m_children.append(mnode)
+            if len(m_children) == 1:
+                mdef["root"] = m_children[0]
+            elif len(m_children) > 1:
+                mdef["layout"] = m_children
+            spec.setdefault("masters", {})[mname] = mdef
         elif tok == "component":
             cname, pos = _scan_token(content, pos, lno)
             rest = content[pos:].strip()

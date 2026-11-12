@@ -287,10 +287,33 @@ def main():
         elif args.command == "auto-heal" or (args.command == "check" and getattr(args, "auto_heal", False)):
             if getattr(args, "out", None) and not (str(args.out).endswith(".rp1") or str(args.out).endswith(".json")):
                 raise LanguageError("E_CLI", "/arguments/out", f"Unsupported output extension for auto-heal: {args.out} (expected .rp1 or .json)")
-            healed = auto_heal_spec(source)
+            spec_abs = str(Path(args.spec).resolve())
+            healed = auto_heal_spec(source, base_dir=str(Path(spec_abs).parent))
             ir = healed["ir"]
+            layout_diags = []
+            structural_ok = True
+            aesthetic_ok = True
+            warnings = []
+            is_ok = True
+            if not getattr(sys.flags, "no_site", 0):
+                from proto import compile_spec_bundle, _build_layout_diagnostics
+                with tempfile.TemporaryDirectory(prefix="rp1-check-") as tmp_dir:
+                    bundle_res = compile_spec_bundle(
+                        copy.deepcopy(healed["spec"]),
+                        tmp_dir,
+                        base_dir=str(Path(spec_abs).parent),
+                        source_path=spec_abs,
+                    )
+                layout_diags = _build_layout_diagnostics(bundle_res, ir)
+                structural_ok = bool(bundle_res.get("structural_ok", True))
+                aesthetic_ok = bool(bundle_res.get("aesthetic_ok", True))
+                warnings = bundle_res.get("warnings", [])
+                is_ok = bool(bundle_res.get("ok", True)) and len(layout_diags) == 0
             result = {
-                "ok": True,
+                "ok": is_ok,
+                "structural_ok": structural_ok,
+                "aesthetic_ok": aesthetic_ok,
+                "warnings": warnings,
                 "healed": healed["healed"],
                 "rounds": healed["rounds"],
                 "appliedPatches": healed["appliedPatches"],
@@ -300,13 +323,13 @@ def main():
                 "pages": len(ir["pages"]),
                 "symbols": len(ir["symbols"]),
                 "semanticHash": ir["semanticHash"],
-                "diagnostics": [],
+                "diagnostics": layout_diags,
             }
             if getattr(args, "out", None):
                 out_val = _emit_rp1_preserving_comments(healed["spec"], raw_rp1) if str(args.out).endswith(".rp1") else healed["spec"]
                 result["output"] = write_new(args.out, out_val)
             print(json.dumps(result, ensure_ascii=False, indent=2))
-            return 0
+            return 0 if is_ok else 1
         else:
             _, ir = compile_language(copy.deepcopy(source))
             if args.command == "check":

@@ -54,7 +54,7 @@
   "set-master-overrides.mjs": "9428358121d57f50dfdc47d901cf9c93b89b93889d38dd64128d5646d9e2a1e5",
   "set-native-table.mjs": "74b901487ff6c76aa6b0a615c65db7a0251499674edd5602f3c3f51fcc7d92e7",
   "set-panel-fit-to-content.mjs": "1ee015e96b546837abd157f81d2de33e444f1e0325d1e6117e420c906bf1d2fb",
-  "set-widget-richtext.mjs": "5d25ccd951a4a161f9c8b63059c6615f9bc8de12b91f3b4edeb6812fbff14f6c",
+  "set-widget-richtext.mjs": "83c00064e07a87fd59a9ceb89d8726e70191de43a67286cc79182a7027886bbf",
   "set-widget-text.mjs": "8a5a8f3b3fedbe43ae1a49bf2ee7c859e2836af3b3ac5a31d53990215805db64",
   "trace.mjs": "410dfc701ab79482e3a71ce9443bbf94c9ef70289e334cc611db65767a704b23",
   "version-adapt.mjs": "033c60f00157cc78328fbabab8d85dc459fcf9564513734d7d4c1c6f0b812b64",

@@ -16,11 +16,13 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 RP_READ_MJS = SCRIPT_DIR / "rp-read.mjs"
 
 INTERNAL_VAR_RE = re.compile(r"^(OnLoadVariable|rp1_agg_.+|rp1_caller_\d+|rp1_bop_.+|__rp_.+|.+_filter_idx)$", re.IGNORECASE)
-HASH_SUFFIX_RE = re.compile(r"^(?:txt|btn|badge|inp|grp|card|panel|rep|div|line|img)-(.+)-[0-9a-f]{12}$")
+HASH_SUFFIX_RE = re.compile(r"^(?:txt|btn|badge|inp|radio|check|combo|list|chk|rad|sel|cmb|lst|txa|cb|rb|grp|card|panel|rep|div|line|img)-(.+)-[0-9a-f]{12}$")
 
 SUPPORTED_EVENT_MAP = {
     "OnClick": "click",
     "OnTextChange": "change",
+    "OnSelectedChange": "change",
+    "OnSelectionChange": "change",
     "OnLoad": "load",
     "OnPageLoad": "load",
     "OnFocus": "focus",
@@ -35,6 +37,12 @@ SUPPORTED_NATIVE_WIDGET_TYPES = {
     "VectorShape",
     "Shape",
     "TextBox",
+    "TextArea",
+    "Checkbox",
+    "RadioButton",
+    "ComboBox",
+    "Droplist",
+    "ListBox",
     "ImageBox",
     "DynamicPanel",
     "Repeater",
@@ -91,8 +99,16 @@ def _infer_widget_kind(w):
         return "dynamic-panel"
     if wtype == "Repeater":
         return "repeater"
-    if wtype == "TextBox":
+    if wtype in ("TextBox", "TextArea"):
         return "input"
+    if wtype == "Checkbox":
+        return "checkbox"
+    if wtype == "RadioButton":
+        return "radio"
+    if wtype in ("ComboBox", "Droplist"):
+        return "combobox"
+    if wtype == "ListBox":
+        return "listbox"
     if wtype == "ImageBox":
         return "image"
     if wtype in ("HorizontalLine", "VerticalLine"):
@@ -325,6 +341,8 @@ def _lift_widget_events(w, name_to_logical):
 def decompile_rp(rp_path_or_dict):
     """Decompile a binary .rp file (or rp-read JSON) into a valid RP/1 JSON AST and .rp1 DSL string."""
     rp_data = read_rp_json(rp_path_or_dict)
+    visual_props = extract_rp_visual_props(rp_path_or_dict) if isinstance(rp_path_or_dict, (str, Path)) else {}
+    by_key = (visual_props or {}).get("__by_key__") or {}
     variables = {}
     for gv in rp_data.get("globalVariables") or []:
         vname = str(gv.get("name") or "")
@@ -388,17 +406,19 @@ def decompile_rp(rp_path_or_dict):
 
         children = []
         max_r, max_b = 375, 812
+        p_rec = p.get("record") if p.get("record") is not None else (p_idx + 1)
         for w_idx, w in enumerate(raw_widgets):
             wname = str(w.get("name") or "")
             if not wname or wname.startswith(("frame-", "bg-", "rep-")) or w.get("type") in ("Layer", "Repeater", "DynamicPanel"):
                 continue
             lid = lid_by_idx.get(w_idx, f"w_{w_idx+1}")
             kind = _infer_widget_kind(w)
+            vp = by_key.get(f"{p_rec}:{w.get('id')}") or (visual_props or {}).get(wname) or {}
             x = int(round(float(w.get("x") or 0)))
             y = int(round(float(w.get("y") or 0)))
             width = max(24, int(round(float(w.get("w") or 120))))
             height = max(20, int(round(float(w.get("h") or 28))))
-            if kind in ("label", "paragraph", "button", "badge"):
+            if kind in ("label", "paragraph", "button", "badge", "checkbox", "radio"):
                 txt_val = str(w.get("text") or lid)
                 lines = txt_val.splitlines() or [txt_val]
                 longest = max((sum(16 if ord(ch) > 127 else 9 for ch in ln) for ln in lines), default=0)
@@ -414,12 +434,29 @@ def decompile_rp(rp_path_or_dict):
             }
             if kind == "input":
                 node["value"] = str(w.get("text") or "")
+            elif kind in ("checkbox", "radio"):
+                node["text"] = str(w.get("text") or lid)
+                node["checked"] = bool(vp.get("checked", w.get("checked", False)))
+                if kind == "radio" and (vp.get("group") or w.get("group")):
+                    node["group"] = str(vp.get("group") or w.get("group"))
+            elif kind in ("combobox", "listbox"):
+                opts = vp.get("options") or w.get("options") or ([str(w.get("text"))] if w.get("text") else ["Option 1"])
+                node["options"] = [str(o) for o in opts if str(o)] or ["Option 1"]
+                if kind == "listbox" and vp.get("multiple"):
+                    node["multiple"] = True
+                    if isinstance(vp.get("selectedIndices"), list):
+                        node["selectedIndices"] = [i for i in vp["selectedIndices"] if isinstance(i, int) and 0 <= i < len(node["options"])]
+                elif isinstance(vp.get("selectedIndex"), int) and 0 <= vp["selectedIndex"] < len(node["options"]):
+                    node["selectedIndex"] = vp["selectedIndex"]
             elif kind == "image":
                 node["src"] = "icon-search.png"
             elif kind in ("label", "paragraph", "button", "badge"):
                 node["text"] = str(w.get("text") or lid)
             elif w.get("text") and kind in ("card", "box"):
                 node["title"] = str(w.get("text"))
+            rot = vp.get("rotation", w.get("rotation"))
+            if isinstance(rot, (int, float)) and rot != 0:
+                node["rotation"] = int(rot) if float(rot).is_integer() else float(rot)
             ev_map, unsup = _lift_widget_events_ex(w, name_to_logical, page_name_to_slug)
             unsupported.extend(unsup)
             if ev_map:
@@ -481,7 +518,7 @@ def find_ast_node_by_id(node, target_id):
         return None
     if not isinstance(node, dict):
         return None
-    for k in ("id", "as", "button", "label", "badge", "input", "card", "box", "row", "column", "stack", "grid", "divider"):
+    for k in ("id", "as", "button", "label", "badge", "input", "checkbox", "radio", "combobox", "droplist", "listbox", "card", "box", "row", "column", "stack", "grid", "divider"):
         if node.get(k) == target_id:
             return node
     for ch_key in ("children", "layout"):
@@ -529,9 +566,37 @@ for (const r of recs) {
       if (code === 3221225478) props.color = hex(field(val ?? {}, 'fill-color')?.value);
       if (code === 3221225479) props.fill = hex(field(val ?? {}, 'fill-color')?.value);
       if (code === 3221225480) props.stroke = hex(field(val ?? {}, 'fill-color')?.value);
+      if ((code & 0x3fffffff) === 50 && typeof val?.value === 'number') props.rotation = val.value;
       if (code === 3221225543 && typeof val?.value === 'number') props.radius = val.value;
       if (code === 3221225573) { props.x = field(val ?? {}, 'X')?.value; props.y = field(val ?? {}, 'Y')?.value; }
       if (code === 3221225577) { props.w = field(val ?? {}, 'Width')?.value; props.h = field(val ?? {}, 'Height')?.value; }
+    }
+    if (o.className === 'Axure:DiagramObject:Checkbox' || o.className === 'Axure:DiagramObject:RadioButton') {
+      const sel = field(o.body, 'Selected');
+      if (typeof sel?.value === 'boolean') props.checked = sel.value;
+      const grp = field(o.body, 'radio-group');
+      if (grp?.text) props.group = grp.text;
+    }
+    if (o.className === 'Axure:DiagramObject:ComboBox' || o.className === 'Axure:DiagramObject:ListBox') {
+      const lo = field(o.body, 'list-options')?.items ?? [];
+      const opts = [], selIdx = [];
+      for (const ref of lo) {
+        const so = g.objects.get(ref.value);
+        const lbl = field(so?.body ?? {}, 'object')?.text;
+        if (lbl) {
+          opts.push(lbl);
+          if (field(so.body, 'selected')?.value === true) selIdx.push(opts.length - 1);
+        }
+      }
+      if (opts.length) {
+        props.options = opts;
+        if (o.className === 'Axure:DiagramObject:ListBox' && field(o.body, 'multiple')?.value === true) {
+          props.multiple = true;
+          props.selectedIndices = selIdx;
+        } else {
+          props.selectedIndex = selIdx[0] ?? 0;
+        }
+      }
     }
     out.__by_key__[`${r.index}:${o.id}`] = { ...props, name: wname, record: r.index, id: o.id };
     if (wname) out[wname] = props;
@@ -610,6 +675,13 @@ def _collect_rp_widgets(rp_data, visual_props=None, rec_remap=None):
                 "stroke": vp.get("stroke"),
                 "color": vp.get("color"),
                 "radius": vp.get("radius"),
+                "rotation": vp.get("rotation"),
+                "checked": vp.get("checked"),
+                "group": vp.get("group"),
+                "options": vp.get("options"),
+                "selectedIndex": vp.get("selectedIndex"),
+                "selectedIndices": vp.get("selectedIndices"),
+                "multiple": vp.get("multiple"),
                 "interactions": w.get("interactions") or [],
             }
     for cw_order, cw in enumerate(rp_data.get("containedWidgets") or []):
@@ -649,6 +721,13 @@ def _collect_rp_widgets(rp_data, visual_props=None, rec_remap=None):
             "stroke": vp.get("stroke"),
             "color": vp.get("color"),
             "radius": vp.get("radius"),
+            "rotation": vp.get("rotation"),
+            "checked": vp.get("checked"),
+            "group": vp.get("group"),
+            "options": vp.get("options"),
+            "selectedIndex": vp.get("selectedIndex"),
+            "selectedIndices": vp.get("selectedIndices"),
+            "multiple": vp.get("multiple"),
             "interactions": cw.get("interactions") or [],
         }
     return widgets
@@ -884,7 +963,7 @@ def _remove_ast_node(spec_obj, target_sym, target_node):
             if isinstance(item, dict):
                 item_id = item.get("id")
                 if not item_id:
-                    for k in ("box", "column", "row", "stack", "grid", "card", "label", "paragraph", "button", "input", "image", "repeater", "panel", "badge", "divider", "use"):
+                    for k in ("box", "column", "row", "stack", "grid", "card", "label", "paragraph", "button", "input", "checkbox", "radio", "combobox", "droplist", "listbox", "image", "repeater", "panel", "badge", "divider", "use"):
                         if isinstance(item.get(k), str):
                             item_id = item.get(k)
                             break
@@ -958,6 +1037,8 @@ def _apply_prop_to_target(target, sym, prop, new_val, old_val=None, coordinate_s
     ast_node = target["node"]
     parent_node = target.get("parent")
     if prop in ("text", "value"):
+        if sym.get("kind") in ("combobox", "listbox") or ast_node.get("type") in ("combobox", "droplist", "listbox") or any(k in ast_node for k in ("combobox", "droplist", "listbox")):
+            return None
         tkey = "value" if (ast_node.get("type") == "input" or "input" in ast_node) else "text"
         cur_txt = ast_node.get(tkey)
         if isinstance(cur_txt, str) and ("${" in cur_txt or cur_txt.startswith("=")):
@@ -1034,8 +1115,13 @@ def _apply_prop_to_target(target, sym, prop, new_val, old_val=None, coordinate_s
             computed_coord = int(round(float(new_val) - offset))
         ast_node[prop] = computed_coord
         return {"id": sym["id"], "property": prop, "oldValue": old_val, "newValue": computed_coord}
-    if prop in ("w", "h", "fill", "stroke", "color", "radius"):
-        val_norm = int(round(float(new_val))) if prop in ("w", "h", "radius") and isinstance(new_val, (int, float)) else new_val
+    if prop in ("w", "h", "fill", "stroke", "color", "radius", "rotation", "checked", "group", "options", "selectedIndex", "selectedIndices", "multiple"):
+        if prop in ("w", "h", "radius") and isinstance(new_val, (int, float)):
+            val_norm = int(round(float(new_val)))
+        elif prop == "rotation" and isinstance(new_val, (int, float)):
+            val_norm = int(new_val) if float(new_val).is_integer() else float(new_val)
+        else:
+            val_norm = copy.deepcopy(new_val)
         ast_node[prop] = val_norm
         return {"id": sym["id"], "property": prop, "oldValue": old_val, "newValue": val_norm}
     if prop == "on":
@@ -1472,10 +1558,24 @@ def lift_rp_into_spec(base_spec, base_rp_path_or_dict, gui_rp_path_or_dict=None,
                 new_item["name"] = wname
             if kind == "input":
                 new_item["value"] = str(gw.get("text") or "")
+            elif kind in ("checkbox", "radio"):
+                new_item["text"] = str(gw.get("text") if gw.get("text") is not None else lid)
+                new_item["checked"] = bool(gw.get("checked", False))
+                if kind == "radio" and gw.get("group"):
+                    new_item["group"] = str(gw["group"])
+            elif kind in ("combobox", "listbox"):
+                opts = gw.get("options") or ([str(gw.get("text"))] if gw.get("text") else ["Option 1"])
+                new_item["options"] = [str(o) for o in opts if str(o)] or ["Option 1"]
+                if kind == "listbox" and gw.get("multiple"):
+                    new_item["multiple"] = True
+                    if isinstance(gw.get("selectedIndices"), list):
+                        new_item["selectedIndices"] = [i for i in gw["selectedIndices"] if isinstance(i, int) and 0 <= i < len(new_item["options"])]
+                elif isinstance(gw.get("selectedIndex"), int) and 0 <= gw["selectedIndex"] < len(new_item["options"]):
+                    new_item["selectedIndex"] = gw["selectedIndex"]
             else:
                 new_item["text"] = str(gw.get("text") if gw.get("text") is not None else lid)
-            for vprop in ("fill", "stroke", "color"):
-                if gw.get(vprop):
+            for vprop in ("fill", "stroke", "color", "rotation"):
+                if gw.get(vprop) is not None and (vprop != "rotation" or gw.get(vprop) != 0):
                     new_item[vprop] = gw[vprop]
             ev_map, unsup_evs = _lift_widget_events_ex(gw, page_nmap, all_page_names_to_slugs)
             if unsup_evs:
@@ -1527,7 +1627,7 @@ def lift_rp_into_spec(base_spec, base_rp_path_or_dict, gui_rp_path_or_dict=None,
                     lifted_component_instances.append(res)
 
         # 2. Check text / value modification
-        if (gw.get("text") or "") != (bw.get("text") or ""):
+        if sym.get("kind") not in ("combobox", "listbox") and (gw.get("text") or "") != (bw.get("text") or ""):
             tprop = "value" if sym.get("kind") == "input" else "text"
             old_t = bw.get("text") if bw.get("text") is not None else ""
             new_t = gw.get("text") if gw.get("text") is not None else ""
@@ -1544,7 +1644,7 @@ def lift_rp_into_spec(base_spec, base_rp_path_or_dict, gui_rp_path_or_dict=None,
                 if isinstance(res, dict) and res.get("isComponentInstance"):
                     lifted_component_instances.append(res)
 
-        # 3. Check geometry (x, y, w, h) & visual style (fill, stroke, color, radius) modifications
+        # 3. Check geometry (x, y, w, h), visual style (fill, stroke, color, radius, rotation) & form props
         for gprop in ("x", "y", "w", "h"):
             if gw.get(gprop) is not None and bw.get(gprop) is not None:
                 g_new = int(round(float(gw[gprop])))
@@ -1564,14 +1664,20 @@ def lift_rp_into_spec(base_spec, base_rp_path_or_dict, gui_rp_path_or_dict=None,
                         if isinstance(res, dict) and res.get("isComponentInstance"):
                             lifted_component_instances.append(res)
 
-        for vprop in ("fill", "stroke", "color", "radius"):
-            if gw.get(vprop) is not None and gw.get(vprop) != bw.get(vprop):
-                res = _apply_prop_to_target(target, sym, vprop, gw[vprop], bw.get(vprop))
+        for vprop in ("fill", "stroke", "color", "radius", "rotation", "checked", "group", "options", "selectedIndex", "selectedIndices", "multiple"):
+            g_val = gw.get(vprop)
+            b_val = bw.get(vprop)
+            if vprop == "rotation":
+                g_val = gw.get("rotation") if gw.get("rotation") is not None else 0
+                b_val = bw.get("rotation") if bw.get("rotation") is not None else 0
+            if g_val is not None and g_val != b_val:
+                res = _apply_prop_to_target(target, sym, vprop, g_val, b_val)
                 if isinstance(res, dict) and res.get("unsupported"):
                     unsupported_native_changes.append(res)
                 else:
-                    _record_delta(sym, vprop, bw.get(vprop), gw[vprop], wname)
-                    lifted_visual_edits.append({"id": sym["id"], "property": vprop, "oldValue": bw.get(vprop), "newValue": gw[vprop], "nativeName": wname})
+                    applied_val = res["newValue"] if isinstance(res, dict) and "newValue" in res else g_val
+                    _record_delta(sym, vprop, b_val, applied_val, wname)
+                    lifted_visual_edits.append({"id": sym["id"], "property": vprop, "oldValue": b_val, "newValue": applied_val, "nativeName": wname})
                     if isinstance(res, dict) and res.get("isComponentInstance"):
                         lifted_component_instances.append(res)
 
@@ -1690,7 +1796,7 @@ def _compute_source_prop_deltas(base_spec, new_spec):
         nt = _resolve_ast_target(new_spec, new_syms[sid], new_uses)
         bn = base_nodes.get(base_syms[sid]["name"], {})
         nn = new_nodes.get(new_syms[sid]["name"], {})
-        for prop in ("text", "value", "name", "x", "y", "w", "h", "fill", "stroke", "color", "radius", "on"):
+        for prop in ("text", "value", "name", "x", "y", "w", "h", "fill", "stroke", "color", "radius", "rotation", "checked", "group", "options", "selectedIndex", "selectedIndices", "multiple", "on"):
             bval = _extract_node_prop(bt, prop) if bt else None
             nval = _extract_node_prop(nt, prop) if nt else None
             # Source pointers address the original AST, not the lowered tree.
@@ -1699,7 +1805,7 @@ def _compute_source_prop_deltas(base_spec, new_spec):
             lnval = nn.get(prop, nval) if prop not in ("on", "name") else nval
             if bval != nval:
                 deltas.setdefault(sid, {})[prop] = {"old": lbval if lbval is not None else bval, "new": lnval if lnval is not None else nval}
-            elif lbval != lnval and prop in ("fill", "stroke", "color", "radius", "text", "value", "w", "h"):
+            elif lbval != lnval and prop in ("fill", "stroke", "color", "radius", "rotation", "text", "value", "w", "h"):
                 deltas.setdefault(sid, {})[prop] = {"old": lbval, "new": lnval, "via": "palette_or_theme"}
     return deltas
 
@@ -1892,7 +1998,7 @@ def three_way_merge_rp(
                     if not fallback_done:
                         conflicts.append({"id": sid, "pageId": sym_info.get("pageId"), "pageName": resolved_page_name, "property": prop, "reason": "Native change cannot be represented in the updated source.", "detail": applied})
                         continue
-                if prop in ("x", "y", "w", "h", "fill", "stroke", "color"):
+                if prop in ("x", "y", "w", "h", "fill", "stroke", "color", "rotation"):
                     visual_diffs.append({"id": sid, "nativeName": nd.get("nativeName"), "changes": {prop: chosen_val}})
                     if nd.get("nativeName"):
                         patch_value = chosen_val
@@ -1952,7 +2058,7 @@ def three_way_merge_rp(
                 conflicts.append(entry)
         else:
             t_pg = matches[0]
-            nid = new_node.get("id") or next((new_node[k] for k in ("label", "button", "input", "image", "badge", "divider", "card") if k in new_node), None)
+            nid = new_node.get("id") or next((new_node[k] for k in ("label", "button", "input", "checkbox", "radio", "combobox", "droplist", "listbox", "image", "badge", "divider", "card") if k in new_node), None)
             if nid and find_ast_node_by_id(t_pg.get("root") or t_pg.get("layout"), nid):
                 conflicts.append({"property": "__added__", "pageId": nw_entry.get("pageId"), "pageName": page_id_to_name.get(nw_entry.get("pageId")),
                                   "reason": f"Native addition '{nid}' collides with a source widget."})
@@ -1983,13 +2089,26 @@ def three_way_merge_rp(
 
     if abs_out_rp:
         fallback_src_path = (
-            abs_out_spec
-            or (os.path.abspath(str(new_spec_path)) if isinstance(new_spec_path, (str, Path)) else None)
+            (os.path.abspath(str(new_spec_path)) if isinstance(new_spec_path, (str, Path)) else None)
+            or (os.path.abspath(str(base_spec_path)) if isinstance(base_spec_path, (str, Path)) else None)
             or (baseline_meta.get("sourcePath") if isinstance(baseline_meta, dict) else None)
+            or abs_out_spec
         )
         parent_dir = os.path.dirname(abs_out_rp) or "."
         os.makedirs(parent_dir, exist_ok=True)
         with tempfile.TemporaryDirectory(prefix=".rp1-merge-", dir=parent_dir) as tmp_dir:
+            if fallback_src_path:
+                src_dir = os.path.dirname(os.path.abspath(fallback_src_path))
+                if os.path.isdir(src_dir):
+                    for entry_name in os.listdir(src_dir):
+                        src_entry = os.path.join(src_dir, entry_name)
+                        dst_entry = os.path.join(tmp_dir, entry_name)
+                        if os.path.exists(dst_entry):
+                            continue
+                        if entry_name == "assets" and os.path.isdir(src_entry):
+                            shutil.copytree(src_entry, dst_entry, dirs_exist_ok=True)
+                        elif os.path.isfile(src_entry) and entry_name.lower().endswith((".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif")):
+                            shutil.copy2(src_entry, dst_entry)
             tmp_spec_json = os.path.join(tmp_dir, "merged.spec.json")
             tmp_out_rp = os.path.join(tmp_dir, "merged.rp")
             with open(tmp_spec_json, "w", encoding="utf-8") as f:
@@ -2065,11 +2184,16 @@ for (let i = recs.length - 1; i >= 0; i--) {
     const p = patchesByKey.get(`${r.index}:${o.id}`);
     if (!p) continue;
     const st = g.objects.get(field(o.body, 'MyStyle')?.value);
-    for (const it of field(st?.body ?? {}, 'PropList')?.items ?? []) {
+    const propItems = field(st?.body ?? {}, 'PropList')?.items ?? [];
+    let rotApplied = false;
+    for (const it of propItems) {
       const code = field(it, 'DOAName')?.value, val = field(it, 'Value');
       if (code === 3221225478 && p.color) { field(val, 'fill-color').value = argb(p.color); dirty = true; }
       if (code === 3221225479 && p.fill) { field(val, 'fill-color').value = argb(p.fill); dirty = true; }
       if (code === 3221225480 && p.stroke) { field(val, 'fill-color').value = argb(p.stroke); dirty = true; }
+      if ((code & 0x3fffffff) === 50 && p.rotation !== undefined) {
+        val.value = Number(p.rotation); delete val.rawNumber; rotApplied = true; dirty = true;
+      }
       if (code === 3221225573 && (p.x !== undefined || p.y !== undefined)) {
         if (p.x !== undefined) { const xf = field(val, 'X'); xf.value = Number(p.x); delete xf.rawNumber; }
         if (p.y !== undefined) { const yf = field(val, 'Y'); yf.value = Number(p.y); delete yf.rawNumber; }
@@ -2080,6 +2204,11 @@ for (let i = recs.length - 1; i >= 0; i--) {
         if (p.h !== undefined) { const hf = field(val, 'Height'); hf.value = Number(p.h); delete hf.rawNumber; }
         dirty = true;
       }
+    }
+    if (p.rotation !== undefined && !rotApplied && st) {
+      const str = t => { let idx = r.strings.indexOf(t); if (idx < 0) { idx = r.strings.length; r.strings.push(t); } return { tag: 8, value: idx + 1, text: t }; };
+      propItems.push({ tag: 1, entries: [[str('DOAName'), { tag: 5, value: 0xc0000032 }], [str('Value'), { tag: 6, value: Number(p.rotation) }]] });
+      dirty = true;
     }
   }
   if (dirty) buf = replaceRecord(buf, r, encodeRecord(r, r.strings, encodePayload(g.roots)));
