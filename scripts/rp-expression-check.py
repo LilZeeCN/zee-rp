@@ -48,6 +48,13 @@ def infer(node, variables):
             raise ValueError(failure("E_VARIABLE", f'Unknown variable "{name}"'))
         return variables[name]
     if "widget" in node:
+        wref = node.get("widget")
+        ref_str = str(wref.get("ref", "")) if isinstance(wref, dict) else str(wref or "")
+        prop = node.get("property") or (ref_str.rsplit(".", 1)[1] if "." in ref_str else None)
+        if prop in ("checked", "disabled"):
+            return "boolean"
+        if prop == "selected":
+            return None
         return "text"
     if "_auto_path" in node:
         parts = str(node["_auto_path"]).split(".")
@@ -57,8 +64,10 @@ def infer(node, variables):
                 raise ValueError(failure("E_VARIABLE", f'Unknown variable "{name}"'))
             return variables[name]
         if parts[0] == "widget" and len(parts) == 3 and parts[1]:
-            if parts[2] == "checked":
+            if parts[2] in ("checked", "disabled"):
                 return "boolean"
+            if parts[2] == "selected":
+                return None
             if parts[2] in ("text", "value"):
                 return "text"
         return None

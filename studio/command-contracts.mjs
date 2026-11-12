@@ -19,7 +19,7 @@ export const COMMAND_CONTRACTS = {
   setToken: schema('setToken', { name: string, value: {}, category: string }, ['name', 'value']),
   setVariable: schema('setVariable', { name: string, variable: string, value: {} }, ['value']),
   setInteraction: schema('setInteraction', { nodeId: string, event: string,
-    actions: { description: '动作、动作数组或 cases 对象。受支持动作词表：show / hide / toggle / set-text / set-var（别名 set-variable）/ set-panel-state / link（别名 goto，跳页）/ navigate / dataset-add|update|delete|select|toggle-select|filter|sort|page / repeater-*。open-link（打开外部 URL）不受 Studio 运行态支持：提交会被拒绝（E_INTERACTION_ACTION）且不写入，外链交互请走完整原生 RP/1（generate_prototype）。动作字段见 studio_describe 或运行态错误提示。' },
+    actions: { description: '动作、动作数组或 cases 对象。受支持动作词表：show / hide / toggle / set-text / set-var（别名 set-variable）/ set-check / set-selected / set-option / set-panel-state / link（别名 goto，跳页）/ navigate / dataset-add|update|delete|select|toggle-select|filter|sort|page / repeater-*。open-link（打开外部 URL）不受 Studio 运行态支持：提交会被拒绝（E_INTERACTION_ACTION）且不写入，外链交互请走完整原生 RP/1（generate_prototype）。动作字段见 studio_describe 或运行态错误提示。' },
     action: { description: 'actions 的单数别名，二选一；词表与限制同 actions。' } }, ['nodeId']),
   createInstance: schema('createInstance', { parentId: string, componentId: string, component: string, instanceId: string, id: string, name: string, variant: string, state: string, props: object, overrides: object, slots: object, x: number, y: number, w: {}, h: {} }),
   addNode: schema('addNode', { parentId: string, index: { type: 'integer', minimum: 0 }, node: object }, ['node']),

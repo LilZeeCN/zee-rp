@@ -46,11 +46,11 @@ export function resolveColorValue(val, palette = {}) {
   return val;
 }
 
-function resolveToneBadgeColors(tone) {
-  if (tone === 'error' || tone === 'danger') return { fill: '#FEE2E2', color: '$danger' };
-  if (tone === 'warning' || tone === 'warn') return { fill: '#FEF3C7', color: '$warning' };
-  if (tone === 'success') return { fill: '#DCFCE7', color: '$success' };
-  if (tone === 'accent') return { fill: '$accent-soft', color: '$accent' };
+function resolveToneBadgeColors(tone, palette = null) {
+  if (tone === 'error' || tone === 'danger') return { fill: '#FEE2E2', color: '#991B1B' };
+  if (tone === 'warning' || tone === 'warn') return { fill: '#FEF3C7', color: '#92400E' };
+  if (tone === 'success') return { fill: '#DCFCE7', color: '#166534' };
+  if (tone === 'accent') return palette?.['accent-soft'] ? { fill: '$accent-soft', color: '$accent' } : { fill: '#DBEAFE', color: '#1E40AF' };
   if (tone === 'neutral' || tone === 'muted') return { fill: '$surface-2', color: '$ink-2' };
   return { fill: '$brand-soft', color: '$brand' };
 }
@@ -98,16 +98,16 @@ function expandMacroNode(node, palette, macroCtx = {}) {
     const children = [];
     const tagTone = n.tagTone || n.tone;
     const hasRightBadge = n.rightBadge !== undefined && n.rightBadge !== null && String(n.rightBadge) !== '';
-    const tagColors = resolveToneBadgeColors(tagTone);
-    const rightColors = resolveToneBadgeColors(n.rightTone || n.badgeVariant);
+    const tagColors = resolveToneBadgeColors(tagTone, palette);
+    const rightColors = resolveToneBadgeColors(n.rightTone || n.badgeVariant, palette);
     const tagNode = n.tag ? {
-      type: 'button',
+      type: 'badge',
       id: `${n.id}_tag`,
       name: `${n.id}_tag`,
       text: String(n.tag),
       h: 24,
       w: 'hug',
-      fontSize: 11,
+      fontSize: 12,
       fontWeight: 600,
       radius: 12,
       fill: tagColors.fill,
@@ -121,7 +121,7 @@ function expandMacroNode(node, palette, macroCtx = {}) {
       text: String(n.rightBadge),
       h: 24,
       w: 'hug',
-      fontSize: 11,
+      fontSize: 12,
       fontWeight: 600,
       radius: 12,
       fill: rightColors.fill,
@@ -211,10 +211,10 @@ function expandMacroNode(node, palette, macroCtx = {}) {
         name: `${n.id}_action`,
         text: String(n.actionText),
         w: 'fill',
-        h: 36,
-        fontSize: 13,
+        h: 44,
+        fontSize: 14,
         fontWeight: 600,
-        radius: 10,
+        radius: 12,
         fill: '$brand',
         color: '#FFFFFF',
         ...(n.goto ? { on: { click: [{ type: 'link', page: n.goto }] } } : {}),
@@ -228,9 +228,17 @@ function expandMacroNode(node, palette, macroCtx = {}) {
     n.fill = n.fill || (n.variant === 'soft' || n.variant === 'subtle' ? '$surface-2' : '$surface');
     n.radius = n.radius ?? 16;
     n.children = children;
+  } else if (n.type === 'card') {
+    const hasExplicitXY = (n.children || []).some(ch => ch && (ch.x !== undefined || ch.y !== undefined));
+    n.layout = n.layout || (hasExplicitXY ? 'stack' : 'column');
+    n.padding = n.padding ?? 16;
+    n.gap = n.gap ?? 12;
+    if (n.variant === 'outlined' || n.variant === 'outline') n.stroke = n.stroke || '$line';
+    if (n.fill === undefined) n.fill = n.variant === 'soft' || n.variant === 'subtle' ? '$surface-2' : '$surface';
+    n.radius = n.radius ?? 16;
   } else if (n.type === 'stat-row' && Array.isArray(n.items)) {
     n.layout = 'row';
-    n.gap = n.gap ?? 10;
+    n.gap = n.gap ?? 8;
     const cardPad = n.cardPadding ?? 12;
     n.children = n.items.map((it, idx) => {
       const sub = it.sub ?? it.unit;
@@ -250,7 +258,7 @@ function expandMacroNode(node, palette, macroCtx = {}) {
           { type: 'label', id: `${n.id}_val_${idx}`, name: `${n.id}_val_${idx}`, text: String(it.value ?? ''), fontSize: it.valueFontSize ?? n.valueFontSize ?? 20, fontWeight: 700, color: it.color || '$brand', w: 'fill', h: 'hug', controlledByMacro: n.id },
           { type: 'label', id: `${n.id}_lbl_${idx}`, name: `${n.id}_lbl_${idx}`, text: String(it.label ?? ''), fontSize: 12, fontWeight: 500, color: '$ink', w: 'fill', h: 'hug', controlledByMacro: n.id },
           ...(sub !== undefined && sub !== null && String(sub) !== ''
-            ? [{ type: 'label', id: `${n.id}_sub_${idx}`, name: `${n.id}_sub_${idx}`, text: String(sub), fontSize: 11, fontWeight: 400, color: '$ink-2', w: 'fill', h: 'hug', controlledByMacro: n.id }]
+            ? [{ type: 'label', id: `${n.id}_sub_${idx}`, name: `${n.id}_sub_${idx}`, text: String(sub), fontSize: 12, fontWeight: 400, color: '$ink-2', w: 'fill', h: 'hug', controlledByMacro: n.id }]
             : []),
         ],
       };
@@ -259,7 +267,7 @@ function expandMacroNode(node, palette, macroCtx = {}) {
     n.layout = 'row';
     n.align = 'center';
     n.padding = n.padding ?? 12;
-    n.gap = n.gap ?? 10;
+    n.gap = n.gap ?? 8;
     n.fill = n.fill || '$surface';
     n.radius = n.radius ?? 12;
     const subText = n.subtitle ?? n.meta;
@@ -267,8 +275,8 @@ function expandMacroNode(node, palette, macroCtx = {}) {
     const hasBothTagAndRight = n.tag !== undefined && n.tag !== null && String(n.tag) !== '' && explicitRight !== undefined && explicitRight !== null && String(explicitRight) !== '';
     const rightBadge = hasBothTagAndRight ? explicitRight : (explicitRight ?? n.tag);
     const rightTone = n.rightTone || n.badgeVariant || (!hasBothTagAndRight ? n.tagTone : null) || n.tone || n.rightVariant;
-    const rightColors = resolveToneBadgeColors(rightTone);
-    const tagColors = resolveToneBadgeColors(n.tagTone || n.tone);
+    const rightColors = resolveToneBadgeColors(rightTone, palette);
+    const tagColors = resolveToneBadgeColors(n.tagTone || n.tone, palette);
     n.children = [
       ...(n.index !== undefined && n.index !== null ? [{
         type: 'badge',
@@ -277,7 +285,7 @@ function expandMacroNode(node, palette, macroCtx = {}) {
         text: String(n.index),
         w: 24,
         h: 24,
-        fontSize: 11,
+        fontSize: 12,
         fontWeight: 600,
         radius: 12,
         fill: '$surface-2',
@@ -314,7 +322,7 @@ function expandMacroNode(node, palette, macroCtx = {}) {
         text: String(n.tag),
         w: 'hug',
         h: 24,
-        fontSize: 11,
+        fontSize: 12,
         fontWeight: 600,
         radius: 12,
         fill: tagColors.fill,
@@ -322,15 +330,15 @@ function expandMacroNode(node, palette, macroCtx = {}) {
         controlledByMacro: n.id,
       }] : []),
       ...(rightBadge ? [{
-        type: 'button',
+        type: 'badge',
         id: `${n.id}_badge`,
         name: `${n.id}_badge`,
         text: String(rightBadge),
         w: 'hug',
-        h: 26,
-        fontSize: 11,
+        h: 24,
+        fontSize: 12,
         fontWeight: 600,
-        radius: 13,
+        radius: 12,
         fill: rightColors.fill,
         color: rightColors.color,
         controlledByMacro: n.id,
@@ -354,11 +362,11 @@ function expandMacroNode(node, palette, macroCtx = {}) {
         name: tabBarId,
         layout: 'row',
         w: 'fill',
-        h: 36,
-        padding: 3,
+        h: 52,
+        padding: 4,
         gap: 4,
         fill: '$surface-2',
-        radius: 10,
+        radius: 12,
         controlledByMacro: n.id,
         children: n.tabs.map((tabLabel, tIdx) => {
           const targetSt = n.states[tIdx] || n.states[0];
@@ -369,8 +377,8 @@ function expandMacroNode(node, palette, macroCtx = {}) {
             name: `${n.id}_${st.id}_tab_${tIdx}`,
             text: String(tabLabel),
             flex: 1,
-            h: 30,
-            fontSize: 12,
+            h: 44,
+            fontSize: 14,
             fontWeight: isActive ? 600 : 500,
             radius: 8,
             fill: isActive ? '$surface' : '#FFFFFF00',
@@ -393,7 +401,7 @@ function expandMacroNode(node, palette, macroCtx = {}) {
           layout: 'column',
           w: 'fill',
           h: 'hug',
-          gap: 10,
+          gap: 12,
           controlledByMacro: n.id,
           children: [tabBar, existingRoot],
         },
@@ -470,14 +478,14 @@ function expandMacroNode(node, palette, macroCtx = {}) {
     n.layout = 'column';
     n.w = n.w ?? 'fill';
     n.h = n.h ?? 'hug';
-    n.gap = n.gap ?? 6;
+    n.gap = n.gap ?? 8;
     n.children = children;
   } else if (n.type === 'nav-bar' && (!Array.isArray(n.children) || n.children.length === 0) && hasStudioMacroExpansionParams(n)) {
     n.layout = 'row';
     n.align = 'center';
     n.justify = 'space-between';
     n.w = n.w ?? 'fill';
-    n.h = n.h ?? 48;
+    n.h = n.h ?? 52;
     n.padding = n.padding ?? [0, 16];
     n.gap = n.gap ?? 8;
     n.fill = n.fill ?? '$surface';
@@ -492,14 +500,14 @@ function expandMacroNode(node, palette, macroCtx = {}) {
             text: String(n.backText || '← 返回'),
             variant: 'ghost',
             w: 'hug',
-            h: 32,
-            fontSize: 13,
+            h: 44,
+            fontSize: 14,
             fontWeight: 500,
             color: '$ink',
             ...(n.backGoto ? { on: { click: [{ type: 'link', page: n.backGoto }] } } : {}),
             controlledByMacro: n.id,
           }]
-        : hasRight ? [{ type: 'spacer', id: `${n.id}_left_pad`, name: `${n.id}_left_pad`, w: 48, h: 1, controlledByMacro: n.id }] : []),
+        : hasRight ? [{ type: 'spacer', id: `${n.id}_left_pad`, name: `${n.id}_left_pad`, w: 48, h: 4, controlledByMacro: n.id }] : []),
       {
         type: 'label',
         id: `${n.id}_title`,
@@ -521,14 +529,14 @@ function expandMacroNode(node, palette, macroCtx = {}) {
             text: String(n.rightText || '操作'),
             variant: 'ghost',
             w: 'hug',
-            h: 32,
-            fontSize: 13,
+            h: 44,
+            fontSize: 14,
             fontWeight: 600,
             color: '$brand',
             ...(n.rightGoto ? { on: { click: [{ type: 'link', page: n.rightGoto }] } } : {}),
             controlledByMacro: n.id,
           }]
-        : hasBack ? [{ type: 'spacer', id: `${n.id}_right_pad`, name: `${n.id}_right_pad`, w: 48, h: 1, controlledByMacro: n.id }] : []),
+        : hasBack ? [{ type: 'spacer', id: `${n.id}_right_pad`, name: `${n.id}_right_pad`, w: 48, h: 4, controlledByMacro: n.id }] : []),
     ];
   } else if (n.type === 'tab-bar' && (!Array.isArray(n.children) || n.children.length === 0) && hasStudioMacroExpansionParams(n)) {
     const rawItems = Array.isArray(n.items) ? n.items : Array.isArray(n.tabs) ? n.tabs : [];
@@ -536,7 +544,7 @@ function expandMacroNode(node, palette, macroCtx = {}) {
     n.align = 'center';
     n.w = n.w ?? 'fill';
     n.h = n.h ?? 52;
-    n.padding = n.padding ?? [6, 8];
+    n.padding = n.padding ?? [4, 8];
     n.gap = n.gap ?? 4;
     n.fill = n.fill ?? '$surface';
     if (n.borderTop === undefined) n.borderTop = true;
@@ -554,10 +562,10 @@ function expandMacroNode(node, palette, macroCtx = {}) {
         name: `${n.id}_tab_${idx}`,
         text: label,
         flex: 1,
-        h: 40,
+        h: 44,
         fontSize: 12,
         fontWeight: isActive ? 600 : 500,
-        radius: 10,
+        radius: 8,
         fill: isActive ? '$brand-soft' : '#FFFFFF00',
         color: isActive ? '$brand' : '$ink-2',
         ...(gotoPage
@@ -926,7 +934,7 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
       ghost: { fill: null, color: palette.ink, stroke: null },
       soft: { fill: palette['brand-soft'] || palette['surface-2'], color: palette.brand },
       danger: { fill: palette.danger || palette.error, color: palette['ink-inv'] || '#FFFFFF' },
-    }[node.variant || node.tone || 'primary'] || { fill: palette.brand, color: '#FFFFFF' }) : (['combobox', 'listbox'].includes(node.type) ? {
+    }[node.variant || node.tone || 'primary'] || { fill: palette.brand, color: '#FFFFFF' }) : (['input', 'combobox', 'listbox'].includes(node.type) ? {
       fill: palette.surface || '#FFFFFF',
       stroke: palette['line-strong'] || palette.line || '#CBD5CE',
       color: palette.ink,
@@ -1656,8 +1664,8 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
       const pageGlobalY = shellPad + screenY;
 
       // Resolve runtime variable formulas if runtimeState or initial variable preview
-      let displayText =
-        n.type === 'path'
+      let rawText =
+        ['path', 'progress-bar', 'stat-row', 'list-item', 'nav-bar', 'tab-bar', 'dynamic-panel', 'repeater'].includes(n.type)
           ? ''
           : n.type === 'combobox'
             ? String((Array.isArray(n.options) ? n.options[n.selectedIndex ?? 0] : null) ?? n.selected ?? n.text ?? '')
@@ -1669,6 +1677,12 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
                   ? n._textMetrics?.text || n.spans.map(s => s?.text ?? '').join('')
                   : '')
               );
+      if (rawText && typeof rawText === 'object' && typeof rawText.variable === 'string') {
+        const varsSource = runtimeState?.variables || doc.variables || {};
+        const entry = varsSource[rawText.variable];
+        rawText = entry && typeof entry === 'object' && 'value' in entry ? entry.value : (entry ?? '');
+      }
+      let displayText = rawText == null ? '' : String(rawText);
       if (typeof displayText === 'string' && displayText.startsWith('=')) {
         displayText = evaluateSimpleDisplayFormula(displayText, runtimeState?.variables || doc.variables || {}, layoutDocument, pg.root);
       }

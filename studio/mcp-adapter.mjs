@@ -345,6 +345,9 @@ export const studioHandlers = {
     if (!projectDir) {
       throw Object.assign(new Error('projectDir 参数必填'), { code: 'E_PROJECT_DIR_REQUIRED' });
     }
+    if (port !== null && port !== 0 && (port < 1024 || port > 65535)) {
+      throw Object.assign(new Error('port 需为 0（由系统分配空闲端口）或 1024–65535'), { code: 'E_INVALID_PORT', requestedPort: port });
+    }
     const absDir = resolve(projectDir);
     const respond = (body, extra = {}) => {
       const diskFingerprint = studioSourceFingerprint();
@@ -377,7 +380,7 @@ export const studioHandlers = {
     // 同一工程：已有本地实例就直接复用，避免重复加载与画面重置。
     const known = inProcessServers.get(absDir);
     if (known?.kind === 'local' && known.studio.server?.listening && known.studio.projectDir === absDir) {
-      if (port !== null && known.studio.port !== port) {
+      if (port !== null && port !== 0 && known.studio.port !== port) {
         throw Object.assign(new Error(`工程已在端口 ${known.studio.port} 运行；显式请求端口 ${port} 不会热迁移实例，请继续使用当前端口或换一个新的 projectDir`), {
           code: 'E_INSTANCE_PORT_MISMATCH', projectDir: absDir, currentPort: known.studio.port, requestedPort: port,
         });
@@ -393,7 +396,7 @@ export const studioHandlers = {
     if (live) {
       const endpoint = new URL(live.url || record.url);
       const currentPort = Number(endpoint.port || (endpoint.protocol === 'https:' ? 443 : 80));
-      if (port !== null && currentPort !== port) {
+      if (port !== null && port !== 0 && currentPort !== port) {
         throw Object.assign(new Error(`工程已在端口 ${currentPort} 运行；请继续使用当前端口`), {
           code: 'E_INSTANCE_PORT_MISMATCH', projectDir: absDir, currentPort, requestedPort: port,
         });
@@ -814,7 +817,7 @@ export const studioTools = [
         sourcePath: { type: 'string' },
         name: { type: 'string' },
         domain: { type: 'string', enum: ['mobile', 'web'] },
-        port: { type: 'integer', minimum: 1024, maximum: 65535 },
+        port: { type: 'integer', minimum: 0, maximum: 65535, description: '监听端口(1024–65535)，或传 0 由系统分配空闲端口；省略时默认从 4310 起自动寻找空闲端口' },
         url: { type: 'string' },
       },
       required: ['projectDir'],

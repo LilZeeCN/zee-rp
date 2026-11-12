@@ -2861,7 +2861,16 @@ class Frontend:
                 out = {"kind": "variable", "name": name, "valueType": typ}
             elif "widget" in value:
                 fields(value, {"widget"}, path)
-                symbol = self.resolve(value["widget"], scope, ptr(path, "widget"))
+                raw_wref = value["widget"]
+                if isinstance(raw_wref, dict) and isinstance(raw_wref.get("ref"), str) and "." in raw_wref["ref"]:
+                    base_ref, suffix_prop = raw_wref["ref"].rsplit(".", 1)
+                    if suffix_prop in ("text", "checked", "selected", "value") and base_ref:
+                        raw_wref = {**raw_wref, "ref": base_ref}
+                elif isinstance(raw_wref, str) and "." in raw_wref:
+                    base_ref, suffix_prop = raw_wref.rsplit(".", 1)
+                    if suffix_prop in ("text", "checked", "selected", "value") and base_ref:
+                        raw_wref = base_ref
+                symbol = self.resolve(raw_wref, scope, ptr(path, "widget"))
                 if symbol["pageId"] != scope.split("/")[0] or symbol["kind"] not in FORM_KINDS | {"label", "paragraph", "button", "badge"}:
                     fail("E_TARGET_TYPE", path, "Runtime text read needs a text-capable widget in this page")
                 source_row = self.row_context(symbol["id"])[0]

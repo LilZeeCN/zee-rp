@@ -18,6 +18,7 @@ try:
     for line, raw in enumerate(text.splitlines(), 1):
         content = raw.strip()
         if not content or content.startswith(('#', '//')): continue
+        if content.endswith(':'): content = content[:-1].rstrip()
         kind, pos = _scan_token(content, 0, line)
         kind = kind.lstrip(':')
         if kind in ('rp/1', 'page') or kind.startswith('+'): continue

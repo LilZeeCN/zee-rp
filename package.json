@@ -56,7 +56,7 @@
     "test:studio-pixels": "node --test test/studio-pixel-contrast-check.mjs",
     "test:studio-editing": "node --test --test-concurrency=1 test/studio-editing-check.mjs test/studio-gesture-browser-check.mjs test/studio-clipboard-browser-check.mjs test/studio-layout-check.mjs",
     "test:studio-ceiling": "node --test test/studio-ceiling-check.mjs",
-    "test:studio-ai": "node --test --test-concurrency=1 test/studio-reliability-check.mjs test/studio-authoring-query-check.mjs test/studio-design-guidance-check.mjs test/studio-rp1-authoring-check.mjs test/studio-rp1-unified-and-forms-check.mjs test/studio-interaction-lint-and-coverage-check.mjs test/studio-doc-contract-parity-check.mjs test/studio-trial-regressions-check.mjs test/studio-phase-decisions-check.mjs test/studio-contracts-check.mjs test/studio-command-ref-check.mjs test/studio-command-sweep-check.mjs test/studio-versions-check.mjs test/studio-selection-check.mjs test/studio-cdp-startup-check.mjs test/studio-operations-check.mjs test/studio-diagnostics-check.mjs test/studio-repeater-export-check.mjs test/studio-node-capabilities-check.mjs test/studio-gesture-browser-check.mjs test/studio-sync-native-check.mjs test/studio-bundle-merge-check.mjs test/studio-scale-performance-check.mjs test/studio-vector-boolean-check.mjs test/studio-export-code-check.mjs test/studio-benchmark-trials-check.mjs test/studio-merge-scopes-check.mjs test/studio-project-fonts-check.mjs test/studio-runtime-scopes-check.mjs",
+    "test:studio-ai": "node --test --test-concurrency=1 test/studio-reliability-check.mjs test/studio-authoring-query-check.mjs test/studio-design-guidance-check.mjs test/studio-rp1-authoring-check.mjs test/studio-rp1-unified-and-forms-check.mjs test/studio-interaction-lint-and-coverage-check.mjs test/studio-doc-contract-parity-check.mjs test/studio-cold-start-polish-check.mjs test/studio-trial-regressions-check.mjs test/studio-phase-decisions-check.mjs test/studio-contracts-check.mjs test/studio-command-ref-check.mjs test/studio-command-sweep-check.mjs test/studio-versions-check.mjs test/studio-selection-check.mjs test/studio-cdp-startup-check.mjs test/studio-operations-check.mjs test/studio-diagnostics-check.mjs test/studio-repeater-export-check.mjs test/studio-node-capabilities-check.mjs test/studio-gesture-browser-check.mjs test/studio-sync-native-check.mjs test/studio-bundle-merge-check.mjs test/studio-scale-performance-check.mjs test/studio-vector-boolean-check.mjs test/studio-export-code-check.mjs test/studio-benchmark-trials-check.mjs test/studio-merge-scopes-check.mjs test/studio-project-fonts-check.mjs test/studio-runtime-scopes-check.mjs",
     "test:studio-baselines": "python3 benchmarks/studio/validate.py",
     "test:scripted-validate": "node --test test/studio-benchmark-trials-check.mjs",
     "test:attribution": "node tools/check-attribution.mjs",
@@ -646,6 +646,7 @@
     "test/studio-rp1-unified-and-forms-check.mjs",
     "test/studio-interaction-lint-and-coverage-check.mjs",
     "test/studio-doc-contract-parity-check.mjs",
+    "test/studio-cold-start-polish-check.mjs",
     "tools/check-attribution.mjs",
     "tools/check-layers.mjs"
   ],

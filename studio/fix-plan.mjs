@@ -46,6 +46,23 @@ export function buildFixPlan(scenePage, metrics, doc = null) {
   // 沿用页面上已有的正文字号，避免补一个空态顺带改掉字阶。
   const bodySize = metrics.metrics?.typeScale?.bodySizes?.slice(-1)[0] || 14;
   const byId = new Map(nodes.map(n => [n.id, n]));
+  const docPage = (doc?.pages || []).find(p => p.id === scenePage.id);
+  const sourceNodeIds = docPage?.root ? (() => {
+    const ids = new Set();
+    const walkIds = n => {
+      if (!n || typeof n !== 'object') return;
+      if (n.id) ids.add(n.id);
+      for (const ch of n.children || []) walkIds(ch);
+      for (const st of n.states || []) if (st?.root) walkIds(st.root);
+      if (n.template) walkIds(n.template);
+    };
+    walkIds(docPage.root);
+    return ids;
+  })() : null;
+  const isEditableSourceNode = n => Boolean(
+    n && !n.controlledByMacro && !n.componentSource && !n.repeaterRowOwner && !n.repeaterTemplateOwner
+      && (!sourceNodeIds || sourceNodeIds.has(n.id))
+  );
   const commands = [];
   const notes = [];
   const manual = [];
@@ -66,6 +83,10 @@ export function buildFixPlan(scenePage, metrics, doc = null) {
   for (const [nodeId, props] of grouped) {
     const node = byId.get(nodeId);
     if (!node) continue;
+    if (!isEditableSourceNode(node)) {
+      notes.push({ nodeId, reason: `由宏或组件托管（${node.controlledByMacro || node.component || '受控节点'}），跳过直接写虚拟子节点` });
+      continue;
+    }
     // 只修 x/y（位置）。宽高改动会牵动兄弟布局，风险高于收益，放进 notes 让人决定。
     // 命令层写的是**局部坐标**（相对父容器）。scene 的 x/y 是页面绝对坐标，
     // 直接写回会被父容器 padding 再加一次（实测 73 → 104，位移 31px）。
@@ -108,7 +129,7 @@ export function buildFixPlan(scenePage, metrics, doc = null) {
   const boundFor = node => node.for || null;
   const covered = new Set(empties.map(boundFor).filter(Boolean));
   for (const list of lists) {
-    if (covered.has(list.id)) continue;
+    if (covered.has(list.id) || !isEditableSourceNode(list)) continue;
     const y = Math.round(((list.y || 0) + (list.h || 0) + 16) / GRID) * GRID;
     // 空态不能是白板：必须带一句可读文案，否则检查变绿、页面仍是空白。
     const relX = Number.isFinite(list.relX) ? list.relX : 0;
@@ -147,7 +168,7 @@ export function buildFixPlan(scenePage, metrics, doc = null) {
   // 4) 撑高文字：把外框高度回缩到文字高度
   for (const item of metrics.metrics?.visualHierarchy?.stretchedText || []) {
     const node = byId.get(item.id);
-    if (!node) continue;
+    if (!node || !isEditableSourceNode(node)) continue;
     const target = Math.max(nearest(item.contentH), GRID);
     pushProperties(item.id, { h: target }, `文字框 ${item.boxH} → ${target}（内容实际 ${item.contentH}）`);
   }
@@ -157,7 +178,7 @@ export function buildFixPlan(scenePage, metrics, doc = null) {
   for (const clip of scenePage.fontReport?.clipDiagnostics || []) {
     if (!clip?.nodeId || clip.repeaterId || seenClipIds.has(clip.nodeId)) continue;
     const node = byId.get(clip.nodeId);
-    if (!node || node.controlledByMacro || node.componentSource) continue;
+    if (!node || !isEditableSourceNode(node)) continue;
     seenClipIds.add(clip.nodeId);
     const props = {};
     if (clip.direction === 'vertical' && Number.isFinite(clip.requiredBounds?.h) && clip.requiredBounds.h > (clip.actualBounds?.h || 0)) {
@@ -171,7 +192,6 @@ export function buildFixPlan(scenePage, metrics, doc = null) {
   }
 
   // 6) stack 容器子节点省略坐标共用起点 (W_STACK_CHILDREN_UNPLACED)
-  const docPage = (doc?.pages || []).find(p => p.id === scenePage.id);
   if (docPage?.root) {
     const walkStack = node => {
       if (!node || typeof node !== 'object') return;

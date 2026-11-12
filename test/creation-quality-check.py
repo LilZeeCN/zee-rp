@@ -128,8 +128,13 @@ def schema_contract():
     schema = language_schema()
     assert schema == json.loads((ROOT / "references/rp-language.schema.json").read_text())
     assert "device" in schema["properties"] and "tokens" in schema["properties"]
-    kinds = {variant["properties"]["type"]["const"] for variant in schema["$defs"]["node"]["anyOf"]
-             if "type" in variant.get("properties", {})}
+    kinds = set()
+    for variant in schema["$defs"]["node"]["anyOf"]:
+        type_prop = variant.get("properties", {}).get("type", {})
+        if "const" in type_prop:
+            kinds.add(type_prop["const"])
+        elif "enum" in type_prop:
+            kinds.update(type_prop["enum"])
     assert {"phone-shell", "progress-bar", "nav-bar", "tab-bar", "stat-row", "list-item"} <= kinds
 
 

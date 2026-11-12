@@ -51,11 +51,21 @@ export function summarizeInteractionSources(rpSummary = {}, { crossPageTextState
       }
     })(page.widgets);
   }
+  for (const cw of rpSummary.containedWidgets || []) {
+    const pageName = typeof cw.container === 'string' ? cw.container.split(' / ')[0] : null;
+    for (const ix of cw.interactions || []) {
+      add({ name: pageName }, 'contained-widget', cw.name || cw.id || null, ix);
+    }
+  }
   const summaryOf = list => ({ interactions: list.length, actions: list.reduce((n, row) => n + row.actionCount, 0) });
+  const pageLevelRows = rows.filter(row => row.owner !== 'contained-widget');
+  const containedRows = rows.filter(row => row.owner === 'contained-widget');
   return {
     sources: rows,
     counts: {
       total: summaryOf(rows),
+      pageLevel: summaryOf(pageLevelRows),
+      ...(containedRows.length ? { contained: summaryOf(containedRows) } : {}),
       authored: summaryOf(rows.filter(row => row.origin === 'authored')),
       exportGenerated: {
         ...summaryOf(rows.filter(row => row.origin.startsWith('export-'))),
@@ -68,8 +78,9 @@ export function summarizeInteractionSources(rpSummary = {}, { crossPageTextState
 function toRp1RuntimeValue(val) {
   if (typeof val === 'string') {
     const trimmed = val.trim();
-    if (trimmed.startsWith('=@') && /^[A-Za-z_][A-Za-z0-9_-]*$/.test(trimmed.slice(2).trim())) {
-      return { widget: trimmed.slice(2).trim() };
+    const wMatch = trimmed.match(/^=@([A-Za-z_][A-Za-z0-9_-]*)(?:\.(text|checked|selected|value))?$/);
+    if (wMatch) {
+      return { widget: wMatch[1] };
     }
     if (trimmed.startsWith('=$') && /^[A-Za-z_][A-Za-z0-9_-]*$/.test(trimmed.slice(2).trim())) {
       return { variable: trimmed.slice(2).trim() };
@@ -1220,7 +1231,7 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
     if (node.backdropBlur) out.backdropBlur = node.backdropBlur;
     if (node.aurora) out.aurora = node.aurora;
     if (node.noise) out.noise = node.noise;
-    for (const bKey of ['borderSides', 'borderTop', 'borderRight', 'borderBottom', 'borderLeft', 'clip']) {
+    for (const bKey of ['borderSides', 'borderTop', 'borderRight', 'borderBottom', 'borderLeft']) {
       if (node[bKey] !== undefined) out[bKey] = node[bKey];
     }
   }
@@ -1491,7 +1502,7 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
     buildRes.rpSha256 = baseline.rpSha256;
 
     // Read back the generated .rp and run structural & geometry alignment verification
-    const rpSummary = readRp(readFileSync(absOutRp), { path: absOutRp });
+    const rpSummary = readRp(readFileSync(absOutRp), { path: absOutRp, includeMasterWidgets: true });
 
     // Compare ResolvedScene visible nodes vs native .rp widget geometries
     let totalCompared = 0;
@@ -1547,6 +1558,7 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
     const unparseable = rpSummary.records?.unparseable ?? 0;
     const danglingRefs = rpSummary.counts?.danglingRefs ?? 0;
     const problems = Array.isArray(rpSummary.problems) ? rpSummary.problems.length : (rpSummary.problems ?? 0);
+    const threeZerosPassed = unparseable === 0 && danglingRefs === 0 && problems === 0;
     const interactionAudit = summarizeInteractionSources(rpSummary, { crossPageTextState });
 
     const report = {
@@ -1558,13 +1570,14 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
       exporterVersion: EXPORTER_VERSION,
       exportedAt: new Date().toISOString(),
       outRpPath: absOutRp,
+      threeZerosPassed,
       summary: {
         pageCount: rpSummary.pages?.length ?? 0,
         widgetCount: rpSummary.counts?.widgets ?? 0,
         unparseable,
         danglingRefs,
         problems,
-        threeZerosPassed: unparseable === 0 && danglingRefs === 0 && problems === 0,
+        threeZerosPassed,
       },
       geometryAlignment: {
         totalCompared,
@@ -1589,8 +1602,8 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
       interactionCounts: {
         ...interactionAudit.counts,
         rpSummary: { interactions: rpSummary.counts?.interactions ?? null, actions: rpSummary.counts?.actions ?? null },
-        matchesRpSummary: interactionAudit.counts.total.interactions === (rpSummary.counts?.interactions ?? null)
-          && interactionAudit.counts.total.actions === (rpSummary.counts?.actions ?? null),
+        matchesRpSummary: interactionAudit.counts.pageLevel.interactions === (rpSummary.counts?.interactions ?? null)
+          && interactionAudit.counts.pageLevel.actions === (rpSummary.counts?.actions ?? null),
       },
       wholePageRasterized: false,
       editableTextRasterized: false,
@@ -1614,6 +1627,7 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
 
     return {
       ok: true,
+      threeZerosPassed,
       outRpPath: absOutRp,
       sourcePath,
       studioSourcePath,

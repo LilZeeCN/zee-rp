@@ -1344,7 +1344,27 @@ export class StudioServer {
                 });
                 return;
               }
-              sendJson(res, 200, { ok: false, code: 'E_SCENARIO_BROWSER_MISMATCH', message: '真实浏览器指针层未通过（非遮挡原因），语义层未执行，以真实浏览器结论为准', browserLayer: browser, designContentHash: this.store.doc.contentHash });
+              const failedHistoryStep = Array.isArray(browser.history) ? browser.history.find(s => !s.passed) : null;
+              const detailSuffix = browser.message
+                ? `：${browser.message}`
+                : failedHistoryStep
+                  ? `：[步骤 ${failedHistoryStep.stepIndex}/${(body.steps || []).length}: ${failedHistoryStep.action}${failedHistoryStep.target ? ` ${failedHistoryStep.target}` : ''}] 断言未满足 (${(failedHistoryStep.failures || []).join(', ')})`
+                  : '';
+              const failedStep = browser.failedStep || (failedHistoryStep ? {
+                stepIndex: failedHistoryStep.stepIndex,
+                totalSteps: (body.steps || []).length,
+                action: failedHistoryStep.action,
+                target: failedHistoryStep.target ?? null,
+                failures: failedHistoryStep.failures || [],
+              } : null);
+              sendJson(res, 200, {
+                ok: false,
+                code: 'E_SCENARIO_BROWSER_MISMATCH',
+                message: `真实浏览器指针层未通过（非遮挡原因），语义层未执行，以真实浏览器结论为准${detailSuffix}`,
+                ...(failedStep ? { stepIndex: failedStep.stepIndex, failedStep } : {}),
+                browserLayer: browser,
+                designContentHash: this.store.doc.contentHash,
+              });
               return;
             }
             // 指针层通过后重建语义会话（指针重放已重置/推进过共享会话）并照常执行语义层

@@ -35,9 +35,9 @@
 │ L0-L1 核心  document(权威文档模型/canonicalJson/contentHash)      │
 │             node-properties(282 属性契约) · node-capabilities     │
 │             component-contracts(6 核心组件) · command-contracts   │
-│             visual-style / vector-paths / clipboard / typography  │
-│             interactions · pixel-truth · css-raster · cdp         │
-│             bounded-cache / schema-validation / png-decode …      │
+│             interaction-lint(7 类交互自愈诊断) · visual-style     │
+│             vector-paths / clipboard / typography / interactions  │
+│             pixel-truth · css-raster · cdp · bounded-cache …      │
 ├────────────────────────────────────────────────────────────────┤
 │ 浏览器侧    studio/web/index.html + styles.css + src/*.mjs        │
 │             main(编辑协调) · state(单例) · sync(SSE/快照 patch)   │

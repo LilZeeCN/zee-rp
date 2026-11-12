@@ -9,13 +9,34 @@ import { classifyNodeCompatibility } from './export-rp.mjs';
 import { exportCssPlan } from './visual-style.mjs';
 import { lintDocumentInteractions } from './interaction-lint.mjs';
 
-function summarizeNativeReadiness(page) {
+function summarizeNativeReadiness(page, docPage = null) {
   let nativeEditable = 0;
   let nativeInitAction = 0;
   let rasterizedEffect = 0;
   let unsupported = 0;
   const nonNativeItems = [];
-  for (const node of page?.nodes || []) {
+  const itemsToCheck = [...(page?.nodes || [])];
+  const seenIds = new Set(itemsToCheck.map(n => n?.id).filter(Boolean));
+  if (docPage?.root) {
+    const walkUnseen = (srcNode, scopePrefix = page?.id || '') => {
+      if (!srcNode || typeof srcNode !== 'object') return;
+      const scopedId = srcNode.id ? `${scopePrefix}/${srcNode.id}` : scopePrefix;
+      if (srcNode.id && !seenIds.has(srcNode.id)) {
+        seenIds.add(srcNode.id);
+        const normalized = srcNode.type === 'textarea'
+          ? { ...srcNode, type: 'input', multiline: true, scopedId }
+          : { ...srcNode, scopedId };
+        itemsToCheck.push(normalized);
+      }
+      for (const ch of srcNode.children || []) walkUnseen(ch, scopedId);
+      for (const st of srcNode.states || []) {
+        if (st?.root) walkUnseen(st.root, `${scopedId}/${st.id}`);
+      }
+      if (srcNode.template) walkUnseen(srcNode.template, `${scopedId}/template`);
+    };
+    walkUnseen(docPage.root, page?.id || '');
+  }
+  for (const node of itemsToCheck) {
     const entries = [];
     classifyNodeCompatibility(node, page.id, entries);
     const cssPlan = exportCssPlan(node);
@@ -24,7 +45,7 @@ function summarizeNativeReadiness(page) {
       entries.splice(Math.max(0, entries.length - 1), 0, {
         pageId: page.id,
         nodeId: node.id,
-        scopedId: `${page.id}/${node.id}`,
+        scopedId: node.scopedId || `${page.id}/${node.id}`,
         nodeType: node.type,
         classification: 'rasterized-effect',
         feature: paintKeys.join(','),
@@ -55,7 +76,7 @@ function summarizeNativeReadiness(page) {
   return {
     fullyNativeEditable: unsupported === 0 && rasterizedEffect === 0,
     counts: {
-      totalNodes: (page?.nodes || []).length,
+      totalNodes: itemsToCheck.length,
       nativeEditable,
       nativeInitAction,
       rasterizedEffect,
@@ -151,7 +172,8 @@ export async function reviewDesign(studio, { pageId, baseRevision, reviewId = nu
     });
   }
   const { mcpImages, base64, ...screenshot } = shot;
-  const nativeReadiness = summarizeNativeReadiness(page);
+  const docPage = (studio.store.doc.pages || []).find(p => p.id === pageId) || null;
+  const nativeReadiness = summarizeNativeReadiness(page, docPage);
   const interactionDiagnostics = lintDocumentInteractions(studio.store.doc, { includeCompleteness: true, pageId });
   const review = { schemaVersion: 2, board: page.board, nodeSnapshots: reviewNodeSnapshots(page), reviewId: id, pageId, revision: baseRevision, contentHash: shot.contentHash, screenshot,
     status: 'awaiting-visual-review', userAccepted: false, findings:findings.map(finding=>({...finding,location:locateDiagnostic({doc:studio.store.doc,scene:studio.scene,pageId,nodeIds:finding.nodeIds||[finding.nodeId||finding.scopedId].filter(Boolean),field:finding.field,code:finding.code,limit:1})})), checkList,

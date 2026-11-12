@@ -83,6 +83,70 @@ async function pointerTarget(page, selector, action, value) {
   if (!target) throw lastError;
   await page.mouseClick(target.point.x, target.point.y);
   if (action === 'input' || action === 'fill') {
+    const textVal = String(value ?? '');
+    const special = await page.evaluate(`(() => {
+      const docs = [document];
+      let el = null;
+      for (let i = 0; i < docs.length && i < 20; i++) {
+        el = docs[i].querySelector(${JSON.stringify(selector)});
+        if (el) break;
+        for (const frame of docs[i].querySelectorAll('iframe')) {
+          try { if (frame.contentDocument) docs.push(frame.contentDocument); } catch {}
+        }
+      }
+      if (!el) return { kind: 'text' };
+      const sel = el.tagName?.toLowerCase() === 'select' ? el : el.querySelector?.('select');
+      if (sel) {
+        const rawValue = ${JSON.stringify(value ?? '')};
+        const textVal = ${JSON.stringify(textVal)};
+        const opts = [...sel.options];
+        const matched = (typeof rawValue === 'number' && opts[rawValue])
+          ? opts[rawValue]
+          : opts.find(o => o.value === textVal || o.textContent.trim() === textVal);
+        if (!matched) {
+          return { kind: 'select-missing', available: opts.map(o => o.value || o.textContent.trim()) };
+        }
+        sel.value = matched.value;
+        sel.dispatchEvent(new Event('input', { bubbles: true }));
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        return { kind: 'select-ok', selected: matched.value };
+      }
+      const listOpts = el.querySelectorAll ? [...el.querySelectorAll('[data-runtime-listbox-option]')] : [];
+      if (listOpts.length > 0) {
+        const rawValue = ${JSON.stringify(value ?? '')};
+        const textVal = ${JSON.stringify(textVal)};
+        const matched = (typeof rawValue === 'number' && listOpts[rawValue])
+          ? listOpts[rawValue]
+          : listOpts.find(o => o.getAttribute('data-runtime-listbox-option') === textVal || o.textContent.trim() === textVal);
+        if (!matched) {
+          return { kind: 'listbox-missing', available: listOpts.map(o => o.getAttribute('data-runtime-listbox-option') || o.textContent.trim()) };
+        }
+        matched.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+        const r = matched.getBoundingClientRect();
+        let x = r.left + r.width * 0.5;
+        let y = r.top + r.height * 0.5;
+        let win = matched.ownerDocument.defaultView;
+        while (win.frameElement) {
+          const fr = win.frameElement.getBoundingClientRect();
+          x += fr.left;
+          y += fr.top;
+          win = win.parent;
+        }
+        return { kind: 'listbox-click', point: { x, y } };
+      }
+      return { kind: 'text' };
+    })()`);
+    if (special?.kind === 'select-missing') {
+      throw new Error(`下拉框选项 "${textVal}" 不存在；可选值: ${(special.available || []).join(', ')}`);
+    }
+    if (special?.kind === 'select-ok') return;
+    if (special?.kind === 'listbox-missing') {
+      throw new Error(`列表框选项 "${textVal}" 不存在；可选值: ${(special.available || []).join(', ')}`);
+    }
+    if (special?.kind === 'listbox-click' && special.point) {
+      await page.mouseClick(special.point.x, special.point.y);
+      return;
+    }
     await page.send('Input.dispatchKeyEvent', {
       type: 'keyDown',
       key: 'a',
@@ -91,7 +155,6 @@ async function pointerTarget(page, selector, action, value) {
       commands: ['selectAll'],
     });
     await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'a', code: 'KeyA' });
-    const textVal = String(value ?? '');
     if (textVal.length > 0) {
       await page.send('Input.insertText', { text: textVal });
     } else {
@@ -131,17 +194,28 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
   const names = new Set();
   for (const step of steps) {
     if (step.target || step.id || step.click || step.fill) names.add(String(step.target || step.id || step.click || step.fill).split('/').at(-1));
-    for (const key of [...Object.keys(step.expect?.text || {}), ...Object.keys(step.expect?.visible || {})]) names.add(key.split('/').at(-1));
+    for (const key of [...Object.keys(step.expect?.text || {}), ...Object.keys(step.expect?.visible || {}), ...Object.keys(step.expect?.checked || {}), ...Object.keys(step.expect?.selected || {})]) names.add(key.split('/').at(-1));
   }
   const read = async () => {
     if (!native) return page.evaluate(`(() => {
       const state = window.__STUDIO_APP__.state;
       const rt = state.runtimeState;
       const widgets = [...document.querySelectorAll('#screen-root .studio-node')].map(el => ({
-        name: el.dataset.nodeId, scopedId: el.dataset.scopedId, text: el.matches('input,textarea') ? el.value : el.innerText,
+        name: el.dataset.nodeId, scopedId: el.dataset.scopedId, text: el.matches('input,textarea,select') ? el.value : el.innerText,
         visible: el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0 && getComputedStyle(el).visibility !== 'hidden'
       }));
-      return { ready: Boolean(rt), page: rt?.currentPageId, variables: rt?.variables, panelStates: rt?.panelStates, datasets: rt?.datasets, nodes: rt?.activePageScene?.nodes, widgets };
+      return {
+        ready: Boolean(rt),
+        page: rt?.currentPageId,
+        variables: rt?.variables,
+        checked: rt?.checked,
+        selectedOptions: rt?.selectedOptions,
+        selectedNodes: rt?.selectedNodes,
+        panelStates: rt?.panelStates,
+        datasets: rt?.datasets,
+        nodes: rt?.activePageScene?.nodes,
+        widgets,
+      };
     })()`);
     const labels = await page.evaluate(`(() => {
       const windows=[window], labels=[];
@@ -161,6 +235,7 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
     const widgets = (observed.widgets || []).map(w => ({ ...w, nativeName: w.name, name: mapping.get(w.name) || w.name }));
     return { ...observed, widgets: widgets.filter(w => !w.nativeName.startsWith('bg-') || !widgets.some(other => other.name === w.name && !other.nativeName.startsWith('bg-'))), page: matched?.id ?? observed.page };
   };
+  let currentStepInfo = null;
   try {
     if (native) {
       // An already loaded start.html can still expose the preceding scenario's
@@ -209,9 +284,11 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
       await pointerTarget(page, '#mode-interact-btn', 'click');
       await page.waitForFunction('Boolean(window.__STUDIO_APP__.state.runtimeState)');
     }
-    for (const step of steps) {
+    for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
+      const step = steps[stepIdx];
       const action = step.action || (step.click ? 'click' : step.fill ? 'input' : 'expect');
       const target = step.target || step.id || step.click || step.fill;
+      currentStepInfo = { stepIndex: stepIdx + 1, totalSteps: steps.length, action, target: target ?? null };
       if (action !== 'expect' && action !== 'assert') {
         let selector;
         if (native) {
@@ -253,9 +330,32 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
           if (!widget || !(substring ? widget.text.includes(value.includes) : widget.text.trim() === String(value))) failures.push(`text:${name}`);
         }
         if (!native) {
+          for (const [name, value] of Object.entries(step.expect?.checked || {})) {
+            const candidates = (actual.nodes || []).filter(n => name.includes('/') ? n.scopedId === name || n.scopedId === `${actual.page}/${name}` : n.id === name);
+            const scopedKey = candidates[0]?.scopedId || (name.includes('/') && actual.checked?.[name] !== undefined ? name : `${actual.page}/${name}`);
+            const curChk = Boolean(actual.checked?.[scopedKey] ?? candidates[0]?.checked);
+            if (curChk !== Boolean(value)) failures.push(`checked:${name}`);
+          }
+          for (const [name, value] of Object.entries(step.expect?.selected || {})) {
+            const candidates = (actual.nodes || []).filter(n => name.includes('/') ? n.scopedId === name || n.scopedId === `${actual.page}/${name}` : n.id === name);
+            const node = candidates[0];
+            const scopedKey = node?.scopedId || (name.includes('/') && (actual.selectedOptions?.[name] !== undefined || actual.selectedNodes?.[name] !== undefined) ? name : `${actual.page}/${name}`);
+            const curSel = (node && (node.type === 'combobox' || node.type === 'listbox')) || actual.selectedOptions?.[scopedKey] !== undefined
+              ? actual.selectedOptions?.[scopedKey]
+              : (actual.selectedNodes?.[scopedKey] ?? actual.checked?.[scopedKey] ?? node?.selected);
+            const okSel = typeof value === 'boolean'
+              ? Boolean(curSel) === value
+              : Array.isArray(value)
+                ? JSON.stringify(curSel) === JSON.stringify(value)
+                : String(curSel ?? '') === String(value);
+            if (!okSel) failures.push(`selected:${name}`);
+          }
           for (const [name, value] of Object.entries(step.expect?.panelState || {})) {
             const candidates = (actual.nodes || []).filter(n => n.type === 'dynamic-panel' && (name.includes('/') ? n.scopedId === name || n.scopedId === `${actual.page}/${name}` : n.id === name));
-            if (candidates.length !== 1 || actual.panelStates?.[candidates[0].scopedId] !== value) failures.push(`panelState:${name}`);
+            const actualPanelState = candidates.length === 1
+              ? (actual.panelStates?.[candidates[0].scopedId] ?? actual.panelStates?.[`${actual.page}/${candidates[0].id}`])
+              : undefined;
+            if (candidates.length !== 1 || actualPanelState !== value) failures.push(`panelState:${name}`);
           }
           for (const [name, value] of Object.entries(step.expect?.datasetCount || {})) if (actual.datasets?.[name]?.visibleRows?.length !== value) failures.push(`datasetCount:${name}`);
           for (const [name, fields] of Object.entries(step.expect?.datasetFirstRow || {})) {
@@ -265,12 +365,28 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
         }
         if (failures.length) await new Promise(r => setTimeout(r, 40));
       } while (failures.length && Date.now() < deadline);
-      history.push({ action, target, expected: step.expect, actual, failures, passed: failures.length === 0 });
+      history.push({ stepIndex: stepIdx + 1, action, target, expected: step.expect, actual, failures, passed: failures.length === 0 });
       if (failures.length) break;
     }
+    currentStepInfo = null;
     const assertions = history.filter(step => step.expected && Object.keys(step.expected).length);
     return { passed: history.length === steps.length && assertions.length > 0 && history.every(s => s.passed), status: 'executed', layer, assertionCount, history };
   } catch (error) {
-    return { passed: false, status: 'failed', layer, code: error.code || 'E_SCENARIO_INTERACTION', message: error.message, ...(error.hit ? { hitDetail: error.hit } : {}), history };
+    const stepPrefix = currentStepInfo
+      ? `[步骤 ${currentStepInfo.stepIndex}/${currentStepInfo.totalSteps}: ${currentStepInfo.action}${currentStepInfo.target ? ` ${currentStepInfo.target}` : ''}] `
+      : '';
+    const message = stepPrefix && !String(error.message || '').startsWith('[步骤 ')
+      ? `${stepPrefix}${error.message}`
+      : error.message;
+    return {
+      passed: false,
+      status: 'failed',
+      layer,
+      code: error.code || 'E_SCENARIO_INTERACTION',
+      message,
+      ...(currentStepInfo ? { failedStep: currentStepInfo } : {}),
+      ...(error.hit ? { hitDetail: error.hit } : {}),
+      history,
+    };
   }
 }

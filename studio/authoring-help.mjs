@@ -41,13 +41,23 @@ const INTERACTION_GUIDE = {
   },
 };
 const fail = (code, message, candidates) => { throw Object.assign(new Error(message), { code, candidates }); };
+const NODE_DESCRIBE_ALIASES = {
+  textarea: 'input',
+  select: 'combobox',
+  droplist: 'combobox',
+  panel: 'dynamic-panel',
+  row: 'box',
+  column: 'box',
+  grid: 'box',
+  stack: 'box',
+};
 
 export function describeAuthoring({ topic = 'workflow', name = null, names = null, intent = 'learning', platform = 'mobile', guideId = null,fields=null,operation='edit',surface=null } = {}) {
   if((fields!==null||surface!==null||operation!=='edit')&&topic!=='node')fail('E_NODE_CAPABILITY_QUERY','fields/operation/surface只用于topic:node');
   if (topic === 'workflow') return { ok: true, entry: AUTHORING_ENTRY,
     interactionGuide: structuredClone(INTERACTION_GUIDE),
-    sequence: ['studio_open_project获取工程ID和版本', 'studio_stage(stage:planning,target:{pageId})一次取得任务参考、当前目标与精确写入入口', 'studio_describe(topic:rp1)简洁创作或studio_describe(topic:command)精确改稿', 'studio_inspect确认源目标与布局', 'studio_command提交', 'studio_design(action:review)看真实图片并检查nativeReadiness与interactionDiagnostics', 'studio_design(action:explore)比较多构图与交互态', 'studio_scenario语义断言（返回coverage与warnings；hitTest:true 会先用真实浏览器指针重放校验点击目标，被遮挡返回E_SCENARIO_OCCLUDED且语义不执行该步；多状态遮挡/命中结论仍可用explore.states真实浏览器指针核验）', 'studio_export(format:rp)检查原生与降级报告'],
-    rules: ['RP/1的column/row和hug/fill承担内容布局，避免逐节点算高。', '保留稳定ID；局部update只改显式字段，不从省略推断删除。', 'AI审美判断必须看对应版本的图；指标通过不等于用户认可。', '写入回包丢失先查版本与内容，不盲目重复撤销或创建。'],
+    sequence: ['studio_open_project获取工程ID和版本', 'studio_stage(stage:planning,target:{pageId})一次取得任务参考、当前目标与精确写入入口', '多页面原型先用studio_command(addPage, shell:"phone-shell"|"web-page")创建全部目标页，再提交含跨页goto/navigate/set-text的rp1片段', 'studio_describe(topic:rp1)简洁创作或studio_describe(topic:command)精确改稿', 'studio_inspect确认源目标与布局', 'studio_command提交', 'studio_design(action:review)看真实图片并检查nativeReadiness与interactionDiagnostics', 'studio_design(action:explore)比较多构图与交互态', 'studio_scenario语义断言（返回coverage与warnings；语义执行层不做遮挡/hitTest校验，通过≠真实可点；hitTest:true 会先用真实浏览器指针重放校验点击目标，被遮挡返回E_SCENARIO_OCCLUDED且语义不执行该步；多状态遮挡/命中结论仍可用explore.states真实浏览器指针核验）', 'studio_export(format:rp)检查原生与降级报告'],
+    rules: ['RP/1的column/row和hug/fill承担内容布局，避免逐节点算高。', '多页面跨页引用强校验目标页存在：先addPage建立全部页面骨架，再写指向其他页面的goto/navigate或跨页set-text。', '保留稳定ID；局部update只改显式字段，不从省略推断删除。', 'AI审美判断必须看对应版本的图；指标通过不等于用户认可。', '写入回包丢失先查版本与内容，不盲目重复撤销或创建。'],
     examples: { inspect: { pageId: 'home', role: 'primary-action', fields: ['target', 'layoutContext'] }, edit: { baseRevision: 1, idempotencyKey: 'make-lesson', pageId: 'home', sourceMode: 'insert', rp1: sample } } };
   if (topic === 'rp1') return { ok: true, format: 'studio-rp1-subset',
     interactionGuide: structuredClone(INTERACTION_GUIDE),
@@ -70,16 +80,21 @@ export function describeAuthoring({ topic = 'workflow', name = null, names = nul
     return { ok: true, name, schema: COMMAND_CONTRACTS[name], ...(boundary ? { boundary } : {}), note: '参数字段与实际命令校验共用定义；properties字段同样受Studio属性词表和值校验约束。' };
   }
   if (topic === 'node') {
-    if (name && !VALID_NODE_TYPES.has(name)) fail('E_NODE_TYPE', `不支持节点 ${name}`, [...VALID_NODE_TYPES]);
+    if (names) {
+      if (name || !Array.isArray(names) || !names.length || names.length > 8) fail('E_NODE_CAPABILITY_QUERY', 'names 需为1–8个节点类型名，不能与name混用', [...VALID_NODE_TYPES, ...Object.keys(NODE_DESCRIBE_ALIASES)]);
+      return { ok: true, nodes: names.map(item => describeAuthoring({ topic: 'node', name: item, fields, operation, surface })), next: '按所需节点批量返回常用字段与消费面契约。' };
+    }
+    const canonicalName = name && NODE_DESCRIBE_ALIASES[name] ? NODE_DESCRIBE_ALIASES[name] : name;
+    if (canonicalName && !VALID_NODE_TYPES.has(canonicalName)) fail('E_NODE_TYPE', `不支持节点 ${name}`, [...VALID_NODE_TYPES, ...Object.keys(NODE_DESCRIBE_ALIASES)]);
     if(!['create','edit'].includes(operation))fail('E_NODE_CAPABILITY_QUERY','operation应为create或edit');
     if(surface!==null&&!NODE_CAPABILITY_SURFACES.includes(surface))fail('E_NODE_CAPABILITY_QUERY','surface应为canvas/runtime/native/full-rp1');
-    if(fields!==null&&(!name||!Array.isArray(fields)||!fields.length||fields.length>16||fields.some(field=>typeof field!=='string'||!field)))fail('E_NODE_CAPABILITY_QUERY','指定fields需要name及1–16个属性名');
-    const summary=name?nodeCapabilitySummary(name):null,selected=fields?[...new Set(fields)]:summary?.commonFields||[];
-    const capabilities=selected.map(field=>nodePropertyCapability(name,field,{operation})).map(item=>surface?{field:item.field,sourceWrite:item.sourceWrite,[surface]:item.surfaces[surface],...(item.alternative?{alternative:item.alternative}:{})}:item);
-    return { ok: true, type: name, operation,...(surface?{surface}:{}),...(summary?{summary}:{}),types: name?undefined:[...VALID_NODE_TYPES],...(!name?{typeAvailability:{renderable:[...VALID_NODE_TYPES].filter(type=>!STUDIO_SOURCE_ONLY_MACROS.has(type)),explicitChildrenOnly:[...STUDIO_SOURCE_ONLY_MACROS],alternative:'nav-bar使用已有核心组件实例；完整RP/1宏另走generate_prototype'}}:{}),capabilities,writableFields:capabilities.filter(item=>item.sourceWrite==='allowed').map(item=>item.field),readOnlyFields:[...NODE_READONLY_PROPERTIES],
+    if(fields!==null&&(!canonicalName||!Array.isArray(fields)||!fields.length||fields.length>16||fields.some(field=>typeof field!=='string'||!field)))fail('E_NODE_CAPABILITY_QUERY','指定fields需要name及1–16个属性名');
+    const summary=canonicalName?nodeCapabilitySummary(canonicalName):null,selected=fields?[...new Set(fields)]:summary?.commonFields||[];
+    const capabilities=selected.map(field=>nodePropertyCapability(canonicalName,field,{operation})).map(item=>surface?{field:item.field,sourceWrite:item.sourceWrite,[surface]:item.surfaces[surface],...(item.alternative?{alternative:item.alternative}:{})}:item);
+    return { ok: true, type: canonicalName, ...(canonicalName !== name ? { requestedName: name, aliasOf: canonicalName } : {}), operation,...(surface?{surface}:{}),...(summary?{summary}:{}),types: canonicalName?undefined:[...VALID_NODE_TYPES],...(!canonicalName?{typeAvailability:{renderable:[...VALID_NODE_TYPES].filter(type=>!STUDIO_SOURCE_ONLY_MACROS.has(type)),explicitChildrenOnly:[...STUDIO_SOURCE_ONLY_MACROS],alternative:'nav-bar使用已有核心组件实例；完整RP/1宏另走generate_prototype'}}:{}),capabilities,writableFields:capabilities.filter(item=>item.sourceWrite==='allowed').map(item=>item.field),readOnlyFields:[...NODE_READONLY_PROPERTIES],
       vocabulary:{total:NODE_PROPERTY_NAMES.size,readOnly:NODE_READONLY_PROPERTIES.size,unconsumed:NODE_UNCONSUMED_PROPERTIES.size,syntaxOnly:NODE_SYNTAX_ONLY_PROPERTIES.size,supportContractComplete:true,completeAudit:false},
       values: { w: '正数 / fill / hug', h: '正数 / fill / hug', fontSize: '(0,120]或$名称引用doc.tokens中已声明的标量数值；gap/padding支持非负数值令牌', opacity: '[0,1]', radius: '非负数', color: '#RRGGBB / #RRGGBBAA / rgba / $颜色令牌', rotate: 'rotate 是 rotation 的别名提示：请用 rotation（数值角度，度）——画布/运行态渲染 rotate(Ndeg)，原生 .rp 写为可编辑的 MyStyle DOA 3221225522（W1 2026-11-02）；复合 3D 变换才用 threeDTransform', anchor: 'stack/free 布局锚定，仅 center / top-right / bottom-left / bottom-right 生效；其他值（如 fill）只存储不消费、无几何效果', threeDTransform: '浏览器渲染层 CSS transform 字符串（如 rotate(15deg)）；只影响渲染，不改变布局几何 x/y/w/h' },
-      note: '默认给常用字段；name+fields查询节点与消费面。完整RP/1契约按类型派生；supportContractComplete表示分类齐全，completeAudit:false表示尚未逐格实测所有消费/宿主组合，不能把状态计数当验收。展开节点按studio_inspect返回的target改源宏或实例覆盖。' };
+      note: `${name === 'textarea' ? 'RP/1 语法别名 textarea 在文档中正规化为 input(multiline:true)；浏览器与代码出口渲染多行 <textarea>，导出 .rp 时映射为原生可编辑单行 TextBox（并在兼容报告与 nativeReadiness 中标注 input.multiline）。' : ''}默认给常用字段；name+fields查询节点与消费面。完整RP/1契约按类型派生；supportContractComplete表示分类齐全，completeAudit:false表示尚未逐格实测所有消费/宿主组合，不能把状态计数当验收。展开节点按studio_inspect返回的target改源宏或实例覆盖。` };
   }
   if (topic === 'design') return { ok: true, guidance: getDesignGuidance({ intent, platform, guideId }) };
   if (topic === 'craft') return {ok:true,craft:getDesignCraft({platform}),note:'未打开工程的通用指导；当前有效方向与版本请从studio_stage读取。'};

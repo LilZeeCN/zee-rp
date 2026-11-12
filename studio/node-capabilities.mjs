@@ -334,8 +334,8 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
     consumes(tabBarMacroFields, 'studio/scene-resolver.mjs:expandMacroNode', '提供 items/tabs 时自动展开标签栏条目与跳转交互', true);
   }
   if (type === 'card') {
-    consumes(cardMacroFields, 'studio/scene-resolver.mjs:expandMacroNode', '无显式children时展开宏内容及标题字号；有children时不自动生成子节点', true);
-    if (node?.children?.length && cardMacroFields.includes(field)) {
+    consumes(cardMacroFields, 'studio/scene-resolver.mjs:expandMacroNode', '无显式children时展开宏内容及标题字号；有children时仍消费variant表面样式但不再生成子节点', true);
+    if (node?.children?.length && cardMacroFields.includes(field) && field !== 'variant') {
       matched = true;
       result.sourceWrite = 'rejected';
       result.surfaces.canvas = fact('unsupported', '当前card已有显式children，不再生成这些宏内容字段', 'studio/scene-resolver.mjs:expandMacroNode');
@@ -437,7 +437,9 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
   }
 
   if (rawMacros.has(type)) {
-    result.typeBoundary = '此原始类型尚无Studio宏展开；显式children与自身几何仍可绘制。nav-bar请优先使用同名核心组件实例；完整RP/1另走原生入口。';
+    result.typeBoundary = ['progress-bar', 'nav-bar', 'tab-bar'].includes(type)
+      ? '提供对应宏参数（title/value/percent/items）且无显式 children 时自动展开画布结构；未传宏参数时仅绘制显式 children 与自身几何。'
+      : '此原始类型尚无Studio宏展开；显式children与自身几何仍可绘制。完整RP/1另走原生入口。';
   }
   return result;
 }
@@ -464,6 +466,9 @@ export function nodeCapabilitySummary(type, { node = null, target = null, source
     ...(type === 'card' ? ['title', 'body', 'titleFontSize'] : []),
     ...(type === 'list-item' ? ['title', 'subtitle', 'rightBadge'] : []),
     ...(type === 'stat-row' ? ['items', 'valueFontSize'] : []),
+    ...(type === 'progress-bar' ? ['value', 'max', 'percent', 'label'] : []),
+    ...(type === 'nav-bar' ? ['title', 'backText', 'backGoto', 'rightText'] : []),
+    ...(type === 'tab-bar' ? ['items', 'tabs', 'active'] : []),
     ...(type === 'repeater' ? ['rows', 'filter', 'sort', 'template'] : []),
     ...(type === 'divider' ? ['direction', 'color'] : []),
     ...(type === 'checkbox' ? ['text', 'checked', 'disabled'] : []),
@@ -482,7 +487,11 @@ export function nodeCapabilitySummary(type, { node = null, target = null, source
     type,
     ...(target ? { editable: target.editable } : {}),
     commonFields,
-    ...(rawMacros.has(type) ? { boundary: '尚未实现此原始类型的Studio宏展开；不要把同名完整RP/1宏当作已支持的画布构件' } : {}),
+    ...(rawMacros.has(type) ? {
+      boundary: ['progress-bar', 'nav-bar', 'tab-bar'].includes(type)
+        ? '无显式 children 且提供对应宏参数（title/value/percent/items）时自动展开画布结构；显式传入 children 时作为容器直接绘制'
+        : '尚未实现此原始类型的Studio宏展开；不要把同名完整RP/1宏当作已支持的画布构件',
+    } : {}),
     ...(target?.kind === 'macro-parameter'
       ? {
           editableFields: macroFields,

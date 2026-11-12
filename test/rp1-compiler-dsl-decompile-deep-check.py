@@ -79,13 +79,16 @@ def test_negative_rotation_and_missing_root_schema():
     lowered, ir = compile_language(copy.deepcopy(spec))
     assert lowered["pages"][0]["root"]["children"][0]["rotation"] == -15
     schema = language_schema()
-    # Verify schema allows negative numbers on rotation
-    badge_variants = [
-        v for v in schema["$defs"]["node"]["anyOf"]
-        if v.get("properties", {}).get("type", {}).get("const") == "badge"
+    # Verify schema allows negative numbers on rotation (via Draft202012Validator + rule inspection)
+    from jsonschema import Draft202012Validator
+    Draft202012Validator(schema).validate(spec)
+    badge_rules = [
+        rule["then"] for rule in schema["$defs"]["node"]["allOf"]
+        if rule.get("if", {}).get("properties", {}).get("type", {}).get("const") == "badge"
     ]
-    assert badge_variants, "Expected badge definition in schema"
-    rot_schema = badge_variants[0]["properties"]["rotation"]
+    assert badge_rules, "Expected badge definition in schema"
+    badge_shape = badge_rules[0]["anyOf"][0] if "anyOf" in badge_rules[0] else badge_rules[0]
+    rot_schema = badge_shape["properties"]["rotation"]
     num_branch = next((b for b in rot_schema.get("anyOf", []) if b.get("type") == "number"), None)
     assert num_branch is not None and "minimum" not in num_branch, f"Expected unbounded number for rotation, got {rot_schema}"
 

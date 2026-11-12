@@ -5,15 +5,15 @@ description: Reconstruct screenshots as editable Axure layouts, compile RP/1 spe
 
 # zee-rp（RP/1 零手算原型创作与原生编辑）
 
-完整 RP/1 原生表单与交互样式（2026-10-30 本机开发快照）：`radio` / `checkbox` / `combobox`（别名 `droplist`）/ `listbox`，支持勾选、互斥组、选项初值、原生取值和重置；`styles={"hover":{...},"selected":{...},"disabled":{...},"focused":{...}}` 写入原生状态样式。动作 `set-check`、普通元件 `set-selected`、列表 `set-option`，详情与完整四页例子见 [原生表单](references/native-forms.md)。使用 `generate_prototype` 完整编译；不要推定 Studio 局部入口也已支持。
+完整 RP/1 与 Studio 画布均支持原生表单与交互样式（2026-11-12 本机开发快照）：`radio` / `checkbox` / `combobox`（别名 `select` / `droplist`）/ `listbox` / `textarea`（及 `input multiline=true`；浏览器与代码出口渲染多行 `<textarea>`，导出 `.rp` 时映射为原生可编辑 `TextBox` 并在兼容报告记录 `input.multiline`），支持勾选、互斥组、选项初值、原生取值和重置；完整 RP/1 还支持 `styles={"hover":{...},"selected":{...},"disabled":{...},"focused":{...}}` 写入原生状态样式。动作支持 `set-check`、普通元件 `set-selected`、下拉/列表 `set-option`（均支持 `"toggle"`），详情与完整四页例子见 [原生表单](references/native-forms.md)。
 
 ## Studio 新作品：先设计，再看图改稿
 
 新稿可用 `studio_stage({stage:"planning",intent,platform,target:{pageId},brief})` 一次取得版本绑定目标、适合任务的完整参考和下一步；局部改字使用 `stage:"edit"` 与版本绑定的明确目标。设计决定通过普通命令 `recordDesignDecision` 与改稿一起持久化，保留反馈来源及过期/冲突状态。详见 [阶段创作与设计决定](docs/studio-stages.md)。
 
-自由画布的新阶段上下文提供[设计工艺与候选理由](docs/studio-craft.md)。[命名版本](docs/studio-versions.md)支持恢复前看差异与可撤销恢复；[长操作](docs/studio-operations.md)可在原候选/素材/导出入口传async/requestKey/baseRevision，断连后用studio_operations核对或取消。取消请求不等于已停，结果过期不提供当前稿提交建议。普通改属性不能修改id/type或内部源控制标记；创建节点仍需稳定ID。
+自由画布的新阶段上下文提供[设计工艺与候选理由](docs/studio-craft.md)。[命名版本](docs/studio-versions.md)支持恢复前看差异与可撤销恢复；[长操作](docs/studio-operations.md)可在原候选/素材/导出入口传async/requestKey/baseRevision，断连后用studio_operations核对或取消。取消请求不等于已停，结果过期不提供当前稿提交建议。普通改属性不能修改id/type或内部源控制标记；创建节点仍需稳定ID（纯装饰 `divider`/`spacer` 可省略 `#id`）。
 
-自由画布从 `studio_describe({topic:"workflow"})` 或 `{topic:"rp1"}` 开始，不必为画布创作通读下方完整原生 RP/1 参考。`studio_command` 接受 `rp1` 节点片段与 `sourceMode:"insert"|"update"`,并支持批处理步引用:命令带顶层 `as:"名字"` 命名产出,后续命令任意字段写 `{"$ref":"名字"}` 引用(整批一个 undo 步)：插入子树或只更新显式字段，保留未写出的内容与交互，复用同一版本、幂等和撤销事务。每个节点写稳定 `#id`。精确语法、支持范围和示例按需发现；不要将此局部入口当成完整 `generate_prototype` 编译器。
+自由画布从 `studio_describe({topic:"workflow"})` 或 `{topic:"rp1"}` 开始，不必为画布创作通读下方完整原生 RP/1 参考。`studio_command` 接受 `rp1` 节点片段与 `sourceMode:"insert"|"update"`（支持可选内联 `vars:`/`tokens:` 头部、`panel` `tabs=[...]` 与 `:state`、`repeater` `:template` 与 `data=`、`parentId:"panelId:stateId"` 直接向指定面板状态写入、一等原生表单控件与全部内置宏），并支持批处理步引用：命令带顶层 `as:"名字"` 命名产出，后续命令任意字段写 `{"$ref":"名字"}` 引用（整批一个 undo 步）：插入子树或只更新显式字段（含 `:state`/`:template` 增量合并），保留未写出的内容与交互，复用同一版本、幂等和撤销事务。精确语法、支持范围和示例按需发现。
 
 改稿前 `studio_inspect({view:"nodes"})` 默认给8项可操作节点：`target` 指出源节点/实例覆盖/宏参数，`layoutContext` 说明父布局与 padding；使用 `role/within/fields` 精确查询，`cursor` 绑定当前版本。命令字段用 `studio_describe({topic:"command",name:"editNodes"})` 查一个契约。学习、任务、图文及 mobile/web 题材可通过 `studio_stage({intent,platform,guideId?})` 取得原创配方；配方是创作材料，不是用户审美认可。回包未确认的写入不会自动重发，先读当前版本与实际内容。当前调用说明见 [AI与RP/1创作](docs/studio-ai-authoring.md)。
 - 节点/字段/消费面与行模板边界：[节点能力说明](docs/studio-node-capabilities.md)。

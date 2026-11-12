@@ -93,10 +93,10 @@ export function evaluatePrototypeExpression(expression, { variables, getWidgetTe
         i += dsMatch[0].length;
         continue;
       }
-      const wMatch = rest.match(/^widget\.([a-zA-Z0-9_/-]+)\.(text|checked|selected|value)(?![a-zA-Z0-9_])/);
+      const wMatch = rest.match(/^widget\.([a-zA-Z0-9_/-]+)\.(text|checked|selected|value|disabled)(?![a-zA-Z0-9_])/);
       if (wMatch) {
         const wProp = wMatch[2];
-        const wVal = (wProp === 'checked' || wProp === 'selected')
+        const wVal = (wProp === 'checked' || wProp === 'selected' || wProp === 'disabled')
           ? (getWidgetState ? getWidgetState(wMatch[1], wProp) : false)
           : (getWidgetText ? getWidgetText(wMatch[1]) : '');
         list.push({ type: 'val', value: wVal });
@@ -126,6 +126,16 @@ export function evaluatePrototypeExpression(expression, { variables, getWidgetTe
         }
       }
       if (ch === '@') {
+        const atPropMatch = rest.match(/^@([a-zA-Z0-9_/-]+)\.(text|checked|selected|value|disabled)(?![a-zA-Z0-9_])/);
+        if (atPropMatch) {
+          const wProp = atPropMatch[2];
+          const wVal = (wProp === 'checked' || wProp === 'selected' || wProp === 'disabled')
+            ? (getWidgetState ? getWidgetState(atPropMatch[1], wProp) : false)
+            : (getWidgetText ? getWidgetText(atPropMatch[1]) : '');
+          list.push({ type: 'val', value: wVal });
+          i += atPropMatch[0].length;
+          continue;
+        }
         const atMatch = rest.match(/^@([a-zA-Z0-9_/-]+)/);
         if (atMatch) {
           list.push({ type: 'val', value: getWidgetText ? getWidgetText(atMatch[1]) : '' });
