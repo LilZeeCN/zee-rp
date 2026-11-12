@@ -94,6 +94,22 @@ export function setWidgetRichText(input, spec) {
     if (index < 0) { index = strings.length; strings.push(text); }
     return { tag: 8, value: index + 1, text };
   };
+  const reInternTree = node => {
+    if (!node || typeof node !== 'object') return;
+    if (node.tag === 8 && typeof node.text === 'string') {
+      Object.assign(node, intern(node.text));
+      return;
+    }
+    if (Array.isArray(node.items)) {
+      for (const item of node.items) reInternTree(item);
+    }
+    if (Array.isArray(node.entries)) {
+      for (const [k, v] of node.entries) {
+        reInternTree(k);
+        reInternTree(v);
+      }
+    }
+  };
   const set = (node, key, value, tag) => {
     const current = field(node, key);
     if (!current || current.tag !== tag) throw new Error(`Unsupported native field ${key}`);
@@ -260,6 +276,7 @@ export function setWidgetRichText(input, spec) {
         if (linkField?.tag !== 3) throw new Error('Native AxHyperlink template has no object reference');
         linkField.value = cloneHyperlink(source.link);
         field(wrapper, 'Inlines').items = [run];
+        if (isBuiltinTemplate) reInternTree(wrapper);
         inlines.push(wrapper);
         linkCount++;
         if (index < spec.paragraphs.length - 1 && runIndex === paragraph.runs.length - 1) {

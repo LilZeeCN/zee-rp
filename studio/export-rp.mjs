@@ -11,6 +11,7 @@ import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
 import {nodePropertyCapability,STUDIO_SOURCE_ONLY_MACROS} from './node-capabilities.mjs';
 import { normalizeVectorNodeSpec, buildRp9ControlPointsForSubpaths } from './vector-paths.mjs';
 import { buildInteractiveRp } from '../scripts/proto.mjs';
+import { setWidgetRichText } from '../scripts/set-widget-richtext.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 import { readRecords, encodeRecord, replaceRecord } from '../scripts/rp-records.mjs';
 import { parsePayload, encodePayload, field } from '../scripts/parse-payload.mjs';
@@ -491,6 +492,216 @@ function patchAndVerifyRpTypography(absOutRp, scene) {
   };
 }
 
+function buildRichTextSpecFromNode(node, paletteColors = {}) {
+  const defaultStyle = {};
+  const baseFont = node._resolvedFontFamily || node.fontFamily || 'PingFang SC';
+  if (baseFont) defaultStyle.fontFamily = String(baseFont);
+  const baseSize = Number(node.fontSize);
+  if (Number.isFinite(baseSize) && baseSize > 0) defaultStyle.size = baseSize;
+
+  const normWeight = w => {
+    if (w === 'bold') return 700;
+    if (w === 'normal') return 400;
+    const n = Math.round(Number(w));
+    return Number.isFinite(n) ? Math.min(950, Math.max(100, n)) : undefined;
+  };
+  const normColor = c => {
+    if (typeof c !== 'string') return undefined;
+    const trimmed = c.trim();
+    const resolved = trimmed.startsWith('$') ? (paletteColors[trimmed.slice(1)] || trimmed) : trimmed;
+    const m6 = resolved.match(/^#([0-9a-fA-F]{6})(?:[0-9a-fA-F]{2})?$/);
+    if (m6) return `#${m6[1]}`;
+    const m3 = resolved.match(/^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/);
+    if (m3) return `#${m3[1]}${m3[1]}${m3[2]}${m3[2]}${m3[3]}${m3[3]}`;
+    return undefined;
+  };
+
+  const baseWeight = normWeight(node.fontWeight ?? 400);
+  if (baseWeight !== undefined) defaultStyle.weight = baseWeight;
+  defaultStyle.italic = Boolean(node.italic);
+  defaultStyle.underline = Boolean(node.underline);
+  defaultStyle.strikethrough = Boolean(node.strikethrough);
+  const baseColor = normColor(node._resolvedColor || node.color || '#1E293B');
+  if (baseColor) defaultStyle.color = baseColor;
+  if (node.letterSpacing !== undefined && Number.isFinite(Number(node.letterSpacing))) {
+    defaultStyle.characterSpacing = Number(node.letterSpacing);
+  }
+
+  const rawAlign = node.textAlign || node.align || node._inheritedAlign;
+  const paragraphAlign = ['left', 'center', 'right'].includes(rawAlign) ? rawAlign : undefined;
+  const lineSpacing = Number.isFinite(Number(node.lineHeight)) && Number(node.lineHeight) > 0
+    ? Number(node.lineHeight)
+    : undefined;
+
+  const paragraphs = [{ runs: [] }];
+  for (const sp of node.spans || []) {
+    if (!sp || typeof sp !== 'object') continue;
+    const style = {};
+    const spFont = sp.fontFamily || sp.font;
+    if (typeof spFont === 'string' && spFont.trim()) style.fontFamily = spFont.trim();
+    const spSize = sp.fontSize ?? sp.size;
+    if (spSize !== undefined && Number.isFinite(Number(spSize)) && Number(spSize) > 0) {
+      style.size = Number(spSize);
+    }
+    if (sp.fontWeight !== undefined || sp.weight !== undefined) {
+      const w = normWeight(sp.fontWeight ?? sp.weight);
+      if (w !== undefined) style.weight = w;
+    } else if (typeof sp.bold === 'boolean') {
+      style.weight = sp.bold ? 700 : 400;
+    }
+    if (typeof sp.italic === 'boolean') style.italic = sp.italic;
+    if (typeof sp.underline === 'boolean') style.underline = sp.underline;
+    if (typeof sp.strikethrough === 'boolean') style.strikethrough = sp.strikethrough;
+    if (sp.color !== undefined) {
+      const c = normColor(sp.color);
+      if (c) style.color = c;
+    }
+    if (sp.letterSpacing !== undefined && Number.isFinite(Number(sp.letterSpacing))) {
+      style.characterSpacing = Number(sp.letterSpacing);
+    }
+    const link = sp.link && typeof sp.link === 'object' && !Array.isArray(sp.link)
+      && ((typeof sp.link.page === 'string' && sp.link.page) || (typeof sp.link.url === 'string' && /^https?:\/\//i.test(sp.link.url)))
+      ? sp.link
+      : undefined;
+
+    const parts = String(sp.text ?? '').split(/\r?\n/);
+    parts.forEach((seg, idx) => {
+      if (idx > 0) paragraphs.push({ runs: [] });
+      paragraphs[paragraphs.length - 1].runs.push({
+        text: seg,
+        ...(Object.keys(style).length ? { style } : {}),
+        ...(link && seg.length > 0 ? { link } : {}),
+      });
+    });
+  }
+
+  for (const p of paragraphs) {
+    if (p.runs.length === 0) p.runs.push({ text: '' });
+    if (paragraphAlign) p.align = paragraphAlign;
+    if (lineSpacing !== undefined) p.lineSpacing = lineSpacing;
+  }
+
+  return { defaults: defaultStyle, paragraphs };
+}
+
+function patchAndVerifyRpRichTextSpans(absOutRp, exportPages, buildRes, paletteColors = {}) {
+  let buf = readFileSync(absOutRp);
+  const rpInitial = readRp(buf, { path: absOutRp });
+  const sourceMap = Array.isArray(buildRes?.sourceMap) ? buildRes.sourceMap : [];
+  const targets = [];
+
+  const collectSpanNodes = (node, pgScene, scopePath) => {
+    if (!node || typeof node !== 'object') return;
+    if (
+      ['label', 'paragraph', 'button', 'badge'].includes(node.type)
+      && Array.isArray(node.spans)
+      && node.spans.length > 0
+      && !node._textMetrics?.truncated
+    ) {
+      targets.push({ pgScene, node, scopedId: `${scopePath}/${node.id}` });
+    }
+    for (const ch of node.children || []) collectSpanNodes(ch, pgScene, scopePath);
+    for (const st of node.states || []) {
+      if (st?.root) collectSpanNodes(st.root, pgScene, `${scopePath}/${node.id}/${st.id}`);
+    }
+    if (node.template) collectSpanNodes(node.template, pgScene, `${scopePath}/${node.id}/template`);
+  };
+
+  for (const pgScene of exportPages) {
+    collectSpanNodes(pgScene.rootTree, pgScene, pgScene.id);
+  }
+  if (!targets.length) {
+    return { totalSpanNodes: 0, patchedCount: 0, allSpansPreserved: true, items: [] };
+  }
+
+  const hasRichTextBlock = (records, recIdx, wId) => {
+    const rec = records.find(r => r.index === Number(recIdx) && ['Axure:Page', 'Axure:PanelState'].includes(r.className));
+    if (!rec) return false;
+    const graph = parsePayload(rec);
+    const w = graph.objects.get(Number(wId));
+    if (!w?.body) return false;
+    let block = field(w.body, 'RichTextBlock');
+    if (block?.tag === 3) block = graph.objects.get(block.value)?.body;
+    const attributed = field(block ?? {}, 'attributed-string');
+    return Boolean(field(attributed ?? {}, 'Paragraphs')?.items?.length);
+  };
+
+  const items = [];
+  let patchedCount = 0;
+  for (const { pgScene, node, scopedId } of targets) {
+    const records = readRecords(buf);
+    const esc = String(node.id).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const primaryRe = new RegExp(`^(?:[a-z]+-)+${esc}-[0-9a-f]{8,16}$`);
+    const bgRe = new RegExp(`^bg-(?:[a-z]+-)+${esc}-[0-9a-f]{8,16}$`);
+
+    let targetLoc = null;
+    const symCandidates = sourceMap.filter(s => {
+      const sid = String(s.logicalId ?? s.id ?? '');
+      const samePage = !s.pageId || s.pageId === pgScene.id || s.pageName === pgScene.name;
+      return samePage && (sid === node.id || sid === scopedId || sid.endsWith(`/${node.id}`));
+    });
+    for (const sym of symCandidates) {
+      for (const loc of sym.native || []) {
+        if (bgRe.test(loc.name || '')) continue;
+        if (hasRichTextBlock(records, loc.record, loc.id)) {
+          targetLoc = { record: Number(loc.record), widgetId: Number(loc.id) };
+          break;
+        }
+      }
+      if (targetLoc) break;
+    }
+
+    if (!targetLoc) {
+      const rpPage =
+        (rpInitial.pages || []).find(p => p.name === pgScene.name || p.id === pgScene.id) ||
+        rpInitial.pages[exportPages.indexOf(pgScene)];
+      const candidates = [
+        ...(rpPage?.widgets || []).map(w => ({ ...w, record: rpPage.record })),
+        ...(rpInitial.containedWidgets || []),
+      ];
+      const matched = candidates.find(
+        w => !bgRe.test(w.name || '')
+          && (w.name === node.id || primaryRe.test(w.name || '') || w.name?.endsWith(`-${node.id}`))
+          && hasRichTextBlock(records, w.record, w.id)
+      );
+      if (matched) targetLoc = { record: Number(matched.record), widgetId: Number(matched.id) };
+    }
+
+    if (!targetLoc) {
+      items.push({ pageId: pgScene.id, nodeId: node.id, scopedId, preserved: false, reason: 'native RichTextBlock widget not found' });
+      continue;
+    }
+
+    const spec = buildRichTextSpecFromNode(node, paletteColors);
+    const patched = setWidgetRichText(buf, {
+      record: targetLoc.record,
+      widgetId: targetLoc.widgetId,
+      ...spec,
+    });
+    buf = patched.file;
+    patchedCount++;
+    items.push({
+      pageId: pgScene.id,
+      nodeId: node.id,
+      scopedId,
+      record: targetLoc.record,
+      widgetId: targetLoc.widgetId,
+      paragraphs: patched.report.paragraphs,
+      runs: patched.report.runs,
+      links: patched.report.links,
+      preserved: true,
+    });
+  }
+
+  writeFileSync(absOutRp, buf);
+  return {
+    totalSpanNodes: targets.length,
+    patchedCount,
+    allSpansPreserved: patchedCount === targets.length,
+    items,
+  };
+}
+
 function patchAndVerifyRpVectors(absOutRp, scene) {
   let buf = readFileSync(absOutRp);
   const rpInitial = readRp(buf, { path: absOutRp });
@@ -623,14 +834,15 @@ export function classifyNodeCompatibility(node, pageId, entries) {
     name: node.name || node.id,
   };
   const cssPlan = exportCssPlan(node);
-  if (['label', 'paragraph', 'button', 'badge'].includes(node.type) && node.spans?.length) {
+  const hasNativeSpans = ['label', 'paragraph', 'button', 'badge'].includes(node.type) && Array.isArray(node.spans) && node.spans.length > 0;
+  if (hasNativeSpans && node._textMetrics?.truncated) {
     entries.push({
       ...baseInfo,
       classification: 'unsupported',
       feature: 'text.spans',
       browserPreserved: true,
-      reason: 'Studio 原生出口将富文本转换为普通可编辑文字',
-      fallback: '保留文字内容和节点级样式；逐段样式保留在 Studio 源与 HTML 代码包',
+      reason: '文本触发省略截断（maxLines/ellipsis）时，原生出口按截断后的可见文本输出',
+      fallback: '保留截断后文字内容和节点级样式；完整逐段 spans 保留在 Studio 权威源中',
     });
   }
   if (node.type === 'input' && node.rotation) entries.push({ ...baseInfo, classification: 'native-init-action', feature: 'input.rotation', browserPreserved: true, nativePreviewPreserved: true, reason: 'RP9 TextBox 静态旋转不参与预览；导出保留角度，并生成原生 OnLoad 绝对旋转动作，输入框仍可编辑', strategy: 'native-widget-onload-rotate', editorStaticRotationSupported: false });
@@ -705,6 +917,12 @@ export function classifyNodeCompatibility(node, pageId, entries) {
           fillRule: vectorSpec.fillRule,
         }
       : {}),
+    ...(hasNativeSpans && !node._textMetrics?.truncated
+      ? {
+          nativeRichTextSpans: true,
+          spanCount: node.spans.length,
+        }
+      : {}),
     ...(node._fromComponentId
       ? {
           componentId: node._fromComponentId,
@@ -723,7 +941,17 @@ export function classifyNodeCompatibility(node, pageId, entries) {
 
 function decorateExportNode(out, node) {
   if (!node._cssPaintAsset) return out;
-  const image = { id: `${node.id}__css_paint`, type: 'image', x: 0, y: 0, w: out.w, h: out.h, src: node._cssPaintAsset.src };
+  const image = {
+    id: `${node.id}__css_paint`,
+    type: 'image',
+    x: 0,
+    y: 0,
+    w: out.w,
+    h: out.h,
+    src: node._cssPaintAsset.src,
+    ...(out.visible === false ? { visible: false } : {}),
+    ...(out.rotation && (!(out.type === 'box' || out.type === 'phone-shell') || !out.children?.length) ? { rotation: out.rotation } : {}),
+  };
   for (const key of ['gradient', 'shadow', 'backdropBlur', 'aurora', 'noise']) delete out[key];
   if ('fill' in out) out.fill = '#FFFFFF00';
   if ('stroke' in out) out.stroke = '#FFFFFF00';
@@ -738,7 +966,18 @@ function decorateExportNode(out, node) {
     return out;
   }
   const { x, y, w, h } = out;
-  return { id: `${node.id}__css_layer`, type: 'box', x: x || 0, y: y || 0, w, h, layout: 'stack', fill: '#FFFFFF00', children: [image, { ...out, x: 0, y: 0 }] };
+  return {
+    id: `${node.id}__css_layer`,
+    type: 'box',
+    x: x || 0,
+    y: y || 0,
+    w,
+    h,
+    layout: 'stack',
+    fill: '#FFFFFF00',
+    ...(out.visible === false ? { visible: false } : {}),
+    children: [image, { ...out, x: 0, y: 0 }],
+  };
 }
 
 function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false, exportCtx = null } = {}) {
@@ -1171,8 +1410,9 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
     writeFileSync(studioSourcePath,studioSourceBytes);
     const buildRes = buildInteractiveRp(planPath, absOutRp, { sourcePath });
 
-    // Patch native AxRun.Family and MyStyle.PropList fontFamily so non-default fonts are preserved in .rp
+    // Patch native AxRun.Family, multi-run RichTextBlock spans, and vector ControlPoints
     const typographyAlignment = patchAndVerifyRpTypography(absOutRp, scene);
+    const richTextAlignment = patchAndVerifyRpRichTextSpans(absOutRp, exportPages, buildRes, cleanPalette);
     const vectorAlignment = patchAndVerifyRpVectors(absOutRp, scene);
     // Typography & vector patching are part of generation, not a later native user edit.
     const finalBytes = readFileSync(absOutRp), baselinePath = `${absOutRp}.baseline.json`;
@@ -1268,6 +1508,7 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
         outliers: nodeAlignmentDetails,
       },
       typographyAlignment,
+      richTextAlignment,
       vectorAlignment,
       componentExportSummary: {
         totalComponentInstances: compatEntries.filter(e => Boolean(e.componentExportMode)).length,

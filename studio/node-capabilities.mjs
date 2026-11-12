@@ -234,6 +234,9 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
     if (type === 'input' && (field === 'fontFamily' || field === 'font')) {
       result.surfaces.native = fact('unsupported', '当前原生输入框不保留字体族', 'studio/export-rp.mjs:resolvedTreeToRp1Node');
     }
+    if (field === 'spans' && type !== 'input') {
+      result.surfaces.native = fact('implemented', '导出为 Axure RP9 原生多段可编辑 RichTextBlock（AxRun 逐段字体/字号/字重/颜色/斜体/下划线/删除线/字距及超链接）', 'studio/export-rp.mjs:patchAndVerifyRpRichTextSpans + scripts/set-widget-richtext.mjs');
+    }
   } else if ((type === 'icon' || type === 'divider' || type === 'path' || type === 'sparkline') && field === 'color') {
     consumes(['color'], 'studio/scene-resolver.mjs:prepareTree + studio/web/src/render.mjs:buildNodeElementHtml', '设置图标、分割线或矢量路径颜色', true);
   }

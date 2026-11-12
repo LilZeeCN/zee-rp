@@ -6,7 +6,14 @@
 export function createRuntimeState(doc) {
   const pages = doc?.pages || [];
   const currentPageId = pages[0]?.id || 'home';
-  const variables = structuredClone(doc?.variables || {});
+  const variables = {};
+  for (const [k, v] of Object.entries(doc?.variables || {})) {
+    if (v && typeof v === 'object' && !Array.isArray(v)) {
+      variables[k] = structuredClone('value' in v ? v.value : ('default' in v ? v.default : v));
+    } else {
+      variables[k] = structuredClone(v);
+    }
+  }
   const panelStates = {};
   const visibility = {};
   const selected = {};
@@ -81,7 +88,18 @@ export function applyRuntimeStep(doc, runtime, step = {}) {
       const dir = step.direction === 'desc' ? -1 : 1;
       const fld = step.field;
       ds.sort = { field: fld, direction: step.direction || 'asc' };
-      ds.visibleRows.sort((a, b) => (a[fld] > b[fld] ? dir : a[fld] < b[fld] ? -dir : 0));
+      ds.visibleRows.sort((a, b) => {
+        const va = a?.[fld];
+        const vb = b?.[fld];
+        const na = typeof va === 'number' ? va : (typeof va === 'string' && va.trim() !== '' ? Number(va) : NaN);
+        const nb = typeof vb === 'number' ? vb : (typeof vb === 'string' && vb.trim() !== '' ? Number(vb) : NaN);
+        if (Number.isFinite(na) && Number.isFinite(nb)) {
+          return na > nb ? dir : na < nb ? -dir : 0;
+        }
+        const sa = String(va ?? '');
+        const sb = String(vb ?? '');
+        return sa > sb ? dir : sa < sb ? -dir : 0;
+      });
     }
     return next;
   }

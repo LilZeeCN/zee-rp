@@ -226,7 +226,13 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
   if (n.fills || n.shadows || n.mixBlendMode) {
     const css = visualCss(n);
     for (const key of ['background-image', 'box-shadow', 'mix-blend-mode']) {
-      if (css[key]) paint[key] = css[key];
+      if (!css[key]) continue;
+      paint[key] = key === 'background-image' && assetRewriteMap.size
+        ? css[key].replace(/url\(\s*(?:"([^"]+)"|'([^']+)'|([^)"'\s]+))\s*\)/gi, (full, q1, q2, bare) => {
+            const rawUrl = (q1 || q2 || bare || '').trim();
+            return assetRewriteMap.has(rawUrl) ? `url("${assetRewriteMap.get(rawUrl)}")` : full;
+          })
+        : css[key];
     }
   }
   return {
@@ -447,21 +453,22 @@ function buildStylesCss(doc, layoutAnalysis) {
     }
   }
 
+  const safeCssComment = val => String(val ?? '').replace(/\*\//g, '* /');
   const mediaRules = layoutAnalysis.declaredBreakpoints
     .filter(bp => typeof bp.width === 'number' && bp.width > 0)
     .map(
       bp => `
-/* Declared Adaptive View: ${bp.name} (max-width: ${bp.width}px) */
+/* Declared Adaptive View: ${safeCssComment(bp.name)} (max-width: ${bp.width}px) */
 @media (max-width: ${bp.width}px) {
   body[data-adaptive-views="declared"] {
-    --active-breakpoint: "${bp.id}";
+    --active-breakpoint: ${JSON.stringify(String(bp.id ?? ''))};
   }
 }`
     )
     .join('\n');
 
   return `/* Studio Runnable Code Export (v${CODE_EXPORTER_VERSION})
- * Document: ${doc.documentId} (r${doc.revision}, hash: ${doc.contentHash})
+ * Document: ${safeCssComment(doc.documentId)} (r${doc.revision}, hash: ${safeCssComment(doc.contentHash)})
  * Layout mode: ${layoutAnalysis.declaredBreakpoints.length > 0 ? 'Declared Adaptive Views' : 'Fixed Board (non-responsive)'}
  */
 :root {
@@ -651,7 +658,14 @@ function buildAppJs(bundlePayload) {
       };
 
       for (const pg of pages) {
-        for (const n of pg.nodes || []) {
+        const allPageNodes = new Map();
+        for (const n of pg.nodes || []) allPageNodes.set(n.scopedId, n);
+        for (const states of Object.values(pg.panelStateNodes || {})) {
+          for (const stNodes of Object.values(states || {})) {
+            for (const sn of stNodes || []) allPageNodes.set(sn.scopedId, sn);
+          }
+        }
+        for (const n of allPageNodes.values()) {
           if (!n.ownVisible) {
             this.visibility[n.scopedId] = false;
           }
@@ -682,14 +696,18 @@ function buildAppJs(bundlePayload) {
       const pg = (this.bundle.pages || []).find(p => p.id === pageId || p.name === pageId);
       if (!pg) return [];
       const baseNodes = [];
-      for (const n of pg.nodes || []) {
-        if (n.panelOwnerId) continue; // Replaced dynamically by active panel state subtree
+      const appendNodeAndPanel = n => {
         baseNodes.push(n);
         if (n.type === 'dynamic-panel') {
           const activeSt = this.panelStates[n.scopedId] || n.activeStateId || n.states?.[0]?.id;
-          const stNodes = pg.panelStateNodes?.[n.id]?.[activeSt] || [];
-          for (const sn of stNodes) baseNodes.push(sn);
+          const stateMap = pg.panelStateNodes?.[n.scopedId] || pg.panelStateNodes?.[n.id];
+          const stNodes = stateMap?.[activeSt] || [];
+          for (const sn of stNodes) appendNodeAndPanel(sn);
         }
+      };
+      for (const n of pg.nodes || []) {
+        if (n.panelOwnerId) continue; // Replaced dynamically by active panel state subtree
+        appendNodeAndPanel(n);
       }
       return baseNodes;
     }
@@ -1517,6 +1535,36 @@ export async function exportStudioDocumentToCode(
   const missingAssets = [];
   const seenSrc = new Set();
 
+  const extractCssUrls = str => {
+    const out = [];
+    if (typeof str !== 'string') return out;
+    const re = /url\(\s*(?:"([^"]+)"|'([^']+)'|([^)"'\s]+))\s*\)/gi;
+    let m;
+    while ((m = re.exec(str)) !== null) {
+      const u = (m[1] || m[2] || m[3] || '').trim();
+      if (u && !/^(?:https?:|data:|#)/i.test(u)) out.push(u);
+    }
+    return out;
+  };
+  const collectNodeAssetSources = node => {
+    if (!node || typeof node !== 'object') return;
+    if (typeof node.src === 'string' && node.src.trim()) seenSrc.add(node.src.trim());
+    if (Array.isArray(node.fills)) {
+      for (const f of node.fills) {
+        if (typeof f === 'string') for (const u of extractCssUrls(f)) seenSrc.add(u);
+      }
+    }
+    if (node.css && typeof node.css === 'object') {
+      for (const v of Object.values(node.css)) {
+        if (typeof v === 'string') for (const u of extractCssUrls(v)) seenSrc.add(u);
+      }
+    }
+    for (const ch of node.children || []) collectNodeAssetSources(ch);
+    for (const st of node.states || []) if (st?.root) collectNodeAssetSources(st.root);
+    if (node.template) collectNodeAssetSources(node.template);
+  };
+  for (const pg of doc.pages || []) collectNodeAssetSources(pg.root);
+  for (const comp of Object.values(doc.components || {})) collectNodeAssetSources(comp?.root);
   for (const pg of scene.pages || []) {
     for (const n of pg.nodes || []) {
       if (n.type === 'image' && typeof n.src === 'string' && n.src.trim()) {
@@ -1596,23 +1644,39 @@ export async function exportStudioDocumentToCode(
     }
 
     const panelStateNodes = {};
-    const panelNodes = (pg.nodes || []).filter(n => n.type === 'dynamic-panel' && Array.isArray(n.states) && n.states.length > 0);
-    for (const pNode of panelNodes) {
-      panelStateNodes[pNode.id] = {};
+    const visitedPanels = new Set();
+    const panelQueue = (pg.nodes || [])
+      .filter(n => !n.panelOwnerId && n.type === 'dynamic-panel' && Array.isArray(n.states) && n.states.length > 0)
+      .map(pNode => ({ pNode, ancestorStates: {} }));
+    while (panelQueue.length > 0) {
+      const { pNode, ancestorStates } = panelQueue.shift();
+      if (visitedPanels.has(pNode.scopedId)) continue;
+      visitedPanels.add(pNode.scopedId);
+      const stateMap = {};
+      panelStateNodes[pNode.scopedId] = stateMap;
+      if (!panelStateNodes[pNode.id]) panelStateNodes[pNode.id] = stateMap;
       for (const st of pNode.states) {
+        const nextActiveStates = {
+          ...ancestorStates,
+          [pNode.scopedId]: st.id,
+          [`${pg.id}/${pNode.id}`]: st.id,
+          [pNode.id]: st.id,
+        };
         const stScene = resolveDocumentScene(doc, {
           projectDir,
-          activePanelStates: {
-            [pNode.scopedId]: st.id,
-            [`${pg.id}/${pNode.id}`]: st.id,
-            [pNode.id]: st.id,
-          },
+          activePanelStates: nextActiveStates,
         });
         const stPg = stScene.pages.find(x => x.id === pg.id);
-        const stSubtree = (stPg?.nodes || [])
-          .filter(cand => cand.panelOwnerId === pNode.id && !cand.booleanOperand)
-          .map(enrichNode);
-        panelStateNodes[pNode.id][st.id] = stSubtree;
+        const statePrefix = `${pNode.scopedId}/${st.id}/`;
+        const rawSubtree = (stPg?.nodes || []).filter(
+          cand => cand.scopedId.startsWith(statePrefix) && cand.panelOwnerId === pNode.id && !cand.booleanOperand
+        );
+        stateMap[st.id] = rawSubtree.map(enrichNode);
+        for (const childNode of rawSubtree) {
+          if (childNode.type === 'dynamic-panel' && Array.isArray(childNode.states) && childNode.states.length > 0) {
+            panelQueue.push({ pNode: childNode, ancestorStates: nextActiveStates });
+          }
+        }
       }
     }
 
