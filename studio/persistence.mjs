@@ -398,7 +398,7 @@ export class StudioPersistence {
     if (this._pendingStore && !this.walWriteError) {
       const store = this._pendingStore;
       this.saveIdempotency(store);
-      this.saveFullSnapshot(store.doc, { recomputeHash: false });
+      this.saveFullSnapshot(store.doc, { recomputeHash: false, preserveUpdatedAt: true });
       if (this.walCount >= 120 || (existsSync(this.transactionsPath) && statSync(this.transactionsPath).size > 8 * 1024 * 1024)) {
         this.checkpointHistory(store);
       }
@@ -407,8 +407,8 @@ export class StudioPersistence {
     }
   }
 
-  saveFullSnapshot(doc, { recomputeHash = true } = {}) {
-    const now = new Date().toISOString();
+  saveFullSnapshot(doc, { recomputeHash = true, preserveUpdatedAt = false } = {}) {
+    const now = (preserveUpdatedAt && doc.updatedAt) ? doc.updatedAt : new Date().toISOString();
     doc.updatedAt = now;
     if (recomputeHash || !doc.contentHash) {
       doc.contentHash = computeContentHash(doc);
@@ -550,7 +550,7 @@ export class StudioPersistence {
       txRecord.kind !== 'undo' &&
       txRecord.kind !== 'redo'
     ) {
-      const now = new Date().toISOString();
+      const now = store.doc.updatedAt || new Date().toISOString();
       store.doc.updatedAt = now;
       writeJsonAtomic(this.projectJsonPath, {
         schemaVersion: SCHEMA_VERSION,
@@ -575,7 +575,7 @@ export class StudioPersistence {
     }
 
     this.flushPendingSnapshot();
-    this.saveFullSnapshot(store.doc, { recomputeHash: false });
+    this.saveFullSnapshot(store.doc, { recomputeHash: false, preserveUpdatedAt: true });
     if(this.walCount>=120 || statSync(this.transactionsPath).size>8*1024*1024)this.checkpointHistory(store);
     this.pruneSnapshots(store);
     return store.durableRevision;

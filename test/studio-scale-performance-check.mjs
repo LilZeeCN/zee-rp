@@ -113,6 +113,12 @@ test('large-canvas local patches preserve browser source, scene and paint across
     })()`);
     assert.deepEqual(actual, { doc: true, nodes: true, text: 'Only this source node changed', left: i ? '370px' : '340px' });
   }
+  await new Promise(r => setTimeout(r, 160));
+  const afterFlushEqual = await page.evaluate(`(async () => {
+    const expected = await (await fetch('/api/context')).json();
+    return JSON.stringify(window.__STUDIO_STATE__.doc) === JSON.stringify(expected.doc);
+  })()`);
+  assert.equal(afterFlushEqual, true);
   assert.equal(page.scriptErrors.length, 0);
 });
 
