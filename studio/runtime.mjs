@@ -1,6 +1,7 @@
 import { resolveDocumentScene } from './scene-resolver.mjs';
 import { evaluatePrototypeExpression, executePrototypeInteraction } from './prototype-runtime.mjs';
 import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
+import { lintDocumentInteractions } from './interaction-lint.mjs';
 
 export const SCENARIO_STEP_SCHEMA = {
   type: 'object', additionalProperties: false,
@@ -264,6 +265,33 @@ export class StudioRuntimeSession {
     }).pages.find(p => p.id === pageId)?.nodes || [];
     const entry = this.findNodeEntry(pageId, nodeId);
     return Boolean(entry && nodes.some(n => n.scopedId === entry.scopedId && n.visible));
+  }
+
+  _findHiddenAncestor(targetScopedId, pageId = this.currentPageId) {
+    const pg = (this.docSnapshot.pages || []).find(p => p.id === pageId);
+    if (!pg?.root) return null;
+    let foundAncestors = null;
+    const walk = (node, prefix, ancestors) => {
+      if (!node || typeof node !== 'object' || foundAncestors) return;
+      const scopedId = `${prefix}/${node.id}`;
+      if (scopedId === targetScopedId) {
+        foundAncestors = ancestors;
+        return;
+      }
+      const nextAnc = [...ancestors, { id: node.id, scopedId, node }];
+      for (const ch of node.children || []) walk(ch, prefix, nextAnc);
+      for (const st of node.states || []) {
+        if (st?.root) walk(st.root, `${scopedId}/${st.id}`, nextAnc);
+      }
+    };
+    walk(pg.root, pg.id, []);
+    if (!foundAncestors) return null;
+    for (const anc of foundAncestors) {
+      const ownVis = anc.node.visible !== false && anc.node.hidden !== true;
+      const curVis = anc.scopedId in this.visibility ? this.visibility[anc.scopedId] : ownVis;
+      if (!curVis) return { id: anc.id, scopedId: anc.scopedId };
+    }
+    return null;
   }
 
   evaluateExpression(expr, context = {}) {
@@ -713,6 +741,13 @@ export class StudioRuntimeSession {
       if (!step.action && !step.goto && !step.fill && !step.click && !step.expect) return invalid(i, '步骤缺少动作或断言');
     }
     if (!assertionCount) return invalid(-1, '场景没有任何断言，不能认证为通过');
+    const visitedPages = new Set([this.currentPageId]);
+    const triggeredInteractiveNodes = new Set();
+    const visitedPanelStates = new Set(Object.entries(this.panelStates).map(([panel, st]) => `${panel}:${st}`));
+    const exercisedVariables = new Set();
+    const matchedBranchKeys = new Set();
+    const runtimeWarnings = [];
+
     const stepResults = [];
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
@@ -727,6 +762,51 @@ export class StudioRuntimeSession {
         const executed = [];
         this._executeDatasetAction(step, executed);
         this.trace.push({ step: this.trace.length + 1, type: 'dataset', pageId: this.currentPageId, executed });
+      }
+
+      visitedPages.add(this.currentPageId);
+      for (const [panel, st] of Object.entries(this.panelStates)) {
+        visitedPanelStates.add(`${panel}:${st}`);
+      }
+
+      const stepTraceEvents = this.trace.slice(traceStart);
+      for (const ev of stepTraceEvents) {
+        if (ev.targetId && (ev.type === 'click' || ev.type === 'input' || ev.type === 'select-option')) {
+          triggeredInteractiveNodes.add(ev.targetId);
+        }
+        for (const act of ev.executed || []) {
+          if (act.action === 'set-var' && act.name) exercisedVariables.add(act.name);
+          if (act.action === 'condition' && act.matched && ev.targetId && Number.isInteger(act.caseIndex)) {
+            matchedBranchKeys.add(`${ev.targetId}#case:${act.caseIndex}`);
+          }
+        }
+      }
+      const stepExecuted = stepTraceEvents.flatMap(event => event.executed || []);
+      const stepWarnings = [];
+      for (const act of stepExecuted) {
+        if ((act.action === 'show' || act.action === 'toggle') && act.target && this.visibility[act.target] === true) {
+          if (!this.isNodeVisible(act.target, this.currentPageId)) {
+            const hiddenAnc = this._findHiddenAncestor(act.target, this.currentPageId);
+            const warn = {
+              code: 'W_SHOW_MASKED_BY_HIDDEN_ANCESTOR',
+              severity: 'warning',
+              stepIndex: i + 1,
+              pageId: this.currentPageId,
+              targetScopedId: act.target,
+              targetNodeId: String(act.target).split('/').at(-1),
+              maskedByAncestorId: hiddenAnc?.id || null,
+              maskedByAncestorScopedId: hiddenAnc?.scopedId || null,
+              message: hiddenAnc
+                ? `第 ${i + 1} 步将 "${act.target}" 设为可见，但其祖先容器 "${hiddenAnc.id}" 当前为 visible:false，目标在画面中仍被遮蔽不可见`
+                : `第 ${i + 1} 步将 "${act.target}" 设为可见，但受祖先容器或非激活面板状态限制，目标在画面中仍不可见`,
+              suggestion: hiddenAnc
+                ? `请改为 show 祖先容器 "${hiddenAnc.id}"（或同时 show "${hiddenAnc.id}"）`
+                : '请检查祖先容器 visible 状态或所属 dynamic-panel 当前激活的 state',
+            };
+            stepWarnings.push(warn);
+            runtimeWarnings.push(warn);
+          }
+        }
       }
 
       const assertions = [];
@@ -744,6 +824,7 @@ export class StudioRuntimeSession {
         }
         if (exp.variables) {
           for (const [varName, expectedVal] of Object.entries(exp.variables)) {
+            exercisedVariables.add(varName);
             const actual = this.variables[varName];
             assertions.push({ type: 'variable', target: varName, expected: expectedVal, actual, passed: String(actual) === String(expectedVal) });
           }
@@ -800,10 +881,83 @@ export class StudioRuntimeSession {
         step,
         currentPageId: this.currentPageId,
         assertions,
-        executed: this.trace.slice(traceStart).flatMap(event => event.executed || []),
+        executed: stepExecuted,
+        ...(stepWarnings.length ? { warnings: stepWarnings } : {}),
         passed: assertions.every(a => a.passed),
       });
     }
+
+    const allPageIds = (this.docSnapshot.pages || []).map(p => p.id);
+    const allInteractiveNodes = [];
+    const allPanelStates = [];
+    const allCaseBranches = [];
+    for (const pg of this.docSnapshot.pages || []) {
+      const walkCov = (node, prefix) => {
+        if (!node || typeof node !== 'object') return;
+        const scopedId = `${prefix}/${node.id}`;
+        const clickSpec = node.on?.click || node.onClick || node.interactions?.click;
+        const isInteractiveWidget =
+          ['button', 'input', 'checkbox', 'radio', 'combobox', 'listbox'].includes(node.type)
+          && !node.disabled
+          && node.state !== 'disabled';
+        if ((Boolean(clickSpec) || isInteractiveWidget) && !prefix.includes('/template')) {
+          allInteractiveNodes.push(scopedId);
+        }
+        if (clickSpec && typeof clickSpec === 'object' && Array.isArray(clickSpec.cases)) {
+          clickSpec.cases.forEach((branch, idx) => {
+            if (!branch || typeof branch !== 'object') return;
+            allCaseBranches.push({
+              branchKey: `${scopedId}#case:${idx}`,
+              pageId: pg.id,
+              nodeId: node.id,
+              scopedId,
+              caseIndex: idx,
+              condition: String(branch.when ?? branch.if ?? branch.condition ?? 'else'),
+            });
+          });
+        }
+        if (node.type === 'dynamic-panel' && Array.isArray(node.states)) {
+          for (const st of node.states) {
+            if (!st?.id) continue;
+            allPanelStates.push(`${scopedId}:${st.id}`);
+            if (st.root) walkCov(st.root, `${scopedId}/${st.id}`);
+          }
+        }
+        for (const ch of node.children || []) walkCov(ch, prefix);
+      };
+      if (pg.root) walkCov(pg.root, pg.id);
+    }
+
+    const staticLintWarnings = lintDocumentInteractions(this.docSnapshot, { includeCompleteness: true });
+    const seenWarnKeys = new Set();
+    const warnings = [];
+    for (const w of [...runtimeWarnings, ...staticLintWarnings]) {
+      const key = `${w.code}:${w.scopedId || ''}:${w.targetScopedId || ''}:${w.branchIndex ?? ''}`;
+      if (!seenWarnKeys.has(key)) {
+        seenWarnKeys.add(key);
+        warnings.push(w);
+      }
+    }
+
+    const totalItems = allPageIds.length + allInteractiveNodes.length + allPanelStates.length + allCaseBranches.length;
+    const hitItems =
+      visitedPages.size
+      + allInteractiveNodes.filter(id => triggeredInteractiveNodes.has(id)).length
+      + allPanelStates.filter(id => visitedPanelStates.has(id)).length
+      + allCaseBranches.filter(b => matchedBranchKeys.has(b.branchKey)).length;
+    const coverage = {
+      visitedPages: [...visitedPages],
+      unvisitedPages: allPageIds.filter(id => !visitedPages.has(id)),
+      triggeredInteractiveNodes: [...triggeredInteractiveNodes],
+      untriggeredInteractiveNodes: allInteractiveNodes.filter(id => !triggeredInteractiveNodes.has(id)),
+      visitedPanelStates: [...visitedPanelStates],
+      unvisitedPanelStates: allPanelStates.filter(id => !visitedPanelStates.has(id)),
+      exercisedVariables: [...exercisedVariables],
+      matchedCaseBranches: allCaseBranches.filter(b => matchedBranchKeys.has(b.branchKey)),
+      unmatchedCaseBranches: allCaseBranches.filter(b => !matchedBranchKeys.has(b.branchKey)),
+      totalCaseBranches: allCaseBranches.length,
+      coverageScore: totalItems > 0 ? Number((hitItems / totalItems).toFixed(3)) : 1,
+    };
 
     return {
       ok: stepResults.every(s => s.passed),
@@ -811,6 +965,8 @@ export class StudioRuntimeSession {
       totalSteps: stepResults.length,
       passedSteps: stepResults.filter(s => s.passed).length,
       stepResults,
+      coverage,
+      warnings,
       finalState: this.getState(),
     };
   }

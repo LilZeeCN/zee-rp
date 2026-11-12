@@ -65,9 +65,9 @@
 
 批量样式优先绑定设计 token，精细位置优先用 `editNodes` 的 align/place/move/distribute 表达关系。它编译为现有原子命令，失败时整批回滚，不隐式切换流式布局。修改后可在 `studio_design(action:review)` 中传 `compareWithReviewId`，一次查看前后真实截图、变化图层范围和检查项变化；编辑器顶栏「对照」提供同一能力。示例和限制见 [关系编辑与画面对照](studio-editing-20261027.md)。
 
-1. `studio_design(action:review)({pageId:"home",baseRevision:8})` 创建版本截图及机器检查，状态为 `awaiting-visual-review`。工具返回真正的 MCP 图片块，供当前模型直接看图。
+1. `studio_design({action:"review",pageId:"home",baseRevision:8})` 创建版本截图及机器检查（含 `nativeReadiness` 原生就绪度与 `interactionDiagnostics` 交互自愈诊断），状态为 `awaiting-visual-review`。工具返回真正的 MCP 图片块，供当前模型直接看图。
 2. 检查主次、构图、图片主体、图文比例、阅读层级和状态。每个问题给出节点 ID、问题和下一步决定。不能只写“更加高级”。
-3. `studio_design(action:review)({pageId:"home",baseRevision:8,reviewId:"…",observations:[{nodeIds:["hero"],issue:"照片主体被按钮遮住",decision:"将按钮移到照片下方"}]})` 将模型观察另存。原始截图记录保持不变，标记 `agent-reviewed`、`userAccepted:false`。
+3. `studio_design({action:"review",pageId:"home",baseRevision:8,reviewId:"…",observations:[{nodeIds:["hero"],issue:"照片主体被按钮遮住",decision:"将按钮移到照片下方"}]})` 将模型观察另存。原始截图记录保持不变，标记 `agent-reviewed`、`userAccepted:false`。
 4. 提交原子改稿，再创建新评审。旧版本返回 `E_STALE_REVIEW`；不会把旧图复用成新版本的完成证据。已提交的观察记录不可覆盖。
 
 `findings` 包含文字裁切、越界、缺图和衍生图底色过期等机器结果，不覆盖审美、所有视觉重叠或业务正确性。装饰性背景可延伸到安全区；正文、导航和操作从60px以下开始。不要把状态栏误当页面正文。

@@ -26,7 +26,7 @@ Axure手工改稿与AI并行修改的已验证流程、稀疏回填和剩余边�
 ]}}
 ```
 
-先声明 `index` 变量、`word` / `remember` 节点和 `done` 页面。表达式可使用 `text`、`number`、`concat`、`contains`、`length`、`lower`、`upper`、`not`、`remove`；引号里的 `$name` / `@widget` 保持原文。`run_scenario` 的 `stepResults[].executed` 给出条件表达式、实际值和分支是否命中；为每道题与跳页结果写断言，不能只验首屏。
+先声明 `index` 变量、`word` / `remember` 节点和 `done` 页面。表达式可使用 `text`、`number`、`concat`、`contains`、`length`、`lower`、`upper`、`not`、`remove`；引号里的 `$name` / `@widget` 保持原文。`studio_scenario` 的 `stepResults[].executed` 给出条件表达式、实际值和分支是否命中，同时返回 `coverage`（页面、交互节点、面板状态与 `cases` 分支覆盖率）与 `warnings`（交互自愈诊断）；为每道题与跳页结果写断言，不能只验首屏。
 
 Studio 原生出口会把跨页 `set-text`（普通 label / paragraph / button / badge）转换为全局文字状态与目标页加载恢复，同页后续改字也同步保存。`crossPageTextState` 列出转换；动态文字绑定、富文本、输入和行模板不使用此自动桥接。
 
@@ -111,11 +111,11 @@ Studio 原生出口会把跨页 `set-text`（普通 label / paragraph / button /
 - 新版恢复日志逐笔追加，并记录撤销/重做身份。重启可恢复具备快照的历史；旧版本缺快照或未记录的撤销不能凭空恢复，明确不可撤销且不改文档。
 - 复制保存源节点快照，粘贴重新分配后代ID并重映射内部目标。改源后粘贴保持复制时内容；重复粘贴不产生同ID后代。
 
-## 局部入口的边界
+## 局部入口的能力与边界
 
-当前节点片段不新增顶层 `product/variables/datasets/components` 声明，不接受任意完整语言运算AST、非click事件或不支持的动作；这些情况明确报错，走现有完整RP/1流程。不能从画布的受限入口推导任意原生工程都能无损双向回写。
+节点片段支持可选的内联 `vars:` / `tokens:` 头部、显式根容器、`panel` / `dynamic-panel`（含 `:state` 与 `tabs=[...]` 自动分段切换）、`repeater`（含 `:template` 与 `data=` 数据集绑定）、一等公民原生表单控件（`checkbox`、`radio`、`combobox`/`select`、`listbox`、`textarea`/`input multiline=true`）及全部内置宏（`card`、`stat-row`、`list-item`、`progress-bar`、`nav-bar`、`tab-bar`）；纯装饰节点 `divider` / `spacer` 可省略 `#id`。不支持任意完整语言运算 AST、非 click 事件或 `open-link` 等浏览器受限动作；这些情况明确报错，走现有完整 RP/1 流程。不能从画布的受限入口推导任意原生工程都能无损双向回写。
 
-新实现的工具数为81，其中22个Studio工具。已有MCP进程和已运行Studio不自动热更新；用 `runtime_info` 核对运行/磁盘指纹，实际操作本轮参数需要新stdio连接与新服务。没有重启已有用户工程，没有公开发布。
+当前公开 MCP 工具数为 72，其中 13 个 `studio_*` 动词化工具。已有 MCP 进程和已运行 Studio 不自动热更新；用 `runtime_info` 核对运行/磁盘指纹，实际操作本轮参数需要新 stdio 连接与新服务。没有重启已有用户工程，没有公开发布。
 
 ## 本轮试用反馈修复
 

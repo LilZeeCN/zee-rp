@@ -13,6 +13,34 @@ function nearest(value, grid = GRID) {
   return Math.max(grid, Math.round(value / grid) * grid);
 }
 
+export function countUnplacedStackContainers(doc, pageId) {
+  const pg = (doc?.pages || []).find(p => p.id === pageId);
+  if (!pg?.root) return 0;
+  let count = 0;
+  const walk = node => {
+    if (!node || typeof node !== 'object') return;
+    const children = Array.isArray(node.children) ? node.children : [];
+    if ((node.layout === 'stack' || (!node.layout && node.type === 'box')) && children.length >= 2) {
+      const positions = new Map();
+      for (const child of children) {
+        if (child.after || child.pin || child.anchor || child.alignX || child.right != null || child.bottom != null) continue;
+        const pos = JSON.stringify([child.x ?? 0, child.y ?? 0]);
+        const group = positions.get(pos) || [];
+        group.push(child);
+        positions.set(pos, group);
+      }
+      const hasOverlap = [...positions.values()].some(
+        group => group.length > 1 && group.some(child => child.x == null || child.y == null)
+      );
+      if (hasOverlap) count++;
+    }
+    for (const child of children) walk(child);
+    for (const st of node.states || []) if (st?.root) walk(st.root);
+  };
+  walk(pg.root);
+  return count;
+}
+
 export function buildFixPlan(scenePage, metrics, doc = null) {
   const nodes = scenePage.nodes || [];
   // 沿用页面上已有的正文字号，避免补一个空态顺带改掉字阶。
@@ -124,6 +152,73 @@ export function buildFixPlan(scenePage, metrics, doc = null) {
     pushProperties(item.id, { h: target }, `文字框 ${item.boxH} → ${target}（内容实际 ${item.contentH}）`);
   }
 
+  // 5) 文本裁切 (E_TEXT_CLIP)：按测量所需尺寸对齐 4px 栅格扩容
+  const seenClipIds = new Set();
+  for (const clip of scenePage.fontReport?.clipDiagnostics || []) {
+    if (!clip?.nodeId || clip.repeaterId || seenClipIds.has(clip.nodeId)) continue;
+    const node = byId.get(clip.nodeId);
+    if (!node || node.controlledByMacro || node.componentSource) continue;
+    seenClipIds.add(clip.nodeId);
+    const props = {};
+    if (clip.direction === 'vertical' && Number.isFinite(clip.requiredBounds?.h) && clip.requiredBounds.h > (clip.actualBounds?.h || 0)) {
+      props.h = Math.max(nearest(Math.ceil(clip.requiredBounds.h)), GRID);
+    } else if (clip.direction === 'horizontal' && Number.isFinite(clip.requiredBounds?.w) && clip.requiredBounds.w > (clip.actualBounds?.w || 0)) {
+      props.w = Math.max(nearest(Math.ceil(clip.requiredBounds.w)), GRID);
+    }
+    if (Object.keys(props).length) {
+      pushProperties(clip.nodeId, props, `修复文本裁切 E_TEXT_CLIP（${clip.direction === 'vertical' ? `h=${clip.actualBounds?.h}→${props.h}` : `w=${clip.actualBounds?.w}→${props.w}`}）`);
+    }
+  }
+
+  // 6) stack 容器子节点省略坐标共用起点 (W_STACK_CHILDREN_UNPLACED)
+  const docPage = (doc?.pages || []).find(p => p.id === scenePage.id);
+  if (docPage?.root) {
+    const walkStack = node => {
+      if (!node || typeof node !== 'object') return;
+      const children = Array.isArray(node.children) ? node.children : [];
+      if ((node.layout === 'stack' || (!node.layout && node.type === 'box')) && children.length >= 2) {
+        const positions = new Map();
+        for (const child of children) {
+          if (child.after || child.pin || child.anchor || child.alignX || child.right != null || child.bottom != null) continue;
+          const pos = JSON.stringify([child.x ?? 0, child.y ?? 0]);
+          const group = positions.get(pos) || [];
+          group.push(child);
+          positions.set(pos, group);
+        }
+        const overlappingGroups = [...positions.values()].filter(
+          group => group.length > 1 && group.some(child => child.x == null || child.y == null)
+        );
+        if (overlappingGroups.length > 0) {
+          const hasExplicitXY = children.some(ch => ch.x !== undefined || ch.y !== undefined);
+          const isPageRoot = node.id === docPage.root.id || node.type === 'phone-shell';
+          if (!hasExplicitXY && !isPageRoot) {
+            const gap = typeof node.gap === 'number' ? node.gap : 12;
+            commands.push({ type: 'setLayout', nodeId: node.id, mode: 'column', gap });
+            notes.push({ nodeId: node.id, reason: `修复 W_STACK_CHILDREN_UNPLACED：将未指定坐标的 stack 容器切换为 column 流式排布（gap=${gap}）` });
+          } else {
+            const gap = typeof node.gap === 'number' ? node.gap : 12;
+            for (const group of overlappingGroups) {
+              const baseX = nearest(Number(group[0]?.x) || 0);
+              let cursorY = nearest(Number(group[0]?.y) || 0);
+              for (let idx = 0; idx < group.length; idx++) {
+                const ch = group[idx];
+                const sceneChild = byId.get(ch.id);
+                const chH = Number(sceneChild?.h || ch.h || 40);
+                if (idx > 0 || ch.x == null || ch.y == null) {
+                  pushProperties(ch.id, { x: baseX, y: cursorY }, `修复 W_STACK_CHILDREN_UNPLACED：为共用起点的子节点分配纵向坐标 y=${cursorY}`);
+                }
+                cursorY = nearest(cursorY + chH + gap);
+              }
+            }
+          }
+        }
+      }
+      for (const child of children) walkStack(child);
+      for (const st of node.states || []) if (st?.root) walkStack(st.root);
+    };
+    walkStack(docPage.root);
+  }
+
   return {
     ok: true,
     pageId: scenePage.id,
@@ -131,7 +226,7 @@ export function buildFixPlan(scenePage, metrics, doc = null) {
     notes,
     manual,
     deterministic: true,
-    caveat: '只包含可直接计算的修复（网格/空态/撑高文字），并在服务端试跑验证。字阶、配色、构图属于取舍，交给 studio_design(action:explore) 与锚点对比；热区需要渲染层支持，列为 manual。',
+    caveat: '只包含可直接计算的修复（网格/空态/撑高文字/文本裁切/stack重叠子节点排布），并在服务端试跑验证。字阶、配色、构图属于取舍，交给 studio_design(action:explore) 与锚点对比；热区需要渲染层支持，列为 manual。',
   };
 }
 

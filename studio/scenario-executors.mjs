@@ -4,7 +4,7 @@ import { observeAxure } from '../scripts/preview-runtime.mjs';
 export const BROWSER_SCENARIO_STEP_SCHEMA = {
   ...SCENARIO_STEP_SCHEMA,
   properties: Object.fromEntries(['action', 'target', 'id', 'fill', 'click', 'value', 'text', 'expect'].map(key => [key,
-    key === 'action' ? { type: 'string', enum: ['click', 'input', 'expect'] } :
+    key === 'action' ? { type: 'string', enum: ['click', 'input', 'expect', 'assert'] } :
     key === 'expect' ? SCENARIO_STEP_SCHEMA.properties.expect : SCENARIO_STEP_SCHEMA.properties[key]])),
 };
 
@@ -108,6 +108,7 @@ async function pointerTarget(page, selector, action, value) {
 export function countScenarioAssertions(steps = []) {
   return steps.reduce((count, step) => count + (step.expect?.page !== undefined ? 1 : 0)
     + Object.keys(step.expect?.variables || {}).length + Object.keys(step.expect?.text || {}).length + Object.keys(step.expect?.visible || {}).length
+    + Object.keys(step.expect?.checked || {}).length + Object.keys(step.expect?.selected || {}).length
     + Object.keys(step.expect?.panelState || {}).length + Object.keys(step.expect?.datasetCount || {}).length + Object.keys(step.expect?.datasetFirstRow || {}).length, 0);
 }
 
@@ -121,7 +122,7 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
     const unsupported = Object.keys(step.expect || {}).filter(key => !(native ? ['page', 'variables', 'text', 'visible'] : Object.keys(SCENARIO_STEP_SCHEMA.properties.expect.properties)).includes(key));
     if (unsupported.length) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_ASSERTION_UNSUPPORTED', fields: unsupported };
     if (step.type !== undefined) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_STEP', reason: '步骤使用 action/expect，不能用 type' };
-    if (step.action && !['click', 'input', 'fill', 'expect'].includes(step.action)) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_ACTION_UNSUPPORTED', action: step.action, reason: `步骤动作 ${step.action} 不受支持；可用动作：click、input、fill、expect` };
+    if (step.action && !['click', 'input', 'fill', 'expect', 'assert'].includes(step.action)) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_ACTION_UNSUPPORTED', action: step.action, reason: `步骤动作 ${step.action} 不受支持；可用动作：click、input、fill、expect、assert` };
   }
   const assertionCount = countScenarioAssertions(steps);
   if (!assertionCount) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_ASSERTIONS_REQUIRED', reason: '场景需要至少一项页面、变量或可见文字断言' };
@@ -211,7 +212,7 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
     for (const step of steps) {
       const action = step.action || (step.click ? 'click' : step.fill ? 'input' : 'expect');
       const target = step.target || step.id || step.click || step.fill;
-      if (action !== 'expect') {
+      if (action !== 'expect' && action !== 'assert') {
         let selector;
         if (native) {
           const name = String(target).split('/').at(-1);

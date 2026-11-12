@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { assertNotProtected } from '../scripts/engine.mjs';
 import { ensureCoreComponentsRegistered } from './component-contracts.mjs';
 import { normalizeInteractionSpec } from './interactions.mjs';
+import { INTERACTION_LINT_CODES, lintDocumentInteractions } from './interaction-lint.mjs';
 export { assertNotProtected };
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -1131,7 +1132,9 @@ export function createEmptyStudioDocument({ name = 'Untitled Project', documentI
 
 // Layout warnings describe the current document, not past commands.
 export function currentDocumentDiagnostics(doc) {
-  const diagnostics = (doc.diagnostics || []).filter(d => d.code !== 'W_LAYOUT_IGNORES_POSITION');
+  const diagnostics = (doc.diagnostics || []).filter(
+    d => d.code !== 'W_LAYOUT_IGNORES_POSITION' && !INTERACTION_LINT_CODES.has(d.code)
+  );
   function visit(node, parent, pageId, scope) {
     if (!node || typeof node !== 'object') return;
     if (
@@ -1173,6 +1176,7 @@ export function currentDocumentDiagnostics(doc) {
   for (const [compId, comp] of Object.entries(doc.components || {})) {
     if (comp?.root) visit(comp.root, null, `component:${compId}`, `component/${compId}`);
   }
+  diagnostics.push(...lintDocumentInteractions(doc, { includeCompleteness: false }));
   return diagnostics;
 }
 

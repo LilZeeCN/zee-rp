@@ -12,7 +12,7 @@ export const COMMAND_CONTRACTS = {
     dependsOn:{type:'object',properties:{tokenNames:{type:'array',maxItems:32,items:string},decisionIds:{type:'array',maxItems:32,items:string},sourceTargets:{type:'array',maxItems:32,items:{type:'object',properties:{pageId:string,nodeId:string,properties:{type:'array',minItems:1,items:string}},required:['nodeId'],additionalProperties:false}}},additionalProperties:false},
     supersedes:{type:'array',maxItems:32,items:string},reference:{type:'object',properties:{id:string,version:string},required:['id','version'],additionalProperties:false}
   }, ['decisionId','scope','subject','outcome','choice','reason']),
-  addPage: schema('addPage', { id: string, name: string, domain: string, pageDomain: string, device: { anyOf: [string, { type: 'null' }] }, w: number, h: number, x: number, y: number, root: object, autoUniqueId: { type: 'boolean' } }),
+  addPage: schema('addPage', { id: string, name: string, title: string, domain: string, pageDomain: string, device: { anyOf: [string, { type: 'null' }] }, shell: { enum: ['phone-shell', 'web-page', 'blank'] }, layout: { enum: ['stack', 'free', 'row', 'column', 'grid'] }, padding: {}, gap: number, w: number, h: number, x: number, y: number, root: object, autoUniqueId: { type: 'boolean' } }),
   renamePage: schema('renamePage', { name: string }, ['pageId', 'name']),
   renameNode: schema('renameNode', { nodeId: string, name: string }, ['nodeId', 'name']),
   deleteNode: schema('deleteNode', { nodeId: string, cascade: { type: 'boolean' } }, ['nodeId']),

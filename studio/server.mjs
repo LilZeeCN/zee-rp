@@ -940,11 +940,13 @@ export class StudioServer {
         const page = this.scene.pages.find(p => p.id === pageId);
         if (!page) return sendJson(res, 404, { ok: false, code: 'E_PAGE_NOT_FOUND', message: `页面不存在：${pageId}` });
         const { computeDesignMetrics } = await import('./design-metrics.mjs');
-        const { buildFixPlan } = await import('./fix-plan.mjs');
+        const { buildFixPlan, countUnplacedStackContainers } = await import('./fix-plan.mjs');
         const { resolveDocumentScene } = await import('./scene-resolver.mjs');
         const { applySingleCommand } = await import('./commands.mjs');
         const metrics = computeDesignMetrics(page, { doc: this.store.doc });
         const plan = buildFixPlan(page, metrics, this.store.doc);
+        const countAuxIssues = (targetPage, targetDoc) =>
+          (targetPage?.fontReport?.clipDiagnostics?.length || 0) + countUnplacedStackContainers(targetDoc, pageId);
 
         // 自证：在文档副本上真跑一遍自己的命令，逐条判断"是否真的让某个检查转正"。
         // 不做这一步，计划就可能用元数据刷绿（坐标漂移、幽灵字段、空盒子）。
@@ -955,26 +957,31 @@ export class StudioServer {
           const scene = resolveDocumentScene(doc, { projectDir: this.projectDir });
           const target = scene.pages.find(p => p.id === pageId);
           if (!target) return null;
-          return computeDesignMetrics(target, { doc });
+          return {
+            metrics: computeDesignMetrics(target, { doc }),
+            auxCount: countAuxIssues(target, doc),
+          };
         };
 
         const kept = [];
         const rejected = [];
-        let simulated = metrics;
+        let simulated = { metrics, auxCount: countAuxIssues(page, this.store.doc) };
         for (const command of plan.commands) {
           const trial = simulate([...kept, command]);
           if (!trial) { rejected.push({ command, reason: '模拟失败' }); continue; }
-          const trialBlocking = new Set(trial.l1.blocking.map(b => b.check));
-          // 严格标准：整页阻塞项必须减少。只让某一项转正、却新增另一项红的命令一律拒绝
-          // （试用者实测过：补空态的命令顺手把字号问题带了出来）。
+          const trialBlocking = new Set(trial.metrics.l1.blocking.map(b => b.check));
+          // 严格标准：整页阻塞项减少，或在不新增阻塞项的前提下消除 E_TEXT_CLIP / W_STACK_CHILDREN_UNPLACED。
           const fixedSomething = [...baselineBlocking].some(check => !trialBlocking.has(check));
-          const worse = trial.l1.blocking.length >= simulated.l1.blocking.length;
-          if (fixedSomething && !worse) {
+          const reducedBlocking = fixedSomething && trial.metrics.l1.blocking.length < simulated.metrics.l1.blocking.length;
+          const reducedAuxWithoutRegression =
+            trial.metrics.l1.blocking.length <= simulated.metrics.l1.blocking.length
+            && trial.auxCount < simulated.auxCount;
+          if (reducedBlocking || reducedAuxWithoutRegression) {
             kept.push(command);
             simulated = trial;
           } else {
-            const before = simulated.l1.blocking.map(b => b.check);
-            const after = trial.l1.blocking.map(b => b.check);
+            const before = simulated.metrics.l1.blocking.map(b => b.check);
+            const after = trial.metrics.l1.blocking.map(b => b.check);
             const fixedList = before.filter(k => !after.includes(k));
             const brokeList = after.filter(k => !before.includes(k));
             rejected.push({
@@ -996,7 +1003,10 @@ export class StudioServer {
             const candidate = rejected[i].command;
             const trial = simulate([...kept, candidate]);
             if (!trial) continue;
-            if (trial.l1.blocking.length < simulated.l1.blocking.length) {
+            const improved =
+              trial.metrics.l1.blocking.length < simulated.metrics.l1.blocking.length
+              || (trial.metrics.l1.blocking.length <= simulated.metrics.l1.blocking.length && trial.auxCount < simulated.auxCount);
+            if (improved) {
               kept.push(candidate);
               simulated = trial;
               rejected.splice(i, 1);
@@ -1010,7 +1020,11 @@ export class StudioServer {
         if (rejected.length > 1) {
           const batch = rejected.map(item => item.command);
           const trial = simulate([...kept, ...batch]);
-          if (trial && trial.l1.blocking.length < simulated.l1.blocking.length) {
+          if (
+            trial
+            && (trial.metrics.l1.blocking.length < simulated.metrics.l1.blocking.length
+              || (trial.metrics.l1.blocking.length <= simulated.metrics.l1.blocking.length && trial.auxCount < simulated.auxCount))
+          ) {
             kept.push(...batch);
             simulated = trial;
             rejected.length = 0;
@@ -1018,7 +1032,7 @@ export class StudioServer {
           }
         }
 
-        const unfixable = simulated.l1.blocking.map(item => ({
+        const unfixable = simulated.metrics.l1.blocking.map(item => ({
           check: item.check,
           reason: plan.manual?.some(m => item.check === 'tap-target' && /热区/.test(m.reason))
             ? '需要渲染层实现命中区，或接受撑大图形'
@@ -1039,7 +1053,7 @@ export class StudioServer {
           baseRevision: this.store.appliedRevision,
           projected: {
             before: { verdict: metrics.l1.verdict, blocking: [...baselineBlocking] },
-            after: { verdict: simulated.l1.verdict, blocking: simulated.l1.blocking.map(b => b.check) },
+            after: { verdict: simulated.metrics.l1.verdict, blocking: simulated.metrics.l1.blocking.map(b => b.check) },
           },
           verified: true,
           verificationBasis: 'geometry',

@@ -5,6 +5,65 @@ import { sha256 } from './document.mjs';
 import { reviewNodeSnapshots, compareReviews } from './review-comparison.mjs';
 import { summarizeMetrics } from './design-metrics.mjs';
 import {locateDiagnostic} from './diagnostics.mjs';
+import { classifyNodeCompatibility } from './export-rp.mjs';
+import { exportCssPlan } from './visual-style.mjs';
+import { lintDocumentInteractions } from './interaction-lint.mjs';
+
+function summarizeNativeReadiness(page) {
+  let nativeEditable = 0;
+  let nativeInitAction = 0;
+  let rasterizedEffect = 0;
+  let unsupported = 0;
+  const nonNativeItems = [];
+  for (const node of page?.nodes || []) {
+    const entries = [];
+    classifyNodeCompatibility(node, page.id, entries);
+    const cssPlan = exportCssPlan(node);
+    const paintKeys = Object.keys(cssPlan.paint || {});
+    if (paintKeys.length > 0 && !entries.some(e => e.classification === 'rasterized-effect')) {
+      entries.splice(Math.max(0, entries.length - 1), 0, {
+        pageId: page.id,
+        nodeId: node.id,
+        scopedId: `${page.id}/${node.id}`,
+        nodeType: node.type,
+        classification: 'rasterized-effect',
+        feature: paintKeys.join(','),
+        reason: '该节点使用了 CSS 装饰绘制效果，导出 .rp 时将生成独立装饰背景 PNG，原生文字与交互仍保持可编辑',
+      });
+    }
+    const nonDefault = entries.find(e => e.classification !== 'native-editable');
+    const primary = nonDefault || entries[entries.length - 1] || { classification: 'native-editable' };
+    if (primary.classification === 'native-editable') nativeEditable++;
+    else if (primary.classification === 'native-init-action') nativeInitAction++;
+    else if (primary.classification === 'rasterized-effect') rasterizedEffect++;
+    else unsupported++;
+
+    for (const item of entries) {
+      if (item.classification !== 'native-editable') {
+        nonNativeItems.push({
+          nodeId: node.id,
+          scopedId: node.scopedId || `${page.id}/${node.id}`,
+          nodeType: node.type,
+          classification: item.classification,
+          feature: item.feature || null,
+          reason: item.reason || (Array.isArray(item.reasons) ? item.reasons.join('；') : null),
+          fallback: item.fallback || null,
+        });
+      }
+    }
+  }
+  return {
+    fullyNativeEditable: unsupported === 0 && rasterizedEffect === 0,
+    counts: {
+      totalNodes: (page?.nodes || []).length,
+      nativeEditable,
+      nativeInitAction,
+      rasterizedEffect,
+      unsupported,
+    },
+    nonNativeItems,
+  };
+}
 
 const checkList = ['主任务和主操作是否足够明确', '图像主体、图文比例和留白是否服务内容', '标题、正文、辅助信息的层级是否清楚', '空态、错误态、长文本及连续操作是否可用', '与所选参考相比，哪些决定需要改，为什么'];
 export async function reviewDesign(studio, { pageId, baseRevision, reviewId = null, observations = null, compareWithReviewId = null } = {}) {
@@ -92,9 +151,13 @@ export async function reviewDesign(studio, { pageId, baseRevision, reviewId = nu
     });
   }
   const { mcpImages, base64, ...screenshot } = shot;
+  const nativeReadiness = summarizeNativeReadiness(page);
+  const interactionDiagnostics = lintDocumentInteractions(studio.store.doc, { includeCompleteness: true, pageId });
   const review = { schemaVersion: 2, board: page.board, nodeSnapshots: reviewNodeSnapshots(page), reviewId: id, pageId, revision: baseRevision, contentHash: shot.contentHash, screenshot,
     status: 'awaiting-visual-review', userAccepted: false, findings:findings.map(finding=>({...finding,location:locateDiagnostic({doc:studio.store.doc,scene:studio.scene,pageId,nodeIds:finding.nodeIds||[finding.nodeId||finding.scopedId].filter(Boolean),field:finding.field,code:finding.code,limit:1})})), checkList,
     assessment: { blockingCount: findings.filter(f => f.severity === 'error').length, advisoryCount: findings.filter(f => f.severity !== 'error').length, note: '硬问题与风格建议分别记录；unknown 不计为通过。' },
+    nativeReadiness,
+    interactionDiagnostics,
     designMetrics: metrics,
     metricsSummary: summarizeMetrics(metrics) };
   if (studio.store.appliedRevision !== baseRevision) throw Object.assign(new Error('评审期间文档已变化，请重试'), { code: 'E_STALE_REVIEW' });

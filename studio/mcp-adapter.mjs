@@ -184,7 +184,7 @@ function docStub(payload) {
     contentHash: payload.contentHash ?? payload.doc.contentHash ?? null,
     pageCount: (payload.doc.pages || []).length,
     fullDocument: false,
-    note: '事务默认不重复回传文档；受影响节点见 scene/affectedNodeIds，完整文档传 includeDoc:true 或调用 studio_get_context',
+    note: '事务默认不重复回传文档；受影响节点见 scene/affectedNodeIds，完整文档传 includeDoc:true 或调用 studio_inspect(view:"context")',
   };
 }
 
@@ -222,7 +222,7 @@ function enforceBudget(payload, maxBytes = DEFAULT_MAX_BYTES) {
       page.nodeCount = page.nodeCount ?? (page.nodes || []).length;
       delete page.nodes;
     }
-    out.truncations.push({ level: 2, dropped: 'all scene.nodes', how: 'use studio_query_nodes for details' });
+    out.truncations.push({ level: 2, dropped: 'all scene.nodes', how: 'use studio_inspect for details' });
   }
 
   if (byteLen(out) > maxBytes && out.doc) {

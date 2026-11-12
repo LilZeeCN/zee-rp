@@ -669,6 +669,13 @@ export function computeCommandImpactAndDiff({
   }
   const diagLabels = {
     W_STACK_CHILDREN_UNPLACED: count => `发现 ${count} 个 stack 容器有子节点因省略坐标而共用起点，请检查坐标或改用自动布局`,
+    W_SHOW_MASKED_BY_HIDDEN_ANCESTOR: count => `发现 ${count} 处 show/toggle 目标被隐藏祖先容器遮蔽 (W_SHOW_MASKED_BY_HIDDEN_ANCESTOR)`,
+    W_CASE_CONSTANT_CONDITION: count => `发现 ${count} 处恒真/恒假交互条件 (W_CASE_CONSTANT_CONDITION)`,
+    W_CASE_SHADOWED: count => `发现 ${count} 处被遮蔽的死分支 (W_CASE_SHADOWED)`,
+    W_SEQUENTIAL_WHEN_MUTATION: count => `发现 ${count} 处顺序 when 读取前序刚修改的变量风险 (W_SEQUENTIAL_WHEN_MUTATION)`,
+    W_STATE_VAR_NEVER_UPDATED: count => `发现 ${count} 个条件依赖的状态变量从未被 set-var 更新 (W_STATE_VAR_NEVER_UPDATED)`,
+    W_BUTTON_NO_INTERACTION: count => `发现 ${count} 个可见按钮未绑定任何交互 (W_BUTTON_NO_INTERACTION)`,
+    W_UNREACHABLE_HIDDEN_LAYER: count => `发现 ${count} 个隐藏节点无任何 show/toggle 指向 (W_UNREACHABLE_HIDDEN_LAYER)`,
     E_TEXT_CLIP: count => `发现文字截断/溢出风险 ${count} 处`,
     E_STALE_OVERRIDE: count => `发现失效组件覆盖 (E_STALE_OVERRIDE) ${count} 处`,
     E_MISSING_ASSET: count => `发现缺失资源 ${count} 处`,

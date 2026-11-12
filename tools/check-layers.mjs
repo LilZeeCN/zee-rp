@@ -93,7 +93,7 @@ const CORE = new Set([
   'interactions', 'vector-paths', 'visual-style', 'clipboard',
   // L1 文档核心
   'document', 'component-contracts', 'text-shaping', 'typography', 'pixel-truth', 'design-metrics',
-  'document-diff', 'command-contracts', 'node-capabilities',
+  'document-diff', 'command-contracts', 'node-capabilities', 'interaction-lint',
   // L2 几何/语义
   'scene-resolver', 'authoring-query', 'relation-edit', 'design-decisions', 'design-craft',
   'design-guidance', 'reference-packs', 'media', 'runtime', 'scenario-executors', 'selection',

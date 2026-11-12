@@ -17,30 +17,71 @@ function addPage({ doc, cmd, cmdIdx, affectedIds }) {
         throw cmdError('E_DUPLICATE_PAGE', `页面 ID "${pageId}" 已存在`, { commandIndex: cmdIdx, field: 'pageId' });
       }
       const lastBoard = doc.pages?.at(-1)?.canvas;
-      const domain = cmd.domain || cmd.pageDomain || doc.domain || 'mobile';
+      const domain = cmd.domain || cmd.pageDomain || (cmd.shell === 'web-page' ? 'web' : cmd.shell === 'phone-shell' ? 'mobile' : doc.domain) || 'mobile';
       const isWeb = domain !== 'mobile';
       const w = Number(cmd.w || (isWeb ? 1280 : 402));
       const h = Number(cmd.h || (isWeb ? 800 : 874));
       const x = Number.isFinite(cmd.x) ? cmd.x : (lastBoard ? lastBoard.x + lastBoard.w + 120 : 80);
       const y = Number.isFinite(cmd.y) ? cmd.y : (lastBoard ? lastBoard.y : 80);
+      const pageName = cmd.name || cmd.title || pageId;
+      const resolvedDevice = cmd.device !== undefined ? cmd.device : (isWeb ? null : (doc.device || 'iphone16-pro'));
+      let defaultRoot;
+      if (cmd.shell === 'phone-shell') {
+        defaultRoot = {
+          type: 'phone-shell',
+          id: `${pageId}_shell`,
+          layout: 'stack',
+          padding: 0,
+          device: resolvedDevice || 'iphone16-pro',
+          children: [
+            {
+              type: 'box',
+              id: `${pageId}_screen`,
+              name: pageName,
+              layout: cmd.layout || 'stack',
+              padding: cmd.padding !== undefined ? cmd.padding : [60, 0, 0, 0],
+              gap: cmd.gap ?? 12,
+              w,
+              h,
+              fill: '$bg',
+              children: [],
+            },
+          ],
+        };
+      } else if (cmd.shell === 'web-page') {
+        defaultRoot = {
+          type: 'box',
+          id: `${pageId}_root`,
+          name: pageName,
+          layout: cmd.layout || 'column',
+          w,
+          h,
+          padding: cmd.padding !== undefined ? cmd.padding : 24,
+          gap: cmd.gap ?? 16,
+          fill: '$bg',
+          children: [],
+        };
+      } else {
+        defaultRoot = {
+          type: 'box',
+          id: `${pageId}_root`,
+          name: pageName,
+          layout: cmd.layout || 'stack',
+          w,
+          h,
+          padding: cmd.padding !== undefined ? cmd.padding : 0,
+          gap: cmd.gap ?? 12,
+          fill: '$bg',
+          children: [],
+        };
+      }
       doc.pages.push({
         id: pageId,
-        name: cmd.name || pageId,
+        name: pageName,
         device: cmd.device !== undefined ? cmd.device : (isWeb ? null : doc.device),
         domain,
         canvas: { x, y, w, h },
-        root: cmd.root ? structuredClone(cmd.root) : {
-          type: 'box',
-          id: `${pageId}_root`,
-          name: cmd.name || pageId,
-          layout: 'stack',
-          w,
-          h,
-          padding: 0,
-          gap: 12,
-          fill: '$bg',
-          children: [],
-        },
+        root: cmd.root ? structuredClone(cmd.root) : defaultRoot,
         interactions: [],
         explorations: [],
       });
