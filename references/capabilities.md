@@ -1,5 +1,7 @@
 # 能力与验证边界
 
+**2026-11-14 `revise_prototype` Node 24 落盘自撞修复：** 修复 `scripts/authoring-workflow.mjs` 先 `mkdirSync(assets)` 再调用 `cpSync(..., { recursive: true, errorOnExist: true, force: false })` 在 Node 24 下必抛 `ERR_FS_CP_EEXIST` 且回滚误删同目录同名冲突的风险。现改用基于 `mkdirSync` + `COPYFILE_EXCL` 的排他递归复制 `copyTreeExclusive`（仅在原子抢占 `<output>.assets` 成功后登记回滚，并发占用统一报 `E_OUTPUT_EXISTS` 且绝不误删外部既有目录），并补齐 `output: "auto"` 对 `.rp.assets` 占用的跳过判断。核心回归 `21/21`（含零模板单元测试）、创作工作流 `18/18`、第三轮真实 stdio 四模式（同步/异步 × auto/显式命名）`14/14`、创作质量 `11/11` 全绿；已连接旧 MCP 进程需重连。
+
 **2026-11-12 全链路深层体检修复与 AI-First 创作平台打磨（本地分支 `feat/deep-polish-ai-platform-20261112`，未推送/未发布）：**
 - **持久化事务与服务防线统一**：`versions.restore`、`studio_merge(mode:"apply")` 与 `studio_merge(kind:"sync_native", mode:"apply")` 全部统一接入 `persistence.commit()` 先写 WAL 并 `fsync`、再发布内存状态与幂等键；快照失败返回 `W_CHECKPOINT_PENDING`，崩溃重放恢复一致。修复静态资源 `%2f` 解码后路径穿越与符号链接逃逸、`readJsonBody` 请求体上限、`openProject` 会话 `sessionId` 轮换、`prepareLocalEdit` 诊断同步刷新；`cdp.mjs` 进程组回收与 macOS 超长 `TMPDIR` 短套接字保护消除受管浏览器启动偶发失败。
 - **表达式求值器、离线代码包与原生 `.rp` 出口修复**：`prototype-runtime.mjs` 改用安全递归下降求值器（移除裸 `new Function`，修复 `$count-1` 连字符分词、负值 `--` 语法错误与 `NaN`/`null` 守卫）；`export-code.mjs` 修复嵌套动态面板、非激活态面板图片与 CSS 背景图离线重写；`export-rp.mjs` 支持将 `text.spans` 导出为原生 RP9 多段 `RichTextBlock` 并修复容器装饰层偏移与旋转继承。

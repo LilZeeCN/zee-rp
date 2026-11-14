@@ -82,6 +82,19 @@ try {
   const cancelled = await call('jobs_cancel', { id: job.id });
   assert.equal(cancelled.cancelled, false); assert.equal(cancelled.reason, 'already_completed');
   record('async revise publishes durable assets, preserves expressions/inputs, removes staging, syncs cleanly');
+  for (const [modeLabel, extra] of [
+    ['sync+auto', { output: 'auto' }],
+    ['sync+explicit', { output: 'runtime-sync-explicit.rp' }],
+    ['async+explicit', { output: 'runtime-async-explicit.rp', async: true }],
+    ['async+auto', { output: 'auto', async: true }],
+  ]) {
+    const reply = await call('revise_prototype', { ...args, ...extra });
+    const res = extra.async ? (await waitJob(reply.id)).result : reply;
+    assert.equal(res.status, 'completed', modeLabel);
+    assert(existsSync(res.output) && existsSync(`${res.output}.assets/revision-report.json`), modeLabel);
+    assert.equal((await call('verify', { path: res.output })).syncStatus.state, 'in_sync', modeLabel);
+  }
+  record('revise_prototype all four modes (sync/async x auto/explicit) publish .rp and .assets cleanly');
   const first = await call('revise_prototype', { ...args, dryRun: true, async: true });
   const queued = await call('revise_prototype', { ...args, dryRun: true, async: true });
   const cancelledQueued = await call('jobs_cancel', { id: queued.id });

@@ -11,6 +11,7 @@ import { listCommands } from '../scripts/registry.mjs';
 import { listMcpTools, jobTools, validateInput } from '../scripts/mcp-tools.mjs';
 import { encodeStyleEntry } from '../scripts/set-widget-richtext.mjs';
 import { assertNotProtected, assertWritable } from '../scripts/engine.mjs';
+import { revisePrototype } from '../scripts/authoring-workflow.mjs';
 import { packRelease, releasePaths } from '../scripts/pack-release.mjs';
 import { renderLayout } from '../examples/render-layout.mjs';
 
@@ -165,6 +166,73 @@ try {
     for (const diagnostic of [/A .*循环依赖.*studio\/server\.mjs/, /A .*循环依赖.*studio\/web\/app\.mjs/, /B .*Node 内建.*fs/, /B .*非同构模块.*server\.mjs/, /D .*越界引用/]) {
       assert.match(checked.stderr, diagnostic);
     }
+  });
+  check('revisePrototype publishes nested assets without ERR_FS_CP_EEXIST and protects occupied targets', () => {
+    const revDir = join(work, 'revise-publish');
+    mkdirSync(revDir, { recursive: true });
+    const srcPath = join(revDir, 'app.rp1');
+    const rpPath = join(revDir, 'app.rp');
+    writeFileSync(srcPath, 'rp/1 target=9 name="Demo"\n\npage #home name="首页"\n  label #title [200x40] "旧标题"\n');
+    writeFileSync(rpPath, 'stub-rp-v1');
+    writeFileSync(`${rpPath}.baseline.json`, JSON.stringify({ version: 1 }) + '\n');
+    const sync = ({ source, outSource }) => {
+      copyFileSync(source, outSource);
+      return { ok: true, summary: { state: 'in_sync' } };
+    };
+    const makeGenerate = onBeforeReturn => ({ source, output }) => {
+      const buildDir = mkdtempSync(join(dirname(output), '.stub-build-'));
+      mkdirSync(join(buildDir, 'states/nested'), { recursive: true });
+      const preview = join(buildDir, 'states/nested/preview.png');
+      const sheet = join(buildDir, 'pages-sheet.png');
+      const ir = join(buildDir, 'language-ir.json');
+      writeFileSync(preview, 'png');
+      writeFileSync(sheet, 'sheet');
+      writeFileSync(ir, JSON.stringify({ stagedSource: source, stagedOut: output, stagedDir: buildDir }) + '\n');
+      writeFileSync(output, 'stub-rp-v2');
+      writeFileSync(`${output}.baseline.json`, JSON.stringify({ version: 1, sourcePath: source, outputRp: output }) + '\n');
+      onBeforeReturn?.();
+      return {
+        status: 'completed', output, baseline: `${output}.baseline.json`,
+        previews: { home: preview }, contactSheet: sheet,
+        artifacts: { directory: buildDir, ir },
+        verification: { structure: true, preview: false },
+        structure: { unparseable: 0, danglingRefs: 0, problems: 0 },
+        eventCoverage: { declared: 0, materialized: 0 },
+      };
+    };
+    const ops = [{ target: 'home/title', property: 'text', value: '新标题' }];
+    const explicit = revisePrototype({ source: srcPath, rp: rpPath, output: join(revDir, 'explicit.rp'), operations: ops },
+      { sync, generate: makeGenerate() });
+    assert.equal(explicit.status, 'completed');
+    assert.ok(existsSync(join(revDir, 'explicit.rp.assets/states/nested/preview.png')));
+    assert.ok(existsSync(explicit.report));
+    assert.ok(!readFileSync(explicit.artifacts.ir, 'utf8').includes('.revision-'));
+    assert.ok(!readdirSync(revDir).some(name => name.startsWith('.revision-')));
+
+    // Pre-occupy app-v2.rp.assets: auto naming must skip v2 without touching it and publish v3.
+    mkdirSync(join(revDir, 'app-v2.rp.assets'));
+    writeFileSync(join(revDir, 'app-v2.rp.assets/keep.txt'), 'keep');
+    const auto = revisePrototype({ source: srcPath, rp: rpPath, output: 'auto', operations: ops },
+      { sync, generate: makeGenerate() });
+    assert.equal(auto.output, join(revDir, 'app-v3.rp'));
+    assert.ok(existsSync(join(revDir, 'app-v3.rp.assets/revision-report.json')));
+    assert.equal(readFileSync(join(revDir, 'app-v2.rp.assets/keep.txt'), 'utf8'), 'keep');
+
+    // Concurrent .assets creation during build must throw E_OUTPUT_EXISTS and never delete the pre-existing directory.
+    const raceOut = join(revDir, 'race.rp');
+    assert.throws(
+      () => revisePrototype({ source: srcPath, rp: rpPath, output: raceOut, operations: ops }, {
+        sync,
+        generate: makeGenerate(() => {
+          mkdirSync(`${raceOut}.assets`);
+          writeFileSync(`${raceOut}.assets/foreign.txt`, 'foreign');
+        }),
+      }),
+      err => err.code === 'E_OUTPUT_EXISTS'
+    );
+    assert.equal(readFileSync(`${raceOut}.assets/foreign.txt`, 'utf8'), 'foreign');
+    assert.ok(!existsSync(raceOut) && !existsSync(`${raceOut}.baseline.json`));
+    assert.ok(!readdirSync(revDir).some(name => name.startsWith('.revision-')));
   });
   check('source baseline fingerprints match every registered script', () => {
     const baseline = JSON.parse(readFileSync(join(root, 'test/baseline-shas.json')));

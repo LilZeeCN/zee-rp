@@ -1,6 +1,6 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { constants, copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertNotProtected, assertWritable } from './engine.mjs';
@@ -141,6 +141,34 @@ print(json.dumps({'executable':sys.executable,'version':sys.version.split()[0],'
   return proc.status === 0 ? JSON.parse(proc.stdout) : { error: proc.error?.message ?? proc.stderr.trim(), missingImageDependencies: ['python3-runtime'] };
 }
 
+const pathOccupied = path => Boolean(lstatSync(path, { throwIfNoEntry: false }));
+function failIfOutputExists(error, path) {
+  if (error?.code === 'EEXIST')
+    throw Object.assign(new Error(`改稿输出已存在，请使用新文件名：${path}`), { code: 'E_OUTPUT_EXISTS' });
+  throw error;
+}
+function copyTreeExclusive(fromDir, toDir, onRootCreated) {
+  try {
+    mkdirSync(toDir);
+  } catch (error) {
+    failIfOutputExists(error, toDir);
+  }
+  onRootCreated?.();
+  const copyChildren = (src, dst) => {
+    for (const entry of readdirSync(src, { withFileTypes: true })) {
+      const srcPath = join(src, entry.name);
+      const dstPath = join(dst, entry.name);
+      if (entry.isDirectory()) {
+        mkdirSync(dstPath);
+        copyChildren(srcPath, dstPath);
+      } else {
+        copyFileSync(srcPath, dstPath, constants.COPYFILE_EXCL);
+      }
+    }
+  };
+  copyChildren(fromDir, toDir);
+}
+
 export function revisePrototype(input, { generate, sync }) {
   const { source, rp, operations, expectedHash, expectedRpSha256, dryRun = false, prefer = 'fail', resolutions } = input;
   const sourcePath = resolve(source), rpPath = resolve(rp);
@@ -157,7 +185,7 @@ export function revisePrototype(input, { generate, sync }) {
     for (let v = 2; ; v++) {
       const candRp = `${stem}-v${v}.rp`;
       const candSrc = `${stem}-v${v}${extname(sourcePath)}`;
-      if (!existsSync(candRp) && !existsSync(candSrc) && !existsSync(`${candRp}.baseline.json`)) {
+      if (!pathOccupied(candRp) && !pathOccupied(candSrc) && !pathOccupied(`${candRp}.baseline.json`) && !pathOccupied(`${candRp}.assets`)) {
         output = candRp;
         break;
       }
@@ -170,7 +198,7 @@ export function revisePrototype(input, { generate, sync }) {
   const destinations = [output, outSource, output && `${output}.baseline.json`, assets].filter(Boolean);
   for (const path of destinations) {
     assertWritable(path);
-    if (existsSync(path)) throw Object.assign(new Error(`改稿输出已存在，请使用新文件名：${path}`), { code: 'E_OUTPUT_EXISTS' });
+    if (pathOccupied(path)) throw Object.assign(new Error(`改稿输出已存在，请使用新文件名：${path}`), { code: 'E_OUTPUT_EXISTS' });
   }
   const parent = dirname(output ?? rpPath);
   assertWritable(join(parent, '.revision'));
@@ -196,9 +224,7 @@ export function revisePrototype(input, { generate, sync }) {
     if (built.status !== 'completed') return built;
     for (const [path, hash] of originalHashes) if (fileHash(path) !== hash)
       throw Object.assign(new Error(`改稿过程中输入已被修改：${path}`), { code: 'E_CONCURRENT_MODIFICATION' });
-    mkdirSync(assets);
-    published.push(assets);
-    cpSync(built.artifacts.directory, assets, { recursive: true, errorOnExist: true, force: false });
+    copyTreeExclusive(built.artifacts.directory, assets, () => published.push(assets));
     const rebase = value => {
       if (typeof value === 'string') return value.replaceAll(built.artifacts.directory, assets)
         .replaceAll(mergedSource, outSource).replaceAll(built.output, output).replaceAll(stage, assets);
@@ -217,12 +243,15 @@ export function revisePrototype(input, { generate, sync }) {
     const durable = rebase(built);
     for (const [from, to] of [[mergedSource, outSource], [built.output, output]]) {
       mkdirSync(dirname(to), { recursive: true });
-      copyFileSync(from, to, constants.COPYFILE_EXCL); published.push(to);
+      try { copyFileSync(from, to, constants.COPYFILE_EXCL); }
+      catch (error) { failIfOutputExists(error, to); }
+      published.push(to);
     }
     const baseline = rebase(JSON.parse(readFileSync(built.baseline, 'utf8')));
     baseline.outputRp = output; baseline.sourcePath = outSource;
     baseline.rpSha256 = fileHash(output); baseline.sourceSha256 = fileHash(outSource);
-    writeFileSync(`${output}.baseline.json`, JSON.stringify(baseline, null, 2) + '\n', { flag: 'wx' });
+    try { writeFileSync(`${output}.baseline.json`, JSON.stringify(baseline, null, 2) + '\n', { flag: 'wx' }); }
+    catch (error) { failIfOutputExists(error, `${output}.baseline.json`); }
     published.push(`${output}.baseline.json`);
     const report = { ...summary, output, source: outSource, baseline: `${output}.baseline.json`,
       sha256: fileHash(output), previews: durable.previews, artifacts: durable.artifacts,
