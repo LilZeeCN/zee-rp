@@ -95,12 +95,13 @@ npm ci
 
 原生 `.rp` 的读取、写入和生成可以在 Windows 上运行（Node 18+ / Python 3.10+）。
 
+- 安装依赖时，在 PowerShell 运行 `py -3 -m venv .venv`、`& .\.venv\Scripts\python.exe -m pip install -r requirements.txt` 和 `npm ci`。运行 CLI 或连接 MCP 前可激活虚拟环境，或将 `ZEE_PYTHON` 设为虚拟环境中 `python.exe` 的绝对路径。
 - 生成器需要你用本机 Axure 保存一个单页、零元件 RP9 工程，并把 `AXURE_BLANK_TEMPLATE_RP9` 指向它。
 - Axure 会在常见安装目录和盘符根目录的便携版中自动探测（`C:\AxureRP9.exe`、`D:\AxureRP9.exe`）；可用 `AXURE_APP_RP9` 覆盖，用 `AXURE_INSTALL_ROOT_RP9`（安装根目录）或 `AXURE_DEFAULT_SETTINGS_RP9`（直接路径）指向 `DefaultSettings`。
 - 多路径环境变量在 Windows 上用 `;` 分隔（`AXURE_PROTECTED_PATHS`、`AXURE_WRITE_ROOT`）。
-- `build-rp` / `generate` 必须使用 `--backend native`。GUI 后端、macOS 菜单自动化与 `tools/rp9_place.py` 仅支持 macOS。`axvg paste` 会把负载写入 Windows 剪贴板，在 Axure 中按 Ctrl+V 粘贴。
+- RP/1 默认使用原生后端。用旧规格调用 `build-rp` 或 `generate` 时需传 `--backend native`。GUI 后端、macOS 菜单自动化与 `tools/rp9_place.py` 仅支持 macOS。`axvg paste` 会把负载写入 Windows 剪贴板，在 Axure 中按 Ctrl+V 粘贴。
 - 截图重建在 Windows 上保留形状识别，但跳过 OCR（Apple Vision 仅限 macOS），文字需另行提供。
-- `npm test` 在 Windows 上通过；装好 Python 依赖后 `test:language` 可用。`test:runtime` / `test:native` 还需要兼容的 `Training/RP9 Tour.rp`；部分 Windows Axure 版本的面板没有命名，必要时设置 `AXURE_PANEL_TEMPLATE` / `AXURE_PANEL_TEMPLATE_NAME`。
+- Windows CI 覆盖 RP/1 文件解析、编译和输出目录。用本机 Axure 模板验证完整的 MCP 生成，请运行 `npm run test:mcp-generate`。`test:backend` 还需要兼容的 `Training/RP9 Tour.rp`。默认教学工程有唯一未命名面板时可自动选用，也可以显式提供有命名面板的 `AXURE_PANEL_TEMPLATE` 和 `AXURE_PANEL_TEMPLATE_NAME`。
 
 <details>
 <summary><b>连接你的 MCP 客户端</b> · 展开配置</summary>

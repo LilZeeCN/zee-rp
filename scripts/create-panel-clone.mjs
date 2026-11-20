@@ -71,22 +71,30 @@ export function createPanel(file, { pageName, pageIndex, name, states = ['State 
   const page = [...graph.objects.values()].find(o => o.className === 'Axure:Page');
   const diagram = graph.objects.get(field(page.body, 'diagram').value);
   const source = readRecords(readFileSync(TEMPLATE));
+  const allowUnnamed = process.platform === 'win32' && detectFileVersion(file) === 9
+    && !process.env.AXURE_PANEL_TEMPLATE && !process.env.AXURE_PANEL_TEMPLATE_NAME;
+  const unnamedPanels = [];
   let templateRecord, templateGraph, templateWidget;
   for (const r of source.filter(r => r.className === 'Axure:Page')) {
     const g = parsePayload(r);
-    const w = [...g.objects.values()].find(o => o.className === 'Axure:DiagramObject:DynamicPanel'
-      && field(field(o.body, 'name-block'), 'text')?.text === TEMPLATE_PANEL_NAME);
-    if (w) { templateRecord = r; templateGraph = g; templateWidget = w; break; }
+    for (const widget of g.objects.values()) {
+      if (widget.className !== 'Axure:DiagramObject:DynamicPanel') continue;
+      const templateName = field(field(widget.body, 'name-block'), 'text')?.text;
+      if (templateName === TEMPLATE_PANEL_NAME) {
+        [templateRecord, templateGraph, templateWidget] = [r, g, widget];
+        break;
+      }
+      if (allowUnnamed && templateName === '') unnamedPanels.push([r, g, widget]);
+    }
+    if (templateWidget) break;
+  }
+  if (!templateWidget && unnamedPanels.length === 1) {
+    [templateRecord, templateGraph, templateWidget] = unnamedPanels[0];
   }
   if (!templateWidget) {
-    // Windows 版 Axure 的 RP9 Tour 教学工程里面板没有显示名；按第一个原生 DynamicPanel 兜底。
-    for (const r of source.filter(r => r.className === 'Axure:Page')) {
-      const g = parsePayload(r);
-      const w = [...g.objects.values()].find(o => o.className === 'Axure:DiagramObject:DynamicPanel');
-      if (w) { templateRecord = r; templateGraph = g; templateWidget = w; break; }
-    }
+    const hint = unnamedPanels.length > 1 ? ' (multiple unnamed panels in RP9 Tour; supply a template with a named panel)' : '';
+    throw new Error(`Missing template panel: ${TEMPLATE_PANEL_NAME}${hint}`);
   }
-  if (!templateWidget) throw new Error(`Missing template panel: ${TEMPLATE_PANEL_NAME}`);
   let templateStateRecords = [];
   if (copyTemplateStates) {
     const templateGuids = templateGraph.roots.find(n => n.tag === 0x1e).values;

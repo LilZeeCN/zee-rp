@@ -4,10 +4,11 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { spawnPythonSync } from '../scripts/python.mjs';
 
 const root = process.env.AXURE_TEST_ROOT ?? resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const keep = process.env.AXURE_AUTHORING_OUTPUT;
@@ -206,19 +207,23 @@ try {
     rmSync(isolated, { recursive: true, force: true });
   });
   await check('missing image dependencies report the active interpreter and a concrete next action', async () => {
-    const bin = join(work, 'fake-python-bin'); mkdirSync(bin);
-    const stub = { executable: '/isolated/python3', version: '3.14', imageModules: { PIL: true, numpy: false, scipy: false }, missingImageDependencies: ['numpy', 'scipy'] };
-    writeFileSync(join(bin, 'python3'), `#!${process.execPath}\nconsole.log(${JSON.stringify(JSON.stringify(stub))});\n`, { mode: 0o755 });
+    const python = spawnPythonSync(['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' });
+    assert.equal(python.status, 0, python.stderr);
+    const missingModules = join(work, 'missing-image-dependencies'); mkdirSync(missingModules);
+    for (const name of ['numpy', 'scipy']) {
+      writeFileSync(join(missingModules, `${name}.py`), 'raise ImportError("simulated missing image dependency")\n');
+    }
     const t = new StdioClientTransport({ command: process.execPath, args: [join(root, 'bin/mcp.mjs')],
-      env: { ...process.env, PATH: `${bin}:${process.env.PATH}`, AXURE_WRITE_ROOT: work }, stderr: 'pipe' });
+      env: { ...process.env, AXURE_WRITE_ROOT: work,
+        PYTHONPATH: [missingModules, process.env.PYTHONPATH].filter(Boolean).join(delimiter) }, stderr: 'pipe' });
     const c = new Client({ name: 'dependency-diagnostic-check', version: '1.0.0' });
     try {
       await c.connect(t);
       const raw = await c.callTool({ name: 'generate_from_image', arguments: { image: generated['mobile-cards'].previews.today, output: join(work, 'missing-deps.rp') } });
       assert(raw.isError); const r = raw.structuredContent;
-      assert.equal(r.code, 'E_IMAGE_DEPENDENCY'); assert.equal(r.diagnostics[0].actual.executable, '/isolated/python3');
+      assert.equal(r.code, 'E_IMAGE_DEPENDENCY'); assert.equal(r.diagnostics[0].actual.executable, python.stdout.trim());
       assert(r.diagnostics[0].nextAction.includes('requirements.txt')); assert(!existsSync(join(work, 'missing-deps.rp')));
-    } finally { await c.close(); rmSync(bin, { recursive: true, force: true }); }
+    } finally { await c.close(); rmSync(missingModules, { recursive: true, force: true }); }
   });
   await check('conflicting patch addressing and missing properties are rejected before publishing', async () => {
     const r = generated['mobile-cards'];

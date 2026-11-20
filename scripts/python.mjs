@@ -11,17 +11,18 @@ let cached = null;
 
 export function pythonCommand() {
   if (cached) return cached;
-  const candidates = [
+  const candidates = new Set([
     process.env.ZEE_PYTHON,
     process.platform === 'win32' ? 'python' : 'python3',
     'python3',
     'python',
     'py',
-  ].filter(Boolean);
+  ].filter(Boolean));
   for (const command of candidates) {
     const prefix = command === 'py' ? ['-3'] : [];
-    const probe = spawnSync(command, [...prefix, '--version'], { encoding: 'utf8' });
-    if (probe.status === 0) {
+    const probe = spawnSync(command, [...prefix, '--version'], { encoding: 'utf8', timeout: 5000 });
+    const version = (probe.stdout || probe.stderr || '').match(/^Python (\d+)\.(\d+)/);
+    if (probe.status === 0 && version && Number(version[1]) === 3 && Number(version[2]) >= 10) {
       cached = { command, prefix };
       return cached;
     }
@@ -32,4 +33,9 @@ export function pythonCommand() {
 export function pythonInvocation(args) {
   const { command, prefix } = pythonCommand();
   return { command, args: [...prefix, ...args] };
+}
+
+export function spawnPythonSync(args, options) {
+  const { command, args: invocationArgs } = pythonInvocation(args);
+  return spawnSync(command, invocationArgs, options);
 }

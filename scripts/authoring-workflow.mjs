@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertNotProtected, assertWritable } from './engine.mjs';
+import { assertNotProtected, assertWritable, defaultWriteRoot } from './engine.mjs';
 import { pythonInvocation } from './python.mjs';
 import { appExists, templateCandidates } from './version.mjs';
 import { previewPrototype } from './preview-runtime.mjs';
@@ -181,7 +181,7 @@ export function revisePrototype(input, { generate, sync }) {
   const originalHashes = new Map([sourcePath, rpPath, `${rpPath}.baseline.json`].map(path => [path, fileHash(path)]));
   if (expectedRpSha256 && originalHashes.get(rpPath) !== expectedRpSha256)
     throw Object.assign(new Error('原型已变化，请读取最新状态后重试。'), { code: 'E_STALE_SYNC_STATE' });
-  const writeRoot = (process.env.AXURE_WRITE_ROOT || '').split(':').filter(Boolean)[0] || process.cwd();
+  const writeRoot = defaultWriteRoot();
   let output = input.output && input.output !== 'auto' ? resolve(writeRoot, input.output) : null;
   if (!dryRun && !output) {
     const stem = rpPath.replace(/\.rp$/i, '').replace(/-v\d+$/, '');

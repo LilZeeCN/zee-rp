@@ -7,6 +7,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildInteractiveRp } from '../scripts/proto.mjs';
 import { createBlankProject } from '../scripts/create-blank-project.mjs';
+import { createPanel } from '../scripts/create-panel-clone.mjs';
 import { writeNativeScene } from '../scripts/native-scene.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { parsePayload, field } from '../scripts/parse-payload.mjs';
@@ -145,10 +146,13 @@ try {
       const graphs = readRecords(readFileSync(report.outputRp)).filter(r => r.strings).map(parsePayload);
       assert(!graphs.some(g => [...g.objects.values()].some(o => o.className === 'Axure:InteractionEvent')));
     });
-    check('explicit GUI backend is preserved', () => assert.throws(() => buildInteractiveRp(bookingPlan, join(work, 'gui.rp'), { backend: 'gui', cacheDir: join(work, 'gui-cache') }), /Forbidden native subprocess: python/));
+    const guiError = process.platform === 'darwin'
+      ? /Forbidden native subprocess:/
+      : /GUI 后端依赖 macOS.*--backend native/;
+    check('explicit GUI backend follows the host contract', () => assert.throws(() => buildInteractiveRp(bookingPlan, join(work, 'gui.rp'), { backend: 'gui', cacheDir: join(work, 'gui-cache') }), guiError));
     const legacy = JSON.parse(readFileSync(bookingPlan)); delete legacy.language;
     const legacyPlan = join(work, 'legacy-plan.json'); writeFileSync(legacyPlan, JSON.stringify(legacy));
-    check('legacy specs retain GUI default', () => assert.throws(() => buildInteractiveRp(legacyPlan, join(work, 'legacy.rp'), { cacheDir: join(work, 'legacy-cache') }), /Forbidden native subprocess: python/));
+    check('legacy specs retain GUI default', () => assert.throws(() => buildInteractiveRp(legacyPlan, join(work, 'legacy.rp'), { cacheDir: join(work, 'legacy-cache') }), guiError));
     check('invalid backend fails before output', () => {
       const out = join(work, 'invalid.rp');
       assert.throws(() => buildInteractiveRp(bookingPlan, out, { backend: 'invalid' }), /backend/); assert(!existsSync(out));
@@ -157,6 +161,38 @@ try {
   const blank = join(work, 'blank.rp'); createBlankProject(blank, { version: 9 });
   const seed = readFileSync(blank);
   const scene = { masters: {}, imageMap: {}, scene: { items: [{ itemType: 1, name: 'probe', type: 0, rect: { location: { x: 0, y: 0 }, size: { width: 10, height: 10 } }, corners: [0,0,0,0], backgroundFills: [], strokes: [] }] } };
+  check('native move modes retain distinct values, animation defaults and readable labels', () => {
+    const expected = [
+      ['location', 0, 300, 1, '移动到'],
+      ['delta', 1, 300, 1, '相对移动'],
+      ['drag', 2, 0, 0, '跟随拖动'],
+      ['drag-x', 3, 0, 0, '跟随水平拖动'],
+      ['drag-y', 4, 0, 0, '跟随垂直拖动'],
+      ['locationBeforeDrag', 5, 300, 1, '回到拖动前的位置'],
+      ['withThis', 6, 300, 1, '随触发元件移动'],
+    ];
+    const event = { event: 'OnDrag', actions: expected.map(([mode]) => ({ type: 'move', mode })) };
+    const page = writeNativeScene(seed, scene);
+    const { file } = addInteractions(page, 'probe', [event]);
+    const graph = parsePayload(readRecords(file).find(record => record.className === 'Axure:Page'));
+    const moves = [...graph.objects.values()].filter(object => object.className === 'Axure:MoveWidgetInfo');
+    assert.deepEqual(moves.map(move => ['MoveType', 'Duration', 'Easing'].map(key => field(move.body, key).value)),
+      expected.map(([, type, duration, easing]) => [type, duration, easing]));
+    const interactions = readRp(file).pages[0].widgets.find(widget => widget.name === 'probe').interactions;
+    assert.deepEqual(interactions[0].cases[0].actions.map(action => action.human.split(' ')[0]),
+      expected.map(([, , , , label]) => label));
+  });
+  check('an explicitly named panel template cannot silently select a different panel', () => {
+    const previous = process.env.AXURE_PANEL_TEMPLATE_NAME;
+    process.env.AXURE_PANEL_TEMPLATE_NAME = 'No such panel in the fixture';
+    try {
+      const pageIndex = readRp(seed).pages[0].record;
+      assert.throws(() => createPanel(seed, { pageIndex, name: 'Template probe' }), /Missing template panel: No such panel/);
+    } finally {
+      if (previous === undefined) delete process.env.AXURE_PANEL_TEMPLATE_NAME;
+      else process.env.AXURE_PANEL_TEMPLATE_NAME = previous;
+    }
+  });
   check('batched events preserve sequential cross-page resolution and replacement without changing the input', () => {
     const page = writeNativeScene(seed, scene);
     const input = mergePages([{ buf: page, name: 'A' }, { buf: page, name: 'B' }]);

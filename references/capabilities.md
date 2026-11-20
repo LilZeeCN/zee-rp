@@ -1,5 +1,7 @@
 # 能力与验证边界
 
+**Windows 原生 RP9 适配（PR #5 修复分支）：** CLI、MCP 和 Studio 的 Python 调用支持通过 `ZEE_PYTHON` 指定解释器，Windows 多目录环境变量用 `;` 分隔。本机 macOS 已通过真实 MCP 的 RP/1 文件生成与结构读回，以及原生拖动字段和摘要校验。公开 CI 的无模板门禁覆盖文件解析、编译和输出目录。Windows Axure 载入、实际拖动预览与保存重开需在目标宿主验证。参见 [Windows 安装说明](../README.md#windows-支持)和[原生动作](rp-workflow.md#支持的原生动作)。
+
 **2026-11-14 `revise_prototype` Node 24 落盘自撞修复：** 修复 `scripts/authoring-workflow.mjs` 先 `mkdirSync(assets)` 再调用 `cpSync(..., { recursive: true, errorOnExist: true, force: false })` 在 Node 24 下必抛 `ERR_FS_CP_EEXIST` 且回滚误删同目录同名冲突的风险。现改用基于 `mkdirSync` + `COPYFILE_EXCL` 的排他递归复制 `copyTreeExclusive`（仅在原子抢占 `<output>.assets` 成功后登记回滚，并发占用统一报 `E_OUTPUT_EXISTS` 且绝不误删外部既有目录），并补齐 `output: "auto"` 对 `.rp.assets` 占用的跳过判断。核心回归 `21/21`（含零模板单元测试）、创作工作流 `18/18`、第三轮真实 stdio 四模式（同步/异步 × auto/显式命名）`14/14`、创作质量 `11/11` 全绿；已连接旧 MCP 进程需重连。
 
 **2026-11-12 全链路深层体检修复与 AI-First 创作平台打磨（本地分支 `feat/deep-polish-ai-platform-20261112`，未推送/未发布）：**

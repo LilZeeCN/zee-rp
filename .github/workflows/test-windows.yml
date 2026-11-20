@@ -12,14 +12,15 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - run: npm ci --ignore-scripts
       - run: python -m pip install pillow numpy jsonschema
-      # 这里只跑不依赖 CHROME_BIN 的门禁；浏览器型套件仍由 macOS/Linux 的 Public tests 覆盖。
+      # npm test exercises MCP file input through compilation without an Axure template.
       - run: npm test
       - run: npm run test:layers
       - run: npm run test:studio-parity
       - run: npm run test:language
+      - run: npm run test:source-contract

@@ -1,6 +1,6 @@
 // 命令层共享纯函数:错误构造、属性/交互/树校验、目标解析与几何辅助。
 // 全部为模块级纯函数(收 doc/index/cmd),从 commands.mjs 原样迁移。
-import { spawnSync } from 'node:child_process';
+import { spawnPythonSync } from '../../scripts/python.mjs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { VALID_NODE_TYPES } from './taxonomy.mjs';
@@ -75,7 +75,7 @@ export function validateInteractionAssignments(spec, doc, cmdIdx, nodeId) {
         };
         visit(spec);
         if (formulaChecks.length) {
-          const checked = spawnSync('python3', [EXPRESSION_CHECKER], {
+          const checked = spawnPythonSync([EXPRESSION_CHECKER], {
             input: JSON.stringify({ expressions: formulaChecks }),
             encoding: 'utf8',
           });
@@ -83,7 +83,7 @@ export function validateInteractionAssignments(spec, doc, cmdIdx, nodeId) {
             let detail = null;
             try { detail = JSON.parse(checked.stdout.trim()); } catch {}
             const code = detail?.code || 'E_INVALID_VALUE';
-            throw cmdError(code, detail?.message || checked.stderr.trim() || '变量表达式未通过 RP/1 语法检查', {
+            throw cmdError(code, detail?.message || checked.stderr?.trim() || checked.error?.message || '变量表达式未通过 RP/1 语法检查', {
               commandIndex: cmdIdx,
               nodeId,
               field: formulaChecks[detail?.index]?.field ?? null,

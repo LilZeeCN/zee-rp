@@ -14,16 +14,12 @@ export const DEFAULT_VERSION = 11;
 export const MAGIC0 = 0xac;
 export const MAGIC1 = 0xef;
 
-// 模板默认目录按平台放置：macOS 用 Application Support，Windows 用 %APPDATA%，
-// 其他平台用 XDG_CONFIG_HOME。
+// Windows 用 %APPDATA%，其余平台沿用原模板位置。
 const TEMPLATE_DIR = (() => {
   if (process.platform === 'win32') {
     return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'zee-axure', 'templates');
   }
-  if (process.platform === 'darwin') {
-    return join(homedir(), 'Library', 'Application Support', 'zee-axure', 'templates');
-  }
-  return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'zee-axure', 'templates');
+  return join(homedir(), 'Library', 'Application Support', 'zee-axure', 'templates');
 })();
 
 const firstExisting = paths => paths.find(p => p && existsSync(p)) || paths.find(Boolean) || '';
@@ -41,15 +37,11 @@ function appPathFor(version) {
       ...['C:', 'D:', 'E:'].map(drive => `${drive}\\${exe}`),
     ]);
   }
-  if (process.platform === 'darwin') return `/Applications/Axure RP ${version}.app`;
-  return `/opt/axure-rp-${version}`;
+  return `/Applications/Axure RP ${version}.app`;
 }
-
-const specCache = new Map();
 
 function spec(version) {
   const v = Number(version);
-  if (specCache.has(v)) return specCache.get(v);
   const table = {
     9: {
       version: 9,
@@ -74,7 +66,6 @@ function spec(version) {
   if (!found) {
     throw new Error(`Unsupported Axure version ${JSON.stringify(version)}. Supported: ${Object.keys(table).join(', ')}`);
   }
-  specCache.set(v, found);
   return found;
 }
 

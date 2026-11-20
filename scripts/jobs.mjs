@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, readFileSync, statSync, lstatSync, unlinkSync, realpathSync, constants } from 'node:fs';
 import { dirname, basename, join, extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertNotProtected, assertWritable } from './engine.mjs';
+import { assertNotProtected, assertWritable, defaultWriteRoot } from './engine.mjs';
 import { readRp } from './rp-read.mjs';
 import { resolvePasteTarget } from './version.mjs';
 
@@ -35,7 +35,7 @@ export class JobManager {
   }
 
   startPrototype(input, type) {
-    const writeRoot = (process.env.AXURE_WRITE_ROOT || '').split(':').filter(Boolean)[0] || process.cwd();
+    const writeRoot = defaultWriteRoot();
     const output = input.output && input.output !== 'auto' ? resolve(writeRoot, input.output) : null;
     if (output) assertWritable(output);
     const args = structuredClone({ ...input, ...(output ? { output } : {}) });

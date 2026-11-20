@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { readFileSync, writeFileSync, existsSync, mkdirSync, copyFileSync, rmSync } from 'node:fs';
 import { join, resolve, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { pythonInvocation } from '../scripts/python.mjs';
 import { assertNotProtected, canonicalJson, sha256 } from './document.mjs';
 
 const worker = join(dirname(fileURLToPath(import.meta.url)), 'media-worker.py');
@@ -37,7 +38,10 @@ function normalizeRecipe(c, tokens, warnings = [], cropLabel = null) {
 }
 function runWorker(job) {
   return new Promise((resolveJob, reject) => {
-    const child = spawn(process.env.PYTHON || 'python3', [worker], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const invocation = process.env.PYTHON && !process.env.ZEE_PYTHON
+      ? { command: process.env.PYTHON, args: [worker] }
+      : pythonInvocation([worker]);
+    const child = spawn(invocation.command, invocation.args, { stdio: ['pipe', 'pipe', 'pipe'] });
     let output = '', error = '';
     child.stdout.on('data', b => { output += b; }); child.stderr.on('data', b => { error += b; });
     child.on('error', reject);
