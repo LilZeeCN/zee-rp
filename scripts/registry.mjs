@@ -5,13 +5,13 @@
 // 用作库：import { listCommands, getCommand, findCommandByScript } from './registry.mjs'
 // 用作 CLI：node registry.mjs dump | validate | table
 import { existsSync, readdirSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 
 // 受保护成品（硬规则）：任何参数解析为该绝对路径时拒绝执行；本 CLI 本无路径参数，纯防御。
-function protectedPaths() { return [process.env.AXURE_PROTECTED_PATH, ...(process.env.AXURE_PROTECTED_PATHS || '').split(':')].filter(Boolean).map(p => resolve(p)); }
+function protectedPaths() { return [process.env.AXURE_PROTECTED_PATH, ...String(process.env.AXURE_PROTECTED_PATHS || '').split(delimiter)].filter(Boolean).map(p => resolve(p)); }
 
 // evidence 枚举 = 盘点实际使用的六级；internal 仅用于无 CLI 入口的库脚本。
 const EVIDENCE_LEVELS = ['structure', 'loaded', 'preview', 'gui-roundtrip', 'channel-a', 'internal'];
@@ -792,6 +792,16 @@ const LIB_SCRIPTS = [
     "script": "extract-assets.mjs",
     "summary": "从 .rp 工程提取内嵌 PNG 位图资源及宿主的精确几何尺寸（x/y/w/h）并输出 manifest.json",
     "evidence": "structure"
+  },
+  {
+    "script": "python.mjs",
+    "summary": "跨平台 Python 3 解释器解析（Windows 使用 python / py，其他平台使用 python3）",
+    "evidence": "internal"
+  },
+  {
+    "script": "py.mjs",
+    "summary": "按平台选择 Python 解释器执行脚本的 npm test 包装器",
+    "evidence": "internal"
   }
 ];
 

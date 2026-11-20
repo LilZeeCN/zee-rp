@@ -91,6 +91,17 @@ python -m pip install -r requirements.txt
 npm ci
 ```
 
+### Windows
+
+Native `.rp` reading, writing and generation run on Windows (Node 18+ / Python 3.10+).
+
+- The generator needs a one-page, zero-widget RP9 project saved by your own Axure; set `AXURE_BLANK_TEMPLATE_RP9` to it.
+- Axure is auto-detected in common install directories and drive-root portable installs (`C:\AxureRP9.exe`, `D:\AxureRP9.exe`). Override with `AXURE_APP_RP9`; point at `DefaultSettings` with `AXURE_INSTALL_ROOT_RP9` (install root) or `AXURE_DEFAULT_SETTINGS_RP9` (direct path).
+- Multi-path environment variables use `;` on Windows (`AXURE_PROTECTED_PATHS`, `AXURE_WRITE_ROOT`).
+- `build-rp` / `generate` must use `--backend native`. The GUI backend, macOS menu automation and `tools/rp9_place.py` are macOS-only. `axvg paste` writes the payload to the Windows clipboard; press Ctrl+V in Axure.
+- Screenshot reconstruction keeps shape detection on Windows but skips OCR (Apple Vision is macOS-only), so text must be supplied separately.
+- `npm test` passes on Windows; `test:language` works once the Python dependencies are installed. `test:runtime` / `test:native` additionally need a compatible `Training/RP9 Tour.rp`; some Windows Axure builds ship unnamed panels, so set `AXURE_PANEL_TEMPLATE` / `AXURE_PANEL_TEMPLATE_NAME` if needed.
+
 <details>
 <summary><b>Connect your MCP client</b> · Expand configuration</summary>
 

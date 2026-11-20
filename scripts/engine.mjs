@@ -10,7 +10,7 @@
 // 引擎自身不写 stdout（子进程 stdout 以 Buffer 原样返回给调用方），日志与拒绝信息只走 stderr（由调用方打印）。
 import { lstatSync, readlinkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getCommand, listCommands } from './registry.mjs';
 
@@ -18,8 +18,11 @@ const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 
 // 受保护路径（硬规则），与 registry.mjs 保持同一来源：AXURE_PROTECTED_PATHS 环境变量提供
 // 冒号分隔的绝对路径列表，命中任一即拒绝作为任何路径参数（输入或输出）；未设置时为空列表。
+// 多路径环境变量按平台分隔符切分：Windows 用 ';'，避免盘符里的 ':' 被误切。
+const splitPathList = value => String(value || '').split(delimiter).map(s => s.trim()).filter(Boolean);
+
 function protectedPaths() {
-  return [process.env.AXURE_PROTECTED_PATH, ...(process.env.AXURE_PROTECTED_PATHS || '').split(':')].filter(Boolean).map(p => resolve(p));
+  return [process.env.AXURE_PROTECTED_PATH, ...splitPathList(process.env.AXURE_PROTECTED_PATHS)].filter(Boolean).map(p => resolve(p));
 }
 
 // darwin（APFS/HFS+ 默认卷）与 win32 大小写不敏感；其余平台按大小写敏感精确比较。
@@ -35,28 +38,37 @@ function protectedError(hit) {
 // lstat/stat（消解永远在触碰它之前停下），readlink 也只读链接文件自身。
 // 组件不存在的尾段按词法路径收尾（输出文件通常尚未创建）；链接跳数超限视为环，报错停机（fail-closed）。
 function physResolve(input, guard = true) {
-  const parts = p => String(p).split(sep).filter(part => part !== '' && part !== '.');
-  const anchor = String(input).startsWith('/') ? [] : parts(process.cwd()); // getcwd 返回物理路径
-  const queue = [...anchor, ...parts(input)];
+  const split = abs => {
+    const { root } = parse(abs);
+    return { root, parts: abs.slice(root.length).split(sep).filter(part => part !== '' && part !== '.') };
+  };
+  const abs = resolve(String(input));
+  const { root } = split(abs);
+  const queue = [...split(abs).parts];
   const stack = [];
   let hops = 0;
+
   while (queue.length > 0) {
     const part = queue.shift();
     if (part === '..') { stack.pop(); continue; }
-    const current = `/${[...stack, part].join(sep)}`;
+    const current = root + [...stack, part].join(sep);
     if (guard && protectedPaths().some(pp => fold(current) === fold(canonicalProtected(pp)))) throw protectedError(current);
     let stat = null;
     try { stat = lstatSync(current); } catch { stack.push(part); continue; }
-    if (stat.isSymbolicLink()) {
-      if (++hops > 64) throw new Error(`拒绝执行：路径消解超限（疑似符号链接环）：${input}`);
-      const target = readlinkSync(current);
-      if (target.startsWith('/')) stack.length = 0;
-      queue.unshift(...parts(target));
-    } else {
-      stack.push(part);
+    if (!stat.isSymbolicLink()) { stack.push(part); continue; }
+
+    if (++hops > 64) throw new Error(`拒绝执行：路径消解超限（疑似符号链接环）：${input}`);
+    let target = readlinkSync(current);
+    if (!isAbsolute(target)) target = resolve(dirname(current), target);
+    const t = split(target);
+    if (fold(t.root) !== fold(root)) {
+      // 跨卷符号链接：目标在另一个根（Windows 不同盘符），递归消解后接回剩余队列。
+      return physResolve(queue.length ? join(target, ...queue) : target, guard);
     }
+    stack.length = 0;
+    queue.unshift(...t.parts);
   }
-  return `/${stack.join(sep)}`;
+  return root + stack.join(sep);
 }
 
 // 受保护路径的规范形：只物理消解目录链（目录可安全触碰），末段 basename 永不做任何 stat。
@@ -80,14 +92,14 @@ export function assertNotProtected(path) {
 // 按路径段比较避免 /wr 误匹配 /wr2 这类前缀假阳性；大小写折叠与红线同一策略。
 export function assertWritable(path) {
   assertNotProtected(path);
-  const roots = (process.env.AXURE_WRITE_ROOT || '').split(':').filter(Boolean);
+  const roots = splitPathList(process.env.AXURE_WRITE_ROOT);
   if (roots.length === 0 || typeof path !== 'string' || path.length === 0) return;
   const abs = physResolve(path);
   const under = roots.some(root => {
     const base = physResolve(root);
     return fold(abs) === fold(base) || fold(abs).startsWith(`${fold(base)}${sep}`);
   });
-  if (!under) throw new Error(`拒绝执行：输出 ${path}（消解为 ${abs}）不在 AXURE_WRITE_ROOT 白名单（${roots.join(':')}）内`);
+  if (!under) throw new Error(`拒绝执行：输出 ${path}（消解为 ${abs}）不在 AXURE_WRITE_ROOT 白名单（${roots.join(delimiter)}）内`);
 }
 
 // 注册表 output → 本次调用的输出路径（供白名单定位）。

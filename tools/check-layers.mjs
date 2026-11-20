@@ -32,7 +32,8 @@ function listMjs(dir) {
   return out;
 }
 const studioFiles = listMjs(STUDIO);
-const rel = p => p.slice(ROOT.length + 1);
+// 诊断里的路径统一用 '/'（Windows 的 '\' 会让按路径匹配的断言与文档链接失真）。
+const rel = p => p.slice(ROOT.length + 1).split(sep).join('/');
 
 // ---- 收集静态声明、无绑定导入和字面量动态 import ----
 function importsOf(file) {

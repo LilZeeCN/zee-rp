@@ -18,6 +18,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { pythonInvocation } from './python.mjs';
 import { createNativeRepeater } from './native-repeater.mjs';
 import { writeNativeScene } from './native-scene.mjs';
 import { materializeNativeControl, applyNativeWidgetStyles } from './native-forms.mjs';
@@ -234,8 +235,9 @@ function parseFlags(argv) {
 
 function runPy(args, { verbose = false, allowAuditFailure = false } = {}) {
   const t0 = Date.now();
-  logVerbose(verbose, 'compile:start', `python3 proto.py ${args.join(' ')}`);
-  const r = spawnSync('python3', [PROTO_PY, ...args], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  const invocation = pythonInvocation([PROTO_PY, ...args]);
+  logVerbose(verbose, 'compile:start', `${invocation.command} proto.py ${args.join(' ')}`);
+  const r = spawnSync(invocation.command, invocation.args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   const elapsed = Date.now() - t0;
   if (r.status !== 0) {
     if (allowAuditFailure) {
@@ -267,6 +269,9 @@ function classifyPlaceError(status, axvgName, stdout, stderr) {
 }
 
 function placeAxvgToCachedRp(axvgPath, cacheDir = DEFAULT_CACHE_DIR, verbose = false) {
+  if (process.platform !== 'darwin') {
+    throw new Error('GUI 后端依赖 macOS 剪贴板与 Axure 菜单自动化；Windows 请使用 --backend native（直接写入原生 .rp）。');
+  }
   const t0 = Date.now();
   mkdirSync(cacheDir, { recursive: true });
   const absAxvg = resolve(axvgPath);
@@ -296,7 +301,8 @@ function placeAxvgToCachedRp(axvgPath, cacheDir = DEFAULT_CACHE_DIR, verbose = f
       const stageRp = join(tmpDir, `${titleTag}.rp`);
       createBlankProject(stageRp, { version: 9 });
       logVerbose(verbose, 'place:gui-run', `${basename(absAxvg)} (tag=${titleTag}, attempt=${attempt})`);
-      const r = spawnSync('python3', [RP9_PLACE_PY, stageRp, titleTag, '--axvg', absAxvg], {
+      const placeInvocation = pythonInvocation([RP9_PLACE_PY, stageRp, titleTag, '--axvg', absAxvg]);
+      const r = spawnSync(placeInvocation.command, placeInvocation.args, {
         encoding: 'utf8',
         timeout: 90000,
       });
@@ -819,7 +825,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     if (['check', 'diagnose', 'binding', 'auto-heal', 'format', 'schema', 'inspect', 'explain', 'complete', 'explore', 'simulate', 'patch', 'dsl-to-json', 'json-to-dsl', 'dsl-format', 'decompile', 'lift-rp'].includes(process.argv[2])) {
       // Preserve the actual tokens: the language parser rejects unknown or misplaced
       // options instead of silently dropping them in the general prototype parser.
-      const result = spawnSync('python3', [LANGUAGE_PY, ...process.argv.slice(2)], {encoding:'utf8', maxBuffer:32*1024*1024});
+      const languageInvocation = pythonInvocation([LANGUAGE_PY, ...process.argv.slice(2)]);
+      const result = spawnSync(languageInvocation.command, languageInvocation.args, {encoding:'utf8', maxBuffer:32*1024*1024});
       if (result.error) throw Object.assign(new Error(result.error.message), { diagnostics: [{code:'E_TOOL_EXEC', pointer:'/arguments', severity:'error', message:result.error.message}] });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
@@ -880,7 +887,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       if (flags.preset) pyArgs.push('--preset', String(flags.preset));
       console.log(JSON.stringify(runPy(pyArgs, { verbose }), null, 2));
     } else if (cmd === 'merge' || cmd === 'measure' || cmd === 'tokens' || cmd === 'doctor') {
-      const result = spawnSync('python3', [PROTO_PY, ...process.argv.slice(2)], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+      const mergeInvocation = pythonInvocation([PROTO_PY, ...process.argv.slice(2)]);
+      const result = spawnSync(mergeInvocation.command, mergeInvocation.args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
       if (result.stdout) process.stdout.write(result.stdout);
       if (result.stderr) process.stderr.write(result.stderr);
       process.exitCode = result.status ?? 1;

@@ -34,6 +34,7 @@ import { existsSync, readFileSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { assertNotProtected, assertWritable } from './engine.mjs';
+import { pythonInvocation } from './python.mjs';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 const TRACE_PY = join(SCRIPTS_DIR, 'trace.py');
@@ -41,7 +42,8 @@ const AXVG_MJS = join(SCRIPTS_DIR, 'axvg.mjs');
 
 function runPy(args) {
   for (const a of args) assertNotProtected(a);
-  const res = spawnSync('python3', [TRACE_PY, ...args], {
+  const invocation = pythonInvocation([TRACE_PY, ...args]);
+  const res = spawnSync(invocation.command, invocation.args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 64 * 1024 * 1024,
   });

@@ -8,38 +8,73 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 
 export const DEFAULT_VERSION = 11;
 export const MAGIC0 = 0xac;
 export const MAGIC1 = 0xef;
 
+// 模板默认目录按平台放置：macOS 用 Application Support，Windows 用 %APPDATA%，
+// 其他平台用 XDG_CONFIG_HOME。
+const TEMPLATE_DIR = (() => {
+  if (process.platform === 'win32') {
+    return join(process.env.APPDATA || join(homedir(), 'AppData', 'Roaming'), 'zee-axure', 'templates');
+  }
+  if (process.platform === 'darwin') {
+    return join(homedir(), 'Library', 'Application Support', 'zee-axure', 'templates');
+  }
+  return join(process.env.XDG_CONFIG_HOME || join(homedir(), '.config'), 'zee-axure', 'templates');
+})();
+
+const firstExisting = paths => paths.find(p => p && existsSync(p)) || paths.find(Boolean) || '';
+
+// Axure 可执行文件：显式环境变量 > 各平台常见安装位置。
+// Windows 额外检查盘符根目录下的便携版（AxureRP9.exe 与 DefaultSettings 同级）。
+function appPathFor(version) {
+  const env = process.env[`AXURE_APP_RP${version}`];
+  if (env) return env;
+  if (process.platform === 'win32') {
+    const exe = `AxureRP${version}.exe`;
+    const bases = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], 'C:\\Program Files', 'C:\\Program Files (x86)'].filter(Boolean);
+    return firstExisting([
+      ...bases.map(base => join(base, 'Axure', `Axure RP ${version}`, exe)),
+      ...['C:', 'D:', 'E:'].map(drive => `${drive}\\${exe}`),
+    ]);
+  }
+  if (process.platform === 'darwin') return `/Applications/Axure RP ${version}.app`;
+  return `/opt/axure-rp-${version}`;
+}
+
+const specCache = new Map();
+
 function spec(version) {
   const v = Number(version);
+  if (specCache.has(v)) return specCache.get(v);
   const table = {
     9: {
       version: 9,
       label: 'Axure RP 9',
-      appPath: process.env.AXURE_APP_RP9 || '/Applications/Axure RP 9.app',
+      appPath: appPathFor(9),
       bundleId: process.env.AXURE_BUNDLE_RP9 || 'com.axure.AxureRP9',
       processName: 'Axure RP 9',
       templateEnv: 'AXURE_BLANK_TEMPLATE_RP9',
-      defaultTemplate: join(homedir(), 'Library/Application Support/zee-axure/templates/axure-rp9-blank.rp'),
+      defaultTemplate: join(TEMPLATE_DIR, 'axure-rp9-blank.rp'),
     },
     11: {
       version: 11,
       label: 'Axure RP 11',
-      appPath: process.env.AXURE_APP_RP11 || '/Applications/Axure RP 11.app',
+      appPath: appPathFor(11),
       bundleId: process.env.AXURE_BUNDLE_RP11 || 'com.axure.AxureRP11',
       processName: 'Axure RP 11',
       templateEnv: 'AXURE_BLANK_TEMPLATE_RP11',
-      defaultTemplate: join(homedir(), 'Library/Application Support/zee-axure/templates/axure-rp11-blank.rp'),
+      defaultTemplate: join(TEMPLATE_DIR, 'axure-rp11-blank.rp'),
     },
   };
   const found = table[v];
   if (!found) {
     throw new Error(`Unsupported Axure version ${JSON.stringify(version)}. Supported: ${Object.keys(table).join(', ')}`);
   }
+  specCache.set(v, found);
   return found;
 }
 
@@ -47,7 +82,28 @@ export function supportedVersions() { return [9, 11]; }
 export function versionSpec(version) { return spec(version); }
 export function versionLabel(version) { return spec(version).label; }
 export function bundleId(version) { return spec(version).bundleId; }
-export function installRoot(version) { return join(spec(version).appPath, 'Contents/Resources/DefaultSettings'); }
+export function installRoot(version) {
+  const v = spec(version);
+  if (process.platform === 'win32') {
+    // 显式环境变量优先：直接给 DefaultSettings，或给安装根目录。
+    const direct = process.env[`AXURE_DEFAULT_SETTINGS_RP${v.version}`];
+    if (direct) return direct;
+    const root = process.env[`AXURE_INSTALL_ROOT_RP${v.version}`];
+    if (root) return existsSync(join(root, 'DefaultSettings')) ? join(root, 'DefaultSettings') : root;
+    // 便携版：DefaultSettings 与 exe 同级；标准安装：安装目录下。
+    if (v.appPath) {
+      const beside = join(dirname(v.appPath), 'DefaultSettings');
+      if (existsSync(beside)) return beside;
+    }
+    const bases = [process.env.ProgramFiles, process.env['ProgramFiles(x86)'], 'C:\\Program Files', 'C:\\Program Files (x86)'].filter(Boolean);
+    for (const base of bases) {
+      const p = join(base, 'Axure', `Axure RP ${v.version}`, 'DefaultSettings');
+      if (existsSync(p)) return p;
+    }
+    return join(dirname(v.appPath || 'C:\\'), 'DefaultSettings');
+  }
+  return join(v.appPath, 'Contents/Resources/DefaultSettings');
+}
 
 // 从 .rp 字节流读版本；不是 Axure 容器或版本未知时抛错（不猜）。
 export function detectFileVersion(file) {
@@ -88,6 +144,7 @@ export function appExists(version) {
 
 // 本机正在运行的 Axure 版本（可能同时开着 9 和 11）。
 export function runningVersions() {
+  if (process.platform !== 'darwin') return [];
   let out = '';
   try {
     out = spawnSync('pgrep', ['-fl', 'Axure RP'], { encoding: 'utf8' }).stdout ?? '';
@@ -98,6 +155,9 @@ export function runningVersions() {
 // 宿主绑定：显式指定 > AXURE_TARGET_VERSION > 唯一在跑的 Axure > 报错。
 // 双版本并行时「第一个名字含 Axure 的进程」会选错程序，所以这里不猜。
 export function resolvePasteTarget({ version, bundleId } = {}) {
+  if (process.platform !== 'darwin') {
+    throw new Error('宿主绑定与菜单自动化仅支持 macOS；Windows 请使用原生 backend，或在 Axure 中手动执行 Ctrl+V。');
+  }
   if (bundleId) {
     const hit = supportedVersions().find(v => spec(v).bundleId === bundleId);
     if (!hit) throw new Error(`Unknown Axure bundle id "${bundleId}". Known: ${supportedVersions().map(v => spec(v).bundleId).join(', ')}`);

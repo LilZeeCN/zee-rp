@@ -13,17 +13,22 @@ import { parsePayload, field } from '../scripts/parse-payload.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 import { addInteractions, createInteractionWriter } from '../scripts/ix-actions.mjs';
 import { mergePages } from '../scripts/merge-pages.mjs';
+import { pythonInvocation } from '../scripts/python.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const work = mkdtempSync(join(tmpdir(), 'rp-native-test-'));
 const spawn = childProcess.spawnSync;
+const spawnPy = (args, options) => {
+  const invocation = pythonInvocation(args);
+  return childProcess.spawnSync(invocation.command, invocation.args, options);
+};
 let checks = 0;
 const check = (label, fn) => { fn(); checks++; console.log(`PASS ${label}`); };
 try {
   const reports = [];
   for (const name of ['booking', 'approval', 'inventory', 'survey', 'course', 'visual']) {
     const bundle = join(work, name);
-    const result = spawn('python3', [join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'examples/rp-language', `${name}.json`), '--out-dir', bundle], { encoding: 'utf8' });
+    const result = spawnPy([join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'examples/rp-language', `${name}.json`), '--out-dir', bundle], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     // Any subprocess here (including GUI wrappers) is a regression. Cache is absent.
     childProcess.spawnSync = (...args) => { throw new Error(`Forbidden native subprocess: ${args[0]}`); };
@@ -84,7 +89,7 @@ try {
   }
   check('panel aggregate initialization stays in valid native scopes', () => {
     const bundle = join(work, 'panel-aggregates');
-    const result = spawn('python3', [join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'test/fixtures/rp-aggregate-panel.json'), '--out-dir', bundle], { encoding: 'utf8' });
+    const result = spawnPy([join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'test/fixtures/rp-aggregate-panel.json'), '--out-dir', bundle], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     const report = buildInteractiveRp(join(bundle, 'compile-plan.json'), join(work, 'panel-aggregates.rp'));
     assert.deepEqual(report.threeZeros, { danglingRefs: 0, sentinelSlotsNonZero: 0, problems: 0 });
@@ -104,7 +109,7 @@ try {
       Object.values(spec.components ?? {}).forEach(c => label(c.root));
       const source = join(work, `${fixture}-named.json`), bundle = join(work, `${fixture}-named`);
       writeFileSync(source, JSON.stringify(spec));
-      const compiled = spawn('python3', [join(root, 'scripts/proto.py'), 'compile', '--spec', source, '--out-dir', bundle], { encoding: 'utf8' });
+      const compiled = spawnPy([join(root, 'scripts/proto.py'), 'compile', '--spec', source, '--out-dir', bundle], { encoding: 'utf8' });
       assert.equal(compiled.status, 0, compiled.stderr);
       const report = buildInteractiveRp(join(bundle, 'compile-plan.json'), join(work, `${fixture}-named.rp`));
       const bytes = readFileSync(report.outputRp), records = readRecords(bytes);
@@ -125,7 +130,7 @@ try {
   }
   check('startup aggregate fixture materializes all events with valid scopes', () => {
     const bundle = join(work, 'startup-aggregates');
-    const result = spawn('python3', [join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'test/fixtures/rp-aggregate-startup.json'), '--out-dir', bundle], { encoding: 'utf8' });
+    const result = spawnPy([join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'test/fixtures/rp-aggregate-startup.json'), '--out-dir', bundle], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     const report = buildInteractiveRp(join(bundle, 'compile-plan.json'), join(work, 'startup-aggregates.rp'));
     assert.equal(report.eventCoverage.declared, report.eventCoverage.materialized);
@@ -140,10 +145,10 @@ try {
       const graphs = readRecords(readFileSync(report.outputRp)).filter(r => r.strings).map(parsePayload);
       assert(!graphs.some(g => [...g.objects.values()].some(o => o.className === 'Axure:InteractionEvent')));
     });
-    check('explicit GUI backend is preserved', () => assert.throws(() => buildInteractiveRp(bookingPlan, join(work, 'gui.rp'), { backend: 'gui', cacheDir: join(work, 'gui-cache') }), /Forbidden native subprocess: python3/));
+    check('explicit GUI backend is preserved', () => assert.throws(() => buildInteractiveRp(bookingPlan, join(work, 'gui.rp'), { backend: 'gui', cacheDir: join(work, 'gui-cache') }), /Forbidden native subprocess: python/));
     const legacy = JSON.parse(readFileSync(bookingPlan)); delete legacy.language;
     const legacyPlan = join(work, 'legacy-plan.json'); writeFileSync(legacyPlan, JSON.stringify(legacy));
-    check('legacy specs retain GUI default', () => assert.throws(() => buildInteractiveRp(legacyPlan, join(work, 'legacy.rp'), { cacheDir: join(work, 'legacy-cache') }), /Forbidden native subprocess: python3/));
+    check('legacy specs retain GUI default', () => assert.throws(() => buildInteractiveRp(legacyPlan, join(work, 'legacy.rp'), { cacheDir: join(work, 'legacy-cache') }), /Forbidden native subprocess: python/));
     check('invalid backend fails before output', () => {
       const out = join(work, 'invalid.rp');
       assert.throws(() => buildInteractiveRp(bookingPlan, out, { backend: 'invalid' }), /backend/); assert(!existsSync(out));

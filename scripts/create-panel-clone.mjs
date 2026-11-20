@@ -78,6 +78,14 @@ export function createPanel(file, { pageName, pageIndex, name, states = ['State 
       && field(field(o.body, 'name-block'), 'text')?.text === TEMPLATE_PANEL_NAME);
     if (w) { templateRecord = r; templateGraph = g; templateWidget = w; break; }
   }
+  if (!templateWidget) {
+    // Windows 版 Axure 的 RP9 Tour 教学工程里面板没有显示名；按第一个原生 DynamicPanel 兜底。
+    for (const r of source.filter(r => r.className === 'Axure:Page')) {
+      const g = parsePayload(r);
+      const w = [...g.objects.values()].find(o => o.className === 'Axure:DiagramObject:DynamicPanel');
+      if (w) { templateRecord = r; templateGraph = g; templateWidget = w; break; }
+    }
+  }
   if (!templateWidget) throw new Error(`Missing template panel: ${TEMPLATE_PANEL_NAME}`);
   let templateStateRecords = [];
   if (copyTemplateStates) {

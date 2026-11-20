@@ -2248,7 +2248,7 @@ const sessionHandlers = {
     }
     const digest = sha256Of(target);
     state.timeline.push({ op: 'save', at: now(), from: tail, path: target, sha256: digest });
-    return { path: as.startsWith('/') ? as : join(process.cwd(), as), physicalPath: target, sha256: digest, fromChainTail: tail };
+    return { path: isAbsolute(as) ? as : join(process.cwd(), as), physicalPath: target, sha256: digest, fromChainTail: tail };
   },
   locate({ path, rp, file, rpFile, query, page, type, limit = 50, offset = 0 } = {}) {
     const targetPath = path ?? rp ?? file ?? rpFile;

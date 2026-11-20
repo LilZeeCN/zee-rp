@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, mkdirSync, writeFileSync, existsSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expandSpec, resetIds } from '../scripts/axvg.mjs';
 import { listCommands } from '../scripts/registry.mjs';
@@ -85,7 +85,8 @@ try {
   check('Axvg encoding selftest', () => assert.match(run('scripts/axvg.mjs', ['selftest']).stdout, /selftest OK/));
   check('published reference SVG matches the authored public specification', () => {
     const spec = JSON.parse(readFileSync(join(root, 'assets/dashboard-example.spec.json')));
-    assert.equal(readFileSync(join(root, 'assets/demo-layout.svg'), 'utf8'), renderLayout(spec));
+    // SVG 是文本资源；Windows checkout 的 CRLF 不应影响等价性比较。
+    assert.equal(readFileSync(join(root, 'assets/demo-layout.svg'), 'utf8').replace(/\r\n/g, '\n'), renderLayout(spec));
   });
   check('all published Markdown file links resolve within the release', () => {
     const paths = new Set(releasePaths());
@@ -95,7 +96,8 @@ try {
       for (const match of text.matchAll(/!?\[[^\]]*\]\(([^)]+)\)/g)) {
         const href = match[1].replace(/^<|>$/g, '').split('#')[0];
         if (!href || /^[a-zA-Z]+:/.test(href)) continue;
-        const destination = join(dirname(path), href);
+        // releasePaths 一律输出 POSIX 相对路径；Windows 的 path.join 会引入反斜杠。
+        const destination = posix.normalize(posix.join(posix.dirname(path), href));
         assert.ok(paths.has(destination), `${path}: ${href}`);
       }
     }
@@ -142,7 +144,11 @@ try {
     assert.equal(run(join(output, 'scripts/registry.mjs'), ['validate']).status, 0);
   });
   check('npm tarball includes runtime modules and shipped test entry points', () => {
-    const packed = spawnSync('npm', ['pack', '--dry-run', '--ignore-scripts', '--json'], { cwd: root, encoding: 'utf8' });
+    // Windows 上 npm 是 npm.cmd，必须经 shell 启动；其他平台保持直接调用。
+    const npm = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+    const packed = spawnSync(npm, ['pack', '--dry-run', '--ignore-scripts', '--json'], {
+      cwd: root, encoding: 'utf8', shell: process.platform === 'win32',
+    });
     assert.equal(packed.status, 0, packed.error?.message || packed.stderr);
     const paths = new Set(JSON.parse(packed.stdout)[0].files.map(file => file.path));
     const runtime = releasePaths().filter(path => /^(bin|scripts|studio)\//.test(path));
@@ -236,8 +242,11 @@ try {
   });
   check('source baseline fingerprints match every registered script', () => {
     const baseline = JSON.parse(readFileSync(join(root, 'test/baseline-shas.json')));
-    for (const [file, hash] of Object.entries(baseline))
-      assert.equal(createHash('sha256').update(readFileSync(join(root, 'scripts', file))).digest('hex'), hash, file);
+    for (const [file, hash] of Object.entries(baseline)) {
+      // 基线按 LF 计算；Windows 的 core.autocrlf 会把工作区文件转成 CRLF，先归一化再哈希。
+      const text = readFileSync(join(root, 'scripts', file), 'utf8').replace(/\r\n/g, '\n');
+      assert.equal(createHash('sha256').update(text, 'utf8').digest('hex'), hash, file);
+    }
     assert.equal(Object.keys(baseline).length, readdirSync(join(root, 'scripts')).filter(f => f.endsWith('.mjs')).length);
   });
 } finally { rmSync(work, { recursive: true, force: true }); }

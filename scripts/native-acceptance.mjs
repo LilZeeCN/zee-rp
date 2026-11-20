@@ -3,6 +3,7 @@ import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, extname } from 'node:path';
+import { pythonInvocation } from './python.mjs';
 import { fileURLToPath } from 'node:url';
 
 const scripts = dirname(fileURLToPath(import.meta.url));
@@ -201,7 +202,8 @@ export async function runNativeAcceptance(page, oraclePath, outputDir, previewUr
           const signature = result.diff.path;
           const candidate = steps => {
             const plan = { observe: oracle.observe, scenarios: [{ id: 'reduced', steps }] };
-            const process = spawnSync('python3', [join(scripts, 'rp_acceptance.py'), 'trace', '--source', oracle.source, '--plan', '-'], { input: JSON.stringify(plan), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
+            const invocation = pythonInvocation([join(scripts, 'rp_acceptance.py'), 'trace', '--source', oracle.source, '--plan', '-']);
+            const process = spawnSync(invocation.command, invocation.args, { input: JSON.stringify(plan), encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
             if (process.status) throw new Error(process.stderr);
             return JSON.parse(process.stdout).scenarios[0];
           };

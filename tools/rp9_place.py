@@ -15,6 +15,15 @@
 """
 import json, os, re, subprocess, sys, time
 
+# 该工具通过 Swift/Accessibility 操作 macOS 版 Axure 菜单；Windows 请走原生写入后端。
+if __name__ == "__main__" and sys.platform != "darwin":
+    print(
+        "rp9_place.py 依赖 macOS 的 Swift/Accessibility 与 Axure 菜单自动化，当前平台不支持。\n"
+        "Windows 请使用：node scripts/proto.mjs build-rp --backend native ...",
+        file=sys.stderr,
+    )
+    sys.exit(2)
+
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # 相对本文件推导（可移植）：tools/ -> <skill>/scripts
 HERE_DIR = os.path.dirname(os.path.abspath(__file__))
