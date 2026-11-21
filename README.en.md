@@ -95,13 +95,13 @@ npm ci
 
 Native `.rp` reading, writing and generation run on Windows (Node 18+ / Python 3.10+).
 
-- In PowerShell, run `py -3 -m venv .venv`, `& .\.venv\Scripts\python.exe -m pip install -r requirements.txt` and `npm ci`. Activate the environment before using the CLI or MCP, or point `ZEE_PYTHON` at its full `python.exe` path.
+- In PowerShell, run `py -3 -m venv .venv`, `& .\.venv\Scripts\python.exe -m pip install pillow numpy jsonschema` and `npm.cmd ci` for native generation and the Windows CI checks. Screenshot reconstruction also needs SciPy from `requirements.txt`. Activate the environment before using the CLI or MCP, or point `ZEE_PYTHON` at its full `python.exe` path.
 - The generator needs a one-page, zero-widget RP9 project saved by your own Axure; set `AXURE_BLANK_TEMPLATE_RP9` to it.
 - Axure is auto-detected in common install directories and drive-root portable installs (`C:\AxureRP9.exe`, `D:\AxureRP9.exe`). Override with `AXURE_APP_RP9`; point at `DefaultSettings` with `AXURE_INSTALL_ROOT_RP9` (install root) or `AXURE_DEFAULT_SETTINGS_RP9` (direct path).
 - Multi-path environment variables use `;` on Windows (`AXURE_PROTECTED_PATHS`, `AXURE_WRITE_ROOT`).
 - RP/1 uses the native backend by default. Pass `--backend native` for older specs with `build-rp` or `generate`. The GUI backend, macOS menu automation and `tools/rp9_place.py` are macOS-only. `axvg paste` writes the payload to the Windows clipboard. Press Ctrl+V in Axure.
 - Screenshot reconstruction keeps shape detection on Windows but skips OCR (Apple Vision is macOS-only), so text must be supplied separately.
-- Windows CI covers RP/1 file parsing, compilation and output paths. Run `npm run test:mcp-generate` with your local Axure template to verify full MCP generation. `test:backend` also needs a compatible `Training/RP9 Tour.rp`. Its default copy can use a single unnamed panel, or you can specify a named panel with `AXURE_PANEL_TEMPLATE` and `AXURE_PANEL_TEMPLATE_NAME`.
+- Windows CI covers RP/1 file parsing, compilation and output paths. Run `npm.cmd run test:mcp-generate` with your local Axure template to verify full MCP generation. `test:backend` also needs a compatible `Training/RP9 Tour.rp`. When the built-in tour has no `Discount Panel`, generation uses the first unnamed panel as a blank shell. To copy existing state content when several unnamed panels are available, specify a named panel using `AXURE_PANEL_TEMPLATE` and `AXURE_PANEL_TEMPLATE_NAME`.
 
 <details>
 <summary><b>Connect your MCP client</b> · Expand configuration</summary>

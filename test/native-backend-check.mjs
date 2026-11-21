@@ -1,16 +1,18 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { syncBuiltinESMExports } from 'node:module';
-import { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildInteractiveRp } from '../scripts/proto.mjs';
 import { createBlankProject } from '../scripts/create-blank-project.mjs';
 import { createPanel } from '../scripts/create-panel-clone.mjs';
+import { fillPanelState } from '../scripts/fill-panel-state.mjs';
 import { writeNativeScene } from '../scripts/native-scene.mjs';
-import { readRecords } from '../scripts/rp-records.mjs';
-import { parsePayload, field } from '../scripts/parse-payload.mjs';
+import { encodeRecord, readRecords, replaceRecord } from '../scripts/rp-records.mjs';
+import { encodePayload, parsePayload, field } from '../scripts/parse-payload.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 import { addInteractions, createInteractionWriter } from '../scripts/ix-actions.mjs';
 import { mergePages } from '../scripts/merge-pages.mjs';
@@ -25,6 +27,21 @@ const spawnPy = (args, options) => {
 };
 let checks = 0;
 const check = (label, fn) => { fn(); checks++; console.log(`PASS ${label}`); };
+function withEnvironment(changes, run) {
+  const previous = Object.entries(changes).map(([name, value]) => {
+    const old = process.env[name];
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+    return [name, old];
+  });
+  try { return run(); }
+  finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+}
 try {
   const reports = [];
   for (const name of ['booking', 'approval', 'inventory', 'survey', 'course', 'visual']) {
@@ -183,15 +200,77 @@ try {
       expected.map(([, , , , label]) => label));
   });
   check('an explicitly named panel template cannot silently select a different panel', () => {
-    const previous = process.env.AXURE_PANEL_TEMPLATE_NAME;
-    process.env.AXURE_PANEL_TEMPLATE_NAME = 'No such panel in the fixture';
-    try {
+    withEnvironment({ AXURE_PANEL_TEMPLATE_NAME: 'No such panel in the fixture' }, () => {
       const pageIndex = readRp(seed).pages[0].record;
       assert.throws(() => createPanel(seed, { pageIndex, name: 'Template probe' }), /Missing template panel: No such panel/);
-    } finally {
-      if (previous === undefined) delete process.env.AXURE_PANEL_TEMPLATE_NAME;
-      else process.env.AXURE_PANEL_TEMPLATE_NAME = previous;
-    }
+    });
+  });
+  const pageName = readRp(seed).pages[0].name;
+  const panelOptions = name => ({ pageName, name, states: ['Content'] });
+  const localAction = [{ event: 'OnClick', actions: [{ type: 'hide', target: 'probe' }] }];
+  const stateLayout = addInteractions(writeNativeScene(seed, scene), 'probe', localAction).file;
+  const innerShell = createPanel(seed, panelOptions('Fixture Panel')).file;
+  const fillOptions = panel => ({ sourcePage: pageName, targetPage: pageName, panel, state: 'Content' });
+  const nestedSource = fillPanelState(stateLayout, innerShell, fillOptions('Fixture Panel')).file;
+
+  check('Windows RP9 can seed a blank panel from a built-in Tour with two unnamed panels', () => {
+    let tour = createPanel(innerShell, panelOptions('Other template panel')).file;
+    tour = addInteractions(tour, 'Fixture Panel', [{ event: 'OnClick', actions: [{ type: 'wait', ms: 10 }] }]).file;
+    const record = readRecords(tour).find(r => r.className === 'Axure:Page');
+    const graph = parsePayload(record), strings = [...record.strings];
+    const panels = [...graph.objects.values()].filter(o => o.className === 'Axure:DiagramObject:DynamicPanel');
+    assert.equal(panels.length, 2);
+    let empty = strings.indexOf('');
+    if (empty === -1) { empty = strings.length; strings.push(''); }
+    for (const panel of panels) field(field(panel.body, 'name-block'), 'text').value = empty + 1;
+    tour = replaceRecord(tour, record, encodeRecord(record, strings, encodePayload(graph.roots)));
+    const settings = join(work, 'simulated-win-settings');
+    mkdirSync(join(settings, 'Training'), { recursive: true });
+    writeFileSync(join(settings, 'Training', 'RP9 Tour.rp'), tour);
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      withEnvironment({ AXURE_DEFAULT_SETTINGS_RP9: settings, AXURE_PANEL_TEMPLATE: undefined, AXURE_PANEL_TEMPLATE_NAME: undefined }, () => {
+        const result = createPanel(seed, panelOptions('new panel'));
+        const summary = readRp(result.file);
+        assert.equal(summary.pages[0].widgets[0].name, 'new panel');
+        assert.equal(summary.pages[0].widgets[0].interactions?.length ?? 0, 0);
+        assert.equal(summary.counts.panelStates, 1);
+        assert.equal(summary.counts.danglingRefs, 0);
+        assert.throws(() => createPanel(seed, { ...panelOptions('copy'), copyTemplateStates: true }), /multiple unnamed panels/);
+      });
+    } finally { Object.defineProperty(process, 'platform', platform); }
+  });
+  check('nested-panels builds with a template whose original state contained widget actions', () => {
+    const template = join(work, 'panel-with-old-actions.rp');
+    writeFileSync(template, nestedSource);
+    withEnvironment({ AXURE_PANEL_TEMPLATE: template, AXURE_PANEL_TEMPLATE_NAME: 'Fixture Panel' }, () => {
+      const result = buildInteractiveRp(join(work, 'nested-panels-named', 'compile-plan.json'), join(work, 'nested-from-active-template.rp'));
+      assert.deepEqual(result.threeZeros, { danglingRefs: 0, sentinelSlotsNonZero: 0, problems: 0 });
+      assert.equal(result.eventCoverage.materialized, result.eventCoverage.declared);
+      assert(result.eventCoverage.declared > 0);
+    });
+  });
+  check('nested state import preserves live interactions and rejects live out-of-layout targets', () => {
+    const record = readRecords(nestedSource).find(r => r.className === 'Axure:PanelState');
+    const graph = parsePayload(record);
+    const path = [...graph.objects.values()].find(o => o.className === 'Axure:DiagramObjectPath');
+    const ids = graph.roots.find(n => n.tag === 0x1e).values;
+    const nullId = ids.indexOf('0'.repeat(32)) + 1;
+    assert(nullId > 0);
+    ids.push(randomBytes(16).toString('hex'));
+    const orphan = { ...structuredClone(path), id: ids.length };
+    field(orphan.body, 'object-id').value = nullId;
+    graph.roots.splice(graph.roots.length - 1, 0, orphan);
+    const encodeSource = () => replaceRecord(nestedSource, record, encodeRecord(record, record.strings, encodePayload(graph.roots)));
+    const outerShell = createPanel(seed, panelOptions('Outer')).file;
+    const { file } = fillPanelState(encodeSource(), outerShell, fillOptions('Outer'));
+    const paths = readRecords(file).filter(r => r.className === 'Axure:PanelState')
+      .flatMap(r => [...parsePayload(r).objects.values()]).filter(o => o.className === 'Axure:DiagramObjectPath');
+    assert.equal(paths.length, 1);
+    assert.equal(readRp(file).counts.danglingRefs, 0);
+    field(path.body, 'object-id').value = nullId;
+    assert.throws(() => fillPanelState(encodeSource(), outerShell, fillOptions('Outer')), /State import interaction targets must belong/);
   });
   check('batched events preserve sequential cross-page resolution and replacement without changing the input', () => {
     const page = writeNativeScene(seed, scene);

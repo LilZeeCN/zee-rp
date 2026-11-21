@@ -260,10 +260,12 @@ export function fillPanelState(source, target, { sourcePage, targetPage, targetM
     }
     if (object?.className === 'Axure:DiagramObjectPath' && !overridePaths.has(id)) {
       const localId = field(object.body, 'object-id')?.value;
+      const target = graph.objects.get(localId);
       const repeaterPath = field(object.body, 'repeater-path')?.items ?? [];
-      if (!ids.has(localId) || field(object.body, 'rdo-path')?.items.length
-        || repeaterPath.some(item => !ids.has(item.value) || graph.objects.get(item.value)?.className !== 'Axure:DiagramObject:Repeater'))
-        throw new Error('State import interaction targets must belong to the imported layout');
+      if (!ids.has(localId) || !target?.className.startsWith('Axure:DiagramObject:') || field(object.body, 'rdo-path')?.items.length
+        || repeaterPath.some(item => !ids.has(item.value) || graph.objects.get(item.value)?.className !== 'Axure:DiagramObject:Repeater')) {
+        throw new Error(`State import interaction targets must belong to the imported layout (path #${id}, target #${localId ?? '?'} ${target?.className ?? 'missing'})`);
+      }
     }
     if (object?.className === 'Axure:DiagramObject:Connector') {
       const sourceGuids = graph.roots.find(n => n.tag === 0x1e).values;
@@ -283,8 +285,12 @@ export function fillPanelState(source, target, { sourcePage, targetPage, targetM
         const guid = sourceGuids[pair.values[1] - 1], pkg = sourceStates.get(guid);
         if (!pkg) throw new Error(`Nested panel state package is missing: ${guid}`);
         if (packages.has(guid)) continue;
-        packages.set(guid, { ...pkg, owner });
-        validate(pkg.graph, new Set(pkg.graph.objects.keys()), false, owner);
+        // Only the actual PanelState owns content. Older files can retain
+        // disconnected definitions from replaced widgets or template states.
+        const stateRoot = pkg.graph.roots.find(node => node.tag === 0x0f);
+        const stateIds = closureOf(pkg.graph, stateRoot.value);
+        packages.set(guid, { ...pkg, owner, ids: stateIds });
+        validate(pkg.graph, stateIds, false, owner);
       }
     }
   } };
@@ -310,7 +316,7 @@ export function fillPanelState(source, target, { sourcePage, targetPage, targetM
     masterOrder.push(guid);
   };
   validate(sg, closure, true);
-  for (const [graph, ids] of [[sg, closure], ...[...packages.values(), ...masters.values()].map(pkg => [pkg.graph, new Set(pkg.graph.objects.keys())])]) {
+  for (const [graph, ids] of [[sg, closure], ...[...packages.values(), ...masters.values()].map(pkg => [pkg.graph, pkg.ids ?? new Set(pkg.graph.objects.keys())])]) {
     const sourceGuids = graph.roots.find(n => n.tag === 0x1e).values;
     for (const id of ids) {
       const object = graph.objects.get(id);
@@ -468,7 +474,7 @@ export function fillPanelState(source, target, { sourcePage, targetPage, targetM
     }
     const copiedKeys = [];
     for (const [guid, pkg] of packages) {
-      const copied = structuredClone(pkg.graph.roots);
+      const copied = structuredClone(pkg.graph.roots.filter(node => node.tag !== 9 || pkg.ids.has(node.id)));
       const table = copied.find(n => n.tag === 0x1e).values;
       for (let i = 0; i < table.length; i++) table[i] = mapIdentity(table[i]);
       const key = guidKey(mapIdentity(guid));
