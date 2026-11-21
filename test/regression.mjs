@@ -132,6 +132,7 @@ try {
 
       const child = join(first, 'child');
       mkdirSync(child, { recursive: true });
+      assertWritable(join(realpathSync.native(first), 'physical-name.json'));
       const shortcut = join(work, 'shortcut');
       if (process.platform === 'win32') symlinkSync(child, shortcut, 'junction');
       else symlinkSync(join('first', 'child'), shortcut, 'dir');

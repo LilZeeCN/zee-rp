@@ -2,7 +2,7 @@ import { SCENARIO_STEP_SCHEMA } from './runtime.mjs';
 import { BROWSER_SCENARIO_STEP_SCHEMA } from './scenario-executors.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { startStudioServer } from './server.mjs';
+import { INSTANCE_REGISTRY_PATH, startStudioServer } from './server.mjs';
 import { studioSourceFingerprint } from './source-fingerprint.mjs';
 import { describeAuthoring, AUTHORING_ENTRY } from './authoring-help.mjs';
 import { VALID_COMMAND_TYPES } from './commands.mjs';
@@ -15,7 +15,6 @@ import {
   compareProjectWithBundle,
 } from './project-bundle.mjs';
 
-const INSTANCE_REGISTRY_PATH = '/tmp/zee-rp-studio-instances.json';
 /** projectDir(绝对路径) -> { kind: 'local', studio } | { kind: 'remote', url } */
 const inProcessServers = new Map();
 

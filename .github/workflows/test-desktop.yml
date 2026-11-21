@@ -26,6 +26,7 @@ jobs:
       # npm test exercises MCP file input through compilation without an Axure template.
       - run: npm test
         timeout-minutes: 6
+      - run: node --test test/studio-startup-normalization-check.mjs
       - run: npm run test:layers
       - run: npm run test:studio-parity
       - run: npm run test:language

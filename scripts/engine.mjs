@@ -8,7 +8,7 @@
 //     输出定位按脚本真实解析规则取位（前置 flag 形态滤 '--' 后按位置参数序），axvg build 省略 -o 时
 //     纳管 spec 同名默认输出。
 // 引擎自身不写 stdout（子进程 stdout 以 Buffer 原样返回给调用方），日志与拒绝信息只走 stderr（由调用方打印）。
-import { lstatSync, readlinkSync } from 'node:fs';
+import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { basename, delimiter, dirname, join, parse, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -66,7 +66,20 @@ function physResolve(input, guard = true) {
       stack.push(part);
       continue;
     }
-    if (!stat.isSymbolicLink()) { stack.push(part); continue; }
+    if (!stat.isSymbolicLink()) {
+      if (sep === '\\' && stat.isDirectory()) {
+        // Windows can expose the same directory with a DOS short name in TEMP
+        // and a long name when the caller canonicalizes its output.
+        const canonical = realpathSync.native(current);
+        if (protectedList.includes(fold(canonical))) throw protectedError(canonical);
+        const directory = pathParts(canonical);
+        root = directory.root;
+        stack.splice(0, stack.length, ...directory.parts);
+      } else {
+        stack.push(part);
+      }
+      continue;
+    }
 
     if (++hops > 64) throw new Error(`拒绝执行：路径消解超限（疑似符号链接环）：${input}`);
     const target = pathParts(readlinkSync(current));
