@@ -4,7 +4,7 @@
   "mcpTools": 72,
   "files": {
     ".gitattributes": "ee0a23931895cbfa18e49a5356aaabc91d7e65481a90ddbae836e2a6f90f2374",
-    ".github/workflows/test-desktop.yml": "21d2cdda35ff70e6104bc1ee886dabe9e7b881be91c392c9341b977f29ccb9f4",
+    ".github/workflows/test-desktop.yml": "d38549e632e4e89e67c2fc113b0e984913ca60aa8c1fb908ea00c293e86f8b7e",
     ".github/workflows/test.yml": "1c6bfeea9a5bc7bc9e07ad4af0ad287bb5686738dec7264976a457e4430fc0da",
     ".gitignore": "478efd95d86e49632d75a5ac5303ca97cfc9570619c8b8df5c14f6e6b250b468",
     ".npmignore": "15a10a4d8f74b88f13a8898b0202d630f56e807c5854c0a0eb89f2218c24864f",
@@ -485,7 +485,7 @@
     "test/panel-master-check.mjs": "9c2365c771b3f8232a4668e67fe9439ed463f2af674207f480a28597608df3c3",
     "test/parity-check.mjs": "ee23954b0a6fe10282ff086d48f544ce57aa2de56932d7957264ccb3c6874402",
     "test/proto-v21-check.mjs": "21fe03836308b0e0b90031a9d5a0d7b699734d7baa09a94c0b976251447657e0",
-    "test/regression.mjs": "1d718690df999100303739bf013047758d0b5888d94955c8a9110bff77295ce2",
+    "test/regression.mjs": "c2a3f8e5ec19e3fb9cdf213cc8363a76ed34975c06362301d95dde9898f26057",
     "test/report-mcp-check.mjs": "152d3c1251c7c4f5386dc2d7dd9b0543cb7a6ed478b1f85a7fe8587d615881e7",
     "test/report-regressions-check.py": "98dc833f29d8b710a552c9e255e687ed94ad236b549544fcdad8a21817c7226a",
     "test/report-round3-check.mjs": "8459e5903a8d81c12f9ab03811f39375ee8e4e1dc5c0aafc11d490f6961f298b",

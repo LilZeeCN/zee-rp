@@ -25,6 +25,7 @@ jobs:
       - run: python -m pip install pillow numpy jsonschema
       # npm test exercises MCP file input through compilation without an Axure template.
       - run: npm test
+        timeout-minutes: 6
       - run: npm run test:layers
       - run: npm run test:studio-parity
       - run: npm run test:language
