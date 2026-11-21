@@ -273,8 +273,9 @@ function describeAction(graph, action, version = 11, widgetsByGuid = null) {
       const mode = intOf(field(move, 'MoveType'));
       const duration = intOf(field(move, 'Duration'));
       type = mode === 0 ? 'set-position' : 'move';
-      human = `${mode === 0 ? '移动到' : '相对移动'} ${targets(['WidgetPaths']).join('、') || '(未指定)'}`
-        + ` x=${literal(field(move, 'XValue'))} y=${literal(field(move, 'YValue'))}（${duration}ms）`;
+      const verb = ['移动到', '相对移动', '跟随拖动', '跟随水平拖动', '跟随垂直拖动', '回到拖动前的位置', '随触发元件移动'][mode] ?? `移动（模式 ${mode}）`;
+      const xy = mode === 0 || mode === 1 ? ` x=${literal(field(move, 'XValue'))} y=${literal(field(move, 'YValue'))}` : '';
+      human = `${verb} ${targets(['WidgetPaths']).join('、') || '(未指定)'}${xy}（${duration}ms）`;
       break;
     }
     case 'InteractionSetPanelStateAction': {

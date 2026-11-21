@@ -153,7 +153,7 @@ RP/1 的同名动作目前只开放 `target/state`，须在目标宿主预览实
 | 动作 | 参数 |
 |---|---|
 | `show/hide/toggle` | `target`、`duration` 毫秒、`animation`，如 `none/fade/slideDown` |
-| `move` | `target`、`x/y` 位移，默认 0；不是 `dx/dy` |
+| `move` | `target`、`mode`、`x/y`、`duration`（毫秒）、`easing`。默认 `mode=delta`，用 `x/y` 指定偏移量 |
 | `set-position` | `target`、`x/y` 绝对位置 |
 | `wait` | `ms` 毫秒 |
 | `set-opacity` | `target`、`opacity` 百分数、`duration` 毫秒、`easing`；例如 Page 本地 VectorShape 已验证 15%/linear/3000 ms 与 100%/swing/2000 ms。其它组合见 样本边界 (internal research reference) |
@@ -165,6 +165,8 @@ RP/1 的同名动作目前只开放 `target/state`，须在目标宿主预览实
 | `set-selected` | `target`、`value`；SetSelectedOption 为列表选项值，不用于图片选中 |
 | `raise-event` | 元件目标 `target`、`eventType`；当前页目标用 `targetPage=true` 且不同时给 target，已验页面 OnLoad eventType=288 |
 | `link` | 外部链接用 `url`、`window=current/new`；内部页面链接的 GUID 解析尚未形成高层接口 |
+
+原生 `move` 支持 `location`（绝对坐标）、`delta`（相对偏移）、`drag`、`drag-x`、`drag-y`、`locationBeforeDrag` 和 `withThis`。三个跟随拖动模式默认 `0ms`、`easing=none`，其余模式默认 `300ms`、`easing=swing`。拖动模式已核对 RP9 写入字段和读取摘要，宿主预览需要单独验证。
 
 ## 条件与多 Case
 

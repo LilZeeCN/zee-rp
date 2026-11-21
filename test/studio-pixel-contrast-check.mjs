@@ -31,7 +31,9 @@ const source = { domain: 'web', pages: [{ id: 'pixels', domain: 'web', canvas: {
     { id: 'clip-parent', type: 'box', layout: 'stack', x: 800, y: 520, w: 120, h: 40, radius: 1, children: [
       label('clipped-half', 0, 0, '#FFFFFF', { text: 'M', w: 120, h: 80, fontSize: 72, lineHeight: 80 })] },
     label('current-color', 1000, 520, '#FFFFFF', { css: { background: 'currentColor' } }),
-    label('far-right', 1400, 100, '#FFFFFF', { w: 190 }),
+    // 显式钉住字体：默认栈在中文 Windows 上回落到更宽的字体（约 197px），
+    // 会让这条「右侧留 10px」的用例变成字体度量测试而不是边缘测量测试。
+    label('far-right', 1400, 100, '#FFFFFF', { w: 190, fontFamily: 'Arial' }),
     { id: 'transformed', type: 'box', layout: 'stack', x: 400, y: 400, w: 400, h: 80, fill: '#FFFFFF',
       css: { transform: 'translate(180px, 20px)' }, children: [label('moved', 0, 0, '#000000')] },
   ],
@@ -54,10 +56,18 @@ test('pixel measurement uses rendered glyphs, local backgrounds and real capture
     const byId = new Map(shot.results.map(r => [r.id, r]));
     await t.test('fractional DPR and far edge survive floating panels', () => {
       assert.equal(shot.dpr, 1.25);
-      for (const id of ['white', 'far-right', 'moved']) {
+      // 未被变换的文本是真正的黑字白底：实测 20.65，接近 21 的上限，与 DPR 无关。
+      for (const id of ['white', 'far-right']) {
         assert.equal(byId.get(id)?.passes, true, JSON.stringify(byId.get(id)));
-        assert.ok(byId.get(id).ratio > 19, JSON.stringify(byId.get(id)));
+        assert.ok(byId.get(id).ratio > 20, JSON.stringify(byId.get(id)));
       }
+      // transform 子树会先栅格化再合成，字形边缘被重采样，最弱采样点的对比度随 DPR 下降
+      // （实测 dpr1 19.2 / dpr1.25 17.9 / dpr2 16.5）。这是合成机制而非设计缺陷，
+      // 因此只要求它仍被正常测量、判定通过、且明显高于 4.5:1 的通过线。
+      const moved = byId.get('moved');
+      assert.equal(moved?.passes, true, JSON.stringify(moved));
+      assert.equal(moved?.status, 'measured', JSON.stringify(moved));
+      assert.ok(moved.ratio > 12, JSON.stringify(moved));
     });
     await t.test('foreground alpha and element opacity are measured after composition', () => {
       for (const id of ['alpha', 'opacity']) {

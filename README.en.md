@@ -82,6 +82,8 @@ Generate a native **`.rp`** and continue editing supported text, controls and la
 
 Install **Node.js 18+** and **Python 3.10+**. Native generation additionally needs local Axure resources and your own single-page blank project saved in RP9.
 
+### macOS
+
 ```sh
 git clone https://github.com/LilZeeCN/zee-rp.git
 cd zee-rp
@@ -90,6 +92,38 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 npm ci
 ```
+
+### Windows
+
+Native `.rp` reading, writing and generation run on Windows (Node 18+ / Python 3.10+).
+
+Use Node.js 24 and Python 3.12 to match desktop CI. Install from PowerShell.
+
+```powershell
+git clone https://github.com/LilZeeCN/zee-rp.git
+cd zee-rp
+py -3.12 -m venv .venv
+$env:ZEE_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path
+& $env:ZEE_PYTHON -m pip install pillow numpy jsonschema
+npm.cmd ci
+```
+
+- The generator needs a one-page, zero-widget RP9 project saved by your own Axure; set `AXURE_BLANK_TEMPLATE_RP9` to it.
+- Axure is auto-detected in common install directories and drive-root portable installs (`C:\AxureRP9.exe`, `D:\AxureRP9.exe`). Override with `AXURE_APP_RP9`; point at `DefaultSettings` with `AXURE_INSTALL_ROOT_RP9` (install root) or `AXURE_DEFAULT_SETTINGS_RP9` (direct path).
+- Multi-path environment variables use `;` on Windows (`AXURE_PROTECTED_PATHS`, `AXURE_WRITE_ROOT`).
+- RP/1 uses the native backend by default. Pass `--backend native` for older specs with `build-rp` or `generate`. The GUI backend, macOS menu automation and `tools/rp9_place.py` are macOS-only. `axvg paste` writes the payload to the Windows clipboard. Press Ctrl+V in Axure.
+- Screenshot reconstruction needs SciPy. Windows supports shape detection and requires you to supply text separately. OCR uses Apple Vision on macOS.
+- Windows and macOS CI cover RP/1 file parsing, compilation and output paths. Run `npm.cmd run test:mcp-generate` with your local Axure template to verify full MCP generation on Windows. `test:backend` also needs a compatible `Training/RP9 Tour.rp`. When the built-in tour has no `Discount Panel`, generation uses the first unnamed panel as a blank shell. To copy existing state content when several unnamed panels are available, specify a named panel using `AXURE_PANEL_TEMPLATE` and `AXURE_PANEL_TEMPLATE_NAME`.
+
+### Generate your first RP9 prototype
+
+Point to your blank project with `export AXURE_BLANK_TEMPLATE_RP9=/absolute/path/blank.rp` on macOS or `$env:AXURE_BLANK_TEMPLATE_RP9 = 'C:\AxureTests\blank.rp'` in Windows PowerShell. Replace the path with your own, then run the same generation command on either platform.
+
+```sh
+node scripts/proto.mjs generate --spec examples/authoring/mobile-cards.rp1 --out-dir output/mobile-cards --out-rp output/mobile-cards.rp --backend native
+```
+
+Open `output/mobile-cards.rp` in Axure RP9 to edit it.
 
 <details>
 <summary><b>Connect your MCP client</b> · Expand configuration</summary>
@@ -103,7 +137,7 @@ Replace the absolute paths with your installation, Python environment and RP9 bl
       "command": "node",
       "args": ["/absolute/path/zee-rp/bin/mcp.mjs"],
       "env": {
-        "PATH": "/absolute/path/zee-rp/.venv/bin:/usr/local/bin:/usr/bin:/bin",
+        "ZEE_PYTHON": "/absolute/path/zee-rp/.venv/bin/python",
         "AXURE_BLANK_TEMPLATE_RP9": "/absolute/path/my-rp9-blank.rp"
       }
     }
@@ -111,7 +145,7 @@ Replace the absolute paths with your installation, Python environment and RP9 bl
 }
 ```
 
-`PATH` must include Python with the installed dependencies. Use an absolute Node path in `command` if needed. Reconnect MCP after updates.
+The example uses macOS paths. On Windows, use paths such as `C:/work/zee-rp/bin/mcp.mjs`, `C:/work/zee-rp/.venv/Scripts/python.exe` and `C:/AxureTests/blank.rp` in the corresponding fields. Use an absolute Node path in `command` if needed. Reconnect MCP after updates.
 
 </details>
 

@@ -1,29 +1,52 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { syncBuiltinESMExports } from 'node:module';
-import { mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, existsSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildInteractiveRp } from '../scripts/proto.mjs';
 import { createBlankProject } from '../scripts/create-blank-project.mjs';
+import { createPanel } from '../scripts/create-panel-clone.mjs';
+import { fillPanelState } from '../scripts/fill-panel-state.mjs';
 import { writeNativeScene } from '../scripts/native-scene.mjs';
-import { readRecords } from '../scripts/rp-records.mjs';
-import { parsePayload, field } from '../scripts/parse-payload.mjs';
+import { encodeRecord, readRecords, replaceRecord } from '../scripts/rp-records.mjs';
+import { encodePayload, parsePayload, field } from '../scripts/parse-payload.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 import { addInteractions, createInteractionWriter } from '../scripts/ix-actions.mjs';
 import { mergePages } from '../scripts/merge-pages.mjs';
+import { pythonInvocation } from '../scripts/python.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const work = mkdtempSync(join(tmpdir(), 'rp-native-test-'));
 const spawn = childProcess.spawnSync;
+const spawnPy = (args, options) => {
+  const invocation = pythonInvocation(args);
+  return childProcess.spawnSync(invocation.command, invocation.args, options);
+};
 let checks = 0;
 const check = (label, fn) => { fn(); checks++; console.log(`PASS ${label}`); };
+function withEnvironment(changes, run) {
+  const previous = Object.entries(changes).map(([name, value]) => {
+    const old = process.env[name];
+    if (value === undefined) delete process.env[name];
+    else process.env[name] = value;
+    return [name, old];
+  });
+  try { return run(); }
+  finally {
+    for (const [name, value] of previous) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+}
 try {
   const reports = [];
   for (const name of ['booking', 'approval', 'inventory', 'survey', 'course', 'visual']) {
     const bundle = join(work, name);
-    const result = spawn('python3', [join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'examples/rp-language', `${name}.json`), '--out-dir', bundle], { encoding: 'utf8' });
+    const result = spawnPy([join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'examples/rp-language', `${name}.json`), '--out-dir', bundle], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     // Any subprocess here (including GUI wrappers) is a regression. Cache is absent.
     childProcess.spawnSync = (...args) => { throw new Error(`Forbidden native subprocess: ${args[0]}`); };
@@ -84,7 +107,7 @@ try {
   }
   check('panel aggregate initialization stays in valid native scopes', () => {
     const bundle = join(work, 'panel-aggregates');
-    const result = spawn('python3', [join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'test/fixtures/rp-aggregate-panel.json'), '--out-dir', bundle], { encoding: 'utf8' });
+    const result = spawnPy([join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'test/fixtures/rp-aggregate-panel.json'), '--out-dir', bundle], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     const report = buildInteractiveRp(join(bundle, 'compile-plan.json'), join(work, 'panel-aggregates.rp'));
     assert.deepEqual(report.threeZeros, { danglingRefs: 0, sentinelSlotsNonZero: 0, problems: 0 });
@@ -104,7 +127,7 @@ try {
       Object.values(spec.components ?? {}).forEach(c => label(c.root));
       const source = join(work, `${fixture}-named.json`), bundle = join(work, `${fixture}-named`);
       writeFileSync(source, JSON.stringify(spec));
-      const compiled = spawn('python3', [join(root, 'scripts/proto.py'), 'compile', '--spec', source, '--out-dir', bundle], { encoding: 'utf8' });
+      const compiled = spawnPy([join(root, 'scripts/proto.py'), 'compile', '--spec', source, '--out-dir', bundle], { encoding: 'utf8' });
       assert.equal(compiled.status, 0, compiled.stderr);
       const report = buildInteractiveRp(join(bundle, 'compile-plan.json'), join(work, `${fixture}-named.rp`));
       const bytes = readFileSync(report.outputRp), records = readRecords(bytes);
@@ -125,7 +148,7 @@ try {
   }
   check('startup aggregate fixture materializes all events with valid scopes', () => {
     const bundle = join(work, 'startup-aggregates');
-    const result = spawn('python3', [join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'test/fixtures/rp-aggregate-startup.json'), '--out-dir', bundle], { encoding: 'utf8' });
+    const result = spawnPy([join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'test/fixtures/rp-aggregate-startup.json'), '--out-dir', bundle], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     const report = buildInteractiveRp(join(bundle, 'compile-plan.json'), join(work, 'startup-aggregates.rp'));
     assert.equal(report.eventCoverage.declared, report.eventCoverage.materialized);
@@ -140,10 +163,13 @@ try {
       const graphs = readRecords(readFileSync(report.outputRp)).filter(r => r.strings).map(parsePayload);
       assert(!graphs.some(g => [...g.objects.values()].some(o => o.className === 'Axure:InteractionEvent')));
     });
-    check('explicit GUI backend is preserved', () => assert.throws(() => buildInteractiveRp(bookingPlan, join(work, 'gui.rp'), { backend: 'gui', cacheDir: join(work, 'gui-cache') }), /Forbidden native subprocess: python3/));
+    const guiError = process.platform === 'darwin'
+      ? /Forbidden native subprocess:/
+      : /GUI 后端依赖 macOS.*--backend native/;
+    check('explicit GUI backend follows the host contract', () => assert.throws(() => buildInteractiveRp(bookingPlan, join(work, 'gui.rp'), { backend: 'gui', cacheDir: join(work, 'gui-cache') }), guiError));
     const legacy = JSON.parse(readFileSync(bookingPlan)); delete legacy.language;
     const legacyPlan = join(work, 'legacy-plan.json'); writeFileSync(legacyPlan, JSON.stringify(legacy));
-    check('legacy specs retain GUI default', () => assert.throws(() => buildInteractiveRp(legacyPlan, join(work, 'legacy.rp'), { cacheDir: join(work, 'legacy-cache') }), /Forbidden native subprocess: python3/));
+    check('legacy specs retain GUI default', () => assert.throws(() => buildInteractiveRp(legacyPlan, join(work, 'legacy.rp'), { cacheDir: join(work, 'legacy-cache') }), guiError));
     check('invalid backend fails before output', () => {
       const out = join(work, 'invalid.rp');
       assert.throws(() => buildInteractiveRp(bookingPlan, out, { backend: 'invalid' }), /backend/); assert(!existsSync(out));
@@ -152,6 +178,100 @@ try {
   const blank = join(work, 'blank.rp'); createBlankProject(blank, { version: 9 });
   const seed = readFileSync(blank);
   const scene = { masters: {}, imageMap: {}, scene: { items: [{ itemType: 1, name: 'probe', type: 0, rect: { location: { x: 0, y: 0 }, size: { width: 10, height: 10 } }, corners: [0,0,0,0], backgroundFills: [], strokes: [] }] } };
+  check('native move modes retain distinct values, animation defaults and readable labels', () => {
+    const expected = [
+      ['location', 0, 300, 1, '移动到'],
+      ['delta', 1, 300, 1, '相对移动'],
+      ['drag', 2, 0, 0, '跟随拖动'],
+      ['drag-x', 3, 0, 0, '跟随水平拖动'],
+      ['drag-y', 4, 0, 0, '跟随垂直拖动'],
+      ['locationBeforeDrag', 5, 300, 1, '回到拖动前的位置'],
+      ['withThis', 6, 300, 1, '随触发元件移动'],
+    ];
+    const event = { event: 'OnDrag', actions: expected.map(([mode]) => ({ type: 'move', mode })) };
+    const page = writeNativeScene(seed, scene);
+    const { file } = addInteractions(page, 'probe', [event]);
+    const graph = parsePayload(readRecords(file).find(record => record.className === 'Axure:Page'));
+    const moves = [...graph.objects.values()].filter(object => object.className === 'Axure:MoveWidgetInfo');
+    assert.deepEqual(moves.map(move => ['MoveType', 'Duration', 'Easing'].map(key => field(move.body, key).value)),
+      expected.map(([, type, duration, easing]) => [type, duration, easing]));
+    const interactions = readRp(file).pages[0].widgets.find(widget => widget.name === 'probe').interactions;
+    assert.deepEqual(interactions[0].cases[0].actions.map(action => action.human.split(' ')[0]),
+      expected.map(([, , , , label]) => label));
+  });
+  check('an explicitly named panel template cannot silently select a different panel', () => {
+    withEnvironment({ AXURE_PANEL_TEMPLATE_NAME: 'No such panel in the fixture' }, () => {
+      const pageIndex = readRp(seed).pages[0].record;
+      assert.throws(() => createPanel(seed, { pageIndex, name: 'Template probe' }), /Missing template panel: No such panel/);
+    });
+  });
+  const pageName = readRp(seed).pages[0].name;
+  const panelOptions = name => ({ pageName, name, states: ['Content'] });
+  const localAction = [{ event: 'OnClick', actions: [{ type: 'hide', target: 'probe' }] }];
+  const stateLayout = addInteractions(writeNativeScene(seed, scene), 'probe', localAction).file;
+  const innerShell = createPanel(seed, panelOptions('Fixture Panel')).file;
+  const fillOptions = panel => ({ sourcePage: pageName, targetPage: pageName, panel, state: 'Content' });
+  const nestedSource = fillPanelState(stateLayout, innerShell, fillOptions('Fixture Panel')).file;
+
+  check('Windows RP9 can seed a blank panel from a built-in Tour with two unnamed panels', () => {
+    let tour = createPanel(innerShell, panelOptions('Other template panel')).file;
+    tour = addInteractions(tour, 'Fixture Panel', [{ event: 'OnClick', actions: [{ type: 'wait', ms: 10 }] }]).file;
+    const record = readRecords(tour).find(r => r.className === 'Axure:Page');
+    const graph = parsePayload(record), strings = [...record.strings];
+    const panels = [...graph.objects.values()].filter(o => o.className === 'Axure:DiagramObject:DynamicPanel');
+    assert.equal(panels.length, 2);
+    let empty = strings.indexOf('');
+    if (empty === -1) { empty = strings.length; strings.push(''); }
+    for (const panel of panels) field(field(panel.body, 'name-block'), 'text').value = empty + 1;
+    tour = replaceRecord(tour, record, encodeRecord(record, strings, encodePayload(graph.roots)));
+    const settings = join(work, 'simulated-win-settings');
+    mkdirSync(join(settings, 'Training'), { recursive: true });
+    writeFileSync(join(settings, 'Training', 'RP9 Tour.rp'), tour);
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: 'win32' });
+    try {
+      withEnvironment({ AXURE_DEFAULT_SETTINGS_RP9: settings, AXURE_PANEL_TEMPLATE: undefined, AXURE_PANEL_TEMPLATE_NAME: undefined }, () => {
+        const result = createPanel(seed, panelOptions('new panel'));
+        const summary = readRp(result.file);
+        assert.equal(summary.pages[0].widgets[0].name, 'new panel');
+        assert.equal(summary.pages[0].widgets[0].interactions?.length ?? 0, 0);
+        assert.equal(summary.counts.panelStates, 1);
+        assert.equal(summary.counts.danglingRefs, 0);
+        assert.throws(() => createPanel(seed, { ...panelOptions('copy'), copyTemplateStates: true }), /multiple unnamed panels/);
+      });
+    } finally { Object.defineProperty(process, 'platform', platform); }
+  });
+  check('nested-panels builds with a template whose original state contained widget actions', () => {
+    const template = join(work, 'panel-with-old-actions.rp');
+    writeFileSync(template, nestedSource);
+    withEnvironment({ AXURE_PANEL_TEMPLATE: template, AXURE_PANEL_TEMPLATE_NAME: 'Fixture Panel' }, () => {
+      const result = buildInteractiveRp(join(work, 'nested-panels-named', 'compile-plan.json'), join(work, 'nested-from-active-template.rp'));
+      assert.deepEqual(result.threeZeros, { danglingRefs: 0, sentinelSlotsNonZero: 0, problems: 0 });
+      assert.equal(result.eventCoverage.materialized, result.eventCoverage.declared);
+      assert(result.eventCoverage.declared > 0);
+    });
+  });
+  check('nested state import preserves live interactions and rejects live out-of-layout targets', () => {
+    const record = readRecords(nestedSource).find(r => r.className === 'Axure:PanelState');
+    const graph = parsePayload(record);
+    const path = [...graph.objects.values()].find(o => o.className === 'Axure:DiagramObjectPath');
+    const ids = graph.roots.find(n => n.tag === 0x1e).values;
+    const nullId = ids.indexOf('0'.repeat(32)) + 1;
+    assert(nullId > 0);
+    ids.push(randomBytes(16).toString('hex'));
+    const orphan = { ...structuredClone(path), id: ids.length };
+    field(orphan.body, 'object-id').value = nullId;
+    graph.roots.splice(graph.roots.length - 1, 0, orphan);
+    const encodeSource = () => replaceRecord(nestedSource, record, encodeRecord(record, record.strings, encodePayload(graph.roots)));
+    const outerShell = createPanel(seed, panelOptions('Outer')).file;
+    const { file } = fillPanelState(encodeSource(), outerShell, fillOptions('Outer'));
+    const paths = readRecords(file).filter(r => r.className === 'Axure:PanelState')
+      .flatMap(r => [...parsePayload(r).objects.values()]).filter(o => o.className === 'Axure:DiagramObjectPath');
+    assert.equal(paths.length, 1);
+    assert.equal(readRp(file).counts.danglingRefs, 0);
+    field(path.body, 'object-id').value = nullId;
+    assert.throws(() => fillPanelState(encodeSource(), outerShell, fillOptions('Outer')), /State import interaction targets must belong/);
+  });
   check('batched events preserve sequential cross-page resolution and replacement without changing the input', () => {
     const page = writeNativeScene(seed, scene);
     const input = mergePages([{ buf: page, name: 'A' }, { buf: page, name: 'B' }]);

@@ -7,7 +7,8 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listCommands } from './registry.mjs';
-import { assertNotProtected, assertWritable, AxureSession } from './engine.mjs';
+import { assertNotProtected, assertWritable, defaultWriteRoot, AxureSession } from './engine.mjs';
+import { spawnPythonSync } from './python.mjs';
 import { readRp } from './rp-read.mjs';
 import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
 import { parsePayload, encodePayload, field, walkNodes } from './parse-payload.mjs';
@@ -1088,11 +1089,11 @@ function loadSpecObjectFromSource(sourcePath) {
   if (absPath.toLowerCase().endsWith('.json')) {
     return JSON.parse(readFileSync(absPath, 'utf8'));
   }
-  const proc = spawnSync('python3', [RP_LANG_CLI, 'dsl-to-json', '--spec', absPath], { encoding: 'utf8' });
+  const proc = spawnPythonSync([RP_LANG_CLI, 'dsl-to-json', '--spec', absPath], { encoding: 'utf8' });
   if (proc.status !== 0) {
     let diagPayload = null;
     try { diagPayload = JSON.parse((proc.stderr || proc.stdout || '').trim()); } catch {}
-    const firstMsg = diagPayload?.diagnostics?.[0]?.message || (proc.stderr || proc.stdout || '').trim();
+    const firstMsg = diagPayload?.diagnostics?.[0]?.message || (proc.stderr || proc.stdout || proc.error?.message || '').trim();
     const err = new Error(`解析 RP/1 源码失败：${firstMsg}`);
     if (Array.isArray(diagPayload?.diagnostics)) err.diagnostics = diagPayload.diagnostics;
     throw err;
@@ -1126,7 +1127,7 @@ export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sour
     if (typeof requestedOutput !== 'string' || !requestedOutput.trim()) {
       throw new Error('output 必须是有效的 .rp 路径。');
     }
-    const defaultRoot = (process.env.AXURE_WRITE_ROOT || '').split(':').filter(Boolean)[0] || process.cwd();
+    const defaultRoot = defaultWriteRoot();
     let effectiveRequestedOutput = requestedOutput;
     if (requestedOutput === 'auto') {
       const baseDir = resolvedSourceFile ? dirname(resolvedSourceFile) : defaultRoot;
@@ -1536,7 +1537,7 @@ with open(out_p, 'w', encoding='utf-8') as f:
         json.dump(res['spec'], f, ensure_ascii=False, indent=2)
         f.write('\\n')
 `;
-      const proc = spawnSync('python3', ['-c', pyScript], { encoding: 'utf8' });
+      const proc = spawnPythonSync(['-c', pyScript], { encoding: 'utf8' });
       if (proc.status !== 0 || !pathExists(reportPath)) {
         throw Object.assign(new Error(`lift 失败：${(proc.stderr || proc.stdout || '').trim()}`), { code: 'E_LIFT_FAILED' });
       }
@@ -1708,7 +1709,7 @@ with open(${JSON.stringify(reportPath)}, 'w', encoding='utf-8') as f:
     json.dump(res, f, ensure_ascii=False, indent=2)
 sys.exit(0 if res.get('ok') else 2)
 `;
-    const proc = spawnSync('python3', ['-c', pyMerge], { encoding: 'utf8' });
+    const proc = spawnPythonSync(['-c', pyMerge], { encoding: 'utf8' });
     const report = pathExists(reportPath) ? JSON.parse(readFileSync(reportPath, 'utf8')) : null;
     if (proc.status === 2 || (report && !report.ok)) {
       if (report?.status === 'layout_gate_failed' || report?.code === 'E_MERGE_LAYOUT_GATE') {
@@ -1939,7 +1940,7 @@ function generateFromImage({
           if (typeof r === 'string') patchArgs.push('--replace', r);
           else if (r && typeof r.old === 'string' && typeof r.new === 'string') patchArgs.push('--replace', `${r.old}=${r.new}`);
         }
-        const patchProc = spawnSync('python3', patchArgs, { encoding: 'utf8' });
+        const patchProc = spawnPythonSync(patchArgs, { encoding: 'utf8' });
         if (patchProc.status !== 0) {
           throw Object.assign(new Error(`OCR 文案替换失败：${(patchProc.stderr || patchProc.stdout || '').trim()}`), { code: 'E_TRACE_PATCH' });
         }
@@ -1948,7 +1949,7 @@ function generateFromImage({
       const refForCrop = imagePath || (curSpec.reference && pathExists(curSpec.reference) ? curSpec.reference : null);
       const hasUncropped = (curSpec.frames ?? []).some(f => (f.children ?? []).some(c => c.kind === 'image' && c.crop && !c.imageKey));
       if (hasUncropped && refForCrop) {
-        const cropProc = spawnSync('python3', [TRACE_PY, 'crop', specPath, '--source', refForCrop, '-o', specPath, '--scale', String(curSpec.scale ?? effectiveScale)], { encoding: 'utf8' });
+        const cropProc = spawnPythonSync([TRACE_PY, 'crop', specPath, '--source', refForCrop, '-o', specPath, '--scale', String(curSpec.scale ?? effectiveScale)], { encoding: 'utf8' });
         if (cropProc.status !== 0) {
           throw Object.assign(new Error(`图片局部媒体裁切失败：${(cropProc.stderr || cropProc.stdout || '').trim()}`), { code: 'E_TRACE_CROP' });
         }
@@ -1959,7 +1960,7 @@ function generateFromImage({
         if (typeof r === 'string') draftArgs.push('--replace', r);
         else if (r && typeof r.old === 'string' && typeof r.new === 'string') draftArgs.push('--replace', `${r.old}=${r.new}`);
       }
-      const draftProc = spawnSync('python3', draftArgs, { encoding: 'utf8' });
+      const draftProc = spawnPythonSync(draftArgs, { encoding: 'utf8' });
       if (draftProc.status !== 0 || !pathExists(specPath)) {
         throw Object.assign(new Error(`图片识别与分层提取失败：${(draftProc.stderr || draftProc.stdout || '').trim()}`), { code: 'E_TRACE_DRAFT' });
       }
@@ -2002,7 +2003,7 @@ function generateFromImage({
     }
 
     stage = 'rp9_spec';
-    const rp9Proc = spawnSync('python3', [TRACE_PY, 'rp9-spec', specPath, '-o', rp9SpecPath, '--assets-dir', assetsDir], { encoding: 'utf8' });
+    const rp9Proc = spawnPythonSync([TRACE_PY, 'rp9-spec', specPath, '-o', rp9SpecPath, '--assets-dir', assetsDir], { encoding: 'utf8' });
     if (rp9Proc.status !== 0 || !pathExists(rp9SpecPath)) {
       throw Object.assign(new Error(`转换 RP9 原生场景规格失败：${(rp9Proc.stderr || rp9Proc.stdout || '').trim()}`), { code: 'E_RP9_SPEC' });
     }
@@ -2087,7 +2088,7 @@ if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIden
     if (refSource && pathExists(refSource)) {
       const verifyArgs = [TRACE_PY, 'verify', specPath, '--source', refSource, '-o', artifactDir, '--scale', String(traceSpec.scale ?? effectiveScale)];
       if (previewImgPath) verifyArgs.push('--preview', previewImgPath);
-      const verifyProc = spawnSync('python3', verifyArgs, { encoding: 'utf8' });
+      const verifyProc = spawnPythonSync(verifyArgs, { encoding: 'utf8' });
       const verifyReportPath = join(artifactDir, 'diff-report.json');
       if (pathExists(verifyReportPath)) {
         visualDiff = JSON.parse(readFileSync(verifyReportPath, 'utf8'));
@@ -2248,7 +2249,7 @@ const sessionHandlers = {
     }
     const digest = sha256Of(target);
     state.timeline.push({ op: 'save', at: now(), from: tail, path: target, sha256: digest });
-    return { path: as.startsWith('/') ? as : join(process.cwd(), as), physicalPath: target, sha256: digest, fromChainTail: tail };
+    return { path: isAbsolute(as) ? as : join(process.cwd(), as), physicalPath: target, sha256: digest, fromChainTail: tail };
   },
   locate({ path, rp, file, rpFile, query, page, type, limit = 50, offset = 0 } = {}) {
     const targetPath = path ?? rp ?? file ?? rpFile;

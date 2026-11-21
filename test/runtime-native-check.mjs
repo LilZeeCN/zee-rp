@@ -9,9 +9,11 @@ import { fileURLToPath } from 'node:url';
 import { buildInteractiveRp } from '../scripts/proto.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { parsePayload, field } from '../scripts/parse-payload.mjs';
+import { pythonInvocation } from '../scripts/python.mjs';
 const root=join(dirname(fileURLToPath(import.meta.url)),'..');
 const work=mkdtempSync(join(tmpdir(),'rp-runtime-native-'));
 const spawn=childProcess.spawnSync;
+const spawnPy=(args,options)=>{const invocation=pythonInvocation(args);return spawn(invocation.command,invocation.args,options);};
 let checks=0;
 const check=(name,fn)=>{fn(); checks++; console.log('PASS '+name);};
 const fixture=name=>JSON.parse(readFileSync(join(root,'examples/rp-language',name+'.json')));
@@ -25,7 +27,7 @@ const programs=[['runtime',base],['empty',empty],['two-instances',twin],['state-
 try {
   for(const [name,source] of programs){
     const spec=join(work,name+'.json'),bundle=join(work,name);writeFileSync(spec,JSON.stringify(source));
-    const compiled=spawn('python3',[join(root,'scripts/proto.py'),'compile','--spec',spec,'--out-dir',bundle],{encoding:'utf8'});
+    const compiled=spawnPy([join(root,'scripts/proto.py'),'compile','--spec',spec,'--out-dir',bundle],{encoding:'utf8'});
     assert.equal(compiled.status,0,name+": "+compiled.stderr+compiled.stdout);
     childProcess.spawnSync=(...args)=>{throw Error('Forbidden subprocess '+args[0]);};syncBuiltinESMExports();
     let report;

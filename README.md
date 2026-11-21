@@ -82,6 +82,8 @@ page #notes name="手记" device=iphone-17-pro
 
 准备 **Node.js 18+** 和 **Python 3.10+**。原生生成另需本机 Axure，以及你自己在 RP9 中保存的单页空白工程。
 
+### macOS
+
 ```sh
 git clone https://github.com/LilZeeCN/zee-rp.git
 cd zee-rp
@@ -90,6 +92,38 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 npm ci
 ```
+
+### Windows 支持
+
+原生 `.rp` 的读取、写入和生成可以在 Windows 上运行（Node 18+ / Python 3.10+）。
+
+用 Node.js 24 和 Python 3.12 可以复用桌面 CI 的环境。在 PowerShell 中安装。
+
+```powershell
+git clone https://github.com/LilZeeCN/zee-rp.git
+cd zee-rp
+py -3.12 -m venv .venv
+$env:ZEE_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path
+& $env:ZEE_PYTHON -m pip install pillow numpy jsonschema
+npm.cmd ci
+```
+
+- 生成器需要你用本机 Axure 保存一个单页、零元件 RP9 工程，并把 `AXURE_BLANK_TEMPLATE_RP9` 指向它。
+- Axure 会在常见安装目录和盘符根目录的便携版中自动探测（`C:\AxureRP9.exe`、`D:\AxureRP9.exe`）；可用 `AXURE_APP_RP9` 覆盖，用 `AXURE_INSTALL_ROOT_RP9`（安装根目录）或 `AXURE_DEFAULT_SETTINGS_RP9`（直接路径）指向 `DefaultSettings`。
+- 多路径环境变量在 Windows 上用 `;` 分隔（`AXURE_PROTECTED_PATHS`、`AXURE_WRITE_ROOT`）。
+- RP/1 默认使用原生后端。用旧规格调用 `build-rp` 或 `generate` 时需传 `--backend native`。GUI 后端、macOS 菜单自动化与 `tools/rp9_place.py` 仅支持 macOS。`axvg paste` 会把负载写入 Windows 剪贴板，在 Axure 中按 Ctrl+V 粘贴。
+- 截图重建需额外安装 SciPy。Windows 支持形状识别，文字需另行提供。OCR 使用 macOS 的 Apple Vision。
+- Windows 和 macOS CI 都覆盖 RP/1 文件解析、编译和输出目录。用本机 Axure 模板验证完整的 MCP 生成，请运行 `npm.cmd run test:mcp-generate`。`test:backend` 还需要兼容的 `Training/RP9 Tour.rp`。生成空白动态面板时，如果内置教学工程没有 `Discount Panel`，会按工程顺序选取第一个无名面板的外壳。如果要从多个无名面板中复制已有状态内容，请通过 `AXURE_PANEL_TEMPLATE` 和 `AXURE_PANEL_TEMPLATE_NAME` 指定一个具名面板。
+
+### 生成第一个 RP9 原型
+
+在 macOS 用 `export AXURE_BLANK_TEMPLATE_RP9=/绝对路径/blank.rp` 指定空白工程。在 Windows PowerShell 用 `$env:AXURE_BLANK_TEMPLATE_RP9 = 'C:\AxureTests\blank.rp'`。换成自己的文件路径，两边执行同一条生成命令。
+
+```sh
+node scripts/proto.mjs generate --spec examples/authoring/mobile-cards.rp1 --out-dir output/mobile-cards --out-rp output/mobile-cards.rp --backend native
+```
+
+用 Axure RP9 打开 `output/mobile-cards.rp` 继续编辑。
 
 <details>
 <summary><b>连接你的 MCP 客户端</b> · 展开配置</summary>
@@ -103,7 +137,7 @@ npm ci
       "command": "node",
       "args": ["/absolute/path/zee-rp/bin/mcp.mjs"],
       "env": {
-        "PATH": "/absolute/path/zee-rp/.venv/bin:/usr/local/bin:/usr/bin:/bin",
+        "ZEE_PYTHON": "/absolute/path/zee-rp/.venv/bin/python",
         "AXURE_BLANK_TEMPLATE_RP9": "/absolute/path/my-rp9-blank.rp"
       }
     }
@@ -111,7 +145,7 @@ npm ci
 }
 ```
 
-`PATH` 应包含安装了依赖的 Python；Node 不在默认路径时，`command` 也使用绝对路径。安装更新后重新连接 MCP。
+上面是 macOS 路径示例。Windows 可用 `C:/work/zee-rp/bin/mcp.mjs`、`C:/work/zee-rp/.venv/Scripts/python.exe` 和 `C:/AxureTests/blank.rp` 填写对应字段。Node 不在默认路径时，`command` 也使用绝对路径。安装更新后重新连接 MCP。
 
 </details>
 

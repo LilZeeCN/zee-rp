@@ -12,8 +12,13 @@ import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { pythonInvocation } from '../scripts/python.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
+const execPy = (args, options) => {
+  const invocation = pythonInvocation(args);
+  return execFileSync(invocation.command, invocation.args, options);
+};
 const ROOT = resolve(HERE, '..');
 const PROTO = join(ROOT, 'scripts', 'proto.mjs');
 const LAB = join(ROOT, 'examples', 'lab-mobile-lowfi.proto.json');
@@ -369,7 +374,7 @@ try {
     failGates.has('no_missing_glyphs') && failGates.has('no_container_overflow'),
     JSON.stringify(negRes.audit.failures));
   // 通过 audit_prototype 对全部 10 项结构门禁逐一触发，确认 10/10 门禁均产出结构化 failures[] 条目
-  const tenGatesOut = execFileSync('python3', ['-c', `
+  const tenGatesOut = execPy(['-c', `
 import json, sys
 sys.path.insert(0, ${JSON.stringify(join(ROOT, 'scripts'))})
 import proto
@@ -435,7 +440,7 @@ print(json.dumps({"gates": gates_in_failures, "count": len(gates_in_failures)}))
     `got=${lab.audit.metrics.whitespace_ratio_pct}, expected=${expectedWeightedWs}, range=${JSON.stringify(lab.audit.metrics.whitespace_ratio_range)}`);
 
   // 13) v3.5 Knuth-Plass 动态规划全局最优断行 vs Greedy 贪心断行对比验证
-  const kpCheckOut = execFileSync('python3', ['-c', `
+  const kpCheckOut = execPy(['-c', `
 import json, sys
 sys.path.insert(0, ${JSON.stringify(join(ROOT, 'scripts'))})
 import proto

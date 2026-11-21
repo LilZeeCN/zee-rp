@@ -1,10 +1,10 @@
 import { BoundedCache, textWeight } from './bounded-cache.mjs';
-import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertNotProtected } from '../scripts/engine.mjs';
+import { spawnPythonSync } from '../scripts/python.mjs';
 import { ensureCoreComponentsRegistered } from './component-contracts.mjs';
 import { normalizeInteractionSpec } from './interactions.mjs';
 import { INTERACTION_LINT_CODES, lintDocumentInteractions } from './interaction-lint.mjs';
@@ -320,7 +320,7 @@ export function parseSourceSpec(sourcePathOrObject) {
   const baseDir = dirname(absPath);
   const ext = extname(absPath).toLowerCase();
   if (ext === '.rp1') {
-    const proc = spawnSync('python3', ['-B', '-c', `
+    const proc = spawnPythonSync(['-B', '-c', `
 import json, sys
 sys.path.insert(0, sys.argv[1])
 from rp_dsl import dsl_to_spec
@@ -328,7 +328,7 @@ with open(sys.argv[2], encoding="utf-8") as f:
     print(json.dumps(dsl_to_spec(f.read()), ensure_ascii=False))
 `, join(ROOT, 'scripts'), absPath], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
     if (proc.status !== 0) {
-      throw Object.assign(new Error(`Failed to parse .rp1 DSL: ${proc.stderr || proc.stdout}`), { code: 'E_DSL_PARSE' });
+      throw Object.assign(new Error(`Failed to parse .rp1 DSL: ${proc.stderr || proc.stdout || proc.error?.message}`), { code: 'E_DSL_PARSE' });
     }
     return { spec: normalizeSpecShorthand(JSON.parse(proc.stdout)), baseDir, sourcePath: absPath };
   }

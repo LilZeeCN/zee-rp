@@ -7,14 +7,19 @@ import { fileURLToPath } from 'node:url';
 import { buildInteractiveRp } from '../scripts/proto.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { parsePayload, field } from '../scripts/parse-payload.mjs';
+import { pythonInvocation } from '../scripts/python.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const work = mkdtempSync(join(tmpdir(), 'rp-visual-check-'));
+const spawnPy = (args, options) => {
+  const invocation = pythonInvocation(args);
+  return spawnSync(invocation.command, invocation.args, options);
+};
 let checks = 0;
 const check = (label, fn) => { fn(); checks++; console.log('PASS', label); };
 try {
   const compiler = process.argv[2] ?? join(root, 'scripts/proto.py');
-  const run = spawnSync('python3', [compiler, 'compile', '--spec', join(root, 'test/fixtures/rp-native-visual.json'), '--out-dir', work], {
+  const run = spawnPy([compiler, 'compile', '--spec', join(root, 'test/fixtures/rp-native-visual.json'), '--out-dir', work], {
     encoding: 'utf8', env: { ...process.env, PYTHONPATH: join(root, 'scripts') },
   });
   assert.equal(run.status, 0, run.stderr);

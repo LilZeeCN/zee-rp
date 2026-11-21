@@ -11,6 +11,13 @@ const CHROME_CANDIDATES = [
   '/usr/bin/google-chrome-stable',
   '/usr/bin/chromium',
   '/usr/bin/chromium-browser',
+  // Windows 的 Chrome / Chromium 默认装在用户目录或 Program Files 下。
+  ...[
+    [process.env.LOCALAPPDATA, 'Google/Chrome/Application/chrome.exe'],
+    [process.env.ProgramFiles, 'Google/Chrome/Application/chrome.exe'],
+    [process.env['ProgramFiles(x86)'], 'Google/Chrome/Application/chrome.exe'],
+    [process.env.LOCALAPPDATA, 'Chromium/Application/chrome.exe'],
+  ].filter(([base]) => Boolean(base)).map(([base, rest]) => join(base, ...rest.split('/'))),
 ].filter(Boolean);
 
 export function findChromeExecutable() {

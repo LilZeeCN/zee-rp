@@ -9,12 +9,42 @@ widgets, and Repeater row scopes.
 """
 import json
 import os
+import sys
 from pathlib import Path
 import subprocess
 from rp_language import ReferenceRuntime, compile_language
 
-AXURE_SCRIPTS_DIR = Path(os.environ.get("AXURE_RUNTIME_SCRIPTS",
-    "/Applications/Axure RP 9.app/Contents/Resources/DefaultSettings/Prototype_Files/resources/scripts/axure"))
+
+def _default_axure_scripts_dir():
+    """Axure 运行时脚本目录：显式环境变量 > 平台默认安装位置。"""
+    override = os.environ.get("AXURE_RUNTIME_SCRIPTS")
+    if override:
+        return Path(override)
+    candidates = []
+    if sys.platform == "darwin":
+        candidates.append(Path("/Applications/Axure RP 9.app/Contents/Resources/DefaultSettings"))
+    elif os.name == "nt":
+        settings = os.environ.get("AXURE_DEFAULT_SETTINGS_RP9")
+        if settings:
+            candidates.append(Path(settings))
+        install_root = os.environ.get("AXURE_INSTALL_ROOT_RP9")
+        if install_root:
+            candidates += [Path(install_root) / "DefaultSettings", Path(install_root)]
+        for base in (os.environ.get("ProgramFiles(x86)"), os.environ.get("ProgramFiles")):
+            if base:
+                candidates.append(Path(base) / "Axure" / "Axure RP 9" / "DefaultSettings")
+        for drive in ("C:", "D:", "E:"):
+            candidates.append(Path(drive + os.sep) / "DefaultSettings")
+    candidates.append(Path.home() / "Axure" / "DefaultSettings")
+    for candidate in candidates:
+        scripts = candidate / "Prototype_Files" / "resources" / "scripts" / "axure"
+        if scripts.exists():
+            return scripts
+    first = candidates[0] if candidates else Path(".")
+    return first / "Prototype_Files" / "resources" / "scripts" / "axure"
+
+
+AXURE_SCRIPTS_DIR = _default_axure_scripts_dir()
 
 NODE_ORACLE_RUNNER = r"""
 const fs = require('node:fs');

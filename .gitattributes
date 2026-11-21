@@ -1,0 +1,12 @@
+# 源码统一 LF，避免 Windows autocrlf 改变源文件指纹。
+* text=auto eol=lf
+
+# 二进制资产不做换行转换。
+*.rp binary
+*.rplib binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary

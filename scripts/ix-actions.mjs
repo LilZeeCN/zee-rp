@@ -112,7 +112,8 @@ const EASE = {
   easeOutQuint: 20, easeOutExpo: 21, easeOutCirc: 22, easeOutBack: 23, easeOutElastic: 24,
   easeOutBounce: 25, easeInOutSine: 26, easeInOutQuad: 27, easeInOutCubic: 28
 };
-const MOVE_BEHAVIOR = { location: 0, delta: 1, drag: 2, withThis: 6 };
+// Axure.Constants.MoveBehavior：与运行时 move.js 的 switch 分支同序（location/delta/drag/dragX/dragY/locationBeforeDrag/withThis）。
+const MOVE_BEHAVIOR = { location: 0, delta: 1, drag: 2, 'drag-x': 3, 'drag-y': 4, locationBeforeDrag: 5, withThis: 6 };
 const SET_STATE = { diagram: 0, next: 1, previous: 2, value: 3, current: 4 };
 const TARGET_TYPE = { url: 0, page: 1, reload: 2, back: 3 };
 
@@ -626,20 +627,23 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
       }
       case 'move': case 'set-position': {
         const { path } = paths();
-        const validModes = ['location', 'delta', 'drag', 'withThis'];
         const mode = spec.mode !== undefined ? String(spec.mode) : (type === 'move' ? 'delta' : 'location');
-        if (!validModes.includes(mode)) {
-          throw new Error(`Unknown move mode "${spec.mode}". Supported: ${validModes.join(', ')}`);
+        if (!Object.hasOwn(MOVE_BEHAVIOR, mode)) {
+          throw new Error(`Unknown move mode "${spec.mode}". Supported: ${Object.keys(MOVE_BEHAVIOR).join(', ')}`);
         }
         if (spec.duration !== undefined) {
           const dur = num(spec.duration);
           if (!Number.isFinite(dur) || dur < 0) throw new Error('move duration must be a non-negative finite number');
         }
-        const delta = mode !== 'location';
+        const moveType = MOVE_BEHAVIOR[mode];
+        // 拖动类（MoveType 2/3/4）跟随指针；drag-x / drag-y 即 Axure 的「限制水平/垂直方向拖动」。
+        // 拖动跟随必须是 0 时长，否则会带着缓动慢慢追，松手后还在滑。
+        const dragMode = ['drag', 'drag-x', 'drag-y'].includes(mode);
         const moveInfo = info('Axure:MoveWidgetInfo', {
-          Easing: int(pick(EASE, spec.easing ?? 'swing', 'easing')), Duration: f64(spec.duration ?? 300),
+          Easing: int(pick(EASE, spec.easing ?? (dragMode ? 'none' : 'swing'), 'easing')),
+          Duration: f64(spec.duration ?? (dragMode ? 0 : 300)),
           XValue: ref(literal(spec.x ?? 0).id), YValue: ref(literal(spec.y ?? 0).id),
-          MoveType: int(delta ? MOVE_BEHAVIOR.delta : MOVE_BEHAVIOR.location),
+          MoveType: int(moveType),
           BoundaryCondition: ref(nullId), MoveTrajectory: int(0), scope: dict([])
         });
         return obj(newGuid(), 'Axure:InteractionMoveWidgetAction', {

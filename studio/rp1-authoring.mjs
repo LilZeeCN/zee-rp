@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process';
+import { spawnPythonSync } from '../scripts/python.mjs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { buildNodeIndex, normalizeNodeInteractions, normalizeSpecShorthand } from './document.mjs';
@@ -117,7 +117,7 @@ function parseSource(source, pageId) {
     }
     return { line: Math.max(1, span.line - 2), column: Math.max(1, span.column - 2 + indent) };
   };
-  const proc = spawnSync('python3', ['-B', '-c', PARSE, SCRIPTS], { input: wrapped, encoding: 'utf8', timeout: 10000, maxBuffer: 8 * 1024 * 1024 });
+  const proc = spawnPythonSync(['-B', '-c', PARSE, SCRIPTS], { input: wrapped, encoding: 'utf8', timeout: 10000, maxBuffer: 8 * 1024 * 1024 });
   if (proc.error || proc.status !== 0) fail('E_RP1_PARSER', 'RP/1 解析器未能完成；请检查 Python 与片段大小', { cause: proc.error?.message || proc.stderr?.slice(0, 1000) });
   let parsed;
   try { parsed = JSON.parse(proc.stdout); } catch { fail('E_RP1_PARSER', 'RP/1 解析器返回无效结果'); }

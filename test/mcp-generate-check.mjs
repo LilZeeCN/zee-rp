@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
+import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -15,7 +15,7 @@ if (keep) mkdirSync(work, { recursive: false });
 const spec = JSON.parse(readFileSync(join(root, 'examples/rp-language/mcp-three-pages.json')));
 const protectedPath = join(work, 'protected.rp');
 const transport = new StdioClientTransport({ command: process.execPath, args: [join(root, 'bin/mcp.mjs')],
-  env: { ...process.env, AXURE_WRITE_ROOT: work, AXURE_PROTECTED_PATHS: protectedPath }, stderr: 'pipe' });
+  env: { ...process.env, AXURE_WRITE_ROOT: [work, join(work, 'second-root')].join(delimiter), AXURE_PROTECTED_PATHS: protectedPath }, stderr: 'pipe' });
 const client = new Client({ name: 'mcp-prototype-acceptance', version: '1.0.0' });
 const results = [];
 let generated;
@@ -119,6 +119,16 @@ try {
     assert(rel.previews?.list);
     const over = await call('generate_prototype', { spec, output: 'relative-out.rp', overwrite: true, compact: true });
     assert.equal(over.status, 'completed');
+  });
+  await check('RP/1 source file generates a native RP9 with a relative output', async () => {
+    const source = join(root, 'examples/authoring/mobile-cards.rp1');
+    const result = await call('generate_prototype', { source, output: '从源码生成.rp', compact: false });
+    assert.equal(result.output, join(realpathSync.native(work), '从源码生成.rp'));
+    assert.deepEqual(result.structure, { unparseable: 0, danglingRefs: 0, problems: 0 });
+    assert.equal(result.eventCoverage.declared, result.eventCoverage.materialized);
+    const rp = JSON.parse((await call('rp_read', { args: [result.output, '--json'] })).stdout);
+    assert.equal(rp.pages.length, result.pages.length);
+    assert.ok(rp.counts.widgets > 0);
   });
   await check('existing, protected and outside-root outputs fail before modifying a file', async () => {
     const digest = createHash('sha256').update(readFileSync(generated.output)).digest('hex');

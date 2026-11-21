@@ -1,11 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import os from 'node:os';
 import { createEmptyStudioDocument, computeContentHash } from '../studio/document.mjs';
 import { StudioPersistence } from '../studio/persistence.mjs';
-import { startStudioServer } from '../studio/server.mjs';
+import { StudioServer, startStudioServer } from '../studio/server.mjs';
 
 function readNormalizeRecords(projectDir) {
   const path = join(projectDir, 'history', 'transactions.jsonl');
@@ -23,6 +23,20 @@ async function startOnce(projectDir) {
   await studio.close();
   return ctx;
 }
+
+test('failed instance registration closes the listening server', async () => {
+  const dir = mkdtempSync(join(os.tmpdir(), 'studio-failed-registration-'));
+  const instancePath = join(dir, '.studio-instance.json');
+  const studio = new StudioServer({ projectDir: dir, port: 0 });
+  try {
+    mkdirSync(instancePath);
+    await assert.rejects(() => studio.start(), { path: instancePath });
+    assert.equal(studio.server, null);
+  } finally {
+    await studio.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('startup normalization advances revision exactly once, records it, and stays idempotent on restarts', async () => {
   const dir = mkdtempSync(join(os.tmpdir(), 'studio-startup-norm-'));

@@ -11,6 +11,7 @@ import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
 import {nodePropertyCapability,STUDIO_SOURCE_ONLY_MACROS} from './node-capabilities.mjs';
 import { normalizeVectorNodeSpec, buildRp9ControlPointsForSubpaths } from './vector-paths.mjs';
 import { buildInteractiveRp } from '../scripts/proto.mjs';
+import { pythonInvocation } from '../scripts/python.mjs';
 import { setWidgetRichText } from '../scripts/set-widget-richtext.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 import { readRecords, encodeRecord, replaceRecord } from '../scripts/rp-records.mjs';
@@ -1453,16 +1454,15 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
     writeFileSync(specPath, JSON.stringify(exportSpec, null, 2), 'utf8');
 
     const bundleDir = join(workDir, 'bundle');
+    const invocation = pythonInvocation([join(ROOT, 'scripts/proto.py'), 'compile', '--spec', specPath, '--out-dir', bundleDir]);
     const compileProc = await new Promise(resolveProc => {
-      const child = spawn(
-        'python3',
-        [join(ROOT, 'scripts/proto.py'), 'compile', '--spec', specPath, '--out-dir', bundleDir],
-        { stdio: ['ignore', 'pipe', 'pipe'] }
-      );
+      const child = spawn(invocation.command, invocation.args, { stdio: ['ignore', 'pipe', 'pipe'] });
+      child.stdout.setEncoding('utf8');
+      child.stderr.setEncoding('utf8');
       let stdout = '';
       let stderr = '';
-      child.stdout?.on('data', chunk => { stdout += chunk.toString(); });
-      child.stderr?.on('data', chunk => { stderr += chunk.toString(); });
+      child.stdout.on('data', chunk => { stdout += chunk; });
+      child.stderr.on('data', chunk => { stderr += chunk; });
       child.on('close', status => resolveProc({ status, stdout, stderr }));
       child.on('error', err => resolveProc({ status: 1, stdout, stderr: err.message }));
     });

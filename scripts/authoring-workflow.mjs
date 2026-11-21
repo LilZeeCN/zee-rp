@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertNotProtected, assertWritable } from './engine.mjs';
+import { assertNotProtected, assertWritable, defaultWriteRoot } from './engine.mjs';
+import { pythonInvocation } from './python.mjs';
 import { appExists, templateCandidates } from './version.mjs';
 import { previewPrototype } from './preview-runtime.mjs';
 import { reviewImageStructure } from './image-structure.mjs';
@@ -71,14 +72,15 @@ export const AUTHORING_CHEATSHEET = {
   ],
 };
 
-const tokenQuery = spawnSync('python3', ['-B', '-c', `import json,sys
+const tokenInvocation = pythonInvocation(['-B', '-c', `import json,sys
 sys.path.insert(0, sys.argv[1])
 from rp_language import COLOR_TOKENS, COLOR_TOKEN_ALIASES, DEVICE_CANVAS_PRESETS, THEMES
 from rp_language import FONT_SIZE_TOKENS, FONT_WEIGHT_TOKENS, SPACING_TOKENS, RADIUS_TOKENS
 print(json.dumps(dict(fontSize=FONT_SIZE_TOKENS, fontWeight=FONT_WEIGHT_TOKENS,
  spacing=SPACING_TOKENS, radius=RADIUS_TOKENS,
  colorTokens=sorted({'$'+c for c in COLOR_TOKENS} | set(COLOR_TOKEN_ALIASES)),
- themes=sorted(THEMES), devices={k:[v['w'],v['h']] for k,v in DEVICE_CANVAS_PRESETS.items()})))`, join(ROOT, 'scripts')], { encoding: 'utf8' });
+ themes=sorted(THEMES), devices={k:[v['w'],v['h']] for k,v in DEVICE_CANVAS_PRESETS.items()})))`, join(ROOT, 'scripts')]);
+const tokenQuery = spawnSync(tokenInvocation.command, tokenInvocation.args, { encoding: 'utf8' });
 if (tokenQuery.status !== 0) throw new Error(tokenQuery.stderr || 'Unable to read compiler token catalog');
 export const AUTHORING_TOKENS = JSON.parse(tokenQuery.stdout);
 
@@ -104,7 +106,8 @@ export function recipeCatalog({ recipe, includeSource = false } = {}) {
 export function runWorkflow(command, source, extra = {}) {
   if (typeof source === 'string' && source.trimStart().startsWith('{')) source = JSON.parse(source);
   if (typeof source === 'string') { source = resolve(source); assertNotProtected(source); }
-  const proc = spawnSync('python3', ['-B', join(ROOT, 'scripts/rp_workflow.py')], {
+  const workflowInvocation = pythonInvocation(['-B', join(ROOT, 'scripts/rp_workflow.py')]);
+  const proc = spawnSync(workflowInvocation.command, workflowInvocation.args, {
     input: JSON.stringify({ command, source, ...extra }), encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
   });
   if (proc.status !== 0) throw new Error(proc.stderr || 'RP/1 workflow process failed');
@@ -130,14 +133,14 @@ export function runtimeInfo(toolList) {
 }
 
 export function pythonEnvironment() {
-  const proc = spawnSync('python3', ['-B', '-c', `import json,sys,importlib
+  const envInvocation = pythonInvocation(['-B', '-c', `import json,sys,importlib
 modules={}
 for name in ('PIL','numpy','scipy'):
  try:
   importlib.import_module(name); modules[name]=True
  except ImportError: modules[name]=False
-print(json.dumps({'executable':sys.executable,'version':sys.version.split()[0],'imageModules':modules,'missingImageDependencies':[k for k,v in modules.items() if not v]}))`],
-  { encoding: 'utf8', timeout: 10000 });
+print(json.dumps({'executable':sys.executable,'version':sys.version.split()[0],'imageModules':modules,'missingImageDependencies':[k for k,v in modules.items() if not v]}))`]);
+  const proc = spawnSync(envInvocation.command, envInvocation.args, { encoding: 'utf8', timeout: 10000 });
   return proc.status === 0 ? JSON.parse(proc.stdout) : { error: proc.error?.message ?? proc.stderr.trim(), missingImageDependencies: ['python3-runtime'] };
 }
 
@@ -178,7 +181,7 @@ export function revisePrototype(input, { generate, sync }) {
   const originalHashes = new Map([sourcePath, rpPath, `${rpPath}.baseline.json`].map(path => [path, fileHash(path)]));
   if (expectedRpSha256 && originalHashes.get(rpPath) !== expectedRpSha256)
     throw Object.assign(new Error('原型已变化，请读取最新状态后重试。'), { code: 'E_STALE_SYNC_STATE' });
-  const writeRoot = (process.env.AXURE_WRITE_ROOT || '').split(':').filter(Boolean)[0] || process.cwd();
+  const writeRoot = defaultWriteRoot();
   let output = input.output && input.output !== 'auto' ? resolve(writeRoot, input.output) : null;
   if (!dryRun && !output) {
     const stem = rpPath.replace(/\.rp$/i, '').replace(/-v\d+$/, '');

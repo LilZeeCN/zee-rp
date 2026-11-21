@@ -1313,6 +1313,13 @@ def detect_media_blocks(arr, scale=1.0):
 
 def run_ocr(image_path):
     """带 SHA1 结果缓存与编译二进制缓存的 Apple Vision OCR 调用（编译缓存冷跑 ~180ms，结果缓存 < 1ms）。"""
+    # Apple Vision 仅 macOS 可用；其他平台退化为“无文字”的几何复刻，而不是整条管线失败。
+    if sys.platform != "darwin":
+        sys.stderr.write(
+            "Warning: 截图 OCR 依赖 macOS Vision（Swift）；当前平台跳过 OCR。"
+            "Windows 建议改用 HTML/几何规格生成（scripts/proto.mjs 或 axvg build）。\n"
+        )
+        return {"items": []}
     if not os.path.exists(OCR_SWIFT):
         return {"items": []}
     cache_path = None

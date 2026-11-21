@@ -71,14 +71,33 @@ export function createPanel(file, { pageName, pageIndex, name, states = ['State 
   const page = [...graph.objects.values()].find(o => o.className === 'Axure:Page');
   const diagram = graph.objects.get(field(page.body, 'diagram').value);
   const source = readRecords(readFileSync(TEMPLATE));
+  const allowUnnamed = process.platform === 'win32' && detectFileVersion(file) === 9
+    && !process.env.AXURE_PANEL_TEMPLATE && !process.env.AXURE_PANEL_TEMPLATE_NAME;
+  const unnamedPanels = [];
   let templateRecord, templateGraph, templateWidget;
   for (const r of source.filter(r => r.className === 'Axure:Page')) {
     const g = parsePayload(r);
-    const w = [...g.objects.values()].find(o => o.className === 'Axure:DiagramObject:DynamicPanel'
-      && field(field(o.body, 'name-block'), 'text')?.text === TEMPLATE_PANEL_NAME);
-    if (w) { templateRecord = r; templateGraph = g; templateWidget = w; break; }
+    for (const widget of g.objects.values()) {
+      if (widget.className !== 'Axure:DiagramObject:DynamicPanel') continue;
+      const templateName = field(field(widget.body, 'name-block'), 'text')?.text;
+      if (templateName === TEMPLATE_PANEL_NAME) {
+        [templateRecord, templateGraph, templateWidget] = [r, g, widget];
+        break;
+      }
+      if (allowUnnamed && templateName === '') unnamedPanels.push([r, g, widget]);
+    }
+    if (templateWidget) break;
   }
-  if (!templateWidget) throw new Error(`Missing template panel: ${TEMPLATE_PANEL_NAME}`);
+  if (!templateWidget && unnamedPanels.length && (!copyTemplateStates || unnamedPanels.length === 1)) {
+    [templateRecord, templateGraph, templateWidget] = unnamedPanels[0];
+    // The built-in Windows Tour can contain several unnamed panels. For an
+    // empty shell only their shape is needed, so use document order and drop events.
+    if (!copyTemplateStates) templateWidget.body.entries = templateWidget.body.entries.filter(([key]) => key.text !== 'InteractionMap');
+  }
+  if (!templateWidget) {
+    const hint = unnamedPanels.length > 1 ? ' (multiple unnamed panels in RP9 Tour; supply a template with a named panel)' : '';
+    throw new Error(`Missing template panel: ${TEMPLATE_PANEL_NAME}${hint}`);
+  }
   let templateStateRecords = [];
   if (copyTemplateStates) {
     const templateGuids = templateGraph.roots.find(n => n.tag === 0x1e).values;
@@ -133,40 +152,17 @@ export function createPanel(file, { pageName, pageIndex, name, states = ['State 
     const recordTemplate = copyTemplateStates ? templateStateRecords[stateIndex] : stateTemplate;
     const sg = parsePayload(recordTemplate), ss = [...recordTemplate.strings];
     const sd = [...sg.objects.values()].find(o => o.className === 'Axure:PanelDiagram');
-    if (!copyTemplateStates) field(sd.body, 'diagram-objects').items = [];
-    // 状态记录清洗：diagram-objects 清空后，模板状态里会残留不再被任何 tag-3 字段引用的
-    // DiagramObject/Style 根对象（Quick Win 的 Hours Panel 即 ImageBox + 其 Style），
-    // StyleCache.Styles 里也留着一条模板遗留条目（Name="Image"）。UI 新建的 ground truth
-    // 是 7 对象且只有 Default 一条样式缓存——这两处残留是相对 ground truth 的 payload 级
-    // 差异，也是最可疑的 GUI 编辑器转换失败点，加载/保存路径虽能容忍，仍一并清掉。
-    // 迭代到不动点：删掉 ImageBox 后，它的 MyStyle（Style）也随之变成孤儿。
+    // A blank state keeps the package's native defaults. Old widget closures
+    // (including their interaction trees and paths) have no attached owner.
     if (!copyTemplateStates) {
-      let removed = 0;
-      do {
-        removed = 0;
-        const referenced = new Set();
-        const collect = n => {
-          if (n.tag === 3) referenced.add(n.value);
-          if (n.entries) for (const [k, v] of n.entries) { collect(k); collect(v); }
-          if (n.items) for (const it of n.items) collect(it);
-          if (n.tag === 9) collect(n.body);
-        };
-        for (const root of sg.roots) if (root.tag !== 9) collect(root);
-        for (const o of sg.objects.values()) collect(o.body);
-        for (const o of [...sg.objects.values()]) {
-          const orphan = (o.className.startsWith('Axure:DiagramObject') || o.className === 'Axure:Style')
-            && !referenced.has(o.id);
-          if (!orphan) continue;
-          sg.objects.delete(o.id);
-          const at = sg.roots.findIndex(n => n.tag === 9 && n.id === o.id);
-          if (at >= 0) sg.roots.splice(at, 1);
-          removed++;
-        }
-      } while (removed > 0);
-      const stateObj = [...sg.objects.values()].find(o => o.className === 'Axure:PanelState');
+      field(sd.body, 'diagram-objects').items = [];
+      const stateObj = sg.objects.get(sg.roots.find(node => node.tag === 0x0f).value);
       const styles = field(field(stateObj.body, 'StyleCache') ?? {}, 'Styles');
       if (styles) styles.items = styles.items
         .filter(it => field(field(it, 'Info') ?? {}, 'Name')?.text !== 'Image');
+      const reachable = closureOf(sg, stateObj.id);
+      sg.roots = sg.roots.filter(node => node.tag !== 9 || reachable.has(node.id));
+      for (const id of sg.objects.keys()) if (!reachable.has(id)) sg.objects.delete(id);
     }
     // 重排 GUID 表：槽位换新 GUID，不残留模板 GUID。但**空哨兵槽必须保持全零**。
     // 对象 id 与 tag-3 引用保持不变——Axure 自己的状态记录同样有洞（PanelState 的

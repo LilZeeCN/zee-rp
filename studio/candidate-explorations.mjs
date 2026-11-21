@@ -3,6 +3,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import { pythonInvocation } from '../scripts/python.mjs';
 import { StudioDocumentStore } from './commands.mjs';
 import { buildNodeIndex, canonicalJson, nodeEvents, sha256 } from './document.mjs';
 import { StudioRuntimeSession } from './runtime.mjs';
@@ -126,7 +127,8 @@ export async function previewCandidates(studio, { pageId, baseRevision, candidat
     await studio.operationProgress?.('building-contact-sheet');
     const manifestPath = join(dir, 'contact-sheet.json'), path = join(dir, 'contact-sheet.png');
     writeFileSync(manifestPath, JSON.stringify({ columns }));
-    execFileSync('python3', [join(dirname(fileURLToPath(import.meta.url)), 'contact-sheet.py'), manifestPath, path], { timeout: 30000 });
+    const invocation = pythonInvocation([join(dirname(fileURLToPath(import.meta.url)), 'contact-sheet.py'), manifestPath, path]);
+    execFileSync(invocation.command, invocation.args, { timeout: 30000 });
     const bytes = readFileSync(path); contactSheet = { path, sha256: sha256(bytes) }; mcpImages = [{ mimeType: 'image/png', data: bytes.toString('base64') }];
   }
   const result = { ok: true, explorationId, pageId, baseRevision, contentHash: sourceHash, candidates: results, contactSheet,

@@ -1,13 +1,13 @@
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync, constants } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { assertWritable } from './engine.mjs';
 import { listCommands } from './registry.mjs';
 import { listMcpTools, jobTools } from './mcp-tools.mjs';
 
 const ROOT = dirname(dirname(fileURLToPath(import.meta.url)));
-const TOP = ['README.md', 'README.en.md', 'README.zh-CN.md', 'CONTRIBUTING.md', 'CHANGELOG.md', 'LICENSE', 'SKILL.md', 'ATTRIBUTION.md', '.gitignore', '.npmignore', 'package.json', 'package-lock.json', 'requirements.txt'];
+const TOP = ['README.md', 'README.en.md', 'README.zh-CN.md', 'CONTRIBUTING.md', 'CHANGELOG.md', 'LICENSE', 'SKILL.md', 'ATTRIBUTION.md', '.gitattributes', '.gitignore', '.npmignore', 'package.json', 'package-lock.json', 'requirements.txt'];
 const DIRS = ['bin', 'scripts', 'studio', 'test', 'references', 'examples', 'docs', 'assets', 'tools', 'benchmarks', '.github'];
 const EXTENSIONS = /\.(m?js|html|css|py|swift|md|json|rp1|svg|png|jpe?g|webp|gif|ya?ml|ttf|txt)$/;
 
@@ -43,7 +43,7 @@ export function packRelease(destination) {
     const target = join(output, path);
     mkdirSync(dirname(target), { recursive: true });
     copyFileSync(join(ROOT, path), target, constants.COPYFILE_EXCL);
-    files[relative(output, target)] = createHash('sha256').update(readFileSync(target)).digest('hex');
+    files[path] = createHash('sha256').update(readFileSync(target)).digest('hex');
   }
   const manifest = { version: JSON.parse(readFileSync(join(ROOT, 'package.json'))).version,
     commands: listCommands().length, mcpTools: listMcpTools().length + jobTools.length, files };

@@ -2,6 +2,7 @@ import { StudioSelections } from './selection.mjs';
 import { studioSourceFingerprint } from './source-fingerprint.mjs';
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
@@ -42,7 +43,7 @@ const loadedSourceFingerprint = studioSourceFingerprint();
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const WEB_DIR = join(HERE, 'web');
-const INSTANCE_REGISTRY_PATH = '/tmp/zee-rp-studio-instances.json';
+export const INSTANCE_REGISTRY_PATH = join(process.platform === 'win32' ? tmpdir() : '/tmp', 'zee-rp-studio-instances.json');
 
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
@@ -1435,8 +1436,13 @@ export class StudioServer {
       projectDir: this.projectDir,
       startedAt: new Date().toISOString(),
     };
-    registerInstanceRecord(record);
-    writeFileSync(join(this.projectDir, '.studio-instance.json'), JSON.stringify(record, null, 2), 'utf8');
+    try {
+      registerInstanceRecord(record);
+      writeFileSync(join(this.projectDir, '.studio-instance.json'), JSON.stringify(record, null, 2), 'utf8');
+    } catch (error) {
+      await this.close();
+      throw error;
+    }
     return record;
   }
 
