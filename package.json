@@ -517,6 +517,7 @@
     "docs/studio-operations.md",
     "test/studio-operations-check.mjs",
     "test/host-capabilities.mjs",
+    "test/host-lifecycle-check.mjs",
     "docs/studio-craft.md",
     "studio/reference-packs.mjs",
     "test/studio-phase-decisions-check.mjs",

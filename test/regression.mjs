@@ -53,6 +53,10 @@ try {
       }
     }
   });
+  check('Axure host lifecycle helpers (driver contract + preview port identity)', () => {
+    const result = run('test/host-lifecycle-check.mjs');
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
   check('registry covers every production script', () => assert.equal(run('scripts/registry.mjs', ['validate']).status, 0));
   check('CLI and MCP expose the global-variable writer', () => {
     assert.ok(listCommands().some(c => c.command === 'create-global-variable'));
@@ -199,6 +203,7 @@ try {
     assert.ok(existsSync(join(output, '.gitattributes')));
     assert.ok(existsSync(join(output, 'scripts/expr-schema.mjs')));
     assert.ok(existsSync(join(output, 'test/historical-regression.mjs')));
+    assert.ok(existsSync(join(output, 'test/host-lifecycle-check.mjs')));
     assert.ok(existsSync(join(output, 'README.zh-CN.md')));
     assert.equal(run(join(output, 'scripts/registry.mjs'), ['validate']).status, 0);
   });
@@ -210,6 +215,7 @@ try {
     });
     assert.equal(packed.status, 0, packed.error?.message || packed.stderr);
     const paths = new Set(JSON.parse(packed.stdout)[0].files.map(file => file.path));
+    assert.ok(paths.has('test/host-lifecycle-check.mjs'));
     const runtime = releasePaths().filter(path => /^(bin|scripts|studio)\//.test(path));
     const { scripts } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
     const testEntrypoints = Object.values(scripts).flatMap(script => script.match(/\b(?:test|tools)\/[\w./-]+\.(?:mjs|py)\b/g) || []);

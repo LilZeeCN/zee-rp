@@ -278,6 +278,7 @@ export async function launchChrome({ headless = true, width = 1440, height = 900
     });
   }).catch(async error => {
     killProcessTree('SIGKILL');
+    proc.stderr.destroy();
     await waitProcessGroupExit(600);
     await removeProfileDir();
     process.removeListener('exit', onNodeExit);
@@ -333,6 +334,8 @@ export async function launchChrome({ headless = true, width = 1440, height = 900
       killProcessTree('SIGKILL');
       await waitProcessGroupExit(1000);
     }
+    // A detached Chrome helper may still hold the write end after Chrome exits.
+    proc.stderr.destroy();
     await removeProfileDir();
     process.removeListener('exit', onNodeExit);
   }

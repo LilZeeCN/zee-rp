@@ -11,7 +11,9 @@ const HELPER = fileURLToPath(new URL('./gui-roundtrip.swift', import.meta.url));
 const GENERATOR = fileURLToPath(new URL('./prototype-worker.mjs', import.meta.url));
 
 export class JobManager {
-  constructor({ runner = (args) => spawn('/usr/bin/swift', [HELPER, ...args], { stdio: ['ignore', 'pipe', 'pipe'] }) } = {}) {
+  constructor({ runner = (args, { signal } = {}) => spawn('/usr/bin/swift', [HELPER, ...args], {
+    stdio: ['ignore', 'pipe', 'pipe'], signal, killSignal: 'SIGKILL',
+  }) } = {}) {
     this.runner = runner;
     this.jobs = new Map();
     this.active = null;
@@ -167,22 +169,30 @@ export class JobManager {
     } catch (error) { this.complete(job, 1, error.message); }
   }
 
-  complete(job, code, error = '') {
+  async complete(job, code, error = '') {
     if (job.finished) return;
     job.finished = true;
-    if (job.status !== 'cancelled') job.status = code === 0 && !error ? 'completed' : 'failed';
+    const cancelled = job.status === 'cancelled';
+    const status = cancelled ? 'cancelled' : code === 0 && !error ? 'completed' : 'failed';
     if (error) job.stderr += error;
-    if (job.status === 'failed') this.cleanupRoundtrip(job);
+    if (status !== 'completed') await this.cleanupRoundtrip(job, cancelled);
+    job.status = status;
     job.exitCode = code;
     this.active = null;
     job.finish();
     setImmediate(() => this.pump());
   }
 
-  cleanupRoundtrip(job) {
+  cleanupRoundtrip(job, cancelledWhileRunning = false) {
     if (job.type !== 'gui-roundtrip' || !job.outputCopy) return;
-    if (job.phase !== 'queued' || /AXURE_GUI_(?:PHASE|DOCUMENT_OPENED)/.test(job.stderr)) {
-      job.outputCleanup = { removed: false, reason: 'native-document-observed' };
+    if (job.phase !== 'queued' || /^AXURE_GUI_DOCUMENT_OPENED$/m.test(job.stderr)) {
+      return this.closeOwnedDocument(job).then(result => {
+        job.outputCleanup = { removed: false, reason: 'native-document-observed', ...result };
+      });
+    }
+    if (cancelledWhileRunning || /^AXURE_GUI_DOCUMENT_OPENING$/m.test(job.stderr)) {
+      // 打开请求可能已投递，窗口事件还没到达。保留副本，避免删除正在打开的文件。
+      job.outputCleanup = { removed: false, reason: 'native-document-may-open' };
       return;
     }
     try {
@@ -197,10 +207,32 @@ export class JobManager {
     }
   }
 
+  async closeOwnedDocument(job) {
+    try {
+      const child = this.runner(['--close', job.output, String(job.host.version)], {
+        signal: AbortSignal.timeout(30000),
+      });
+      return await new Promise(resolve => {
+        let stdout = '', stderr = '', failure;
+        child.stdout.on('data', chunk => { stdout += chunk; });
+        child.stderr.on('data', chunk => { stderr += chunk; });
+        child.once('error', error => { failure = error.message; });
+        child.once('close', code => {
+          const word = stdout.trim();
+          const documentClosed = code === 0 && !failure && (word === 'closed' || word === 'not-open');
+          resolve({ documentClosed, document: failure || word || stderr.trim() || 'unknown' });
+        });
+      });
+    } catch (error) {
+      return { documentClosed: false, document: error.message };
+    }
+  }
+
   cancel(id) {
     const job = this.jobs.get(id);
     if (!job) throw new Error(`未知 job ${id}`);
     if (!['queued', 'running'].includes(job.status)) return { ...this.get(id), cancelled: false, reason: `already_${job.status}` };
+    if (job.finished) return { ...this.get(id), cancelled: false, reason: 'cleanup_pending' };
     const running = job.status === 'running';
     job.status = 'cancelled';
     if (running) {
