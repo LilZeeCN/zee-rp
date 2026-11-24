@@ -1,6 +1,6 @@
 import test from 'node:test';import assert from 'node:assert/strict';import{createServer}from'node:http';import{launchChrome}from'../studio/cdp.mjs';
 import {spawnSync} from 'node:child_process';
-import {mkdtempSync,mkdirSync,rmSync,readdirSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,rmSync,readdirSync,writeFileSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 
@@ -21,4 +21,35 @@ test('browser starts with a long operation temp path and removes its private pro
  const source=`import {launchChrome} from ${JSON.stringify(new URL('../studio/cdp.mjs',import.meta.url).href)};const browser=await launchChrome();try{const page=await browser.openPage();console.log(JSON.stringify({ready:await page.evaluate('document.readyState')}));}finally{await browser.close();}`;
  const result=spawnSync(process.execPath,['--input-type=module','-e',source],{env:{...process.env,TMPDIR:dir},encoding:'utf8',timeout:20000});
  assert.equal(result.status,0,result.stderr);assert.equal(JSON.parse(result.stdout).ready,'complete');assert.deepEqual(readdirSync(dir),[]);
+});
+
+test('closing Chrome releases stderr even if a detached helper still holds it', {
+  skip: process.platform === 'win32',
+}, t => {
+  const dir = mkdtempSync(join(tmpdir(), 'studio-chrome-stderr-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const bin = join(dir, 'fake-chrome');
+  const helper = `
+    const { existsSync } = require('node:fs');
+    setInterval(() => { if (!existsSync(process.argv[1])) process.exit(); }, 25);
+    setTimeout(() => process.exit(), 15000);
+  `;
+  writeFileSync(bin, `#!/usr/bin/env node
+    const { spawn } = require('node:child_process');
+    spawn(process.execPath, ['-e', ${JSON.stringify(helper)}, ${JSON.stringify(bin)}], {
+      detached: true, stdio: ['ignore', 'ignore', 2],
+    }).unref();
+    process.stderr.write('DevTools listening on ws://127.0.0.1:12345/devtools/browser/fixture\\n');
+    setInterval(() => {}, 1000);
+  `, { mode: 0o755 });
+  const moduleUrl = new URL('../studio/cdp.mjs', import.meta.url);
+  const source = `
+    import { launchChrome } from ${JSON.stringify(moduleUrl.href)};
+    const browser = await launchChrome();
+    await browser.close();
+  `;
+  const result = spawnSync(process.execPath, ['--input-type=module', '-e', source], {
+    env: { ...process.env, CHROME_BIN: bin }, encoding: 'utf8', timeout: 7000,
+  });
+  assert.equal(result.status, 0, result.error?.message || result.stderr);
 });
