@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, readFileSync, statSync, lstatSync, unlinkSync, realpathSync, constants } from 'node:fs';
 import { dirname, basename, join, extname, resolve } from 'node:path';
@@ -172,7 +172,7 @@ export class JobManager {
     job.finished = true;
     if (job.status !== 'cancelled') job.status = code === 0 && !error ? 'completed' : 'failed';
     if (error) job.stderr += error;
-    if (job.status === 'failed') this.cleanupRoundtrip(job);
+    if (job.status === 'failed' || job.status === 'cancelled') this.cleanupRoundtrip(job);
     job.exitCode = code;
     this.active = null;
     job.finish();
@@ -182,7 +182,9 @@ export class JobManager {
   cleanupRoundtrip(job) {
     if (job.type !== 'gui-roundtrip' || !job.outputCopy) return;
     if (job.phase !== 'queued' || /AXURE_GUI_(?:PHASE|DOCUMENT_OPENED)/.test(job.stderr)) {
-      job.outputCleanup = { removed: false, reason: 'native-document-observed' };
+      // 宿主已经打开过这份副本：把文档关掉。作业失败或被取消时原来只记一句
+      // native-document-observed，窗口会一直留在 Axure 里，反复重试后越积越多。
+      job.outputCleanup = { removed: false, reason: 'native-document-observed', ...this.closeOwnedDocument(job) };
       return;
     }
     try {
@@ -194,6 +196,20 @@ export class JobManager {
       job.outputCleanup = { removed: unchanged, reason: unchanged ? 'unopened-copy-removed' : 'output-changed' };
     } catch (error) {
       job.outputCleanup = { removed: false, reason: error.code === 'ENOENT' ? 'already-absent' : 'cleanup-failed', ...(error.code === 'ENOENT' ? {} : { message: error.message }) };
+    }
+  }
+
+  /// 关闭作业自己的文档（best effort）。只关标题与本次作业副本同名的那一个。
+  closeOwnedDocument(job) {
+    try {
+      const version = String(job.host?.version ?? 9);
+      const result = spawnSync('/usr/bin/swift', [HELPER, '--close', job.output, version],
+        { encoding: 'utf8', timeout: 30000 });
+      const word = (result.stdout || '').trim();
+      const closed = word === 'closed' || word === 'not-open';
+      return { documentClosed: closed, document: word || result.error?.message || 'unknown' };
+    } catch (error) {
+      return { documentClosed: false, document: error.message };
     }
   }
 

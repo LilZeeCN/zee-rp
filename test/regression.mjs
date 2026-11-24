@@ -53,6 +53,10 @@ try {
       }
     }
   });
+  check('Axure host lifecycle helpers (driver contract + preview port identity)', () => {
+    const result = run('test/host-lifecycle-check.mjs');
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  });
   check('registry covers every production script', () => assert.equal(run('scripts/registry.mjs', ['validate']).status, 0));
   check('CLI and MCP expose the global-variable writer', () => {
     assert.ok(listCommands().some(c => c.command === 'create-global-variable'));
