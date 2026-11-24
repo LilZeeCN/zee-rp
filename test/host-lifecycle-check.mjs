@@ -2,9 +2,10 @@
 // 不需要 Axure 安装：端口归属与 marker 解析都是纯数据，驱动部分只检查源码契约。
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
+import { createServer } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { previewFileMarker, selectPreviewPort } from '../studio/axure-preview.mjs';
+import { previewFileMarker, readPreviewMarker, selectPreviewPort } from '../studio/axure-preview.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const results = [];
@@ -24,27 +25,30 @@ check('preview marker: absent', () => {
   assert.equal(previewFileMarker(undefined), null);
 });
 
-// Axure 预览服务只发裸 LF 头；这里用一个裸 LF 的本地服务证明 marker 读取不依赖 CRLF。
-// ESM 顶层 await：check() 本身是同步的，异步准备放在外面做。
-const bareLfMarker = await (async () => {
-  const { createServer } = await import('node:net');
-  const { execFile } = await import('node:child_process');
-  const { promisify } = await import('node:util');
+async function previewResponse(status, body, length = Buffer.byteLength(body)) {
   const server = createServer(socket => {
     socket.once('data', () => {
-      const body = "PREVIEW_INFO = { fileName : 'job-lf' }";
-      socket.end(`HTTP/1.0 200 OK\nContent-Type: text/html\nContent-Length: ${body.length}\n\n${body}`);
+      socket.end(`HTTP/1.0 ${status}\nContent-Type: text/html\nContent-Length: ${length}\n\n${body}`);
     });
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   try {
-    const { stdout } = await promisify(execFile)('/usr/bin/curl', ['-sS', `http://127.0.0.1:${server.address().port}/start.html`]);
-    return previewFileMarker(stdout);
+    return await readPreviewMarker(server.address().port);
   } finally {
-    server.close();
+    await new Promise(resolve => server.close(resolve));
   }
-})();
-check('preview marker: reads a bare-LF HTTP/1.0 response', () => assert.equal(bareLfMarker, 'job-lf'));
+}
+const body = "PREVIEW_INFO = { fileName : '作业-lf' }";
+const bareLfMarker = await previewResponse('200 OK', body);
+const markerless = await previewResponse('200 OK', '<html>旧版预览</html>');
+const missingPage = await previewResponse('404 Not Found', body);
+const truncatedPage = await previewResponse('200 OK', body, Buffer.byteLength(body) + 1);
+check('preview marker: reads the production bare-LF path', () => assert.equal(bareLfMarker, '作业-lf'));
+check('preview marker: distinguishes markerless pages from failed reads', () => {
+  assert.equal(markerless, null);
+  assert.equal(missingPage, undefined);
+  assert.equal(truncatedPage, undefined);
+});
 
 const before = new Set([1000]);
 check('port: a new port serving this job wins', () => {
@@ -64,8 +68,19 @@ check('port: marker comparison ignores spaces and case', () => {
 });
 check('port: hosts without a marker keep the old “one new port” rule', () => {
   const picked = selectPreviewPort({ before: new Set([1000]), after: new Set([1000, 2000]),
-    markers: new Map(), expected: 'job' });
+    markers: new Map([[1000, null], [2000, null]]), expected: 'job' });
   assert.deepEqual(picked, { port: 2000, reusedPort: false, matchedBy: 'new-port' });
+});
+check('port: a new port marked for another document is rejected', () => {
+  assert.throws(() => selectPreviewPort({ before, after: new Set([1000, 2000]),
+    markers: new Map([[1000, 'previous-job'], [2000, 'other-document']]), expected: 'job' }),
+  { code: 'E_AXURE_PREVIEW_AMBIGUOUS' });
+});
+check('port: a failed probe or a known marker cannot trigger the legacy fallback', () => {
+  for (const markers of [new Map([[1000, null]]), new Map([[1000, 'previous-job'], [2000, null]])]) {
+    assert.throws(() => selectPreviewPort({ before, after: new Set([1000, 2000]), markers, expected: 'job' }),
+      { code: 'E_AXURE_PREVIEW_AMBIGUOUS' });
+  }
 });
 check('port: two jobs marked the same are ambiguous', () => {
   assert.throws(() => selectPreviewPort({ before: new Set(), after: new Set([1000, 2000]),
@@ -74,7 +89,7 @@ check('port: two jobs marked the same are ambiguous', () => {
 });
 check('port: two new ports with no marker are ambiguous', () => {
   assert.throws(() => selectPreviewPort({ before: new Set(), after: new Set([1000, 2000]),
-    markers: new Map(), expected: 'job' }),
+    markers: new Map([[1000, null], [2000, null]]), expected: 'job' }),
   (error) => error.code === 'E_AXURE_PREVIEW_AMBIGUOUS');
 });
 check('port: nothing listening is ambiguous, not a silent success', () => {
@@ -85,21 +100,19 @@ check('port: nothing listening is ambiguous, not a silent success', () => {
 
 // 驱动契约：这些是回归护栏。真正的 GUI 行为仍需真机验证（见 PR 说明）。
 const driver = readFileSync(join(root, 'scripts/gui-roundtrip.swift'), 'utf8');
-check('driver: closes through the window close button', () => {
+check('driver: window close and menu close require an owned target', () => {
   assert.match(driver, /kAXCloseButtonAttribute/);
-  assert.match(driver, /func closeOwnedWindow/);
+  assert.match(driver, /guard closeDocument\(app, path, title\)/);
+  assert.match(driver, /if name of value of attribute "AXFocusedWindow" is not .* then return false/);
+  assert.doesNotMatch(driver, /fileAction\("关闭", "Close"\)/);
 });
 check('driver: no per-window System Events probe', () => {
   assert.doesNotMatch(driver, /to exists window/);
 });
-check('driver: every System Events call carries an Apple event timeout', () => {
-  // 每次告诉 System Events 都必须在 250 字符内声明 with timeout，否则宿主一忙就挂两分钟。
-  const parts = driver.split('tell application "System Events"');
-  assert.ok(parts.length > 1, 'expected System Events usage');
-  parts.slice(1).forEach((chunk, index) => {
-    const head = parts[index].slice(-250);
-    assert.ok(head.includes('with timeout of'), `System Events call #${index + 1} has no timeout`);
-  });
+check('driver: all Apple events go through the bounded script executor', () => {
+  assert.equal([...driver.matchAll(/\bNSAppleScript\(/g)].length, 1);
+  assert.match(driver, /let boundedSource = "with timeout of .*end timeout"/);
+  assert.match(driver, /NSAppleScript\(source: boundedSource\)/);
 });
 check('driver: window titles are normalised against the licence suffix', () => {
   assert.match(driver, /func documentKey/);

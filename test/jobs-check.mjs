@@ -19,6 +19,7 @@ const mockRunner = ([output]) => {
   child.once('close', () => { running--; });
   return child;
 };
+const mockClose = () => spawn(process.execPath, ['-e', 'console.log("closed")']);
 const manager = new JobManager({ runner: mockRunner });
 const results = [];
 const check = async (name, action) => {
@@ -55,6 +56,7 @@ try {
     await until(job.id, 'running'); assert.equal(manager.cancel(job.id).status, 'cancelled');
     await manager.close(); assert.equal(manager.active, null);
     assert.equal(existsSync(job.output), true, '运行中取消可能已有待处理的原生打开请求，应保留副本');
+    assert.deepEqual(manager.get(job.id).outputCleanup, { removed: false, reason: 'native-document-may-open' });
   });
   await check('同名输出拒绝且已有内容原样保留', async () => {
     const file = join(work, 'a.rp'), before = readFileSync(file);
@@ -103,18 +105,60 @@ try {
     for (const [kind, script] of [
       ['opened', 'console.error("AXURE_GUI_PHASE opened");process.exit(1)'],
       ['observed', 'console.error("AXURE_GUI_DOCUMENT_OPENED");process.exit(1)'],
+      ['opening', 'console.error("AXURE_GUI_DOCUMENT_OPENING");process.exit(1)'],
       ['changed', 'require("fs").appendFileSync(process.argv[1],"changed");process.exit(1)'],
       ['replaced', 'const f=require("fs"),p=process.argv[1];f.copyFileSync(p,p+".external");f.renameSync(p+".external",p);process.exit(1)'],
     ]) {
-      const preserve = new JobManager({ runner: ([output]) => spawn(process.execPath, ['-e', script, output]) });
       const output = join(work, `preserve-${kind}.rp`);
+      const closeCalls = [];
+      const preserve = new JobManager({ runner: args => {
+        if (args[0] !== '--close') return spawn(process.execPath, ['-e', script, args[0]]);
+        closeCalls.push(args);
+        return mockClose();
+      } });
       try {
         const job = await preserve.startRoundtrip({ source, output, wait: true });
         assert.equal(job.status, 'failed');
         assert.equal(existsSync(output), true, kind);
+        if (kind === 'opened' || kind === 'observed') {
+          assert.deepEqual(closeCalls, [['--close', job.output, String(job.host.version)]]);
+          assert.equal(job.outputCleanup.documentClosed, true);
+        } else assert.deepEqual(closeCalls, []);
         if (kind === 'changed') assert(readFileSync(output).toString().endsWith('changed'));
       } finally { await preserve.close(); }
     }
+  });
+  await check('已打开的运行任务取消后先关自己的窗口，再启动下一份作业', async () => {
+    const output = join(realpathSync(work), 'cancel-opened.rp');
+    const nextOrder = [];
+    const cancelOpened = new JobManager({ runner(args) {
+      if (args[0] === '--close') {
+        nextOrder.push('close');
+        assert.equal(args[1], output);
+        const child = spawn(process.execPath, ['-e', 'setTimeout(() => console.log("closed"), 100)']);
+        child.once('close', () => nextOrder.push('closed'));
+        return child;
+      }
+      if (args[0] === output) {
+        return spawn(process.execPath, ['-e', 'console.error("AXURE_GUI_DOCUMENT_OPENED");setInterval(() => {}, 1000)']);
+      }
+      nextOrder.push('next');
+      return mockRunner(args);
+    } });
+    try {
+      const job = await cancelOpened.startRoundtrip({ source, output });
+      const next = cancelOpened.startRoundtrip({ source, output: join(work, 'after-close.rp'), wait: true });
+      const deadline = Date.now() + 5000;
+      while (!cancelOpened.get(job.id).stderr.includes('AXURE_GUI_DOCUMENT_OPENED') && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 10));
+      }
+      assert.match(cancelOpened.get(job.id).stderr, /AXURE_GUI_DOCUMENT_OPENED/);
+      assert.equal(cancelOpened.cancel(job.id).status, 'cancelled');
+      assert.equal((await next).status, 'completed');
+      assert.deepEqual(nextOrder, ['close', 'closed', 'next']);
+      assert.equal(cancelOpened.get(job.id).outputCleanup.documentClosed, true);
+      assert.ok(existsSync(output));
+    } finally { await cancelOpened.close(); }
   });
   await check('符号链接加 .. 保留真实输入与输出位置', async () => {
     const a = join(work, 'a'), b = join(work, 'b');
@@ -132,7 +176,8 @@ try {
     assert.ok(!existsSync(join(a, 'physical.rp')));
   });
   await check('只保存但未关闭重开不能完成往返任务', async () => {
-    const partial = new JobManager({ runner: ([output]) => spawn(process.execPath, ['--input-type=module', '-e', 'import{readFileSync,writeFileSync}from"node:fs";setTimeout(()=>{const p=process.argv[1];writeFileSync(p,readFileSync(p));console.error("AXURE_GUI_PHASE saved")},20)', output]) });
+    const partial = new JobManager({ runner: ([output]) => output === '--close' ? mockClose()
+      : spawn(process.execPath, ['--input-type=module', '-e', 'import{readFileSync,writeFileSync}from"node:fs";setTimeout(()=>{const p=process.argv[1];writeFileSync(p,readFileSync(p));console.error("AXURE_GUI_PHASE saved")},20)', output]) });
     const job = await partial.startRoundtrip({ source, output: join(work, 'partial.rp'), wait: true });
     assert.equal(job.validation.guiSaved, true); assert.equal(job.validation.closed, false);
     assert.equal(job.validation.reopened, false); assert.equal(job.status, 'failed'); await partial.close();

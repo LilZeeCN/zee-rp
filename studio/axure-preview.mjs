@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { copyFileSync, mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { get } from 'node:http';
+import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { exportStudioDocumentToRp } from './export-rp.mjs';
@@ -9,7 +10,7 @@ const run = promisify(execFile);
 const scriptsDir = join(dirname(fileURLToPath(import.meta.url)), '..', 'scripts');
 
 async function axurePorts() {
-  const { stdout } = await run('/usr/sbin/lsof', ['-nP', '-iTCP', '-sTCP:LISTEN']);
+  const { stdout } = await run('/usr/sbin/lsof', ['-nP', '-iTCP', '-sTCP:LISTEN'], { timeout: 3000 });
   return new Set(stdout.split('\n').filter(line => /^Axure/.test(line)).flatMap(line => [...line.matchAll(/(?:127\.0\.0\.1|\*|\[::1?\]|localhost):(\d+)/g)].map(m => Number(m[1]))));
 }
 
@@ -29,7 +30,7 @@ function markerKey(value) {
 
 // 在候选端口里挑出本次作业的那一个。输入是纯数据，便于单测：
 //   before/after —— 发布前后 Axure 监听的端口集合
-//   markers      —— Map<端口, PREVIEW_INFO 文件名 | null>
+//   markers      —— Map<端口, PREVIEW_INFO 文件名 | null（无标记）| undefined（读取失败）>
 //   expected     —— 本次作业副本的文件名（不含扩展名）
 // 规则：先按 marker 精确归属；没有 marker 的宿主退回「唯一新端口」；其余一律视为歧义。
 export function selectPreviewPort({ before = new Set(), after = new Set(), markers = new Map(), expected }) {
@@ -40,25 +41,37 @@ export function selectPreviewPort({ before = new Set(), after = new Set(), marke
   if (marked.length === 1) return { port: marked[0], reusedPort: !fresh.includes(marked[0]), matchedBy: 'marker' };
   if (marked.length > 1) throw Object.assign(new Error('多个 Axure 预览端口都在服务本次作业文档'), { code: 'E_AXURE_PREVIEW_AMBIGUOUS' });
   // 老版本 Axure 不写 marker 时保持原有语义：本次作业必须拿到一个新端口。
-  if (fresh.length === 1) return { port: fresh[0], reusedPort: false, matchedBy: 'new-port' };
+  if (fresh.length === 1 && all.every(port => markers.get(port) === null)) {
+    return { port: fresh[0], reusedPort: false, matchedBy: 'new-port' };
+  }
   throw Object.assign(new Error('无法唯一定位本次新生成的 Axure 预览端口'), { code: 'E_AXURE_PREVIEW_AMBIGUOUS' });
 }
 
-// Axure 的预览服务是手写的极简 HTTP/1.0 服务，响应头用裸 LF 而不是 CRLF；
-// Node 的 fetch/undici 会直接判协议错误。curl 的解析足够宽松，macOS 自带。
-async function fetchPreviewText(port, path = '/start.html') {
+// Axure 的 HTTP/1.0 响应头使用裸 LF。宽松解析仅用于本机 Axure 预览探针。
+export async function readPreviewMarker(port) {
+  const maxBytes = 4 * 1024 * 1024;
   try {
-    const { stdout } = await run('/usr/bin/curl', ['-sS', '--max-time', '3', `http://127.0.0.1:${port}${path}`],
-      { timeout: 5000, maxBuffer: 4 * 1024 * 1024 });
-    return stdout;
+    const response = await new Promise((resolve, reject) => {
+      get({
+        host: '127.0.0.1', port, path: '/start.html', agent: false,
+        insecureHTTPParser: true, signal: AbortSignal.timeout(3000),
+      }, resolve).once('error', reject);
+    });
+    if (response.statusCode !== 200) {
+      response.destroy();
+      return undefined;
+    }
+    const chunks = [];
+    let bytes = 0;
+    for await (const chunk of response) {
+      bytes += chunk.length;
+      if (bytes > maxBytes) return undefined;
+      chunks.push(chunk);
+    }
+    return previewFileMarker(Buffer.concat(chunks, bytes).toString('utf8'));
   } catch {
-    return null;
+    return undefined;
   }
-}
-
-async function readPreviewMarker(port) {
-  const text = await fetchPreviewText(port);
-  return text === null ? null : previewFileMarker(text);
 }
 
 // Opens only an owned export. Freshness is proven by the preview marker: the server we return is
@@ -87,7 +100,7 @@ export async function prepareAxurePreview(doc, directory, { projectDir = null } 
     }
   }
   writeFileSync(join(directory, 'host-roundtrip.json'), JSON.stringify({ source, owned, stdout: host.stdout, stderr: host.stderr, contentHash: doc.contentHash, attempts }, null, 2));
-  const expected = owned.slice(owned.lastIndexOf('/') + 1).replace(/\.rp$/i, '');
+  const expected = basename(owned, '.rp');
   // 端口是宿主的事，出现顺序不定；轮询到「唯一归属」为止，超时再报歧义。
   const deadline = Date.now() + 10000;
   let selected;

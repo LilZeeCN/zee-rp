@@ -1,4 +1,4 @@
-import { spawn, spawnSync } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, readFileSync, statSync, lstatSync, unlinkSync, realpathSync, constants } from 'node:fs';
 import { dirname, basename, join, extname, resolve } from 'node:path';
@@ -11,7 +11,9 @@ const HELPER = fileURLToPath(new URL('./gui-roundtrip.swift', import.meta.url));
 const GENERATOR = fileURLToPath(new URL('./prototype-worker.mjs', import.meta.url));
 
 export class JobManager {
-  constructor({ runner = (args) => spawn('/usr/bin/swift', [HELPER, ...args], { stdio: ['ignore', 'pipe', 'pipe'] }) } = {}) {
+  constructor({ runner = (args, { signal } = {}) => spawn('/usr/bin/swift', [HELPER, ...args], {
+    stdio: ['ignore', 'pipe', 'pipe'], signal, killSignal: 'SIGKILL',
+  }) } = {}) {
     this.runner = runner;
     this.jobs = new Map();
     this.active = null;
@@ -167,24 +169,30 @@ export class JobManager {
     } catch (error) { this.complete(job, 1, error.message); }
   }
 
-  complete(job, code, error = '') {
+  async complete(job, code, error = '') {
     if (job.finished) return;
     job.finished = true;
-    if (job.status !== 'cancelled') job.status = code === 0 && !error ? 'completed' : 'failed';
+    const cancelled = job.status === 'cancelled';
+    const status = cancelled ? 'cancelled' : code === 0 && !error ? 'completed' : 'failed';
     if (error) job.stderr += error;
-    if (job.status === 'failed' || job.status === 'cancelled') this.cleanupRoundtrip(job);
+    if (status !== 'completed') await this.cleanupRoundtrip(job, cancelled);
+    job.status = status;
     job.exitCode = code;
     this.active = null;
     job.finish();
     setImmediate(() => this.pump());
   }
 
-  cleanupRoundtrip(job) {
+  cleanupRoundtrip(job, cancelledWhileRunning = false) {
     if (job.type !== 'gui-roundtrip' || !job.outputCopy) return;
-    if (job.phase !== 'queued' || /AXURE_GUI_(?:PHASE|DOCUMENT_OPENED)/.test(job.stderr)) {
-      // 宿主已经打开过这份副本：把文档关掉。作业失败或被取消时原来只记一句
-      // native-document-observed，窗口会一直留在 Axure 里，反复重试后越积越多。
-      job.outputCleanup = { removed: false, reason: 'native-document-observed', ...this.closeOwnedDocument(job) };
+    if (job.phase !== 'queued' || /^AXURE_GUI_DOCUMENT_OPENED$/m.test(job.stderr)) {
+      return this.closeOwnedDocument(job).then(result => {
+        job.outputCleanup = { removed: false, reason: 'native-document-observed', ...result };
+      });
+    }
+    if (cancelledWhileRunning || /^AXURE_GUI_DOCUMENT_OPENING$/m.test(job.stderr)) {
+      // 打开请求可能已投递，窗口事件还没到达。保留副本，避免删除正在打开的文件。
+      job.outputCleanup = { removed: false, reason: 'native-document-may-open' };
       return;
     }
     try {
@@ -199,15 +207,22 @@ export class JobManager {
     }
   }
 
-  /// 关闭作业自己的文档（best effort）。只关标题与本次作业副本同名的那一个。
-  closeOwnedDocument(job) {
+  async closeOwnedDocument(job) {
     try {
-      const version = String(job.host?.version ?? 9);
-      const result = spawnSync('/usr/bin/swift', [HELPER, '--close', job.output, version],
-        { encoding: 'utf8', timeout: 30000 });
-      const word = (result.stdout || '').trim();
-      const closed = word === 'closed' || word === 'not-open';
-      return { documentClosed: closed, document: word || result.error?.message || 'unknown' };
+      const child = this.runner(['--close', job.output, String(job.host.version)], {
+        signal: AbortSignal.timeout(30000),
+      });
+      return await new Promise(resolve => {
+        let stdout = '', stderr = '', failure;
+        child.stdout.on('data', chunk => { stdout += chunk; });
+        child.stderr.on('data', chunk => { stderr += chunk; });
+        child.once('error', error => { failure = error.message; });
+        child.once('close', code => {
+          const word = stdout.trim();
+          const documentClosed = code === 0 && !failure && (word === 'closed' || word === 'not-open');
+          resolve({ documentClosed, document: failure || word || stderr.trim() || 'unknown' });
+        });
+      });
     } catch (error) {
       return { documentClosed: false, document: error.message };
     }
@@ -217,6 +232,7 @@ export class JobManager {
     const job = this.jobs.get(id);
     if (!job) throw new Error(`未知 job ${id}`);
     if (!['queued', 'running'].includes(job.status)) return { ...this.get(id), cancelled: false, reason: `already_${job.status}` };
+    if (job.finished) return { ...this.get(id), cancelled: false, reason: 'cleanup_pending' };
     const running = job.status === 'running';
     job.status = 'cancelled';
     if (running) {

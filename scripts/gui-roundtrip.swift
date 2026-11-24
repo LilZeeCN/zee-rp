@@ -10,8 +10,8 @@ import ApplicationServices
 //     gui-roundtrip.swift --close <file> <9|11> 精确关闭该文档（不碰其它文档）
 //     gui-roundtrip.swift --quit <9|11>         退出应用
 //
-// 生命周期约定：关闭走窗口自己的关闭按钮。Axure 的「文件 → 关闭」作用在最前面的文档上，
-// 连续作业时会把别的文档关掉、把自己的那份留下，反复调用后窗口越积越多，最终宿主不可用。
+// 生命周期约定：关闭只操作已确认归属的窗口。RP9 的窗口按钮可能仅隐藏文档，
+// 所以优先使用关闭菜单，但必须先验证目标窗口，并在点击前再次验证焦点。
 
 enum GuiFailure: Error { case message(String) }
 func fail(_ message: String) throws { throw GuiFailure.message(message) }
@@ -20,19 +20,18 @@ func literal(_ value: String) -> String {
 }
 func emit(_ line: String) { FileHandle.standardOutput.write(Data((line + "\n").utf8)) }
 @discardableResult
-func appleScript(_ source: String) throws -> NSAppleEventDescriptor? {
+func appleScript(_ source: String, timeout: Int = 5) throws -> NSAppleEventDescriptor? {
     var error: NSDictionary?
-    let result = NSAppleScript(source: source)?.executeAndReturnError(&error)
+    let boundedSource = "with timeout of \(timeout) seconds\n\(source)\nend timeout"
+    let result = NSAppleScript(source: boundedSource)?.executeAndReturnError(&error)
     if let error = error { try fail(String(describing: error)) }
     return result
 }
-func tryScript(_ source: String) -> NSAppleEventDescriptor? { (try? appleScript(source)) ?? nil }
+func tryScript(_ source: String, timeout: Int = 5) -> NSAppleEventDescriptor? {
+    (try? appleScript(source, timeout: timeout)) ?? nil
+}
 func waitUntil(_ test: () -> Bool, _ message: String) throws {
-    for _ in 0..<100 {
-        if test() { return }
-        Thread.sleep(forTimeInterval: 0.1)
-    }
-    try fail(message)
+    if !pollUntil(10, test) { try fail(message) }
 }
 /// 有界等待：超时返回 false 而不抛错（辅助模式用）。
 func pollUntil(_ timeout: TimeInterval, _ test: () -> Bool) -> Bool {
@@ -81,8 +80,13 @@ do {
     /// 不归一会把同一个窗口算两次，也会让按标题匹配落空。
     func documentKey(_ windowTitle: String) -> String {
         var text = windowTitle
+        let prefix = "\(procName) - "
+        if text.hasPrefix(prefix) { text = String(text.dropFirst(prefix.count)) }
         if let range = text.range(of: " - \(procName)") { text = String(text[text.startIndex..<range.lowerBound]) }
-        return text.trimmingCharacters(in: .whitespaces)
+        text = text.trimmingCharacters(in: .whitespaces)
+        if text.hasSuffix("*") { text.removeLast() }
+        if text.lowercased().hasSuffix(".rp") { text = String(text.dropLast(3)) }
+        return text
     }
 
     /// 文档窗口名单（已去重、已归一）。
@@ -103,6 +107,7 @@ do {
         var seen = Set<String>()
         var keys: [String] = []
         for title in cgTitles + axTitles {
+            if title == procName { continue }
             let key = documentKey(title)
             if key.isEmpty || seen.contains(key) { continue }
             seen.insert(key)
@@ -114,6 +119,25 @@ do {
     func axWindowList(_ app: NSRunningApplication) -> [AXUIElement] {
         let axApp = AXUIElementCreateApplication(app.processIdentifier)
         return (axAttr(axApp, kAXWindowsAttribute as String) as? [AXUIElement]) ?? []
+    }
+
+    func ownedWindow(_ app: NSRunningApplication, path: String, title: String) -> AXUIElement? {
+        let matches = axWindowList(app).filter { documentKey(axTitle($0)) == title }
+        if path.hasPrefix("/") {
+            let target = URL(fileURLWithPath: path).resolvingSymlinksInPath().path
+            let identified = matches.compactMap { window -> (AXUIElement, String)? in
+                guard let value = axAttr(window, kAXDocumentAttribute as String) as? String else { return nil }
+                if value.hasPrefix("/") { return (window, URL(fileURLWithPath: value).resolvingSymlinksInPath().path) }
+                guard let url = URL(string: value), url.isFileURL else { return nil }
+                return (window, url.resolvingSymlinksInPath().path)
+            }
+            if !identified.isEmpty {
+                let exact = identified.filter { $0.1 == target }
+                return exact.count == 1 ? exact[0].0 : nil
+            }
+        }
+        // 某些 Axure 版本只公开标题。只有唯一同名 AX 窗口才可操作。
+        return matches.count == 1 ? matches[0] : nil
     }
 
     /// Axure（Mono/.NET）只在应用被激活后才把窗口暴露给可访问性 API：
@@ -128,46 +152,88 @@ do {
             if axWindowList(app).isEmpty {
                 // AppleScript activate 对 Axure 才有效；NSRunningApplication.activate 在
                 // 后台激活被系统限制时不会把窗口带出来。
-                _ = tryScript("with timeout of 5 seconds\ntell application id \"\(bundleId)\" to activate\nend timeout")
+                _ = tryScript("tell application id \"\(bundleId)\" to activate")
             }
             app.activate(options: [.activateAllWindows])
         }
         let exposed = pollUntil(timeout) { !axWindowList(app).isEmpty }
         if !exposed {
-            FileHandle.standardError.write(Data("AXURE_GUI_AX_NOT_EXPOSED windows=0 frontmost=\((tryScript("tell application \"System Events\" to tell process \"\(procName)\" to get frontmost")?.booleanValue).map(String.init) ?? "?")\n".utf8))
+            FileHandle.standardError.write(Data("AXURE_GUI_AX_NOT_EXPOSED windows=0\n".utf8))
         }
         return exposed
     }
 
     /// 按窗口自己的关闭按钮关闭指定文档。
     /// 不能用「文件 → 关闭」：它作用在最前面的文档上，连续作业时会关错并把该关的留下。
-    func pressCloseButton(_ app: NSRunningApplication, _ docTitle: String) -> Bool {
-        _ = ensureExposed(app)
-        for window in axWindowList(app) where documentKey(axTitle(window)) == docTitle {
-            guard let ref = axAttr(window, kAXCloseButtonAttribute as String) else { continue }
-            if AXUIElementPerformAction(ref as! AXUIElement, kAXPressAction as CFString) == .success { return true }
-        }
-        return false
+    func pressCloseButton(_ window: AXUIElement) -> Bool {
+        guard let ref = axAttr(window, kAXCloseButtonAttribute as String),
+              CFGetTypeID(ref) == AXUIElementGetTypeID() else { return false }
+        return AXUIElementPerformAction(ref as! AXUIElement, kAXPressAction as CFString) == .success
+    }
+
+    func windowIsFocused(_ app: NSRunningApplication, _ window: AXUIElement) -> Bool {
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        guard let focused = axAttr(axApp, kAXFocusedWindowAttribute as String) else { return false }
+        return CFEqual(window, focused)
+    }
+
+    func raiseWindow(_ app: NSRunningApplication, _ window: AXUIElement) {
+        if windowIsFocused(app, window) { return }
+        app.activate(options: [.activateAllWindows])
+        _ = AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        _ = AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+    }
+
+    func pressFocusedFileMenu(_ app: NSRunningApplication, _ window: AXUIElement, _ chinese: String, _ english: String) -> Bool {
+        let windowTitle = axTitle(window)
+        guard !windowTitle.isEmpty, windowIsFocused(app, window) else { return false }
+        return tryScript("""
+        tell application "System Events" to tell process "\(procName)"
+          if name of value of attribute "AXFocusedWindow" is not \(literal(windowTitle)) then return false
+          if exists menu bar item "文件" of menu bar 1 then
+            click menu item \(literal(chinese)) of menu "文件" of menu bar item "文件" of menu bar 1
+          else
+            click menu item \(literal(english)) of menu "File" of menu bar item "File" of menu bar 1
+          end if
+          return true
+        end tell
+        """)?.booleanValue == true
     }
 
     /// 把某个已打开的文档抬到最前。Axure 只把「活动文档」暴露给可访问性 API，
     /// 并排打开两个作业时，另一个既不在 AXWindows 里也不在 System Events 的窗口列表里。
     /// 用 LaunchServices 再投递一次同一路径：宿主会把已有窗口抬起来，而不是开第二份。
     func raiseDocument(_ app: NSRunningApplication, _ path: String, _ docTitle: String) -> Bool {
-        if axWindowList(app).contains(where: { documentKey(axTitle($0)) == docTitle }) { return true }
+        // 仅在窗口服务器已看到这份文档、AX 尚未暴露它时重新投递路径。
+        guard path.hasPrefix("/"), documentWindows(app).contains(docTitle),
+              !axWindowList(app).contains(where: { documentKey(axTitle($0)) == docTitle }) else { return false }
         let proc = Process()
         proc.executableURL = URL(fileURLWithPath: "/usr/bin/open")
         proc.arguments = ["-b", bundleId, path]
-        try? proc.run(); proc.waitUntilExit()
-        return pollUntil(10) { axWindowList(app).contains { documentKey(axTitle($0)) == docTitle } }
+        guard (try? proc.run()) != nil else { return false }
+        proc.waitUntilExit()
+        return proc.terminationStatus == 0 && pollUntil(5) { ownedWindow(app, path: path, title: docTitle) != nil }
     }
 
-    /// 精确关闭：先按关闭按钮；找不到窗口就先抬起再按。返回是否确实关掉了。
+    /// 关闭后同时检查 AX 和窗口服务器，只有目标标题消失才返回成功。
     func closeDocument(_ app: NSRunningApplication, _ path: String, _ docTitle: String) -> Bool {
-        if pressCloseButton(app, docTitle), pollUntil(15, { !documentWindows(app).contains(docTitle) }) { return true }
-        if raiseDocument(app, path, docTitle), pressCloseButton(app, docTitle),
-           pollUntil(15, { !documentWindows(app).contains(docTitle) }) { return true }
-        return false
+        if ownedWindow(app, path: path, title: docTitle) == nil {
+            _ = raiseDocument(app, path, docTitle)
+        }
+        guard let window = ownedWindow(app, path: path, title: docTitle) else { return false }
+        if versionArg == "9" {
+            raiseWindow(app, window)
+            guard pollUntil(3, { windowIsFocused(app, window) }),
+                  pressFocusedFileMenu(app, window, "关闭", "Close") else { return false }
+            return pollUntil(8) { !documentWindows(app).contains(docTitle) }
+        }
+        if pressCloseButton(window), pollUntil(2, { !documentWindows(app).contains(docTitle) }) { return true }
+        if ownedWindow(app, path: path, title: docTitle) == nil {
+            _ = raiseDocument(app, path, docTitle)
+        }
+        guard let focused = ownedWindow(app, path: path, title: docTitle),
+              pressFocusedFileMenu(app, focused, "关闭", "Close") else { return false }
+        return pollUntil(8) { !documentWindows(app).contains(docTitle) }
     }
 
     // ------------------------------------------------------------------ 辅助模式
@@ -182,28 +248,27 @@ do {
             exit(0)
         case "--close":
             guard arguments.count >= 2 else { throw GuiFailure.message("usage: --close <file.rp> <9|11>") }
-            let target = arguments[1]
-            guard !target.contains("\n"), !target.contains("\r") else { throw GuiFailure.message("GUI path must not contain newlines") }
-            let docTitle = URL(fileURLWithPath: target).deletingPathExtension().lastPathComponent
-            guard let app = runningApp(), documentWindows(app).contains(docTitle) else { emit("not-open"); exit(0) }
-            // 首次激活时 Axure 的可访问性树常常晚一拍才出现；整段重试一次比单次长等更可靠。
-            for attempt in 0..<2 {
-                _ = ensureExposed(app)
-                if closeDocument(app, target, docTitle) {
-                    emit("closed")
-                    exit(0)
-                }
-                if attempt == 0 { Thread.sleep(forTimeInterval: 1.0) }
+            let target = URL(fileURLWithPath: arguments[1])
+            guard !target.path.contains("\n"), !target.path.contains("\r") else { throw GuiFailure.message("GUI path must not contain newlines") }
+            let docTitle = target.deletingPathExtension().lastPathComponent
+            guard let app = runningApp() else { emit("not-open"); exit(0) }
+            let exposed = ensureExposed(app, timeout: 5)
+            if !documentWindows(app).contains(docTitle) {
+                guard exposed else { throw GuiFailure.message("Cannot verify whether the owned document is open") }
+                emit("not-open")
+                exit(0)
             }
-            throw GuiFailure.message("Owned job document did not close")
+            guard closeDocument(app, target.path, docTitle) else { throw GuiFailure.message("Owned job document did not close") }
+            emit("closed")
+            exit(0)
         case "--quit":
             guard let app = runningApp() else { emit("not-running"); exit(0) }
             // 可选标题：先按窗口关闭调用方自己的文档，避免 Axure 的「是否保存」提示挡住退出。
             for docTitle in arguments.dropFirst(2) where !docTitle.hasPrefix("--") {
                 _ = ensureExposed(app)
-                _ = closeDocument(app, docTitle.hasSuffix(".rp") ? docTitle : docTitle + ".rp", docTitle.replacingOccurrences(of: ".rp", with: ""))
+                _ = closeDocument(app, docTitle, documentKey(URL(fileURLWithPath: docTitle).lastPathComponent))
             }
-            _ = tryScript("with timeout of 10 seconds\ntell application id \"\(bundleId)\" to quit\nend timeout")
+            _ = tryScript("tell application id \"\(bundleId)\" to quit", timeout: 10)
             // Axure 退出前要落盘自己的状态；多文档或刚关闭文档时会明显变慢，45s 才算失败。
             if pollUntil(45, { runningApp() == nil }) { emit("quit"); exit(0) }
             throw GuiFailure.message("\(procName) did not quit")
@@ -213,7 +278,8 @@ do {
     }
 
     // ------------------------------------------------------------------ 旧形态：roundtrip
-    let path = arguments[0]
+    guard let inputPath = arguments.first else { throw GuiFailure.message("usage: <file.rp> [9|11] [preview]") }
+    let path = URL(fileURLWithPath: inputPath).path
     guard !path.contains("\n"), !path.contains("\r") else { throw GuiFailure.message("GUI path must not contain newlines") }
     let title = URL(fileURLWithPath: path).deletingPathExtension().lastPathComponent
     if (try? appleScript("tell application id \"\(bundleId)\" to activate")) == nil {
@@ -228,46 +294,24 @@ do {
     }
     let axApp = AXUIElementCreateApplication(app.processIdentifier)
 
-    func matchesTitle(_ windowTitle: String) -> Bool {
-        let key = documentKey(windowTitle)
-        return key == title || key == title + ".rp"
+    func isOpen() -> Bool { documentWindows(app).contains(title) }
+    func isTargetFocused() -> Bool {
+        guard let window = ownedWindow(app, path: path, title: title) else { return false }
+        return windowIsFocused(app, window)
     }
-    func isTarget(_ windowTitle: String) -> Bool { matchesTitle(windowTitle) }
-    func isOpen() -> Bool { documentWindows(app).contains(where: isTarget) }
     var observedDocument = false
     func focusTarget() throws {
         try waitUntil({ isOpen() }, "Owned job document is unavailable")
-        // 激活并等可访问性树出现；否则下面的 System Events 抬窗会因为「没有窗口」直接失败，
-        // 菜单动作也会落到错误的时机上。
-        guard ensureExposed(app) else { throw GuiFailure.message("Axure did not expose its document window") }
         if !observedDocument {
             observedDocument = true
             FileHandle.standardError.write(Data("AXURE_GUI_DOCUMENT_OPENED\n".utf8))
         }
-        let actualTitle = documentWindows(app).first(where: isTarget) ?? title
-        // 所有 System Events 调用都带 5s 超时：宿主忙或被模态框挡住时不至于挂两分钟。
-        if tryScript("""
-        with timeout of 5 seconds
-        tell application "System Events" to tell process "\(procName)"
-          set frontmost to true
-          perform action "AXRaise" of window \(literal(actualTitle))
-        end tell
-        end timeout
-        """) != nil {
-            try waitUntil({
-                let focused = tryScript("with timeout of 3 seconds\ntell application \"System Events\" to tell process \"\(procName)\" to get name of value of attribute \"AXFocusedWindow\"\nend timeout")
-                return app.isActive && focused.map { documentKey($0.stringValue ?? "") == actualTitle } ?? false
-            }, "Owned job document is not the active Axure document")
-            return
+        guard ensureExposed(app, timeout: 5),
+              let window = ownedWindow(app, path: path, title: title) else {
+            throw GuiFailure.message("Axure did not expose the owned document window")
         }
-        // System Events 被 TCC 挡住时的 AXUIElement 兜底
-        app.activate(options: [.activateAllWindows])
-        Thread.sleep(forTimeInterval: 0.3)
-        for w in axWindowList(app) where matchesTitle(axTitle(w)) {
-            AXUIElementPerformAction(w, kAXRaiseAction as CFString)
-            AXUIElementSetAttributeValue(w, kAXMainAttribute as CFString, kCFBooleanTrue)
-        }
-        Thread.sleep(forTimeInterval: 0.3)
+        raiseWindow(app, window)
+        try waitUntil(isTargetFocused, "Owned job document is not the active Axure document")
     }
     func openTarget() throws {
         for attempt in 0..<2 {
@@ -312,29 +356,13 @@ do {
     func fileAction(_ chinese: String, _ english: String) throws {
         try focusTarget()
         _ = waitMenuReady(chinese, english)  // 来不及启用时仍然尝试点击，由调用方的校验兜底
-        if (try? appleScript("""
-        with timeout of 5 seconds
-        tell application "System Events" to tell process "\(procName)"
-          if exists menu bar item "文件" of menu bar 1 then
-            click menu item \(literal(chinese)) of menu "文件" of menu bar item "文件" of menu bar 1
-          else
-            click menu item \(literal(english)) of menu "File" of menu bar item "File" of menu bar 1
-          end if
-        end tell
-        end timeout
-        """)) != nil {
+        if let window = ownedWindow(app, path: path, title: title),
+           pressFocusedFileMenu(app, window, chinese, english) {
             return
         }
-        guard axPressMenu(["文件", "File"], [chinese, english]) else {
+        guard isTargetFocused(), axPressMenu(["文件", "File"], [chinese, english]) else {
             throw GuiFailure.message("AX menu press failed for \(english)/\(chinese)")
         }
-    }
-    /// 关闭本次作业的文档：先按窗口关闭按钮（精确），不可用时才退到菜单。
-    func closeOwnedWindow() throws {
-        try focusTarget()
-        if closeDocument(app, path, title) { return }
-        try fileAction("关闭", "Close")
-        try waitUntil({ !isOpen() }, "Owned job document did not close")
     }
     guard !isOpen() else { throw GuiFailure.message("A document with this title is already open; refusing ambiguous GUI target") }
     let before = try FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date
@@ -346,6 +374,7 @@ do {
         FileHandle.standardError.write(Data(("AXURE_GUI_PHASE \(value) (\(ms)ms)\n").utf8))
     }
     let wantPreview = arguments.count > 2 && arguments[2] == "preview"
+    FileHandle.standardError.write(Data("AXURE_GUI_DOCUMENT_OPENING\n".utf8))
     try openTarget()
     phase("opened")
     // 保存必须校验：磁盘 mtime 没变就是没保存，重新聚焦再按一次（最多三次）。
@@ -362,14 +391,13 @@ do {
     }
     guard saved else { throw GuiFailure.message("Native Save did not modify the owned output file") }
     phase("saved")
-    try closeOwnedWindow()
+    guard closeDocument(app, path, title) else { throw GuiFailure.message("Owned job document did not close") }
     phase("closed")
     try openTarget()
     phase("reopened")
     if wantPreview {
         try focusTarget()
         if (try? appleScript("""
-        with timeout of 5 seconds
         tell application "System Events" to tell process "\(procName)"
           if exists menu bar item "发布" of menu bar 1 then
             if exists menu item "预览" of menu "发布" of menu bar item "发布" of menu bar 1 then
@@ -385,9 +413,10 @@ do {
             end if
           end if
         end tell
-        end timeout
         """)) == nil {
-            _ = axPressMenu(["发布", "Publish"], ["预览", "预览...", "Preview", "Preview..."])
+            guard isTargetFocused(), axPressMenu(["发布", "Publish"], ["预览", "预览...", "Preview", "Preview..."]) else {
+                throw GuiFailure.message("Axure Preview menu press failed for the owned document")
+            }
         }
         phase("preview")
     }
