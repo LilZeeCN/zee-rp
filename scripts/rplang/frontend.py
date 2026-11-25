@@ -1,4 +1,3 @@
-# 从 scripts/rp_language.py 原样迁移(2026-11-08 RP/1 编译链拆分批次 2;行为不变,勿手改)。
 from rp_icons import ICON_NAMES
 import copy
 import difflib
@@ -7,6 +6,7 @@ import hashlib
 import math
 import re
 import string
+from .core import DRAG_MODES, PANEL_ANIMATIONS, PANEL_GESTURES, PANEL_MODES
 from .core import ACTION_PROPS, BOX_ALIGN_ALIASES, BOX_TEXT_CONTAINER_KEYS, BOX_TEXT_STYLE_KEYS, CARD_CONTENT_KEYS, CHECK_KINDS, COLOR_TOKENS, DEVICE_CANVAS_PRESETS, EVENTS, EVENT_SHORTHANDS, FORM_KINDS, GEOMETRY, INLINE_EXPR_HINT_RE, JUSTIFY_ALIASES, LanguageError, MACRO_ITEM_PROPS, MACRO_PROPS, MACRO_SLOTS, NODE_PROPS, NODE_SOURCE_ALIASES, OPTION_KINDS, SCALARS, SHORTHAND_NODE_KINDS, STATE_STYLE_KEYS, TEXT_ALIGN_ALIASES, THEMES, _estimate_visual_px, _resolve_pointer, are_when_asts_mutually_exclusive, expand_data_table_macro, expand_detail_card_macro, expand_form_card_macro, expand_kv_list_macro, expand_list_item_macro, expand_master_detail_macro, expand_nav_bar_macro, expand_phone_shell_macro, expand_progress_bar_macro, expand_searchable_list_macro, expand_stat_row_macro, expand_tab_bar_macro, expand_wizard_card_macro, fail, fields, ident, normalize_color_token, normalize_font_weight, normalize_panel_state_dict, normalize_panel_states_in_tree, parse_domain_type, parse_font_shorthand, parse_inline_expr, parse_template_string, ptr, sanitize_dingbats, validate_device, validate_font_size, validate_source_tree, validate_statecharts
 
 class Frontend:
@@ -1930,6 +1930,9 @@ class Frontend:
                         fail("E_COLOR", pp, "Expected a known $color-token, #RGB, #RRGGBB, #RRGGBBAA, or rgba(...)")
             elif key in {"native", "equalHeight", "wrap", "italic", "underline", "strikethrough", "smooth", "borderTop", "borderBottom", "borderLeft", "borderRight", "visible", "hidden", "checked", "selected", "disabled", "multiple"}:
                 self.typecheck(value, "boolean", pp)
+            elif key == "maxLength":
+                if type(value) is not int or not 0 <= value <= 2147483647:
+                    fail("E_INPUT", pp, "maxLength must be a nonnegative 32-bit integer")
             elif key == "columns":
                 if type(value) is not int or value < 1:
                     fail("E_TYPE", pp, "columns must be a positive integer")
@@ -3253,8 +3256,17 @@ class Frontend:
             if kind == "focus" and target["kind"] not in FORM_KINDS:
                 fail("E_TARGET_TYPE", path, f"{kind} requires a native input")
             if kind == "set-panel-state":
-                if target["kind"] != "dynamic-panel" or action.get("state") not in target.get("states", []):
-                    fail("E_STATE", ptr(path, "state"), "State must belong to the target panel")
+                self.check_panel_action(action, target, path)
+                if "mode" in out:
+                    out["stateMode"] = out.pop("mode")
+                if "repeatInterval" in out:
+                    out["repeat"] = True
+                elif out.get("stateMode") in ("next", "previous"):
+                    out["repeatSkipFirst"] = False
+            if kind == "move":
+                if action.get("mode") not in DRAG_MODES:
+                    fail("E_ACTION", ptr(path, "mode"), f"Expected one of {DRAG_MODES}")
+                out["duration"] = 0
             out["target"] = target["name"]
         if kind in {"set-check", "set-selected", "set-option"}:
             expected_kinds = CHECK_KINDS if kind == "set-check" else OPTION_KINDS if kind == "set-option" else {"label", "paragraph", "button", "badge"}
@@ -3297,6 +3309,37 @@ class Frontend:
                 fail("E_SIZE", ptr(path, "ms"), "Wait must be a nonnegative integer")
         return out
 
+    def check_panel_action(self, action, target, path):
+        if target["kind"] != "dynamic-panel":
+            fail("E_TARGET_TYPE", ptr(path, "target"), "set-panel-state requires a dynamic panel")
+        if ("state" in action) == ("mode" in action):
+            fail("E_STATE", path, "Specify exactly one of state or mode")
+        if "state" in action and action["state"] not in target["states"]:
+            fail("E_STATE", ptr(path, "state"), "State must belong to the target panel")
+        mode = action.get("mode")
+        if "mode" in action and mode not in PANEL_MODES:
+            fail("E_STATE", ptr(path, "mode"), f"Expected one of {PANEL_MODES}")
+        for key in ("loop", "repeatSkipFirst"):
+            if key in action:
+                self.typecheck(action[key], "boolean", ptr(path, key))
+        for key in ("loop", "repeatInterval", "repeatSkipFirst"):
+            if key in action and mode not in ("next", "previous"):
+                fail("E_STATE", ptr(path, key), "This option requires mode next or previous")
+        if "repeatSkipFirst" in action and "repeatInterval" not in action:
+            fail("E_STATE", ptr(path, "repeatSkipFirst"), "repeatSkipFirst requires repeatInterval")
+        if "repeatInterval" in action and (type(action["repeatInterval"]) is not int or not 1 <= action["repeatInterval"] <= 2147483647):
+            fail("E_STATE", ptr(path, "repeatInterval"), "repeatInterval must be a positive 32-bit integer in milliseconds")
+        for phase in ("enter", "exit"):
+            animation, duration = phase + "Animation", phase + "Duration"
+            if mode == "current" and (animation in action or duration in action):
+                fail("E_STATE", path, "Stopping repetition does not run a transition")
+            if animation in action and action[animation] not in PANEL_ANIMATIONS:
+                fail("E_STATE", ptr(path, animation), f"Expected one of {PANEL_ANIMATIONS}")
+            if duration in action:
+                if (type(action[duration]) is not int or not 0 <= action[duration] <= 2147483647
+                        or action.get(animation, "none") == "none"):
+                    fail("E_STATE", ptr(path, duration), "Duration must be a nonnegative 32-bit integer and requires an animation")
+
     def condition(self, condition, scope, path):
         value = self.runtime(condition, scope, path, expected="boolean")
         return {"left": {"runtime": value}, "op": "==", "right": {"runtime": {"kind": "literal", "value": True, "valueType": "boolean"}}}
@@ -3315,6 +3358,8 @@ class Frontend:
                 elif trigger_kind in OPTION_KINDS: native = "OnSelectionChange"
             if not native or (page and event not in {"load", "OnLoad"}):
                 fail("E_EVENT", ep, f"Unsupported event '{event}'")
+            if native in PANEL_GESTURES.values() and trigger_symbol.get("kind") != "dynamic-panel":
+                fail("E_EVENT_TARGET", ep, "Swipe and drag events require a dynamic panel")
             if native in names:
                 fail("E_EVENT", ep, f"Duplicate event alias '{event}'")
             names.add(native)
@@ -3354,6 +3399,11 @@ class Frontend:
                 compiled = {"description": "RP/1 " + event,
                             "isNewIfGroup": i == 0,
                             "actions": [item for j, a in enumerate(desugared_acts) for result in [self.action(a, scope, ptr(ep if shorthand else ptr(cp, "actions"), j))] for item in (result if isinstance(result, list) else [result])]}
+                for act in compiled["actions"]:
+                    if act["type"] == "move":
+                        expected_event = "OnDragDrop" if act["mode"] == "locationBeforeDrag" else "OnDrag"
+                        if native != expected_event:
+                            fail("E_EVENT_TARGET", cp, f"{act['mode']} requires {expected_event}")
                 if case.get("else"):
                     if i == 0 or "when" in case or i != len(cases) - 1 or not any("when" in c for c in cases[:i]):
                         fail("E_CONDITION", cp, "else must end a conditional chain")

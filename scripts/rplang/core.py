@@ -1,4 +1,3 @@
-# 从 scripts/rp_language.py 原样迁移(2026-11-08 RP/1 编译链拆分批次 2;行为不变,勿手改)。
 import copy
 import difflib
 import json
@@ -279,7 +278,7 @@ NODE_PROPS = {
     "paragraph": TEXT | {"lineGap", "lineHeight", "maxLines", "padding", "fill", "stroke", "radius"} | STYLE_EXTRAS,
     "button": TEXT | {"variant", "fill", "stroke", "radius", "icon"} | STYLE_EXTRAS,
     "badge": TEXT | {"variant", "fill", "stroke", "radius", "icon"} | STYLE_EXTRAS,
-    "input": {"value", "placeholder", "native", "fill", "stroke", "radius", "fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX"} | STYLE_EXTRAS,
+    "input": {"value", "placeholder", "maxLength", "native", "fill", "stroke", "radius", "fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX"} | STYLE_EXTRAS,
     "divider": {"direction", "color", "fill", "opacity"},
     "image": {"src", "radius", "opacity", "shadow", "rotation"},
     "icon": {"icon", "color", "fill", "stroke", "radius", "strokeWidth"} | STYLE_EXTRAS,
@@ -288,14 +287,24 @@ NODE_PROPS = {
     "repeater": {"dataset", "key", "template", "rowGap", "rowHeight", "pageSize", "where"},
     "when": {"condition", "then", "else", "layout", "gap"},
 }
-EVENTS = {"click": "OnClick", "change": "OnTextChange", "load": "OnLoad",
+PANEL_GESTURES = {
+    "swipeleft": "OnSwipeLeft", "swiperight": "OnSwipeRight",
+    "dragstart": "OnDragStart", "drag": "OnDrag", "dragdrop": "OnDragDrop",
+}
+PANEL_MODES = ("next", "previous", "current")
+PANEL_ANIMATIONS = ("none", "fade", "slideLeft", "slideRight", "slideUp", "slideDown")
+DRAG_MODES = ("drag", "drag-x", "drag-y", "locationBeforeDrag")
+
+EVENTS = {**PANEL_GESTURES,"click": "OnClick", "change": "OnTextChange", "load": "OnLoad",
           "mouseover": "OnMouseOver", "mouseout": "OnMouseOut",
           "focus": "OnFocus", "blur": "OnLostFocus",
           "statechange": "OnPanelStateChange", "selectedchange": "OnSelectedChange", "selectionchange": "OnSelectionChange"}
 ACTION_PROPS = {
     "set-text": {"target", "text"},
     "set-variable": {"variable", "value"},
-    "set-panel-state": {"target", "state"},
+    "set-panel-state": {"target", "state", "mode", "loop", "repeatInterval", "repeatSkipFirst",
+                        "enterAnimation", "enterDuration", "exitAnimation", "exitDuration"},
+    "move": {"target", "mode"},
     "show": {"target"}, "hide": {"target"}, "toggle": {"target"},
     "enable": {"target"}, "disable": {"target"}, "focus": {"target"},
     "link": {"page"}, "wait": {"ms"},
@@ -343,6 +352,8 @@ EVENT_SHORTHANDS = {
     "onClick": "click", "onChange": "change", "onLoad": "load",
     "onMouseOver": "mouseover", "onMouseOut": "mouseout",
     "onFocus": "focus", "onBlur": "blur", "onStateChange": "statechange",
+    "onSwipeLeft": "swipeleft", "onSwipeRight": "swiperight",
+    "onDragStart": "dragstart", "onDrag": "drag", "onDragDrop": "dragdrop",
 }
 # Source contracts are shared with the editor schema; expansion must not erase input.
 MACRO_COMMON_PROPS = {"type", "id", "name", "on", "size", "slots", "when", "visible", "hidden"} | GEOMETRY | set(EVENT_SHORTHANDS)

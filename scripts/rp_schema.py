@@ -4,7 +4,7 @@ Check remains authoritative for expression types, dynamic component arguments,
 references, row scope, dataset columns and target-specific behavior support.
 """
 from rp_language import (
-    NODE_PROPS, ACTION_PROPS, GEOMETRY, THEMES, EVENTS, EVENT_SHORTHANDS,
+    NODE_PROPS, ACTION_PROPS, GEOMETRY, THEMES, EVENTS, EVENT_SHORTHANDS, DRAG_MODES, PANEL_ANIMATIONS, PANEL_GESTURES, PANEL_MODES,
     MACRO_PROPS, MACRO_ITEM_PROPS, DEVICE_CANVAS_PRESETS, MAX_FONT_SIZE,
     OPTION_KINDS, STATE_STYLE_KEYS,
     CARD_CONTENT_KEYS, CARD_CONTENT_OPTIONS, BOX_TEXT_STYLE_KEYS, BOX_TEXT_CONTAINER_KEYS, NODE_SOURCE_ALIASES,
@@ -58,7 +58,7 @@ def language_schema():
     common = {"id": ident, "name": text, "on": ref("events"), "font": nonempty, "when": ref("value"), "adaptive": adaptive,
               "goto": ident, "link": ident, "navigate": ident,
               "size": {"type": "array", "items": ref("size"), "minItems": 2, "maxItems": 2},
-              **{k: event_value for k in EVENT_SHORTHANDS},
+              **{k: event_value for k, event in EVENT_SHORTHANDS.items() if event not in PANEL_GESTURES},
               **{k: ref("size") if k in {"w", "h"} else string_expr if k == "anchor" else either(number, ref("compileExpression")) if k in {"x", "y", "right", "bottom"} else numeric for k in GEOMETRY}}
     panel_state = {
         "type": "object",
@@ -125,6 +125,8 @@ def language_schema():
             return {"type": "boolean"}
         if name == "options":
             return array(nonempty, 1)
+        if name == "maxLength":
+            return {**nonnegative_int, "maximum": 2147483647}
         if name == "selectedIndex":
             return nonnegative_int
         if name == "selectedIndices":
@@ -152,6 +154,8 @@ def language_schema():
 
     def node_variants(kind, props, required=()):
         props = {**props, "visible": {"type": "boolean"}, "hidden": {"type": "boolean"}}
+        if kind in {"dynamic-panel", "panel", "use"}:
+            props.update({key: event_value for key, event in EVENT_SHORTHANDS.items() if event in PANEL_GESTURES})
         props.update({alias: props[canonical] for alias, canonical in NODE_SOURCE_ALIASES.items() if canonical in props})
         standard = obj({"type": {"const": kind}, **props}, ["type", "id", *required])
         shorthand_props = {k: v for k, v in props.items() if k != "type"}
@@ -319,6 +323,16 @@ def language_schema():
             props["height"] = ref("value")
             props["duration"] = {"type": "number", "minimum": 0}
             optional = {"duration", "easing", "anchor"}
+        if kind == "set-panel-state":
+            props.update({"state": ident, "mode": {"enum": list(PANEL_MODES)},
+                          "loop": {"type": "boolean"}, "repeatSkipFirst": {"type": "boolean"},
+                          "repeatInterval": {**positive_int, "maximum": 2147483647}})
+            for phase in ("enter", "exit"):
+                props[phase + "Animation"] = {"enum": list(PANEL_ANIMATIONS)}
+                props[phase + "Duration"] = {**nonnegative_int, "maximum": 2147483647}
+            optional = fields - {"target"}
+        if kind == "move":
+            props["mode"] = {"enum": list(DRAG_MODES)}
         if kind == "data-sort":
             props["direction"] = {"enum": ["ascending", "descending", "asc", "desc"]}
         if kind == "data-add":
@@ -327,6 +341,24 @@ def language_schema():
             action["oneOf"] = [{"required": ["rows"], "not": {"required": ["row"]}}, {"required": ["row"], "not": {"required": ["rows"]}}]
         else:
             action = obj(props, ["type", *sorted(fields - optional)])
+        if kind == "set-panel-state":
+            action["oneOf"] = [{"required": ["state"], "not": {"required": ["mode"]}},
+                               {"required": ["mode"], "not": {"required": ["state"]}}]
+            action["dependentRequired"] = {"repeatSkipFirst": ["repeatInterval"],
+                                           "enterDuration": ["enterAnimation"], "exitDuration": ["exitAnimation"]}
+            action["allOf"] = [{
+                "if": {"anyOf": [{"required": [key]} for key in ("loop", "repeatInterval")]},
+                "then": {"required": ["mode"], "properties": {"mode": {"enum": ["next", "previous"]}}},
+            }]
+            for phase in ("enter", "exit"):
+                action["allOf"].append({
+                    "if": {"required": [phase + "Duration"]},
+                    "then": {"properties": {phase + "Animation": {"not": {"const": "none"}}}},
+                })
+            action["allOf"].append({
+                "if": {"required": ["mode"], "properties": {"mode": {"const": "current"}}},
+                "then": {"not": {"anyOf": [{"required": [phase + "Animation"]} for phase in ("enter", "exit")]}},
+            })
         actions.append(action)
     actions.extend([
         obj({"rule": ident}, ["rule"]), obj({"type": {"const": "apply-rule"}, "rule": ident}, ["type", "rule"]),

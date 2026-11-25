@@ -1,4 +1,3 @@
-# 从 scripts/rp_language.py 原样迁移(2026-11-08 RP/1 编译链拆分批次 2;行为不变,勿手改)。
 from rp_product import expand_product_spec, compute_product_impact
 import copy
 import hashlib
@@ -12,11 +11,13 @@ def simulate_spec(spec, steps=None):
     rt = ReferenceRuntime(spec)
     trace = [{"step": 0, "state": rt.snapshot()}]
     for idx, step in enumerate(steps or [], 1):
-        if "input" in step:
+        if "advanceMs" in step:
+            fired = rt.advance(step["advanceMs"])
+        elif "input" in step:
             fired = rt.set_input(step["input"], step.get("value", ""))
         else:
             fired = rt.trigger(step.get("target", step.get("trigger")), step.get("event", "click"),
-                               row_index=step.get("rowIndex", 0))
+                               row_index=step.get("rowIndex", 0), dx=step.get("dx", 0), dy=step.get("dy", 0))
         trace.append({"step": idx, "action": step, "fired": fired, "state": rt.snapshot()})
     return {"final": rt.snapshot(), "trace": trace, "executionTrace": rt.execution_trace,
             "limitations": {"referenceModel": "per-row and template-level widgets; native host behavior verified via expr.js oracle",
@@ -147,13 +148,16 @@ def explore_state_space(spec, max_depth=5, max_states=48, input_samples=None):
                 row_sampling = row_sampling or count > 2
                 for row_index in range(min(2, count)):
                     candidate_steps.append({"target": trigger, "event": event, "rowIndex": row_index})
+        if rt.panel_repeats:
+            candidate_steps.append({"advanceMs": min(timer[0] for timer in rt.panel_repeats.values()) - rt.time_ms})
         if len(path) >= max_depth:
             depth_bound = depth_bound or bool(candidate_steps)
             continue
         for step in candidate_steps:
             next_rt = copy.deepcopy(rt)
             trace_start = len(next_rt.execution_trace)
-            if "input" in step: next_rt.set_input(step["input"], step["value"])
+            if "advanceMs" in step: next_rt.advance(step["advanceMs"])
+            elif "input" in step: next_rt.set_input(step["input"], step["value"])
             else: next_rt.trigger(step["target"], step["event"], row_index=step["rowIndex"])
             next_id = state_hash(next_rt)
             new_path = path + [step]

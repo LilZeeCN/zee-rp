@@ -213,7 +213,7 @@ export function materializeNativeControl(sourceFile, outputFile, config) {
     const cloneFile = join(work, 'clone.rp');
     const report = cloneLibraryWidget(join(installRoot(9), 'Libraries/Default.rplib'), sourceFile, cloneFile, {
       sourcePageName, targetPageName: config.pageName, name: config.name,
-      x: config.x, y: config.y, width: config.width, height: config.height,
+      x: config.x, y: config.y, width: config.width, height: config.height, maxLength: config.maxLength,
     });
     let output = readFileSync(cloneFile);
     const record = readRecords(output).find(r => r.className === 'Axure:Page' && parsePayload(r).objects.has(report.id)

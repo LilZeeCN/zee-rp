@@ -152,8 +152,85 @@ try {
     await swipe(1);
     await text('英语长难句训练').waitFor();
     assertions.push('right swipe returns to the populated panel state');
+  } else if (scenario === 'rp1-native') {
+    await page.goto(target('start.html'));
+    const cards = ['第一张卡片', '第二张卡片', '第三张卡片'];
+    const visibleCard = async () => {
+      for (const card of cards) if (await text(card).isVisible()) return card;
+      return null;
+    };
+    await text(cards[0]).waitFor();
+    await text('前进一张').click();
+    await text(cards[1]).waitFor();
+    assertions.push('single-step state change acts immediately');
+    await text('开始轮播').click();
+    assert.equal(await visibleCard(), cards[1]);
+    await text(cards[2]).waitFor();
+    await text(cards[0]).waitFor();
+    assertions.push('timer delays the first transition and wraps after the last state');
+    await text('停止轮播').click();
+    const held = await visibleCard();
+    for (let i = 0; i < 12; i++) {
+      assert.equal(await visibleCard(), held);
+      await new Promise(resolve => setTimeout(resolve, 90));
+    }
+    assertions.push('stop freezes the currently visible state');
+    await text('开始轮播').click();
+    await text(cards[(cards.indexOf(held) + 1) % cards.length]).waitFor();
+    await text('停止轮播').click();
+    assertions.push('restart resumes from the stopped state');
+
+    for (const [name, axis] of [['horizontal', 'x'], ['vertical', 'y']]) {
+      const panel = frame.locator(`[data-label^="panel-${name}-"]`);
+      const before = await panel.boundingBox();
+      const x = before.x + before.width * 0.5, y = before.y + 28;
+      await page.mouse.move(x, y);
+      await page.mouse.down();
+      await page.mouse.move(x + 70, y + 56, { steps: 12 });
+      const during = await panel.boundingBox();
+      const deltas = { x: during.x - before.x, y: during.y - before.y };
+      assert.ok(deltas[axis] >= 30, JSON.stringify(deltas));
+      assert.ok(Math.abs(deltas[axis === 'x' ? 'y' : 'x']) <= 2, JSON.stringify(deltas));
+      await page.mouse.up();
+      const after = await panel.boundingBox();
+      assert.ok(Math.abs(after.x - before.x) <= 2 && Math.abs(after.y - before.y) <= 2);
+      assertions.push(`${name} drag is constrained and returns on release`);
+    }
+    for (const [name, limit] of [['limited', 7], ['styled', 3]]) {
+      const input = frame.locator(`[data-label^="inp-${name}-"] input`);
+      assert.equal(await input.getAttribute('maxlength'), String(limit));
+      await input.pressSequentially('0123456789');
+      assert.equal(await input.inputValue(), '0123456789'.slice(0, limit));
+      assertions.push(`native input limits actual typing to ${limit}`);
+    }
+    const touchPage = await browser.newPage({ hasTouch: true });
+    touchPage.setDefaultTimeout(5000);
+    touchPage.on('pageerror', error => errors.push(error.message));
+    const touchFrame = touchPage.frameLocator('#mainFrame');
+    const card = value => touchFrame.getByText(value, { exact: true }).filter({ visible: true });
+    await touchPage.goto(target('start.html'));
+    await card(cards[0]).waitFor();
+    const carousel = touchFrame.locator('[data-label^="panel-carousel-"]');
+    const touch = await touchPage.context().newCDPSession(touchPage);
+    for (const direction of [-1, 1]) {
+      const rect = await carousel.boundingBox();
+      const x = rect.x + rect.width * (direction < 0 ? 0.72 : 0.25);
+      const y = rect.y + 32;
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] });
+      for (let step = 1; step <= 12; step++) {
+        await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + direction * step * 11, y }] });
+      }
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+      await card(cards[direction === -1 ? 1 : 0]).waitFor();
+      await carousel.evaluate(async element => {
+        const jq = element.ownerDocument.defaultView.jQuery;
+        if (jq) await new Promise(resolve => jq(element).find(':animated').promise().done(resolve));
+      });
+      assertions.push(direction === -1 ? 'left swipe selects the next card' : 'right swipe selects the previous card');
+    }
+
   } else {
-    throw new Error('Usage: node browser-check.mjs <maxlength|list-detail|timer|drag|swipe> <HTML directory> [length]');
+    throw new Error('Usage: node browser-check.mjs <maxlength|list-detail|timer|drag|swipe|rp1-native> <HTML directory> [length]');
   }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ scenario, assertions, errors }, null, 2));

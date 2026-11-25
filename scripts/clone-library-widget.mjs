@@ -13,7 +13,7 @@ const uniquePage = (summary, name, role) => {
 };
 
 export function cloneLibraryWidget(sourceFile, targetFile, outputFile, {
-  sourcePageName, targetPageName, name, x, y, width, height, inputStyle, placeholder
+  sourcePageName, targetPageName, name, x, y, width, height, inputStyle, placeholder, maxLength
 }) {
   if (!sourcePageName || !targetPageName || !name) throw new Error('sourcePageName, targetPageName, and name are required');
   let output = readFileSync(targetFile);
@@ -77,13 +77,23 @@ export function cloneLibraryWidget(sourceFile, targetFile, outputFile, {
   }
   if (!positioned || !sized) throw new Error(`${widget.className} has no editable position/size properties`);
 
+  const str = text => {
+    let index = targetStrings.indexOf(text);
+    if (index < 0) { index = targetStrings.length; targetStrings.push(text); }
+    return { tag: 8, value: index + 1, text };
+  };
+  if (maxLength !== undefined) {
+    if (widget.className !== 'Axure:DiagramObject:TextBox' ||
+        !Number.isInteger(maxLength) || maxLength < 0 || maxLength > 2147483647) {
+      throw new Error('maxLength requires a TextBox and a nonnegative 32-bit integer');
+    }
+    const entry = field(widget.body, 'MaxLength');
+    const value = { tag: 5, value: maxLength };
+    if (entry) Object.assign(entry, value);
+    else widget.body.entries.push([str('MaxLength'), value]);
+  }
   if (inputStyle) {
     if (widget.className !== 'Axure:DiagramObject:TextBox') throw new Error('inputStyle requires a TextBox');
-    const str = text => {
-      let index = targetStrings.indexOf(text);
-      if (index < 0) { index = targetStrings.length; targetStrings.push(text); }
-      return { tag: 8, value: index + 1, text };
-    };
     const map = obj => ({ tag: 1, entries: Object.entries(obj).map(([k, v]) => [str(k), v]) });
     const num = value => ({ tag: 6, value });
     const int = value => ({ tag: 5, value });

@@ -1306,7 +1306,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 if key in node:
                     style[key] = node[key]
             config = {"name": name, "kind": kind, "x": nx, "y": ny, "w": nw, "h": nh, "style": style,
-                      **{key: copy.deepcopy(node[key]) for key in ("text", "value", "placeholder", "checked", "group", "options", "selectedIndex", "multiple", "selectedIndices", "rotation") if key in node},
+                      **{key: copy.deepcopy(node[key]) for key in ("text", "value", "placeholder", "maxLength", "checked", "group", "options", "selectedIndex", "multiple", "selectedIndices", "rotation") if key in node},
                       **state_fields, **({"styles": state_styles} if state_styles else {})}
             if active_when_ctx[0] and any(not ctx[2] for ctx in active_when_ctx[0]):
                 config["visible"] = False
@@ -1341,6 +1341,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 "bgName": bg_name,
                 "placeholder": node.get("placeholder", ""),
                 "value": node.get("value", ""),
+                **({"maxLength": node["maxLength"]} if "maxLength" in node else {}),
                 "x": nx,
                 "y": ny,
                 "w": nw,

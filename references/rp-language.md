@@ -192,7 +192,7 @@ node scripts/proto.mjs build-rp --plan ./bundle/compile-plan.json --out ./anothe
 
 ## 事件、条件与动作顺序
 
-`on` 将事件映射到有序动作数组。事件别名是 `click,change,load,mouseover,mouseout,focus,blur,statechange` 或对应 `On*` 名称。页面只支持 `load`，普通元件不接受 `load`（`E_EVENT_TARGET`）；`change/focus/blur` 只允许输入，`statechange` 只允许面板；同一事件别名不能重复。
+`on` 将事件映射到有序动作数组。事件使用 `click`、`change`、`load`、`mouseover`、`mouseout`、`focus`、`blur`、`statechange` 或对应原生 `On*` 名称。动态面板还支持 `swipeleft`、`swiperight`、`dragstart`、`drag`、`dragdrop`。页面事件用 `load`，输入事件用 `change/focus/blur`。同一事件使用两种别名会报错。
 
 ```json
 {"on":{"click":{"cases":[
@@ -209,7 +209,8 @@ node scripts/proto.mjs build-rp --plan ./bundle/compile-plan.json --out ./anothe
 |---|---|
 | `set-text` | `target:{ref},text`；目标 label/button/badge/input |
 | `set-variable` | `variable,value`；严格匹配声明类型 |
-| `set-panel-state` | `target:{ref},state`；状态须属于面板 |
+| `set-panel-state` | `target` 加 `state` 或 `mode`。用 `state` 指定面板内声明的状态，用 `mode` 选 `next`、`previous` 或 `current` |
+| `move` | `target,mode`。在 `drag` 事件使用 `drag`、`drag-x` 或 `drag-y`，在 `dragdrop` 事件使用 `locationBeforeDrag` |
 | `set-size` | `target:{ref},width,height`；可选 `duration`（毫秒）、`easing`、`anchor`，实际尺寸/动画行为须在目标宿主验证 |
 | `show,hide,toggle` | `target:{ref}` |
 | `enable,disable,focus` | `target:{ref}`；目标原生输入 |
@@ -218,7 +219,9 @@ node scripts/proto.mjs build-rp --plan ./bundle/compile-plan.json --out ./anothe
 
 元件动作只访问当前页，包括其面板状态。跨页用导航与变量传参。所有事件在页面、面板与变量身份完成装配后写入；绑定失败会报错并指向声明。
 `enable/disable/focus` 仅接受原生 input。普通按钮要拦截提交，请使用条件 Case 守卫或显隐状态。
-RP/1 的 `set-panel-state` 不开放过渡参数；原生编辑工具有独立参数，见 [原生动作表](rp-workflow.md#支持的原生动作)。
+`next` 和 `previous` 支持 `loop:true` 首尾循环、`repeatInterval` 定时和可选的 `repeatSkipFirst`。配置了间隔时，默认等一整个间隔再切换。用 `mode:"current"` 停止轮播并保持当前卡片，重新触发定时动作即可恢复。切换支持 `enterAnimation`、`exitAnimation` 和对应的 `enterDuration`、`exitDuration`。动画可用 `none`、`fade`、`slideLeft`、`slideRight`、`slideUp`、`slideDown`，时长以整数毫秒为单位。
+
+原生 `input` 的 `maxLength` 为非负整数，浏览器按 UTF-16 代码单元限制手动键入。原生动作样例可直接用 [native-gestures.rp1](../examples/rp-language/native-gestures.rp1) 生成 .rp。参考运行器用 `{"advanceMs":450}` 推进虚拟时钟，拖动步骤用 `{"target":"horizontal","event":"drag","dx":90,"dy":40}` 表示从开始位置累计的拖动量。参考运行器报告状态与位移，视觉运动用 Axure 生成的播放器验证。
 
 ## 单份详情视图
 
@@ -280,7 +283,7 @@ npm run test:runtime
 
 动作简写：`{"set":{"$answer":"yes","@status":"完成"}}` 按顺序展开；裸名 status 写元件，变量要用 `$` 或 `set-variable`。`{"state":["panel","done"]}` / `set-state` 切态；`show/hide/toggle` 接受目标 ID；`goto` 接受页面 ID。标准动作对象始终可用。
 
-节点支持 `onClick/onChange/onLoad/onMouseOver/onMouseOut/onFocus/onBlur/onStateChange`；事件值接受单动作、动作数组或 `{cases:[...]}`。cases 的动作使用 `actions`，兼容 `do`。同名原生别名冲突报错，输入/面板专属事件仍检查目标类型。
+节点支持 `onClick/onChange/onLoad/onMouseOver/onMouseOut/onFocus/onBlur/onStateChange`。动态面板支持 `onSwipeLeft/onSwipeRight/onDragStart/onDrag/onDragDrop`。事件值接受单动作、动作数组或 `{cases:[...]}`。cases 的动作使用 `actions`，兼容 `do`。同名原生别名冲突报错，输入/面板专属事件仍检查目标类型。
 
 ## 业务宏契约
 

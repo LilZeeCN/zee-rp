@@ -31,6 +31,8 @@ SUPPORTED_EVENT_MAP = {
     "OnMouseOver": "mouseover",
     "OnMouseOut": "mouseout",
     "OnPanelStateChange": "statechange",
+    "OnSwipeLeft": "swipeleft", "OnSwipeRight": "swiperight",
+    "OnDragStart": "dragstart", "OnDrag": "drag", "OnDragDrop": "dragdrop",
 }
 
 SUPPORTED_NATIVE_WIDGET_TYPES = {
@@ -52,7 +54,7 @@ SUPPORTED_NATIVE_WIDGET_TYPES = {
 }
 
 
-def read_rp_json(rp_path_or_dict):
+def read_rp_json(rp_path_or_dict, include_container_events=False):
     """Run rp-read.mjs --json on a binary .rp path or return an already parsed dict."""
     if isinstance(rp_path_or_dict, dict):
         return rp_path_or_dict
@@ -61,7 +63,8 @@ def read_rp_json(rp_path_or_dict):
     if not p_obj.is_file():
         raise FileNotFoundError(f"Missing or unreadable .rp file: {rp_path}")
     proc = subprocess.run(
-        ["node", str(RP_READ_MJS), "--json", rp_path],
+        ["node", str(RP_READ_MJS), "--json", rp_path,
+         *(["--include-master-widgets"] if include_container_events else [])],
         capture_output=True,
         text=True,
         check=False,
@@ -205,6 +208,15 @@ def _lift_human_action_ex(act, name_to_logical, page_name_to_slug=None):
             return {"type": "set-text", "target": target_id, "text": raw_txt}, None
         return None, f"Unrecognized set-text syntax: {human}"
 
+    if atype in ("set-panel-state", "setPanelState", "move") and "rp1" in act:
+        params = act["rp1"]
+        if params is None:
+            return None, f"Unsupported native options for {atype}: {human}"
+        target = name_to_logical.get(params["target"])
+        if not target:
+            return None, f"Missing or ambiguous native action target: {params['target']}"
+        return {**params, "target": target}, None
+
     if atype in ("set-panel-state", "setPanelState"):
         m = (
             re.search(r"设置面板(?:状态)?\s+(.+?)\s+(?:状态值\s*→\s*|→\s*)(.+?)(?:，循环)?$", human)
@@ -340,7 +352,7 @@ def _lift_widget_events(w, name_to_logical):
 
 def decompile_rp(rp_path_or_dict):
     """Decompile a binary .rp file (or rp-read JSON) into a valid RP/1 JSON AST and .rp1 DSL string."""
-    rp_data = read_rp_json(rp_path_or_dict)
+    rp_data = read_rp_json(rp_path_or_dict, include_container_events=True)
     visual_props = extract_rp_visual_props(rp_path_or_dict) if isinstance(rp_path_or_dict, (str, Path)) else {}
     by_key = (visual_props or {}).get("__by_key__") or {}
     variables = {}
@@ -376,44 +388,75 @@ def decompile_rp(rp_path_or_dict):
         page_ids.append(pid)
         page_name_to_slug.setdefault(pname, pid)
 
+    state_widgets = {}
+    for item in rp_data.get("containedWidgets") or []:
+        containers = item.get("container") or []
+        if item.get("record") is not None and containers:
+            state_widgets.setdefault((item["record"], containers[-1]), []).append(item)
+
     pages = []
     unsupported = []
     for p_idx, p in enumerate(raw_pages):
         pname = str(p.get("name") or f"page_{p_idx+1}")
         pid = page_ids[p_idx]
-        raw_widgets = p.get("widgets") or []
         name_to_logical = {}
-        lid_by_idx = {}
-        seen_wnames = set()
-        used_ids = {"root"}
-        for w_idx, w in enumerate(raw_widgets):
-            wname = str(w.get("name") or "")
-            if not wname or wname.startswith(("frame-", "bg-", "rep-")) or w.get("type") in ("Layer", "Repeater", "DynamicPanel"):
-                continue
-            cand = _logical_id_from_native_name(wname, w_idx + 1)
-            base_cand = cand
-            seq = 2
-            while cand in used_ids:
-                cand = f"{base_cand}_{seq}"
-                seq += 1
-            used_ids.add(cand)
-            lid_by_idx[w_idx] = cand
-            if wname in seen_wnames:
-                name_to_logical[wname] = None
-            else:
-                seen_wnames.add(wname)
-                name_to_logical[wname] = cand
+        state_names = {}
 
-        children = []
+        def collect(widgets, scope="", ancestors=()):
+            used_ids = {"root"}
+            entries = []
+            for w_idx, widget in enumerate(widgets):
+                name = str(widget.get("name") or "")
+                if not name or name.startswith(("frame-", "bg-", "rep-")) or widget.get("type") in ("Layer", "Repeater"):
+                    continue
+                if widget.get("type") == "DynamicPanel" and not widget.get("panel"):
+                    unsupported.append({"kind": "unsupported-panel", "widgetName": name,
+                                        "detail": "Native dynamic panel has no readable states."})
+                    continue
+                base_id = _logical_id_from_native_name(name, w_idx + 1)
+                lid = base_id
+                seq = 2
+                while lid in used_ids:
+                    lid = f"{base_id}_{seq}"
+                    seq += 1
+                used_ids.add(lid)
+                logical = f"{scope}/{lid}" if scope else lid
+                name_to_logical[name] = None if name in name_to_logical else logical
+                states = []
+                used_states = set()
+                for n, state in enumerate(widget.get("panel") or [], 1):
+                    original_name = state["name"]
+                    base_state = _logical_id_from_native_name(original_name, n)
+                    state_id = base_state
+                    seq = 2
+                    while state_id in used_states:
+                        state_id = f"{base_state}_{seq}"
+                        seq += 1
+                    used_states.add(state_id)
+                    state_names[logical, original_name] = state_id
+                    record = state.get("record")
+                    if record is None or record in ancestors:
+                        unsupported.append({"kind": "unsupported-panel-state", "widgetName": name,
+                                            "detail": f"Missing or recurring native record for panel state '{original_name}'."})
+                        members = []
+                    else:
+                        members = collect(state_widgets.get((record, f"{name}({original_name})"), []),
+                                          f"{pid}/{logical}/{state_id}" if not scope else f"{logical}/{state_id}",
+                                          (*ancestors, record))
+                    states.append((state_id, members))
+                entries.append((widget, lid, states))
+            return entries
+
+        entries = collect(p.get("widgets") or [])
         max_r, max_b = 375, 812
         p_rec = p.get("record") if p.get("record") is not None else (p_idx + 1)
-        for w_idx, w in enumerate(raw_widgets):
+
+        def make_node(entry, in_panel=False):
+            nonlocal max_r, max_b
+            w, lid, states = entry
             wname = str(w.get("name") or "")
-            if not wname or wname.startswith(("frame-", "bg-", "rep-")) or w.get("type") in ("Layer", "Repeater", "DynamicPanel"):
-                continue
-            lid = lid_by_idx.get(w_idx, f"w_{w_idx+1}")
             kind = _infer_widget_kind(w)
-            vp = by_key.get(f"{p_rec}:{w.get('id')}") or (visual_props or {}).get(wname) or {}
+            vp = by_key.get(f"{w.get('record', p_rec)}:{w.get('id')}") or (visual_props or {}).get(wname) or {}
             x = int(round(float(w.get("x") or 0)))
             y = int(round(float(w.get("y") or 0)))
             width = max(24, int(round(float(w.get("w") or 120))))
@@ -424,16 +467,27 @@ def decompile_rp(rp_path_or_dict):
                 longest = max((sum(16 if ord(ch) > 127 else 9 for ch in ln) for ln in lines), default=0)
                 width = max(width, longest + 32)
                 height = max(height, len(lines) * 24 + 8)
-            max_r = max(max_r, x + width + 24, width + 64)
-            max_b = max(max_b, y + height + 24)
+            if not in_panel:
+                max_r = max(max_r, x + width + 24, width + 64)
+                max_b = max(max_b, y + height + 24)
             node = {
                 "type": kind,
                 "id": lid,
                 "w": width,
                 "h": height,
             }
-            if kind == "input":
+            if in_panel:
+                node.update(x=x, y=y)
+            if kind == "dynamic-panel":
+                node["states"] = [{
+                    "id": state_id,
+                    "root": {"type": "box", "id": "root", "layout": "stack", "w": width, "h": height,
+                             "children": [make_node(member, in_panel=True) for member in members]},
+                } for state_id, members in states]
+            elif kind == "input":
                 node["value"] = str(w.get("text") or "")
+                if type(w.get("maxLength")) is int and w["maxLength"] < 2147483647:
+                    node["maxLength"] = w["maxLength"]
             elif kind in ("checkbox", "radio"):
                 node["text"] = str(w.get("text") or lid)
                 node["checked"] = bool(vp.get("checked", w.get("checked", False)))
@@ -460,9 +514,16 @@ def decompile_rp(rp_path_or_dict):
             ev_map, unsup = _lift_widget_events_ex(w, name_to_logical, page_name_to_slug)
             unsupported.extend(unsup)
             if ev_map:
+                for actions in ev_map.values():
+                    for action in actions:
+                        if action["type"] == "set-panel-state" and "state" in action:
+                            alias = state_names.get((action["target"], action["state"]))
+                            if alias:
+                                action["state"] = alias
                 node["on"] = ev_map
-            children.append(node)
+            return node
 
+        children = [make_node(entry) for entry in entries]
         if not children:
             children.append({"type": "label", "id": "empty_lbl", "text": pname, "w": 200, "h": 24})
 
@@ -667,6 +728,7 @@ def _collect_rp_widgets(rp_data, visual_props=None, rec_remap=None):
                 "type": w.get("type") or "",
                 "className": w.get("className") or "",
                 "text": w.get("text"),
+                "maxLength": w.get("maxLength"),
                 "x": vp.get("x", w.get("x")),
                 "y": vp.get("y", w.get("y")),
                 "w": vp.get("w", w.get("w")),
@@ -713,6 +775,7 @@ def _collect_rp_widgets(rp_data, visual_props=None, rec_remap=None):
             "type": cw.get("type") or "",
             "className": cw.get("className") or "",
             "text": cw.get("text"),
+            "maxLength": cw.get("maxLength"),
             "x": vp.get("x", cw.get("x")),
             "y": vp.get("y", cw.get("y")),
             "w": vp.get("w", cw.get("w")),
@@ -1115,7 +1178,7 @@ def _apply_prop_to_target(target, sym, prop, new_val, old_val=None, coordinate_s
             computed_coord = int(round(float(new_val) - offset))
         ast_node[prop] = computed_coord
         return {"id": sym["id"], "property": prop, "oldValue": old_val, "newValue": computed_coord}
-    if prop in ("w", "h", "fill", "stroke", "color", "radius", "rotation", "checked", "group", "options", "selectedIndex", "selectedIndices", "multiple"):
+    if prop in ("w", "h", "fill", "stroke", "color", "radius", "rotation", "checked", "group", "options", "selectedIndex", "selectedIndices", "multiple", "maxLength"):
         if prop in ("w", "h", "radius") and isinstance(new_val, (int, float)):
             val_norm = int(round(float(new_val)))
         elif prop == "rotation" and isinstance(new_val, (int, float)):
@@ -1125,7 +1188,8 @@ def _apply_prop_to_target(target, sym, prop, new_val, old_val=None, coordinate_s
         ast_node[prop] = val_norm
         return {"id": sym["id"], "property": prop, "oldValue": old_val, "newValue": val_norm}
     if prop == "on":
-        for pop_k in ("onClick", "onChange", "onLoad", "onMouseOver", "onMouseOut", "onFocus", "onBlur", "onStateChange", "on"):
+        from rplang.core import EVENT_SHORTHANDS
+        for pop_k in (*EVENT_SHORTHANDS, "on"):
             ast_node.pop(pop_k, None)
         if new_val:
             ast_node["on"] = copy.deepcopy(new_val)
@@ -1558,6 +1622,8 @@ def lift_rp_into_spec(base_spec, base_rp_path_or_dict, gui_rp_path_or_dict=None,
                 new_item["name"] = wname
             if kind == "input":
                 new_item["value"] = str(gw.get("text") or "")
+                if type(gw.get("maxLength")) is int and gw["maxLength"] < 2147483647:
+                    new_item["maxLength"] = gw["maxLength"]
             elif kind in ("checkbox", "radio"):
                 new_item["text"] = str(gw.get("text") if gw.get("text") is not None else lid)
                 new_item["checked"] = bool(gw.get("checked", False))
@@ -1664,7 +1730,7 @@ def lift_rp_into_spec(base_spec, base_rp_path_or_dict, gui_rp_path_or_dict=None,
                         if isinstance(res, dict) and res.get("isComponentInstance"):
                             lifted_component_instances.append(res)
 
-        for vprop in ("fill", "stroke", "color", "radius", "rotation", "checked", "group", "options", "selectedIndex", "selectedIndices", "multiple"):
+        for vprop in ("fill", "stroke", "color", "radius", "rotation", "checked", "group", "options", "selectedIndex", "selectedIndices", "multiple", "maxLength"):
             g_val = gw.get(vprop)
             b_val = bw.get(vprop)
             if vprop == "rotation":
@@ -1796,7 +1862,7 @@ def _compute_source_prop_deltas(base_spec, new_spec):
         nt = _resolve_ast_target(new_spec, new_syms[sid], new_uses)
         bn = base_nodes.get(base_syms[sid]["name"], {})
         nn = new_nodes.get(new_syms[sid]["name"], {})
-        for prop in ("text", "value", "name", "x", "y", "w", "h", "fill", "stroke", "color", "radius", "rotation", "checked", "group", "options", "selectedIndex", "selectedIndices", "multiple", "on"):
+        for prop in ("text", "value", "name", "x", "y", "w", "h", "fill", "stroke", "color", "radius", "rotation", "checked", "group", "options", "selectedIndex", "selectedIndices", "multiple", "maxLength", "on"):
             bval = _extract_node_prop(bt, prop) if bt else None
             nval = _extract_node_prop(nt, prop) if nt else None
             # Source pointers address the original AST, not the lowered tree.

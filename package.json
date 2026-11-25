@@ -163,6 +163,7 @@
     "examples/rp-language/lost-and-found.json",
     "examples/rp-language/mcp-three-pages.json",
     "examples/rp-language/mobile-layout.rp1",
+    "examples/rp-language/native-gestures.rp1",
     "examples/rp-language/nested-panels.json",
     "examples/rp-language/panel-data.json",
     "examples/rp-language/repair-workorder.json",

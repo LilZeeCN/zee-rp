@@ -4394,10 +4394,6 @@
                   "on": {
                     "$ref": "#/$defs/events"
                   },
-                  "font": {
-                    "type": "string",
-                    "minLength": 1
-                  },
                   "when": {
                     "$ref": "#/$defs/value"
                   },
@@ -4698,10 +4694,58 @@
                       }
                     ]
                   },
+                  "borderBottom": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "fill": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "wrap": {
+                    "type": "boolean"
+                  },
+                  "stroke": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
                   "rotation": {
                     "anyOf": [
                       {
                         "type": "number"
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "backdropBlur": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
                       },
                       {
                         "type": "string",
@@ -4726,16 +4770,17 @@
                       }
                     ]
                   },
-                  "fontSize": {
+                  "aurora": {
                     "anyOf": [
                       {
-                        "type": "number",
-                        "exclusiveMinimum": 0,
-                        "maximum": 120
+                        "type": "boolean"
                       },
                       {
-                        "type": "string",
-                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        },
+                        "minItems": 0
                       },
                       {
                         "$ref": "#/$defs/compileExpression"
@@ -4752,7 +4797,50 @@
                       }
                     ]
                   },
-                  "maxLines": {
+                  "innerGlow": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "shadow": {
+                    "$ref": "#/$defs/dataValue"
+                  },
+                  "opacity": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "gradient": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "borderRight": {
                     "anyOf": [
                       {
                         "type": "string"
@@ -4777,13 +4865,15 @@
                       }
                     ]
                   },
-                  "selectionGroup": {
-                    "type": "string"
-                  },
-                  "color": {
+                  "noise": {
                     "anyOf": [
                       {
-                        "type": "string"
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
                       },
                       {
                         "$ref": "#/$defs/compileExpression"
@@ -4804,7 +4894,53 @@
                       }
                     ]
                   },
-                  "noise": {
+                  "borderTop": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "visible": {
+                    "type": "boolean"
+                  },
+                  "hidden": {
+                    "type": "boolean"
+                  },
+                  "bg": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "background": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "borderColor": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "borderWidth": {
                     "anyOf": [
                       {
                         "type": "number",
@@ -4818,6 +4954,158 @@
                         "$ref": "#/$defs/compileExpression"
                       }
                     ]
+                  },
+                  "rounded": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "borderRadius": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "text": {
+                    "$ref": "#/$defs/value"
+                  },
+                  "fontSize": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "exclusiveMinimum": 0,
+                        "maximum": 120
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "fontWeight": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "color": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "textColor": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "fg": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "font": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "disabled": {
+                    "type": "boolean"
+                  },
+                  "lineHeight": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "italic": {
+                    "type": "boolean"
+                  },
+                  "weight": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "letterSpacing": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
+                  },
+                  "selected": {
+                    "type": "boolean"
                   },
                   "styles": {
                     "type": "object",
@@ -5318,215 +5606,8 @@
                     "required": [],
                     "additionalProperties": false
                   },
-                  "selected": {
-                    "type": "boolean"
-                  },
-                  "strikethrough": {
-                    "type": "boolean"
-                  },
-                  "borderBottom": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "fill": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "wrap": {
-                    "type": "boolean"
-                  },
-                  "stroke": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "backdropBlur": {
-                    "anyOf": [
-                      {
-                        "type": "number",
-                        "minimum": 0
-                      },
-                      {
-                        "type": "string",
-                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "fontFamily": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "underline": {
-                    "type": "boolean"
-                  },
-                  "letterSpacing": {
-                    "anyOf": [
-                      {
-                        "type": "number",
-                        "minimum": 0
-                      },
-                      {
-                        "type": "string",
-                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "fontWeight": {
-                    "anyOf": [
-                      {
-                        "type": "number",
-                        "minimum": 0
-                      },
-                      {
-                        "type": "string",
-                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "aurora": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "array",
-                        "items": {
-                          "type": "string"
-                        },
-                        "minItems": 0
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "innerGlow": {
-                    "anyOf": [
-                      {
-                        "type": "number",
-                        "minimum": 0
-                      },
-                      {
-                        "type": "string",
-                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "shadow": {
-                    "$ref": "#/$defs/dataValue"
-                  },
-                  "spans": {
-                    "type": "array",
-                    "items": {
-                      "type": "object"
-                    },
-                    "minItems": 0
-                  },
-                  "opacity": {
-                    "anyOf": [
-                      {
-                        "type": "number",
-                        "minimum": 0
-                      },
-                      {
-                        "type": "string",
-                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "gradient": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "borderRight": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "italic": {
-                    "type": "boolean"
-                  },
-                  "weight": {
-                    "anyOf": [
-                      {
-                        "type": "number",
-                        "minimum": 0
-                      },
-                      {
-                        "type": "string",
-                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "lineHeight": {
-                    "anyOf": [
-                      {
-                        "type": "number",
-                        "minimum": 0
-                      },
-                      {
-                        "type": "string",
-                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "disabled": {
-                    "type": "boolean"
+                  "selectionGroup": {
+                    "type": "string"
                   },
                   "lineGap": {
                     "anyOf": [
@@ -5543,7 +5624,14 @@
                       }
                     ]
                   },
-                  "borderTop": {
+                  "spans": {
+                    "type": "array",
+                    "items": {
+                      "type": "object"
+                    },
+                    "minItems": 0
+                  },
+                  "fontFamily": {
                     "anyOf": [
                       {
                         "type": "string"
@@ -5553,109 +5641,21 @@
                       }
                     ]
                   },
-                  "text": {
-                    "$ref": "#/$defs/value"
+                  "maxLines": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
                   },
-                  "visible": {
+                  "underline": {
                     "type": "boolean"
                   },
-                  "hidden": {
+                  "strikethrough": {
                     "type": "boolean"
-                  },
-                  "bg": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "background": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "textColor": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "fg": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "borderColor": {
-                    "anyOf": [
-                      {
-                        "type": "string"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "borderWidth": {
-                    "anyOf": [
-                      {
-                        "type": "number",
-                        "minimum": 0
-                      },
-                      {
-                        "type": "string",
-                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "rounded": {
-                    "anyOf": [
-                      {
-                        "type": "number",
-                        "minimum": 0
-                      },
-                      {
-                        "type": "string",
-                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
-                  },
-                  "borderRadius": {
-                    "anyOf": [
-                      {
-                        "type": "number",
-                        "minimum": 0
-                      },
-                      {
-                        "type": "string",
-                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
-                      },
-                      {
-                        "$ref": "#/$defs/compileExpression"
-                      }
-                    ]
                   }
                 },
                 "required": [
@@ -13022,6 +13022,56 @@
               },
               "onLoad": {
                 "$ref": "#/$defs/eventValue"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -13623,6 +13673,56 @@
                   {
                     "type": "string",
                     "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
                   },
                   {
                     "$ref": "#/$defs/compileExpression"
@@ -15677,6 +15777,21 @@
               },
               "hidden": {
                 "type": "boolean"
+              },
+              "onSwipeLeft": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onSwipeRight": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDragStart": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDrag": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDragDrop": {
+                "$ref": "#/$defs/eventValue"
               }
             },
             "required": [
@@ -16232,6 +16347,56 @@
                   {
                     "type": "string",
                     "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
                   },
                   {
                     "$ref": "#/$defs/compileExpression"
@@ -19220,6 +19385,11 @@
                     "$ref": "#/$defs/compileExpression"
                   }
                 ]
+              },
+              "maxLength": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647
               }
             },
             "required": [
@@ -19738,6 +19908,56 @@
                   {
                     "type": "string",
                     "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
                   },
                   {
                     "$ref": "#/$defs/compileExpression"
@@ -21634,6 +21854,56 @@
                     "$ref": "#/$defs/compileExpression"
                   }
                 ]
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -23243,6 +23513,56 @@
                     "$ref": "#/$defs/compileExpression"
                   }
                 ]
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -23941,6 +24261,56 @@
                     "$ref": "#/$defs/compileExpression"
                   }
                 ]
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -24537,6 +24907,21 @@
               },
               "hidden": {
                 "type": "boolean"
+              },
+              "onSwipeLeft": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onSwipeRight": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDragStart": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDrag": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDragDrop": {
+                "$ref": "#/$defs/eventValue"
               }
             },
             "required": [
@@ -26523,6 +26908,56 @@
                     "$ref": "#/$defs/compileExpression"
                   }
                 ]
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -27059,6 +27494,56 @@
                   {
                     "type": "string",
                     "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
                   },
                   {
                     "$ref": "#/$defs/compileExpression"
@@ -30001,6 +30486,56 @@
                     "$ref": "#/$defs/compileExpression"
                   }
                 ]
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -31973,6 +32508,56 @@
                     "$ref": "#/$defs/compileExpression"
                   }
                 ]
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -32964,6 +33549,56 @@
                     "$ref": "#/$defs/compileExpression"
                   }
                 ]
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -33009,6 +33644,21 @@
               },
               "hidden": {
                 "type": "boolean"
+              },
+              "onSwipeLeft": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onSwipeRight": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDragStart": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDrag": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDragDrop": {
+                "$ref": "#/$defs/eventValue"
               }
             },
             "required": [
@@ -33039,91 +33689,6 @@
                 "properties": {
                   "type": {
                     "const": "when"
-                  },
-                  "id": {
-                    "type": "string",
-                    "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
-                  },
-                  "name": {
-                    "type": "string"
-                  },
-                  "on": {
-                    "$ref": "#/$defs/events"
-                  },
-                  "when": {
-                    "$ref": "#/$defs/value"
-                  },
-                  "adaptive": {
-                    "type": "object",
-                    "propertyNames": {
-                      "type": "string",
-                      "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
-                    },
-                    "additionalProperties": {
-                      "type": "object",
-                      "properties": {
-                        "x": {
-                          "type": "number"
-                        },
-                        "y": {
-                          "type": "number"
-                        },
-                        "w": {
-                          "type": "number",
-                          "minimum": 0
-                        },
-                        "h": {
-                          "type": "number",
-                          "minimum": 0
-                        }
-                      },
-                      "required": [],
-                      "additionalProperties": false
-                    }
-                  },
-                  "goto": {
-                    "type": "string",
-                    "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
-                  },
-                  "link": {
-                    "type": "string",
-                    "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
-                  },
-                  "navigate": {
-                    "type": "string",
-                    "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
-                  },
-                  "size": {
-                    "type": "array",
-                    "items": {
-                      "$ref": "#/$defs/size"
-                    },
-                    "minItems": 2,
-                    "maxItems": 2
-                  },
-                  "onClick": {
-                    "$ref": "#/$defs/eventValue"
-                  },
-                  "onChange": {
-                    "$ref": "#/$defs/eventValue"
-                  },
-                  "onLoad": {
-                    "$ref": "#/$defs/eventValue"
-                  },
-                  "onMouseOver": {
-                    "$ref": "#/$defs/eventValue"
-                  },
-                  "onMouseOut": {
-                    "$ref": "#/$defs/eventValue"
-                  },
-                  "onFocus": {
-                    "$ref": "#/$defs/eventValue"
-                  },
-                  "onBlur": {
-                    "$ref": "#/$defs/eventValue"
-                  },
-                  "onStateChange": {
-                    "$ref": "#/$defs/eventValue"
                   },
                   "colSpan": {
                     "anyOf": [
@@ -33228,6 +33793,18 @@
                       }
                     ]
                   },
+                  "size": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/$defs/size"
+                    },
+                    "minItems": 2,
+                    "maxItems": 2
+                  },
+                  "id": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+                  },
                   "pinGap": {
                     "anyOf": [
                       {
@@ -33316,15 +33893,10 @@
                       }
                     ]
                   },
-                  "gap": {
+                  "condition": {
                     "anyOf": [
                       {
-                        "type": "number",
-                        "minimum": 0
-                      },
-                      {
-                        "type": "string",
-                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                        "type": "string"
                       },
                       {
                         "$ref": "#/$defs/compileExpression"
@@ -33341,7 +33913,7 @@
                       }
                     ]
                   },
-                  "condition": {
+                  "else": {
                     "anyOf": [
                       {
                         "type": "string"
@@ -33366,10 +33938,15 @@
                       }
                     ]
                   },
-                  "else": {
+                  "gap": {
                     "anyOf": [
                       {
-                        "type": "string"
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
                       },
                       {
                         "$ref": "#/$defs/compileExpression"
@@ -33381,6 +33958,79 @@
                   },
                   "hidden": {
                     "type": "boolean"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "on": {
+                    "$ref": "#/$defs/events"
+                  },
+                  "when": {
+                    "$ref": "#/$defs/value"
+                  },
+                  "adaptive": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+                    },
+                    "additionalProperties": {
+                      "type": "object",
+                      "properties": {
+                        "x": {
+                          "type": "number"
+                        },
+                        "y": {
+                          "type": "number"
+                        },
+                        "w": {
+                          "type": "number",
+                          "minimum": 0
+                        },
+                        "h": {
+                          "type": "number",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [],
+                      "additionalProperties": false
+                    }
+                  },
+                  "goto": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+                  },
+                  "link": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+                  },
+                  "navigate": {
+                    "type": "string",
+                    "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+                  },
+                  "onClick": {
+                    "$ref": "#/$defs/eventValue"
+                  },
+                  "onChange": {
+                    "$ref": "#/$defs/eventValue"
+                  },
+                  "onLoad": {
+                    "$ref": "#/$defs/eventValue"
+                  },
+                  "onMouseOver": {
+                    "$ref": "#/$defs/eventValue"
+                  },
+                  "onMouseOut": {
+                    "$ref": "#/$defs/eventValue"
+                  },
+                  "onFocus": {
+                    "$ref": "#/$defs/eventValue"
+                  },
+                  "onBlur": {
+                    "$ref": "#/$defs/eventValue"
+                  },
+                  "onStateChange": {
+                    "$ref": "#/$defs/eventValue"
                   }
                 },
                 "required": [
@@ -34187,6 +34837,56 @@
                   {
                     "type": "string",
                     "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
                   },
                   {
                     "$ref": "#/$defs/compileExpression"
@@ -44932,6 +45632,56 @@
               "data-table": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -45547,6 +46297,56 @@
               "detail-card": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -47623,6 +48423,21 @@
               "dynamic-panel": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onSwipeLeft": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onSwipeRight": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDragStart": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDrag": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDragDrop": {
+                "$ref": "#/$defs/eventValue"
               }
             },
             "required": [
@@ -48192,6 +49007,56 @@
               "form-card": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -51216,6 +52081,11 @@
               "input": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "maxLength": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 2147483647
               }
             },
             "required": [
@@ -51748,6 +52618,56 @@
               "kv-list": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -53662,6 +54582,56 @@
               "list-item": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -55289,6 +56259,56 @@
               "master-detail": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -55996,6 +57016,56 @@
               "nav-bar": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -56601,6 +57671,21 @@
               "panel": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onSwipeLeft": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onSwipeRight": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDragStart": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDrag": {
+                "$ref": "#/$defs/eventValue"
+              },
+              "onDragDrop": {
+                "$ref": "#/$defs/eventValue"
               }
             },
             "required": [
@@ -58605,6 +59690,56 @@
               "phone-shell": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -59155,6 +60290,56 @@
               "progress-bar": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -62137,6 +63322,56 @@
               "searchable-list": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -64136,6 +65371,56 @@
               "stat-row": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -65136,6 +66421,56 @@
               "tab-bar": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -65183,6 +66518,21 @@
                   "use": {
                     "type": "string",
                     "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+                  },
+                  "onSwipeLeft": {
+                    "$ref": "#/$defs/eventValue"
+                  },
+                  "onSwipeRight": {
+                    "$ref": "#/$defs/eventValue"
+                  },
+                  "onDragStart": {
+                    "$ref": "#/$defs/eventValue"
+                  },
+                  "onDrag": {
+                    "$ref": "#/$defs/eventValue"
+                  },
+                  "onDragDrop": {
+                    "$ref": "#/$defs/eventValue"
                   }
                 },
                 "required": [
@@ -66589,6 +67939,56 @@
               "wizard-card": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "onDragStart": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeRight": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onSwipeLeft": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDragDrop": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "onDrag": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -66652,12 +68052,209 @@
               "$ref": "#/$defs/reference"
             },
             "state": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+            },
+            "exitDuration": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            },
+            "exitAnimation": {
+              "enum": [
+                "none",
+                "fade",
+                "slideLeft",
+                "slideRight",
+                "slideUp",
+                "slideDown"
+              ]
+            },
+            "enterAnimation": {
+              "enum": [
+                "none",
+                "fade",
+                "slideLeft",
+                "slideRight",
+                "slideUp",
+                "slideDown"
+              ]
+            },
+            "loop": {
+              "type": "boolean"
+            },
+            "enterDuration": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 2147483647
+            },
+            "mode": {
+              "enum": [
+                "next",
+                "previous",
+                "current"
+              ]
+            },
+            "repeatInterval": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 2147483647
+            },
+            "repeatSkipFirst": {
+              "type": "boolean"
             }
           },
           "required": [
             "type",
-            "state",
+            "target"
+          ],
+          "additionalProperties": false,
+          "oneOf": [
+            {
+              "required": [
+                "state"
+              ],
+              "not": {
+                "required": [
+                  "mode"
+                ]
+              }
+            },
+            {
+              "required": [
+                "mode"
+              ],
+              "not": {
+                "required": [
+                  "state"
+                ]
+              }
+            }
+          ],
+          "dependentRequired": {
+            "repeatSkipFirst": [
+              "repeatInterval"
+            ],
+            "enterDuration": [
+              "enterAnimation"
+            ],
+            "exitDuration": [
+              "exitAnimation"
+            ]
+          },
+          "allOf": [
+            {
+              "if": {
+                "anyOf": [
+                  {
+                    "required": [
+                      "loop"
+                    ]
+                  },
+                  {
+                    "required": [
+                      "repeatInterval"
+                    ]
+                  }
+                ]
+              },
+              "then": {
+                "required": [
+                  "mode"
+                ],
+                "properties": {
+                  "mode": {
+                    "enum": [
+                      "next",
+                      "previous"
+                    ]
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "enterDuration"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "enterAnimation": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "exitDuration"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "exitAnimation": {
+                    "not": {
+                      "const": "none"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "mode"
+                ],
+                "properties": {
+                  "mode": {
+                    "const": "current"
+                  }
+                }
+              },
+              "then": {
+                "not": {
+                  "anyOf": [
+                    {
+                      "required": [
+                        "enterAnimation"
+                      ]
+                    },
+                    {
+                      "required": [
+                        "exitAnimation"
+                      ]
+                    }
+                  ]
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "move"
+            },
+            "target": {
+              "$ref": "#/$defs/reference"
+            },
+            "mode": {
+              "enum": [
+                "drag",
+                "drag-x",
+                "drag-y",
+                "locationBeforeDrag"
+              ]
+            }
+          },
+          "required": [
+            "type",
+            "mode",
             "target"
           ],
           "additionalProperties": false
@@ -67439,6 +69036,9 @@
       "propertyNames": {
         "enum": [
           "OnClick",
+          "OnDrag",
+          "OnDragDrop",
+          "OnDragStart",
           "OnFocus",
           "OnLoad",
           "OnLostFocus",
@@ -67447,17 +69047,24 @@
           "OnPanelStateChange",
           "OnSelectedChange",
           "OnSelectionChange",
+          "OnSwipeLeft",
+          "OnSwipeRight",
           "OnTextChange",
           "blur",
           "change",
           "click",
+          "drag",
+          "dragdrop",
+          "dragstart",
           "focus",
           "load",
           "mouseout",
           "mouseover",
           "selectedchange",
           "selectionchange",
-          "statechange"
+          "statechange",
+          "swipeleft",
+          "swiperight"
         ]
       },
       "additionalProperties": {
@@ -68815,12 +70422,17 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onRowClick",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "padding",
       "pageSize",
       "pin",
@@ -68872,11 +70484,16 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "padding",
       "pin",
       "pinGap",
@@ -69027,11 +70644,16 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "pin",
       "pinGap",
       "right",
@@ -69069,12 +70691,17 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onStateChange",
       "onSubmit",
+      "onSwipeLeft",
+      "onSwipeRight",
       "padding",
       "pin",
       "pinGap",
@@ -69317,6 +70944,7 @@
       "id",
       "innerGlow",
       "link",
+      "maxLength",
       "name",
       "native",
       "navigate",
@@ -69383,11 +71011,16 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "padding",
       "pin",
       "pinGap",
@@ -69520,11 +71153,16 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "padding",
       "page",
       "pin",
@@ -69651,11 +71289,16 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "padding",
       "pin",
       "pinGap",
@@ -69709,12 +71352,17 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onRight",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "padding",
       "pin",
       "pinGap",
@@ -69761,11 +71409,16 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "pin",
       "pinGap",
       "right",
@@ -69899,12 +71552,17 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onRight",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "padding",
       "pin",
       "pinGap",
@@ -69965,11 +71623,16 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "percent",
       "pin",
       "pinGap",
@@ -70237,11 +71900,16 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "padding",
       "pageSize",
       "pin",
@@ -70430,11 +72098,16 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "padding",
       "pin",
       "pinGap",
@@ -70489,11 +72162,16 @@
       "onBlur",
       "onChange",
       "onClick",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "padding",
       "pin",
       "pinGap",
@@ -70518,6 +72196,11 @@
       "component",
       "hidden",
       "id",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
+      "onSwipeLeft",
+      "onSwipeRight",
       "type",
       "visible"
     ],
@@ -70588,11 +72271,16 @@
       "onChange",
       "onClick",
       "onComplete",
+      "onDrag",
+      "onDragDrop",
+      "onDragStart",
       "onFocus",
       "onLoad",
       "onMouseOut",
       "onMouseOver",
       "onStateChange",
+      "onSwipeLeft",
+      "onSwipeRight",
       "padding",
       "pin",
       "pinGap",

@@ -130,6 +130,23 @@ try {
     assert.equal(rp.pages.length, result.pages.length);
     assert.ok(rp.counts.widgets > 0);
   });
+  await check('RP/1 native gestures and timed state changes pass the public stdio compiler', async () => {
+    const source = join(root, 'examples/rp-language/native-gestures.rp1');
+    const generated = await call('generate_prototype', {
+      source, output: join(work, 'rp1-native-gestures.rp'), compact: false,
+    });
+    assert.deepEqual(generated.structure, { unparseable: 0, danglingRefs: 0, problems: 0 });
+    assert.equal(generated.eventCoverage.declared, generated.eventCoverage.materialized);
+    const rp = JSON.parse((await call('rp_read', { args: [generated.output, '--json'] })).stdout);
+    const widgets = rp.pages[0].widgets;
+    const events = widgets.flatMap(widget => widget.interactions ?? []);
+    const actions = events.flatMap(event => event.cases.flatMap(kase => kase.actions));
+    assert(events.some(event => event.event === 'OnSwipeRight'));
+    assert(events.some(event => event.event === 'OnDragDrop'));
+    assert(actions.some(action => action.rp1?.repeatInterval === 450));
+    assert(actions.some(action => action.rp1?.mode === 'current'));
+    assert(widgets.some(widget => widget.maxLength === 7));
+  });
   await check('existing, protected and outside-root outputs fail before modifying a file', async () => {
     const digest = createHash('sha256').update(readFileSync(generated.output)).digest('hex');
     await failure({ spec, output: generated.output });

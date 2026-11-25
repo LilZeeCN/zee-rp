@@ -39,6 +39,49 @@ def sugar_fixture():
 
 
 class LanguageContract(unittest.TestCase):
+    def test_native_timers_and_gestures_in_reference_runtime(self):
+        from rp_language_cli import read_source
+        spec = read_source(ROOT / "examples/rp-language/native-gestures.rp1")
+        steps = [
+            {"target": "start"}, {"advanceMs": 449}, {"advanceMs": 1},
+            {"target": "stop"}, {"advanceMs": 900}, {"target": "start"}, {"advanceMs": 450},
+            {"target": "stop"}, {"target": "carousel", "event": "swipeleft"},
+            {"target": "carousel", "event": "swiperight"},
+            {"target": "horizontal", "event": "drag", "dx": 90, "dy": 40},
+            {"target": "horizontal", "event": "dragdrop"},
+            {"target": "vertical", "event": "OnDrag", "dx": 90, "dy": 40},
+            {"target": "vertical", "event": "OnDragDrop"},
+            {"input": "limited", "value": "🙂🙂🙂🙂"}, {"input": "styled", "value": "ABCDE"},
+        ]
+        rt = ReferenceRuntime(spec)
+        name = rt.resolve_trigger_name
+        states = [entry["state"] for entry in simulate_spec(spec, steps)["trace"]]
+        self.assertEqual([state["panels"][name("carousel")] for state in states[:11]],
+                         ["first", "first", "first", "second", "second", "second", "second",
+                          "third", "third", "first", "third"])
+        for index, widget, xy in [(11, "horizontal", (90, 0)), (12, "horizontal", (0, 0)),
+                                  (13, "vertical", (0, 40)), (14, "vertical", (0, 0))]:
+            snapshot = states[index]["widgets"][name(widget)]
+            self.assertEqual((snapshot["dx"], snapshot["dy"]), xy)
+        self.assertEqual(states[-1]["widgets"][name("limited")]["text"], "🙂🙂🙂")
+        self.assertEqual(states[-1]["widgets"][name("styled")]["text"], "ABC")
+
+    def test_native_gesture_and_timer_diagnostics(self):
+        spec = sugar_fixture()
+        owner = spec["pages"][0]["root"]["children"][2]
+        owner["onSwipeLeft"] = [{"type": "set-panel-state", "target": "receipt", "mode": "next"}]
+        self.reject(spec, "E_EVENT_TARGET")
+        owner.pop("onSwipeLeft")
+        owner["onClick"] = [{"type": "move", "target": "receipt", "mode": "drag-x"}]
+        self.reject(spec, "E_EVENT_TARGET")
+        owner["onClick"] = [{"type": "set-panel-state", "target": "receipt", "mode": "current", "repeatInterval": 10}]
+        self.reject(spec, "E_STATE")
+        owner["onClick"] = [{"type": "set-panel-state", "target": "receipt", "mode": "next", "repeatInterval": 0}]
+        self.reject(spec, "E_STATE")
+        owner.pop("onClick")
+        spec["pages"][0]["root"]["children"][0]["maxLength"] = True
+        self.reject(spec, "E_INPUT")
+
     def test_strict_comparison_spelling_preserves_literals_and_type_checks(self):
         spec = sugar_fixture()
         spec["pages"][0]["root"]["children"][2]["onClick"] = {"cases": [

@@ -1,0 +1,35 @@
+rp/1 target=9 name="原生交互验收" domain=web theme=enterprise-light
+page #demo name="原生交互" canvas=[740,560]
+  box #root [740x560] layout=stack
+    dynamic-panel #carousel [380x90] x=24 y=24
+      +onSwipeLeft [{"type":"set-panel-state","target":"carousel","mode":"next","loop":true,"enterAnimation":"slideLeft","enterDuration":120}]
+      +onSwipeRight [{"type":"set-panel-state","target":"carousel","mode":"previous","loop":true,"enterAnimation":"slideRight","enterDuration":120}]
+      :state first
+        box #frame [380x90] layout=stack fill=#D9E8FB
+          label #caption [350x40] x=15 y=22 "第一张卡片"
+      :state second
+        box #frame [380x90] layout=stack fill=#E8DDFB
+          label #caption [350x40] x=15 y=22 "第二张卡片"
+      :state third
+        box #frame [380x90] layout=stack fill=#D7EFE5
+          label #caption [350x40] x=15 y=22 "第三张卡片"
+    button #start [108x42] x=24 y=132 "开始轮播"
+      +onClick [{"type":"set-panel-state","target":"carousel","mode":"next","loop":true,"repeatInterval":450,"repeatSkipFirst":true}]
+    button #stop [108x42] x=148 y=132 "停止轮播"
+      +onClick [{"type":"set-panel-state","target":"carousel","mode":"current"}]
+    button #step [108x42] x=272 y=132 "前进一张"
+      +onClick [{"type":"set-panel-state","target":"carousel","mode":"next","loop":true}]
+    dynamic-panel #horizontal [185x60] x=24 y=205
+      +onDrag [{"type":"move","target":"horizontal","mode":"drag-x"}]
+      +onDragDrop [{"type":"move","target":"horizontal","mode":"locationBeforeDrag"}]
+      :state normal
+        box #frame [185x60] layout=stack fill=#FADFCC
+          label #caption [155x36] x=15 y=12 "水平拖动"
+    dynamic-panel #vertical [185x60] x=24 y=352
+      +onDrag [{"type":"move","target":"vertical","mode":"drag-y"}]
+      +onDragDrop [{"type":"move","target":"vertical","mode":"locationBeforeDrag"}]
+      :state normal
+        box #frame [185x60] layout=stack fill=#D7EFE5
+          label #caption [155x36] x=15 y=12 "垂直拖动"
+    input #limited [220x38] x=24 y=464 placeholder="最多 7 字符" maxLength=7
+    input #styled [220x38] x=268 y=464 placeholder="最多 3 字符" maxLength=3 styles={"focused":{"stroke":"#654AE8"}}

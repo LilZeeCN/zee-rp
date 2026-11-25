@@ -807,7 +807,7 @@ KNOWN_NODE_PROPS = {
     "columnGap", "rowGap", "align", "justify", "equalHeight", "fill", "stroke", "color",
     "radius", "isGroup", "bgName", "isModal", "children", "text", "content", "fontSize",
     "size", "fontWeight", "weight", "lineHeight", "lineGap", "maxLines", "variant",
-    "placeholder", "value", "native", "textPaddingX", "caption", "src", "image", "file",
+    "placeholder", "value", "native", "maxLength", "textPaddingX", "caption", "src", "image", "file",
     "states", "root", "tree", "title", "titleAlign", "subtitle", "leftIcon", "leftText",
     "backName", "rightText", "rightName", "buttonText", "headerTitle", "headerRight",
     "emptyHint", "shareText", "claimText", "items", "activeIndex", "cards", "cardHeight",
@@ -991,7 +991,7 @@ def _expand_declarative_tree_core(node, prefix="p1"):
                 "stroke": node.get("stroke", "$line-strong"),
                 "radius": snap_token(node.get("radius", 6), RADIUS_TOKENS),
             }
-            for key in ("fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX", "rotation", "x", "y", "right", "bottom", "anchor"):
+            for key in ("fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX", "rotation", "x", "y", "right", "bottom", "anchor", "maxLength"):
                 if key in node:
                     out_ni[key] = node[key]
             if "flex" in node:

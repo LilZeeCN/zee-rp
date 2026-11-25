@@ -1,4 +1,3 @@
-# 从 scripts/rp_language.py 原样迁移(2026-11-08 RP/1 编译链拆分批次 2;行为不变,勿手改)。
 import copy
 import math
 import re
@@ -25,6 +24,11 @@ class ReferenceRuntime:
         self.focused_widget = None
         self.execution_trace = []
         self.event_depth = 0
+        self.time_ms = 0
+        self.panel_repeats = {}
+        self.offsets = {}
+        self.drag_origins = {}
+        self.drag_delta = (0, 0)
         for p in self.ir["pages"]:
             self._index_tree(p["root"], p["slug"], None)
         self.current_page = self.ir["pages"][0]["slug"]
@@ -45,6 +49,8 @@ class ReferenceRuntime:
                 "options": copy.deepcopy(node.get("options", [])),
                 "selectedIndices": copy.deepcopy(node.get("selectedIndices", [node.get("selectedIndex", 0)] if kind in OPTION_KINDS else [])),
             }
+        if name and kind == "input" and "maxLength" in node:
+            self.widgets[name]["maxLength"] = node["maxLength"]
         if name and kind in OPTION_KINDS:
             indices = self.widgets[name]["selectedIndices"]
             self.widgets[name]["text"] = node["options"][indices[0]] if indices else ""
@@ -286,6 +292,55 @@ class ReferenceRuntime:
                 for r_idx, row in enumerate(vrows):
                     self._exec_events(interaction, "OnItemLoad", row=row, reason="data-refresh", row_index=r_idx)
 
+    def _set_panel_state(self, target, state, row, row_index):
+        panel = self.panels[target]
+        if state != panel["current"]:
+            panel["current"] = state
+            return self.trigger(target, "OnPanelStateChange", row=row, row_index=row_index)
+        return []
+
+    def _progress_panel(self, act, row, row_index, skip_first=False):
+        target = act["target"]
+        panel = self.panels[target]
+        states = panel["states"]
+        direction = 1 if act["stateMode"] == "next" else -1
+        index = states.index(panel["current"]) + direction
+        if not 0 <= index < len(states) and not act.get("loop"):
+            self.panel_repeats.pop(target, None)
+            return []
+        if act.get("repeat"):
+            durations = [act.get(phase + "Duration", 500) for phase in ("enter", "exit")
+                         if act.get(phase + "Animation", "none") != "none"]
+            delay = max([act["repeatInterval"], *durations])
+            self.panel_repeats[target] = (self.time_ms + delay, act, row, row_index)
+        if not skip_first:
+            return self._set_panel_state(target, states[index % len(states)], row, row_index)
+        return []
+
+    def advance(self, milliseconds):
+        if type(milliseconds) is not int or milliseconds < 0:
+            fail("E_ARGUMENT", "/advanceMs", "advanceMs must be a nonnegative integer")
+        until = self.time_ms + milliseconds
+        fired = []
+        for _ in range(10000):
+            target = min(self.panel_repeats, key=lambda k: self.panel_repeats[k][0], default=None)
+            if target is None or self.panel_repeats[target][0] > until:
+                self.time_ms = until
+                return fired
+            self.time_ms, act, row, row_index = self.panel_repeats.pop(target)
+            fired.extend(self._progress_panel(act, row, row_index))
+        fail("E_RUNTIME_LIMIT", "/advanceMs", "Reference execution exceeded 10000 timer ticks")
+
+    def _move_with_drag(self, target, mode):
+        if mode == "locationBeforeDrag":
+            if target in self.drag_origins:
+                self.offsets[target] = self.drag_origins[target]
+        else:
+            x, y = self.drag_origins.setdefault(target, self.offsets.get(target, (0, 0)))
+            dx, dy = self.drag_delta
+            self.offsets[target] = (x + (0 if mode == "drag-y" else dx),
+                                    y + (0 if mode == "drag-x" else dy))
+
     def _exec_action(self, act, row=None, row_index=None, defer_refresh=False):
         kind = act["type"]
         target = act.get("target")
@@ -307,12 +362,14 @@ class ReferenceRuntime:
         elif kind == "set-variable":
             val = self.eval_expr(act["runtime"], row=row) if "runtime" in act else act.get("value")
             self.variables[act["variable"]] = val
-        elif kind == "set-panel-state":
-            if target in self.panels and act.get("state") in self.panels[target]["states"]:
-                prev = self.panels[target]["current"]
-                self.panels[target]["current"] = act["state"]
-                if prev != act["state"]:
-                    self.trigger(target, "OnPanelStateChange", row=row, row_index=row_index or 0)
+        elif kind == "set-panel-state" and target in self.panels:
+            self.panel_repeats.pop(target, None)
+            if act.get("stateMode") in ("next", "previous"):
+                self._progress_panel(act, row, row_index or 0, act.get("repeat") and act.get("repeatSkipFirst", True))
+            elif act.get("state") in self.panels[target]["states"]:
+                self._set_panel_state(target, act["state"], row, row_index or 0)
+        elif kind == "move":
+            self._move_with_drag(target, act["mode"])
         elif kind == "raise-event":
             ev_name = "OnPanelStateChange" if act.get("eventType") == 278 else "OnClick"
             self.trigger(target, ev_name, row=row, row_index=row_index or 0)
@@ -343,6 +400,10 @@ class ReferenceRuntime:
         elif kind == "link":
             dest_slug = self.pages_by_name.get(act.get("page"), act.get("page"))
             if dest_slug in self.pages_by_slug:
+                self.panel_repeats.clear()
+                self.drag_origins.clear()
+                self.offsets = {name: pos for name, pos in self.offsets.items()
+                                if self.widgets[name]["page"] != dest_slug}
                 self.current_page = dest_slug
                 self._run_page_load(dest_slug, reset=True)
         elif kind == "data-add" and target in self.repeaters:
@@ -418,10 +479,14 @@ class ReferenceRuntime:
             if type(text) is not bool: fail("E_TYPE", "/", "Checkbox/radio input steps require boolean values")
             return self._set_checked(tname, text)
         if kind in OPTION_KINDS: return self._set_option(tname, str(text))
-        self.widgets[tname]["text"] = str(text)
+        text = str(text)
+        limit = self.widgets[tname].get("maxLength")
+        if limit is not None:
+            text = text.encode("utf-16-le", errors="surrogatepass")[:limit * 2].decode("utf-16-le", errors="ignore")
+        self.widgets[tname]["text"] = text
         return self.trigger(tname, "change")
 
-    def trigger(self, target_id_or_name, event="click", row_index=0, row=None):
+    def trigger(self, target_id_or_name, event="click", row_index=0, row=None, dx=0, dy=0):
         native_ev = EVENTS.get(event, event)
         tname = self.resolve_trigger_name(target_id_or_name)
         kind = self.widgets.get(tname, {}).get("kind")
@@ -443,10 +508,20 @@ class ReferenceRuntime:
             self._set_checked(tname, True if kind == "radio" else not self.widgets[tname]["checked"])
         if native_ev == "OnFocus": self.focused_widget = tname
         elif native_ev == "OnLostFocus" and self.focused_widget == tname: self.focused_widget = None
+        if native_ev == "OnDragStart":
+            self.drag_origins.clear()
+        if native_ev == "OnDrag":
+            if any(type(value) not in (int, float) or not math.isfinite(value) for value in (dx, dy)):
+                fail("E_ARGUMENT", "/", "Drag dx and dy must be finite numbers")
+            self.drag_delta = (dx, dy)
         fired = []
-        for ix in page["interactions"]:
-            if ix["trigger"] == tname:
-                fired.extend(self._exec_events(ix, native_ev, row=row, reason="input-change" if native_ev == "OnTextChange" else "panel-state-change" if native_ev == "OnPanelStateChange" else "user-event", row_index=row_index))
+        try:
+            for ix in page["interactions"]:
+                if ix["trigger"] == tname:
+                    fired.extend(self._exec_events(ix, native_ev, row=row, reason="input-change" if native_ev == "OnTextChange" else "panel-state-change" if native_ev == "OnPanelStateChange" else "user-event", row_index=row_index))
+        finally:
+            if native_ev == "OnDragDrop":
+                self.drag_origins.clear()
         return fired
 
     def execution_state(self):
@@ -455,7 +530,11 @@ class ReferenceRuntime:
                 "widgets": copy.deepcopy(self.widgets), "panels": copy.deepcopy(self.panels),
                 "rowWidgets": {f"{k[0]}:{k[1]}:{k[2]}": copy.deepcopy(v) for k, v in self.row_widgets.items()},
                 "repeaters": {name: {k:copy.deepcopy(v) for k,v in rep.items() if k != "template"} for name,rep in self.repeaters.items()},
-                "focusedWidget": self.focused_widget}
+                "focusedWidget": self.focused_widget,
+                **({"offsets": copy.deepcopy(self.offsets)} if self.offsets else {}),
+                **({"dragOrigins": copy.deepcopy(self.drag_origins)} if self.drag_origins else {}),
+                **({"panelRepeats": {key: (timer[0] - self.time_ms, *copy.deepcopy(timer[1:]))
+                                     for key, timer in self.panel_repeats.items()}} if self.panel_repeats else {})}
 
     def snapshot(self):
         snap = {
@@ -465,7 +544,8 @@ class ReferenceRuntime:
             "widgets": {k: {"text": v["text"], "visible": v["visible"], "enabled": v["enabled"],
                             **({"checked": v["checked"]} if v["kind"] in CHECK_KINDS else {}),
                             **({"selectedIndices": v["selectedIndices"]} if v["kind"] in OPTION_KINDS else {}),
-                            "selected": v["selected"]}
+                            "selected": v["selected"],
+                            **(dict(zip(("dx", "dy"), self.offsets[k])) if k in self.offsets else {})}
                         for k, v in self.widgets.items() if v["page"] == self.current_page},
             "repeaters": {k: self.visible_rows(k) for k, v in self.repeaters.items() if v["page"] == self.current_page},
         }

@@ -220,6 +220,36 @@ print(json.dumps({'symbols':ir['symbols'],'tabs':tabs,'query':match,'negative':n
       assert.ok(events('query/price').includes('OnSelectionChange'));
       assert.ok(events('query/shipping').includes('OnSelectedChange'));
     });
+    check('RP/1 gesture fixture writes and lifts native transitions, timing, and input limits', () => {
+      const src = join(root, 'examples/rp-language/native-gestures.rp1');
+      const nativePath = join(work, 'gestures.rp');
+      run('node', ['scripts/proto.mjs', 'generate', '--spec', src,
+        '--out-dir', join(work, 'gestures'), '--out-rp', nativePath]);
+      const native = readRp(readFileSync(nativePath));
+      assert.equal(native.counts.problems, 0);
+      assert.equal(native.counts.danglingRefs, 0);
+      assert.equal(native.records.unparseable, 0);
+      const widgets = native.pages[0].widgets;
+      const widgetByPrefix = prefix => widgets.find(item => item.name.startsWith(prefix));
+      const gesture = (prefix, event) =>
+        widgetByPrefix(prefix).interactions.find(ix => ix.event === event).cases[0].actions[0].rp1;
+      assert.equal(gesture('panel-carousel-', 'OnSwipeLeft').mode, 'next');
+      assert.equal(gesture('panel-carousel-', 'OnSwipeRight').enterAnimation, 'slideRight');
+      assert.equal(gesture('btn-start-', 'OnClick').repeatInterval, 450);
+      assert.equal(gesture('btn-stop-', 'OnClick').mode, 'current');
+      assert.equal(gesture('panel-horizontal-', 'OnDrag').mode, 'drag-x');
+      assert.equal(gesture('panel-vertical-', 'OnDragDrop').mode, 'locationBeforeDrag');
+      assert.equal(widgetByPrefix('inp-limited-').maxLength, 7);
+      assert.equal(widgetByPrefix('inp-styled-').maxLength, 3);
+      const lifted = join(work, 'gestures-lifted.rp1');
+      run('node', ['scripts/proto.mjs', 'decompile', '--rp', nativePath, '--out', lifted]);
+      const sourceText = readFileSync(lifted, 'utf8');
+      assert.match(sourceText, /repeatInterval":450/);
+      assert.match(sourceText, /swiperight/);
+      assert.match(sourceText, /locationBeforeDrag/);
+      assert.match(sourceText, /maxLength=7/);
+      assert.equal(run('node', ['scripts/proto.mjs', 'check', '--spec', lifted]).ok, true);
+    });
     console.log(JSON.stringify({ ok: true, checks, evidence: 'compiler-reference-model-and-native-serialization',
       nativeGui: 'requires separate Axure save/reopen and browser verification' }));
   }

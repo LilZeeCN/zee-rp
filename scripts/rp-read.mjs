@@ -34,6 +34,12 @@ function unguidKey(key) {
 const guidsOf = graph => graph?.roots?.find(n => n.tag === 0x1e)?.values ?? [];
 const strOf = node => (node && node.tag === 8 ? node.text : undefined);
 const intOf = node => (node === undefined || node === null ? undefined : node.value);
+
+function textBoxLimit(object) {
+  const limit = field(object.body, 'MaxLength');
+  return object.className === 'Axure:DiagramObject:TextBox' && limit?.tag === 5 && limit.value <= 2147483647
+    ? { maxLength: limit.value } : {};
+}
 const pairValues = node => (node && Array.isArray(node.values) ? node.values : null);
 // RepeaterStyle is a style object created by native saves, not a diagram
 // widget. Keep the exact legacy Repeater name without matching its helpers.
@@ -125,7 +131,7 @@ function caseCondition(graph, kase) {
 // ---- 交互树读取 ----
 // InteractionTreeMap = { node-table: dict(nodeId → 对象), tree: Tree }；
 // Tree.children = 事件 Node；事件 Node.children = 用例 Node；用例 Node.children = 动作 Node。
-function readInteractions(graph, mapNode, version, widgetsByGuid = null) {
+function readInteractions(graph, mapNode, version, widgetsByGuid, panelStates) {
   const results = [];
   if (!mapNode) return results;
   const nodeTable = field(mapNode.body, 'node-table');
@@ -146,7 +152,7 @@ function readInteractions(graph, mapNode, version, widgetsByGuid = null) {
       const actions = childrenOf(caseNode)
         .map(actionNode => target(actionNode.id))
         .filter(Boolean)
-        .map(action => describeAction(graph, action, version, widgetsByGuid));
+        .map(action => describeAction(graph, action, version, widgetsByGuid, panelStates));
       cases.push({
         description: strOf(field(kase.body, 'Description')) ?? '',
         disabled: field(kase.body, 'Disabled')?.value === true,
@@ -166,7 +172,7 @@ function readInteractions(graph, mapNode, version, widgetsByGuid = null) {
 }
 
 // 动作 → 人读文本。未知类型退化成「类名 → 目标」。
-function describeAction(graph, action, version = 11, widgetsByGuid = null) {
+function describeAction(graph, action, version, widgetsByGuid, panelStates) {
   const disabled = field(action.body, 'Disabled')?.value === true;
   const resolveWidget = id => {
     if (id === undefined || id === null) return undefined;
@@ -242,7 +248,7 @@ function describeAction(graph, action, version = 11, widgetsByGuid = null) {
   const bodyOf = key => info(key)?.body ?? {};
 
   const class_ = action.className.replace(/^Axure:/, '');
-  let type = class_, human = class_;
+  let type = class_, human = class_, rp1;
   switch (class_) {
     case 'InteractionLinkWindowAction': {
       const target = graph.objects.get(field(action.body, 'target')?.value);
@@ -275,7 +281,16 @@ function describeAction(graph, action, version = 11, widgetsByGuid = null) {
       type = mode === 0 ? 'set-position' : 'move';
       const verb = ['移动到', '相对移动', '跟随拖动', '跟随水平拖动', '跟随垂直拖动', '回到拖动前的位置', '随触发元件移动'][mode] ?? `移动（模式 ${mode}）`;
       const xy = mode === 0 || mode === 1 ? ` x=${literal(field(move, 'XValue'))} y=${literal(field(move, 'YValue'))}` : '';
-      human = `${verb} ${targets(['WidgetPaths']).join('、') || '(未指定)'}${xy}（${duration}ms）`;
+      const names = targets(['WidgetPaths', 'panelobjectpaths']);
+      human = `${verb} ${names.join('、') || '(未指定)'}${xy}（${duration}ms）`;
+      const dragMode = { 2: 'drag', 3: 'drag-x', 4: 'drag-y', 5: 'locationBeforeDrag' }[mode];
+      if (dragMode) {
+        const boundary = field(move, 'BoundaryCondition');
+        const hasBoundary = boundary && graph.objects.has(boundary.value);
+        rp1 = names.length === 1 && field(action.body, 'MoveInfos')?.items?.length === 1
+          && !hasBoundary && [0, undefined].includes(intOf(field(move, 'MoveTrajectory'))) && duration === 0
+          ? { type: 'move', target: names[0], mode: dragMode } : null;
+      }
       break;
     }
     case 'InteractionSetPanelStateAction': {
@@ -283,9 +298,38 @@ function describeAction(graph, action, version = 11, widgetsByGuid = null) {
       const mode = intOf(field(state, 'set-state-type'));
       const modes = { 0: '指定状态', 1: '下一状态', 2: '上一状态', 3: '状态值', 4: '当前状态' };
       type = 'set-panel-state';
-      human = `设置面板 ${targets(['PanelPaths']).join('、') || '(未指定)'} ${modes[mode] ?? mode}`
-        + (mode === 3 ? ` → ${literal(field(state, 'state-value'))}` : '')
+      const names = targets(['PanelPaths', 'panelobjectpaths']);
+      const guid = guidsOf(graph)[intOf(field(state, 'diagram-id')) - 1];
+      const stateName = panelStates.get(guid)?.name;
+      human = `设置面板 ${names.join('、') || '(未指定)'} ${modes[mode] ?? mode}`
+        + (mode === 3 ? ` → ${literal(field(state, 'state-value'))}` : mode === 0 && stateName ? ` → ${stateName}` : '')
         + (field(state, 'loop')?.value === true ? '，循环' : '');
+      const stateMode = { 1: 'next', 2: 'previous', 4: 'current' }[mode];
+      const repeat = field(state, 'repeat')?.value === true;
+      const relative = mode === 1 || mode === 2;
+      const repeatInterval = intOf(field(state, 'repeat-interval'));
+      const transitions = ['none', 'fade', 'slideRight', 'slideLeft', 'slideUp', 'slideDown'];
+      const animation = phase => {
+        const index = intOf(field(state, phase + '-easing')) ?? 0;
+        const duration = intOf(field(state, phase + '-duration'));
+        if (!transitions[index] || (index && (!Number.isInteger(duration) || duration < 0))) return null;
+        return index ? { [phase + 'Animation']: transitions[index], [phase + 'Duration']: duration } : {};
+      };
+      const enter = animation('enter'), exit = animation('exit');
+      const hasOptions = ['show-when-set', 'compress'].some(key => field(state, key)?.value === true)
+        || ['animation-enter', 'animation-exit', 'enter-scale', 'exit-scale']
+          .some(key => (intOf(field(state, key)) ?? 0) !== 0);
+      rp1 = names.length === 1 && field(action.body, 'SetStateInfos')?.items?.length === 1 && !hasOptions
+        && (stateMode || (mode === 0 && stateName)) && enter && exit
+        && (mode !== 4 || (!Object.keys(enter).length && !Object.keys(exit).length))
+        && (!repeat || (relative && Number.isInteger(repeatInterval) && repeatInterval > 0))
+        ? {
+            type, target: names[0], ...(stateMode ? { mode: stateMode } : { state: stateName }),
+            ...(relative && field(state, 'loop')?.value === true ? { loop: true } : {}),
+            ...(repeat ? { repeatInterval, repeatSkipFirst: field(state, 'repeat-skip-first')?.value === true } : {}),
+            ...enter, ...exit,
+          }
+        : null;
       break;
     }
     case 'InteractionSetPanelOrderAction': {
@@ -388,7 +432,7 @@ function describeAction(graph, action, version = 11, widgetsByGuid = null) {
       human = names.length ? `${class_} → ${names.join('、')}` : class_;
     }
   }
-  return { type, className: class_, disabled, human };
+  return { type, className: class_, disabled, human, ...(rp1 === undefined ? {} : { rp1 }) };
 }
 
 // 原始字段 dump（--full 用）：把 payload 图翻成普通 JS 对象，引用标注指向。
@@ -551,6 +595,16 @@ export function readRp(file, { full = false, path = null, includeMasterWidgets =
   // 面板状态索引：状态 GUID → {状态名, 记录}。状态 GUID = PanelState 记录 GUID 列表的索引 2。
   const panelStates = new Map();
   const panelStateByRecord = new Map();
+  const describePanel = (graph, object, onUnresolved) => {
+    const panel = field(object.body, 'panel-diagrams');
+    if (!panel) return null;
+    return (panel.items ?? []).map(item => {
+      const guidIndex = pairValues(item)?.[1] ?? item.value;
+      const state = panelStates.get(guidsOf(graph)[guidIndex - 1]);
+      if (!state && onUnresolved) onUnresolved(guidIndex);
+      return { name: state?.name ?? `(状态 ${guidIndex})`, guidIndex, record: state?.record ?? null };
+    });
+  };
   let panelStateRecords = 0;
   for (const record of records) {
     if (record.className !== 'Axure:PanelState') continue;
@@ -609,6 +663,7 @@ export function readRp(file, { full = false, path = null, includeMasterWidgets =
       if (!object || !isWidget(object)) continue;
       const geo = geometryOf(graph, object);
       const vec = includeVectors ? vectorOf(object) : null;
+      const panel = describePanel(graph, object);
       containedWidgets.push({
         id: object.id,
         guid: guidsOf(graph)[object.id - 1] || null,
@@ -617,10 +672,12 @@ export function readRp(file, { full = false, path = null, includeMasterWidgets =
         className: object.className,
         text: textOf(field(object.body, 'RichTextBlock') ?? field(object.body, 'TextBlock')),
         x: geo.x, y: geo.y, w: geo.w, h: geo.h,
+        ...textBoxLimit(object),
         ...(vec ? vec : {}),
+        ...(panel ? { panel } : {}),
         container: containerPath,
         record: graphRecords.get(graph) ?? null,
-        ...(includeMasterWidgets ? { interactions: readInteractions(graph, graph.objects.get(field(object.body, 'InteractionMap')?.value), version, widgetsByGuid) } : {})
+        ...(includeMasterWidgets ? { interactions: readInteractions(graph, graph.objects.get(field(object.body, 'InteractionMap')?.value), version, widgetsByGuid, panelStates) } : {})
       });
       visitWidgetContainers(graph, object, containerPath);
     }
@@ -711,29 +768,23 @@ export function readRp(file, { full = false, path = null, includeMasterWidgets =
         className: object.className,
         x: geo.x, y: geo.y, w: geo.w, h: geo.h,
         text: textOf(field(object.body, 'RichTextBlock') ?? field(object.body, 'TextBlock')),
+        ...textBoxLimit(object),
         ...(vec ? vec : {}),
       };
-      // 动态面板：panel-diagrams = [strIdx('Axure:PanelState'), 页面 GUID 表下标]。
-      const panel = field(object.body, 'panel-diagrams');
+      const panel = describePanel(graph, object, guidIndex => {
+        problem('unresolved-panel-state', `页面「${page.name}」面板「${widget.name}」的状态 ${guidIndex} 解析不到 PanelState 记录`, { page: page.name, widget: widget.name, guidIndex });
+      });
       if (panel) {
         panelCount++;
-        widget.panel = (panel.items ?? []).map(item => {
-          const guidIndex = pairValues(item)?.[1] ?? item.value;
-          const guid = guids[guidIndex - 1];
-          const state = guid ? panelStates.get(guid) : undefined;
-          if (!state) {
-            problem('unresolved-panel-state', `页面「${page.name}」面板「${widget.name}」的状态 ${guidIndex} 解析不到 PanelState 记录`, { page: page.name, widget: widget.name, guidIndex });
-          }
-          return { name: state?.name ?? `(状态 ${guidIndex})`, guidIndex, record: state?.record ?? null };
-        });
+        widget.panel = panel;
       }
       const mapNode = graph.objects.get(field(object.body, 'InteractionMap')?.value);
-      const interactions = readInteractions(graph, mapNode, version, widgetsByGuid);
+      const interactions = readInteractions(graph, mapNode, version, widgetsByGuid, panelStates);
       if (interactions.length) { tally(interactions); widget.interactions = interactions; }
       if (full) widget.raw = rawDump(graph, object.body);
       widgets.push(widget);
     }
-    const pageInteractions = readInteractions(graph, graph.objects.get(field(pageObject?.body ?? {}, 'interactionmap')?.value), version, widgetsByGuid);
+    const pageInteractions = readInteractions(graph, graph.objects.get(field(pageObject?.body ?? {}, 'interactionmap')?.value), version, widgetsByGuid, panelStates);
     tally(pageInteractions);
     pageSummaries.push({
       name: page.name, folder: page.folder, record: record.index,

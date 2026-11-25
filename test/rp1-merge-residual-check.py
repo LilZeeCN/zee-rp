@@ -47,6 +47,22 @@ def run_merge(base, rp, edited, source, meta):
 
 
 class MergeResidualTests(unittest.TestCase):
+    def test_native_text_box_length_lifts_and_conflicts(self):
+        base, native, meta = fixture()
+        input_node = base["pages"][0]["root"]["children"][0]
+        input_node.update(type="input", value=input_node.pop("text"), maxLength=7)
+        native["pages"][0]["widgets"][0].update(type="TextBox", maxLength=7)
+        edited = copy.deepcopy(native)
+        edited["pages"][0]["widgets"][0]["maxLength"] = 3
+        lifted = D.lift_rp_into_spec(base, native, edited, baseline_meta=meta)
+        self.assertEqual(lifted["nativePropDeltas"]["p1/title"]["maxLength"]["new"], 3)
+        self.assertEqual(lifted["spec"]["pages"][0]["root"]["children"][0]["maxLength"], 3)
+        source = copy.deepcopy(base)
+        source["pages"][0]["root"]["children"][0]["maxLength"] = 5
+        conflict = run_merge(base, native, edited, source, meta)
+        self.assertEqual(conflict["status"], "conflict")
+        self.assertTrue(any(item["property"] == "maxLength" for item in conflict["conflicts"]))
+
     def test_native_save_renumbering_uses_guid_without_delete_add_or_source_loss(self):
         b, r, m = fixture()
         for idx, page in enumerate(r['pages']):

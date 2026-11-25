@@ -434,7 +434,7 @@ export function buildInteractiveRp(
         const report = cloneLibraryWidget(rplibPath, input, output, {
           sourcePageName: 'Text Field', targetPageName: 'Page 1', name: inp.name,
           x: inp.x, y: inp.y, width: inp.w, height: inp.h,
-          inputStyle: inp.style, placeholder: inp.placeholder,
+          inputStyle: inp.style, placeholder: inp.placeholder, maxLength: inp.maxLength,
         });
         setWidgetText(output, initialized, 'Page 1', inp.name, inp.value ?? '');
         buf = readFileSync(initialized);

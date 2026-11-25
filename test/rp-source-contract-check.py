@@ -11,11 +11,24 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from rp_language import compile_language
 from rp_schema import language_schema
+from rp_language_cli import read_source
 
 
 class SourceContractTests(unittest.TestCase):
     def test_generated_schema_is_current(self):
         self.assertEqual(language_schema(), json.loads((ROOT / "references/rp-language.schema.json").read_text()))
+
+    def test_native_gesture_fixture_matches_source_schema(self):
+        spec = read_source(ROOT / "examples/rp-language/native-gestures.rp1")
+        validator = Draft202012Validator(language_schema())
+        validator.validate(spec)
+        compile_language(spec)
+        validator = validator.evolve(schema={"$ref": "#/$defs/action", "$defs": language_schema()["$defs"]})
+        action = {"type": "set-panel-state", "target": "carousel", "mode": "next"}
+        self.assertTrue(validator.is_valid({**action, "repeatInterval": 450}))
+        self.assertFalse(validator.is_valid({**action, "state": "first"}))
+        self.assertFalse(validator.is_valid({**action, "repeatSkipFirst": True}))
+        self.assertFalse(validator.is_valid({**action, "mode": "current", "loop": True}))
 
     def test_schema_and_compiler_acceptance(self):
         cases = [

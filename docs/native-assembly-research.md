@@ -1,5 +1,7 @@
 # Axure Native Assembly Bridge 研究与验证
 
+同一开发分支后续已将这里验证过的轮播、滑动、双轴拖动复位及文本框输入长度接入完整 RP/1。当前用法和约束见 [RP/1 动作契约](../references/rp-language.md)。以下表格记录程序集桥接首轮取证时的能力分布。
+
 基线为 zee-rp 的 `9503290`。复验环境为 Apple Silicon、macOS 27.2.1、Node 24.22.3、Playwright 1.65.1。Windows 对照项目提供了技术路线线索，桥接代码依据本机程序集的结构、单独启动的探针以及本项目写入和读回结果实现。 [Windows 对照项目](https://github.com/xunan23333-bit/axure-rp9-agent-skill)
 
 ## 安装覆盖与架构

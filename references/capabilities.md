@@ -1,5 +1,7 @@
 # 能力与验证边界
 
+**完整 RP/1 原生交互**。macOS RP9 的独立 RP/1 编译支持定时切态、停止与重启、左右滑动、双轴拖动、释放时复位、面板淡入或滑动过渡，以及原生文本框 `maxLength`。源码检查、参考模拟、二进制读回和官方播放器复验通过。Studio 局部 RP/1 方言、拖动边界和命中容差有独立的能力边界。见 [RP/1 动作契约](rp-language.md) 和 [原生交互示例](../examples/rp-language/native-gestures.rp1)。
+
 **Native Assembly Bridge（源码分支实验）**。Apple Silicon macOS 上，RP9 9.0.0.3754 和 RP11 11.0.0.4137 支持无模板生成单页文档和原生文本框，支持无编辑器导出官方 HTML。RP9 空白输出可经既有模板配置供 RP/1 使用。桥接器提供程序集成员查询、双版本属性差分及现有二进制读取器对账。Windows 发现入口可用，程序集调用待真机验证。研究与验收边界见开发分支的 `docs/native-assembly-research.md`。
 
 **Windows 原生 RP9 适配（PR #5）：** CLI、MCP 和 Studio 的 Python 调用支持通过 `ZEE_PYTHON` 指定解释器，Windows 多目录环境变量用 `;` 分隔。PR 作者在 Windows RP9 报告了水平拖动、垂直拖动和松手复位预览通过，复位样本另存重开后行为保持。后续修复支持从内置教学工程的多个无名面板中创建空白外壳，并避免嵌套状态导入受已脱离元件的旧交互影响。后续修复已通过 macOS 原生结构回归，Windows 默认模板的完整生成仍待复验。公开 CI 的无模板门禁覆盖文件解析、编译和输出目录。参见 [Windows 安装说明](../README.md#windows-支持)和[原生动作](rp-workflow.md#支持的原生动作)。

@@ -656,7 +656,12 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         const path = pathTo(panel.id);
         const states = panelStates(panel);
         let stateType = SET_STATE.diagram, diagramId = nullId;
-        if (spec.state !== undefined) {
+        if (spec.stateMode !== undefined) {
+          if (spec.state !== undefined || !['next', 'previous', 'current'].includes(spec.stateMode)) {
+            throw new Error('set-panel-state requires one named state or stateMode next/previous/current');
+          }
+          stateType = SET_STATE[spec.stateMode];
+        } else if (spec.state !== undefined) {
           const key = String(spec.state);
           if (states.has(key)) diagramId = states.get(key);
           else if (SET_STATE[key.toLowerCase()] !== undefined) stateType = SET_STATE[key.toLowerCase()];
