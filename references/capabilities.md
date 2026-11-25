@@ -1,5 +1,7 @@
 # 能力与验证边界
 
+**Native Assembly Bridge（源码分支实验）**。Apple Silicon macOS 上，RP9 9.0.0.3754 和 RP11 11.0.0.4137 支持无模板生成单页文档和原生文本框，支持无编辑器导出官方 HTML。RP9 空白输出可经既有模板配置供 RP/1 使用。桥接器提供程序集成员查询、双版本属性差分及现有二进制读取器对账。Windows 发现入口可用，程序集调用待真机验证。研究与验收边界见开发分支的 `docs/native-assembly-research.md`。
+
 **Windows 原生 RP9 适配（PR #5）：** CLI、MCP 和 Studio 的 Python 调用支持通过 `ZEE_PYTHON` 指定解释器，Windows 多目录环境变量用 `;` 分隔。PR 作者在 Windows RP9 报告了水平拖动、垂直拖动和松手复位预览通过，复位样本另存重开后行为保持。后续修复支持从内置教学工程的多个无名面板中创建空白外壳，并避免嵌套状态导入受已脱离元件的旧交互影响。后续修复已通过 macOS 原生结构回归，Windows 默认模板的完整生成仍待复验。公开 CI 的无模板门禁覆盖文件解析、编译和输出目录。参见 [Windows 安装说明](../README.md#windows-支持)和[原生动作](rp-workflow.md#支持的原生动作)。
 
 **2026-11-14 `revise_prototype` Node 24 落盘自撞修复：** 修复 `scripts/authoring-workflow.mjs` 先 `mkdirSync(assets)` 再调用 `cpSync(..., { recursive: true, errorOnExist: true, force: false })` 在 Node 24 下必抛 `ERR_FS_CP_EEXIST` 且回滚误删同目录同名冲突的风险。现改用基于 `mkdirSync` + `COPYFILE_EXCL` 的排他递归复制 `copyTreeExclusive`（仅在原子抢占 `<output>.assets` 成功后登记回滚，并发占用统一报 `E_OUTPUT_EXISTS` 且绝不误删外部既有目录），并补齐 `output: "auto"` 对 `.rp.assets` 占用的跳过判断。核心回归 `21/21`（含零模板单元测试）、创作工作流 `18/18`、第三轮真实 stdio 四模式（同步/异步 × auto/显式命名）`14/14`、创作质量 `11/11` 全绿；已连接旧 MCP 进程需重连。

@@ -26,7 +26,7 @@ export function releasePaths(root = ROOT) {
       if (item.isFile() && path.startsWith('test/') && publicTests && !publicTests.has(path)) continue;
       if (dir === 'test/fixtures' && item.isFile() && !publicTests?.has(path) && !['rp-aggregate-cases.json', 'rp-aggregate-matrix.json', 'rp-aggregate-panel.json', 'rp-aggregate-startup.json', 'rp-native-visual.json', 'rp1-master-adaptive.json', 'round3-runtime-rows.json', 'round3-master-slot.json'].includes(item.name)) continue;
       if (item.isDirectory()) walk(path);
-      else if (item.isFile() && EXTENSIONS.test(item.name)) paths.push(path);
+      else if (item.isFile() && (EXTENSIONS.test(item.name) || path === 'tools/native-assembly/Worker.cs')) paths.push(path);
     }
   };
   for (const dir of DIRS) walk(dir);
