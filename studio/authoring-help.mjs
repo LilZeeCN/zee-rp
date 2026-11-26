@@ -51,6 +51,14 @@ const NODE_DESCRIBE_ALIASES = {
   grid: 'box',
   stack: 'box',
 };
+const COMMAND_DESCRIBE_ALIASES = {
+  removePage: 'deletePage',
+  removeNode: 'deleteNode',
+  'set-props': 'setProperties',
+  'set-variable': 'setVariable',
+  'set-tokens': 'setTokens',
+  'dataset-op': 'datasetOp',
+};
 
 export function describeAuthoring({ topic = 'workflow', name = null, names = null, intent = 'learning', platform = 'mobile', guideId = null,fields=null,operation='edit',surface=null } = {}) {
   if((fields!==null||surface!==null||operation!=='edit')&&topic!=='node')fail('E_NODE_CAPABILITY_QUERY','fields/operation/surface只用于topic:node');
@@ -73,11 +81,12 @@ export function describeAuthoring({ topic = 'workflow', name = null, names = nul
       return { ok: true, contracts: names.map(item => describeAuthoring({ topic, name: item })), next: '使用同一份字段定义校验，按所需命令批量发现。' };
     }
     if (!name) return { ok: true, groups: COMMAND_TYPES_BY_GROUP, detailedContracts: Object.keys(COMMAND_CONTRACTS), next: '传name按需读取一个精确契约，避免加载全部命令' };
-    if (!COMMAND_CONTRACTS[name]) fail('E_COMMAND_HELP', `暂未提供 ${name} 的详细参数契约；常用契约见 candidates，完整命令范围见不带name的查询`, Object.keys(COMMAND_CONTRACTS));
-    const boundary = name === 'booleanPathOp'
+    const canonicalCmd = COMMAND_CONTRACTS[name] ? name : (COMMAND_DESCRIBE_ALIASES[name] || name);
+    if (!COMMAND_CONTRACTS[canonicalCmd]) fail('E_COMMAND_HELP', `暂未提供 ${name} 的详细参数契约；常用契约见 candidates，完整命令范围见不带name的查询`, Object.keys(COMMAND_CONTRACTS));
+    const boundary = canonicalCmd === 'booleanPathOp'
       ? '布尔运算内部先把输入贝塞尔按每段16个采样点展平求交，装配后把结果中落在同一源贝塞尔上的连续折线段还原为原生 C 段（de Casteljau 子区间控制点，形状与源曲线一致）：产物圆弧输出为 C 段而非折线，直线段保持 L；求交点位置按展平弦近似（弦距≈采样误差）。'
       : null;
-    return { ok: true, name, schema: COMMAND_CONTRACTS[name], ...(boundary ? { boundary } : {}), note: '参数字段与实际命令校验共用定义；properties字段同样受Studio属性词表和值校验约束。' };
+    return { ok: true, name: canonicalCmd, ...(canonicalCmd !== name ? { requestedName: name, aliasOf: canonicalCmd } : {}), schema: COMMAND_CONTRACTS[canonicalCmd], ...(boundary ? { boundary } : {}), note: '参数字段与实际命令校验共用定义；properties字段同样受Studio属性词表和值校验约束。' };
   }
   if (topic === 'node') {
     if (names) {

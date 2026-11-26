@@ -534,7 +534,7 @@ test('Wave 2 blind-test friction closure: column h:fill flex, overflow/lineHeigh
   const dir = mkdtempSync(join(tmpdir(), 'zee-blind-w2-'));
   try {
     const projectDir = join(dir, 'proj');
-    const opened = await studioHandlers.studio_open_project({ projectDir, platform: 'mobile' });
+    const opened = await studioHandlers.studio_open_project({ projectDir, domain: 'mobile', port: 0 });
     assert.equal(opened.ok, true, JSON.stringify(opened));
 
     // 1. column h:"fill" takes remaining height (not full innerH), W_LINE_HEIGHT_FLOOR fires on tight explicit lineHeight, W_BOARD_OVERFLOW fires on flow overflow
@@ -639,6 +639,54 @@ test('Wave 2 blind-test friction closure: column h:fill flex, overflow/lineHeigh
     const rp1Match = (rp1Exp.rp1Text || '').match(/label #phonetic_hug[^\n]*\[(\d+)x\d+\]/);
     assert(rp1Match, `phonetic_hug should exist in exported rp1: ${rp1Exp.rp1Text}`);
     assert(Number(rp1Match[1]) >= hugInScene.bounds.w + 4, `exported hug label w=${rp1Match[1]} should include >=4px buffer over scene w=${hugInScene.bounds.w}`);
+  } finally {
+    await closeInProcessStudioServer();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('GPT-6 retest polish: verify_prototype limits 120000ms/120steps documented, removePage alias, and browser whitespace collapse', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-retest-w3-'));
+  try {
+    // 1. verify_prototype schema limits & descriptions
+    const verifyTool = authoringTools({ generate: () => {}, sync: () => {}, listTools: () => [] }).find(t => t.name === 'verify_prototype');
+    assert.equal(verifyTool.inputSchema.properties.timeoutMs.maximum, 120000);
+    assert.match(verifyTool.inputSchema.properties.timeoutMs.description || '', /120000/);
+    assert.equal(verifyTool.inputSchema.properties.steps.maxItems, 120);
+    assert.match(verifyTool.inputSchema.properties.steps.description || '', /120/);
+
+    // 2. studio_describe(topic:"command", names:[..., "removePage"]) resolves alias cleanly
+    const projectDir = join(dir, 'proj');
+    const opened = await studioHandlers.studio_open_project({ projectDir, domain: 'mobile', port: 0 });
+    assert.equal(opened.ok, true, JSON.stringify(opened));
+    const desc = await studioHandlers.studio_describe({ projectDir, topic: 'command', names: ['setText', 'removePage', 'set-variable'] });
+    assert.equal(desc.ok, true, JSON.stringify(desc));
+    assert.equal(desc.contracts[1].name, 'deletePage');
+    assert.equal(desc.contracts[1].requestedName, 'removePage');
+    assert.equal(desc.contracts[1].aliasOf, 'deletePage');
+
+    // 3. hitTest:true normalizes DOM consecutive ASCII whitespace
+    if (!chromeSkipReason()) {
+      const tx = await studioHandlers.studio_command({
+        projectDir,
+        pageId: 'home',
+        baseRevision: 1,
+        idempotencyKey: 'w3-ws',
+        commands: [{
+          type: 'addNode',
+          parentId: 'home_screen',
+          node: { id: 'ws_lbl', type: 'label', x: 24, y: 100, w: 300, h: 32, fontSize: 16, text: '已完成 3 词  ·  再练 0 次', color: '#0F172A' },
+        }],
+      });
+      assert.equal(tx.ok, true, JSON.stringify(tx));
+      const scen = await studioHandlers.studio_scenario({
+        projectDir,
+        startPageId: 'home',
+        hitTest: true,
+        steps: [{ action: 'expect', expect: { text: { ws_lbl: '已完成 3 词  ·  再练 0 次' } } }],
+      });
+      assert.equal(scen.ok, true, JSON.stringify(scen));
+    }
   } finally {
     await closeInProcessStudioServer();
     rmSync(dir, { recursive: true, force: true });

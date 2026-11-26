@@ -420,12 +420,16 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
           const visible = actual.widgets?.some(w => matches(w) && w.visible) || false;
           if (typeof value !== 'boolean' || visible !== value) failures.push(`visible:${name}`);
         }
+        const normBrowserWs = s => String(s).replace(/[ \t]+/g, ' ').trim();
         for (const [name, value] of Object.entries(step.expect?.text || {})) {
           const widget = actual.widgets?.find(w => (!native ? matchBrowserWidget(w, name, actual.page) : w.name === name.replace(/:/g, '/').split('/').at(-1)) && w.visible);
           const needle = value !== null && typeof value === 'object'
             ? (typeof value.includes === 'string' ? value.includes : typeof value.contains === 'string' ? value.contains : null)
             : null;
-          if (!widget || !(needle !== null ? widget.text.includes(needle) : widget.text.trim() === String(value))) failures.push(`text:${name}`);
+          const textOk = Boolean(widget) && (needle !== null
+            ? (widget.text.includes(needle) || normBrowserWs(widget.text).includes(normBrowserWs(needle)))
+            : (widget.text.trim() === String(value).trim() || normBrowserWs(widget.text) === normBrowserWs(value)));
+          if (!textOk) failures.push(`text:${name}`);
         }
         if (!native) {
           for (const [name, value] of Object.entries(step.expect?.checked || {})) {

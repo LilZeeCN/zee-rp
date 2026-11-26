@@ -446,7 +446,7 @@ export function authoringTools({ generate, sync, listTools }) {
         page: { type: 'string', minLength: 1, description: '可选起始页面 ID 或名称。' },
         cwd: { type: 'string', minLength: 1 },
         projectDir: { type: 'string', minLength: 1 },
-        timeoutMs: { type: 'integer', minimum: 500, maximum: 30000 },
+        timeoutMs: { type: 'integer', minimum: 500, maximum: 120000, description: '单次重放超时（毫秒，500–120000，默认 15000）。' },
         virtualClock: { type: 'boolean', description: 'true 时加速轮播等 >=200ms 定时器，配合 advanceTime 毫秒级推进（含 advanceTime 步骤时自动启用）。' },
         viewport: { type: 'object', properties: {
           width: { type: 'integer', minimum: 320, maximum: 3840 },
@@ -457,7 +457,7 @@ export function authoringTools({ generate, sync, listTools }) {
         includeImage: { type: 'boolean', description: 'true 时在 MCP 响应中附带最终截图 PNG。' },
         storyboard: { type: 'string', minLength: 1, description: '可选 .png 交互时序关键帧拼图输出路径（禁止覆盖已有文件）。' },
         includeStoryboard: { type: 'boolean', description: 'true 时在 MCP 响应中附带横向标注每步交互状态的关键帧拼图 PNG。' },
-        steps: { type: 'array', minItems: 0, maxItems: 60, items: verifyStepItemsSchema },
+        steps: { type: 'array', minItems: 0, maxItems: 120, items: verifyStepItemsSchema, description: '无头 Chrome 交互步骤数组（0–120 步）。' },
       }, additionalProperties: false },
       handler: input => verifyOfficialPreview(input, { runWorkflow, exportHtml: exportPrototype }), readOnly: false },
     { name: 'preview_prototype', description: '在已有 ego lite 任务空间中验证真实 Axure 预览。按逻辑 ID 点击、输入并断言文字/变量/面板状态，返回实际状态、源码位置及报告截图。用 export_prototype + verify_prototype 进行无头 Chrome 验收，或先运行 gui_roundtrip(preview:true)；不接管用户空间，不把模拟当原生证据。',
