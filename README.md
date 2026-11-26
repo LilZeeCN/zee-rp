@@ -68,11 +68,12 @@ page #notes name="手记" device=iphone-17-pro
 
 | 从哪里继续 | 可以做什么 |
 | :--- | :--- |
-| **Studio** | 和 AI 共用设计文档、事务与撤销历史 |
-| **Axure** | 打开原生工程，继续编辑元件与支持的交互 |
-| **浏览器** | 运行预览；也可导出独立 HTML / CSS / JS |
+| **Studio** | 和 AI 共用设计文档、事务、原子 `fix_plan(apply:true)` 自愈与撤销历史 |
+| **Axure** | 打开原生 `.rp`，或反编译已有 `.rp` 进 Studio，再 `studio_export(format:"rp1")` 导出源码 |
+| **浏览器** | 运行拖拽/滑动/定时切态预览；免装 Axure 即可用 `verify_prototype(engine:"studio-html")` 真机验收 |
+| **网页 / 截图** | 直接传本地 `.html` 或 `http(s)://` URL 给 `studio_open_project` / `generate_prototype`，一步提取排版与表单进画布 |
 
-[原生导出与回填](docs/studio-native-roundtrip.md)　↗　[代码导出](docs/studio-code-export.md)　↗　[40 秒流程动画](https://github.com/LilZeeCN/zee-rp/releases/download/v0.2.1/zee-rp-zhixu-1080p60.mp4)
+[原生导出与回填](docs/studio-native-roundtrip.md)　↗　[HTML / URL 导入](references/html-workflow.md)　↗　[代码导出](docs/studio-code-export.md)　↗　[40 秒流程动画](https://github.com/LilZeeCN/zee-rp/releases/download/v0.2.1/zee-rp-zhixu-1080p60.mp4)
 
 <br>
 
@@ -91,6 +92,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 npm ci
+npm run doctor   # 3 秒自检 Node / Python / Chrome / 模板就绪状态
 ```
 
 ### Windows 支持

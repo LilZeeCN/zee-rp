@@ -9,29 +9,25 @@
  *  - T-F-1 透明 PNG/动图转 JPG 必须带 warnings；T-F-2 令牌过期走 W_MEDIA_TOKEN_STALE
  *  - T-F-5/T-FR-1 多裁切逐项隔离，失败单不留未登记孤儿
  */
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { studioHandlers } from '../studio/mcp-adapter.mjs';
+import { closeInProcessStudioServer, studioHandlers } from '../studio/mcp-adapter.mjs';
 import { computeDesignMetrics } from '../studio/design-metrics.mjs';
 import { prepareMedia } from '../studio/media.mjs';
 
-let failures = 0;
-const check = (name, fn) => {
-  try { fn(); console.log(`  ok   ${name}`); } catch (err) { failures++; console.error(`  FAIL ${name}\n       ${err.message}`); }
-};
-const checkAsync = async (name, fn) => {
-  try { await fn(); console.log(`  ok   ${name}`); } catch (err) { failures++; console.error(`  FAIL ${name}\n       ${err.message}`); }
-};
-
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
-// ---------------------------------------------------------------------------
-console.log('[1] T-E-4：设备画板/root 容器不进栅格 offenders');
+test('组 G7 度量与素材卫生（T-E-4/5/6/7、T-ER-1/2、T-F-1/2/5、T-FR-1）', async t => {
+const check = (_name, fn) => fn();
+const checkAsync = (name, fn) => t.test(name, fn);
 const dir = mkdtempSync(join(tmpdir(), 'zee-g7-'));
-const open = await studioHandlers.studio_open_project({ projectDir: dir, name: 'G7 度量', domain: 'mobile', port: 4641 });
+const mediaDir = mkdtempSync(join(tmpdir(), 'zee-g7-media-'));
+try {
+const open = await studioHandlers.studio_open_project({ projectDir: dir, name: 'G7 度量', domain: 'mobile', port: 0 });
 let rev = open.appliedRevision;
 const addBoard = await studioHandlers.studio_apply_commands({
   projectDir: dir,
@@ -152,8 +148,7 @@ check('geometry 侧带跨模式口径说明（modeNote）', () => {
 });
 
 // ---------------------------------------------------------------------------
-console.log('[5] T-F-1/T-F-2/T-F-5/T-FR-1：媒体 warnings、令牌警告级、逐项隔离与孤儿清理');
-const mediaDir = mkdtempSync(join(tmpdir(), 'zee-g7-media-'));
+// [5] T-F-1/T-F-2/T-F-5/T-FR-1：媒体 warnings、令牌警告级、逐项隔离与孤儿清理
 // 累计登记表：每次 prepareMedia 响应里登记过的文件（产物 + 原图）。
 // 孤儿判定 = assets/ 目录对登记表的补集必须为空（跨单累计，比单单对比更严）。
 const registry = new Set();
@@ -216,7 +211,8 @@ await checkAsync('重放确定性：同配方两次调用响应逐字节一致�
   remember(await prepareMedia(input)); assertNoOrphans();
 });
 
-try { rmSync(dir, { recursive: true, force: true }); rmSync(mediaDir, { recursive: true, force: true }); } catch {}
-if (failures) { console.error(`\n${failures} 项失败`); process.exit(1); }
-console.log('\n全部通过');
-process.exit(0);
+} finally {
+  await closeInProcessStudioServer();
+  try { rmSync(dir, { recursive: true, force: true }); rmSync(mediaDir, { recursive: true, force: true }); } catch {}
+}
+});

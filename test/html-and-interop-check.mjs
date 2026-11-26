@@ -1,8 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { runDoctor } from '../scripts/doctor.mjs';
 import { authoringTools, verifyOfficialPreview } from '../scripts/authoring-workflow.mjs';
 import { sessionTools } from '../scripts/mcp-tools.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
@@ -333,6 +336,68 @@ test('Studio preview drag/swipe/timer (#18) and cross-platform verify_prototype(
     assert.ok(verifyRes.mcpImages?.length >= 1);
   } finally {
     try { await browser?.close(); } catch {}
+    await closeInProcessStudioServer();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('zee-rp doctor CLI & runDoctor() report capability matrix cleanly', () => {
+  const report = runDoctor();
+  assert.equal(report.ok, true, JSON.stringify(report));
+  assert.equal(report.checks.node.ok, true);
+  assert.equal(report.checks.python.ok, true);
+  assert.equal(report.checks.pythonDeps.ok, true);
+  assert.equal(typeof report.capabilities.studioCanvas, 'boolean');
+  assert.equal(typeof report.capabilities.htmlImportAndChromeVerify, 'boolean');
+
+  const rootDir = dirname(dirname(fileURLToPath(import.meta.url)));
+  const cliOut = execFileSync(process.execPath, [join(rootDir, 'bin/axure.mjs'), 'doctor', '--json'], {
+    cwd: rootDir, encoding: 'utf8',
+  });
+  const cliReport = JSON.parse(cliOut);
+  assert.equal(cliReport.ok, true);
+  assert.deepEqual(Object.keys(cliReport.capabilities), Object.keys(report.capabilities));
+});
+
+test('generate_from_image supports autoFix:true + emitRp1 + studio-html Chrome verify', {
+  skip: chromeSkipReason() || nativeTemplateSkipReason(),
+}, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-img-autofix-verify-'));
+  try {
+    const imgSpec = {
+      schemaVersion: 1,
+      scale: 1,
+      frames: [
+        {
+          name: 'autofix-page',
+          x: 0,
+          y: 0,
+          w: 420,
+          h: 280,
+          bg: '#FFFFFF',
+          children: [
+            { kind: 'rect', id: 'card1', x: 16, y: 16, w: 388, h: 120, fill: '#F8FAFC', stroke: '#CBD5E1', radius: 12 },
+            { kind: 'text', id: 'heading1', x: 32, y: 36, w: 240, h: 28, content: '视觉闭环标题', fontSize: 18, color: '#0F172A' },
+          ],
+        },
+      ],
+    };
+    const res = await mcpToolMap.generate_from_image({
+      spec: imgSpec,
+      output: join(dir, 'healed-from-img.rp'),
+      emitRp1: true,
+      autoFix: true,
+      verifyEngine: 'studio-html',
+      verify: [
+        { action: 'expect', target: 'w_4', expect: { visible: true, text: '视觉闭环标题' } },
+      ],
+    });
+    assert.equal(res.status, 'completed', JSON.stringify(res));
+    assert.equal(res.autoFix?.attempted, true);
+    assert.ok(existsSync(res.rp1Source));
+    assert.equal(res.verificationReport?.status, 'completed', JSON.stringify(res.verificationReport));
+    assert.equal(res.verification?.evidence, 'studio-html-cdp');
+  } finally {
     await closeInProcessStudioServer();
     rmSync(dir, { recursive: true, force: true });
   }

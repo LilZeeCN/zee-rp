@@ -1,5 +1,6 @@
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import vm from 'node:vm';
@@ -10,18 +11,25 @@ import { addInteractions } from '../scripts/ix-actions.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { parsePayload, field } from '../scripts/parse-payload.mjs';
+import { resolveBlankTemplate } from '../scripts/blank-template.mjs';
 
 // Exercise real RP9 library widgets and the serialized expression graph. This is
 // structure plus installed JavaScript runtime evidence, not Axure GUI evidence.
-const rp9Root = '/Applications/Axure RP 9.app/Contents/Resources/DefaultSettings';
+const rp9Root = process.env.AXURE_DEFAULT_SETTINGS_RP9 || '/Applications/Axure RP 9.app/Contents/Resources/DefaultSettings';
 const library = join(rp9Root, 'Libraries/Default.rplib');
-const blank = '/Users/lilzee/Library/Application Support/zee-axure/templates/axure-rp9-blank.rp';
-const work = mkdtempSync(join(tmpdir(), 'native-form-actions-'));
-let checks = 0;
-const check = (name, fn) => { fn(); checks++; console.log(`PASS ${name}`); };
+let blank = null;
+try { blank = resolveBlankTemplate(9); } catch {}
+const skipReason = !existsSync(library)
+  ? `Default.rplib not found at ${library}`
+  : !blank
+    ? 'RP9 blank template unavailable'
+    : false;
 const widget = (name, valueType = 'text', accessor) => ({ kind: 'widget', name, valueType, ...(accessor ? { accessor } : {}) });
 
-try {
+test('RP9 native library form actions & shipped expr.js runtime checks', { skip: skipReason }, () => {
+  const work = mkdtempSync(join(tmpdir(), 'native-form-actions-'));
+  const check = (_name, fn) => fn();
+  try {
   let file = join(work, 'blank.rp');
   copyFileSync(blank, file);
   const pageName = readRp(readFileSync(file), { path: file }).pages[0].name;
@@ -119,8 +127,7 @@ try {
     call('SetSelectedOption', 'combo', '全部价格');
     assert.equal(call('GetSelectedOption', 'combo'), '全部价格');
   });
-
-  console.log(JSON.stringify({ ok: true, checks, evidence: 'RP9 native structure and installed expression runtime; no GUI assertion' }));
 } finally {
   rmSync(work, { recursive: true, force: true });
 }
+});

@@ -1282,6 +1282,48 @@ export const studioTools = [
   },
 ];
 
+export async function runStudioFixPlanOnRp1({ rp1 = null, sourcePath = null, projectDir, pageId = null } = {}) {
+  mkdirSync(projectDir, { recursive: true });
+  const { studio, info } = await startStudioServer({
+    projectDir,
+    ...(rp1 ? { rp1 } : { sourcePath }),
+    port: 0,
+  });
+  try {
+    const baseUrl = (info?.url || `http://127.0.0.1:${studio.port}`).replace(/\/$/, '');
+    const ctx = await callServerJson(baseUrl, '/api/context', 'GET', null, { readOnly: true });
+    const baseRevision = ctx?.appliedRevision ?? ctx?.doc?.revision ?? 1;
+    const targetPageId = pageId || ctx?.doc?.pages?.[0]?.id || 'home';
+    const fixRes = await callServerJson(baseUrl, '/api/design/fix-plan', 'POST', {
+      pageId: targetPageId,
+      apply: true,
+      baseRevision,
+      idempotencyKey: `img-autofix-${baseRevision}`,
+      label: 'generate_from_image autoFix',
+    });
+    let rp1Text = null;
+    if (fixRes?.applied && Number(fixRes?.appliedCount) > 0) {
+      const expRes = await callServerJson(baseUrl, '/api/export-rp1', 'POST', {});
+      if (expRes?.ok && typeof expRes.rp1Text === 'string') {
+        rp1Text = expRes.rp1Text;
+      }
+    }
+    return {
+      ok: Boolean(fixRes?.ok),
+      attempted: true,
+      applied: Boolean(fixRes?.applied),
+      appliedCount: Number(fixRes?.appliedCount ?? 0),
+      skippedEmpty: Boolean(fixRes?.skippedEmpty),
+      beforeBlockers: fixRes?.before?.blockerCount ?? null,
+      afterBlockers: fixRes?.actualAfter?.blockerCount ?? fixRes?.after?.blockerCount ?? null,
+      remainingManualCount: fixRes?.manualActions?.length ?? 0,
+      rp1Text,
+    };
+  } finally {
+    try { await studio.close(); } catch {}
+  }
+}
+
 export async function closeInProcessStudioServer() {
   for (const entry of inProcessServers.values()) {
     if (entry?.kind === 'local' && entry.studio) {

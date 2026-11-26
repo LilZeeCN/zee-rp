@@ -15,9 +15,18 @@ if (argv[0] === 'studio') {
   process.exit(res.status ?? 0);
 }
 
+if (argv[0] === 'doctor') {
+  const { spawnSync } = await import('node:child_process');
+  const { fileURLToPath } = await import('node:url');
+  const doctorPath = fileURLToPath(new URL('../scripts/doctor.mjs', import.meta.url));
+  const res = spawnSync(process.execPath, [doctorPath, ...argv.slice(1)], { stdio: 'inherit' });
+  process.exit(res.status ?? 0);
+}
+
 function commandList() {
   const studioEntry = `  ${'studio'.padEnd(24)} 启动或操作 zee-rp Studio 自由画布 (start / context / screenshot / export)`;
-  return [studioEntry, ...listCommands().map(c => `  ${c.command.padEnd(24)} ${c.summary}`)].join('\n');
+  const doctorEntry = `  ${'doctor'.padEnd(24)} 一键检查 Node / Python / 依赖 / Chrome / RP9 模板与可用能力矩阵 (--json / --strict)`;
+  return [studioEntry, doctorEntry, ...listCommands().map(c => `  ${c.command.padEnd(24)} ${c.summary}`)].join('\n');
 }
 
 if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {

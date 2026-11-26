@@ -1,6 +1,8 @@
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { TEST_DIR } from './fixture-summary.mjs';
 import { fixturePath } from './native-inputs.mjs';
 import { createGlobalVariable } from '../scripts/create-global-variable.mjs';
@@ -63,4 +65,17 @@ export function runCreateGlobalVariableChecks() {
   });
 
   return results;
+}
+
+if (import.meta.url === pathToFileURL(resolve(process.argv[1] || '')).href) {
+  const skip = existsSync(fixturePath('var-set-counter-roundtrip.rp'))
+    ? false
+    : 'Requires private .rp fixtures (AXURE_FIXTURE_ROOT)';
+  test('create global variable checks', { skip }, async t => {
+    for (const r of runCreateGlobalVariableChecks()) {
+      await t.test(r.name, () => {
+        assert.equal(r.passed, true, r.detail);
+      });
+    }
+  });
 }

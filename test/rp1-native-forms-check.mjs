@@ -1,5 +1,6 @@
 // RP/1 native forms: compiler, reference behavior and actual RP9 serialization.
 // Native browser behavior is verified separately after Axure save/reopen.
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
@@ -9,21 +10,22 @@ import { fileURLToPath } from 'node:url';
 import { readRp } from '../scripts/rp-read.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { field, parsePayload } from '../scripts/parse-payload.mjs';
+import { pythonInvocation } from '../scripts/python.mjs';
 import { nativeTemplateSkipReason } from './host-capabilities.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const source = join(root, 'examples/rp-language/native-forms.rp1');
-const work = mkdtempSync(join(tmpdir(), 'rp1-native-forms-check-'));
-let checks = 0;
-const check = (name, run) => { run(); checks++; console.log('PASS ' + name); };
 const run = (command, args) => {
-  const result = spawnSync(command, args, { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  const inv = command === 'python3' ? pythonInvocation(args) : { command, args };
+  const result = spawnSync(inv.command, inv.args, { cwd: root, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
   assert.equal(result.status, 0, (result.stderr || '') + result.stdout);
   return JSON.parse(result.stdout);
 };
 
-try {
-  const semantics = run('python3', ['-c', `
+let sharedSemantics = null;
+function getSemantics() {
+  if (sharedSemantics) return sharedSemantics;
+  sharedSemantics = run('python3', ['-c', `
 import copy,json,sys
 sys.path.insert(0,${JSON.stringify(join(root, 'scripts'))})
 from rp_language_cli import read_source
@@ -120,21 +122,28 @@ assert selected_widget['checked'] is True and selected_widget['selected'] is Tru
 boundaries={'radio_peer_change':peer.variables['changed'],'selected_only_checked':selected_widget['checked']}
 print(json.dumps({'symbols':ir['symbols'],'tabs':tabs,'query':match,'negative':negative,'boundaries':boundaries,'pages':len(ir['pages'])},ensure_ascii=False))
 `]);
-  check('RP/1 native form reference behavior, selection groups, query and reset', () => {
-    assert.deepEqual(semantics.tabs, [false, false, true]);
-    assert.equal(semantics.pages, 4);
-    assert.equal(Object.keys(semantics.negative).length, 4);
-  });
-  check('radio peer callbacks and checked/selected initialization stay consistent', () => {
-    assert.equal(semantics.boundaries.radio_peer_change, true);
-    assert.equal(semantics.boundaries.selected_only_checked, true);
-    assert.equal(semantics.negative.conflicting_checked_selected, 'E_PROPERTY');
-  });
+  return sharedSemantics;
+}
 
-  const skip = nativeTemplateSkipReason();
-  if (skip) {
-    console.log(JSON.stringify({ ok: true, checks, native: 'skipped', reason: skip }));
-  } else {
+test('RP/1 native form reference behavior, selection groups, query and reset', () => {
+  const semantics = getSemantics();
+  assert.deepEqual(semantics.tabs, [false, false, true]);
+  assert.equal(semantics.pages, 4);
+  assert.equal(Object.keys(semantics.negative).length, 4);
+});
+
+test('radio peer callbacks and checked/selected initialization stay consistent', () => {
+  const semantics = getSemantics();
+  assert.equal(semantics.boundaries.radio_peer_change, true);
+  assert.equal(semantics.boundaries.selected_only_checked, true);
+  assert.equal(semantics.negative.conflicting_checked_selected, 'E_PROPERTY');
+});
+
+test('RP9 native forms serialization & gesture fixture roundtrip', { skip: nativeTemplateSkipReason() }, () => {
+  const work = mkdtempSync(join(tmpdir(), 'rp1-native-forms-check-'));
+  const check = (_name, fn) => fn();
+  try {
+    const semantics = getSemantics();
     const output = join(work, 'native-forms.rp');
     const generation = run('node', [join(root, 'scripts/proto.mjs'), 'generate', '--spec', source,
       '--out-dir', join(work, 'bundle'), '--out-rp', output]);
@@ -250,9 +259,7 @@ print(json.dumps({'symbols':ir['symbols'],'tabs':tabs,'query':match,'negative':n
       assert.match(sourceText, /maxLength=7/);
       assert.equal(run('node', ['scripts/proto.mjs', 'check', '--spec', lifted]).ok, true);
     });
-    console.log(JSON.stringify({ ok: true, checks, evidence: 'compiler-reference-model-and-native-serialization',
-      nativeGui: 'requires separate Axure save/reopen and browser verification' }));
+  } finally {
+    rmSync(work, { recursive: true, force: true });
   }
-} finally {
-  rmSync(work, { recursive: true, force: true });
-}
+});

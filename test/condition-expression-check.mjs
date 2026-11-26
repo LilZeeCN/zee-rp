@@ -1,6 +1,8 @@
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import vm from 'node:vm';
 import { TEST_DIR } from './fixture-summary.mjs';
 import { fixturePath } from './native-inputs.mjs';
@@ -330,4 +332,18 @@ export async function runConditionExpressionChecks() {
   });
 
   return results;
+}
+
+if (import.meta.url === pathToFileURL(resolve(process.argv[1] || '')).href) {
+  const skip = existsSync(fixturePath('var-set-counter-roundtrip.rp'))
+    ? false
+    : 'Requires private .rp fixtures (AXURE_FIXTURE_ROOT)';
+  test('condition expression checks', { skip }, async t => {
+    const checks = await runConditionExpressionChecks();
+    for (const r of checks) {
+      await t.test(r.name, () => {
+        assert.equal(r.passed, true, r.detail);
+      });
+    }
+  });
 }

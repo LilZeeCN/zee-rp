@@ -1,15 +1,21 @@
 // Decode the written native GUID paths independently of writer reports.
+import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { fixturePath } from './native-inputs.mjs';
-import { fileURLToPath } from 'node:url';
 import { addInteractions, pageWidgetContexts } from '../scripts/ix-actions.mjs';
 import { readRecords } from '../scripts/rp-records.mjs';
 import { parsePayload, field } from '../scripts/parse-payload.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 
-let passed = 0;
-function check(name, body) { body(); passed++; console.log(`PASS ${name}`); }
+const hasScopeFixtures =
+  existsSync(fixturePath('panel-replace-roundtrip.rp')) &&
+  existsSync(fixturePath('panel-nested-two-level-roundtrip.rp'));
+
+test('scoped native interactions preserve GUID paths across panel states', {
+  skip: hasScopeFixtures ? false : 'Requires private .rp fixtures (AXURE_FIXTURE_ROOT)',
+}, async t => {
+const check = (name, body) => t.test(name, body);
 const fixture = name => readFileSync(fixturePath(name));
 const source = fixture('panel-replace-roundtrip.rp');
 const contexts = pageWidgetContexts(source, 'Page 1');
@@ -33,20 +39,20 @@ function checkPath(result, expected) {
   assert.equal(summary.problems.length, 0);
 }
 
-check('panel-state owner is actually modified', () => {
+await check('panel-state owner is actually modified', () => {
   const result = write(source, 'NATIVE_TEXT_FIELD', [{ type: 'set-text', target: 'NATIVE_TEXT_FIELD', text: 'inside' }]);
   assert.equal(readRecords(result.file).find(r => r.index === result.report.record).className, 'Axure:PanelState');
   checkPath(result, widgetGuid('NATIVE_TEXT_FIELD'));
 });
-check('state-to-root text path preserves target GUID', () => {
+await check('state-to-root text path preserves target GUID', () => {
   const result = write(source, 'NATIVE_TEXT_FIELD', [{ type: 'set-text', target: 'SHOW_FORM', text: 'outside' }]);
   checkPath(result, widgetGuid('SHOW_FORM'));
 });
-check('root-to-state text path preserves target GUID', () => {
+await check('root-to-state text path preserves target GUID', () => {
   const result = write(source, 'SHOW_FORM', [{ type: 'set-text', target: 'NATIVE_TEXT_FIELD', text: 'inside' }]);
   checkPath(result, widgetGuid('NATIVE_TEXT_FIELD'));
 });
-check('state-to-parent panel-state action imports diagram GUID', () => {
+await check('state-to-parent panel-state action imports diagram GUID', () => {
   const result = write(source, 'NATIVE_TEXT_FIELD', [{ type: 'set-panel-state', target: 'CONTENT_PANEL', state: 'Visual' }]);
   checkPath(result, widgetGuid('CONTENT_PANEL'));
   const record = readRecords(result.file).find(r => r.index === result.report.record);
@@ -58,17 +64,17 @@ check('state-to-parent panel-state action imports diagram GUID', () => {
   const expected = original.graph.roots.find(n => n.tag === 0x1e).values[diagram.id - 1];
   assert.equal(table[field(state.body, 'diagram-id').value - 1], expected);
 });
-check('explicit container selects state owner', () => {
+await check('explicit container selects state owner', () => {
   const result = write(source, 'NATIVE_TEXT_FIELD', [{ type: 'wait', ms: 1 }], { container: ['CONTENT_PANEL(Form)'] });
   assert.equal(result.report.record, contexts.find(c => c.container.includes('CONTENT_PANEL(Form)')).r.index);
 });
-check('wrong container is rejected', () => {
+await check('wrong container is rejected', () => {
   assert.throws(() => write(source, 'NATIVE_TEXT_FIELD', [{ type: 'wait', ms: 1 }], { container: ['CONTENT_PANEL(Visual)'] }), /found 0/);
 });
-check('missing trigger cannot be silently skipped', () => {
+await check('missing trigger cannot be silently skipped', () => {
   assert.throws(() => write(source, 'ABSENT', [{ type: 'wait', ms: 1 }]), /found 0/);
 });
-check('nested native state owner can address grandparent panel', () => {
+await check('nested native state owner can address grandparent panel', () => {
   const nested = fixture('panel-nested-two-level-roundtrip.rp');
   const result = write(nested, 'NATIVE_TEXT_FIELD', [{ type: 'set-panel-state', target: 'OUTER_PANEL', state: 'Imported' }]);
   const summary = readRp(result.file);
@@ -76,4 +82,4 @@ check('nested native state owner can address grandparent panel', () => {
   assert.equal(summary.problems.length, 0);
   assert.equal(readRecords(result.file).find(r => r.index === result.report.record).className, 'Axure:PanelState');
 });
-console.log(`${passed} scoped native checks passed`);
+});

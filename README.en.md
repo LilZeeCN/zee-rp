@@ -68,11 +68,12 @@ Generate a native **`.rp`** and continue editing supported text, controls and la
 
 | Continue in | What stays with you |
 | :--- | :--- |
-| **Studio** | A shared design document, transactions and undo history |
-| **Axure** | Native objects and supported interactions to keep editing |
-| **The browser** | Runnable previews, plus standalone HTML / CSS / JS export |
+| **Studio** | A shared design document, transactions, atomic `fix_plan(apply:true)` healing and undo history |
+| **Axure** | Open native `.rp`, decompile existing `.rp` into Studio, or export back to `.rp1` via `studio_export(format:"rp1")` |
+| **The browser** | Drag/swipe/timer previews; run cross-platform Chrome verification without Axure via `verify_prototype(engine:"studio-html")` |
+| **HTML / URL / Image** | Pass local `.html`, `http(s)://` URLs or UI screenshots to `studio_open_project` / `generate_prototype` / `generate_from_image` |
 
-[Native export and sync](docs/studio-native-roundtrip.md)　↗　[Code export](docs/studio-code-export.md)　↗　[40-second workflow animation](https://github.com/LilZeeCN/zee-rp/releases/download/v0.2.1/zee-rp-zhixu-1080p60.mp4)
+[Native export and sync](docs/studio-native-roundtrip.md)　↗　[HTML / URL import](references/html-workflow.md)　↗　[Code export](docs/studio-code-export.md)　↗　[40-second workflow animation](https://github.com/LilZeeCN/zee-rp/releases/download/v0.2.1/zee-rp-zhixu-1080p60.mp4)
 
 <br>
 
@@ -91,6 +92,7 @@ python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 npm ci
+npm run doctor   # 3-second check for Node, Python, Chrome and RP9 template readiness
 ```
 
 ### Windows

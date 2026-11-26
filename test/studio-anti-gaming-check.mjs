@@ -8,6 +8,7 @@
  *  5. 导出预算必须认得 customFilter
  *  6. 修复计划只接受"整页阻塞项严格减少"的命令，并给出 unfixable 原因
  */
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -15,10 +16,8 @@ import { join } from 'node:path';
 import { studioHandlers } from '../studio/mcp-adapter.mjs';
 import { startStudioServer } from '../studio/server.mjs';
 
-let failures = 0;
-const check = (name, fn) => {
-  try { fn(); console.log(`  ok   ${name}`); } catch (err) { failures++; console.error(`  FAIL ${name}\n       ${err.message}`); }
-};
+test('反“刷绿”攻击面回归（16 组场景）', async () => {
+const check = (_name, fn) => fn();
 const servers = new Map();
 const newProject = async (tag) => {
   const dir = mkdtempSync(join(tmpdir(), `zee-anti-${tag}-`));
@@ -387,7 +386,4 @@ console.log('[16] 半透明遮罩不能虚报高对比度');
   });
   await closeProject(dir);
 }
-
-if (failures) { console.error(`\n${failures} 项失败`); process.exit(1); }
-console.log('\n全部通过');
-process.exit(0);
+});

@@ -1,5 +1,6 @@
 // Axure 宿主生命周期：纯函数 + 驱动契约。
 // 不需要 Axure 安装：端口归属与 marker 解析都是纯数据，驱动部分只检查源码契约。
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:net';
@@ -8,11 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { previewFileMarker, readPreviewMarker, selectPreviewPort } from '../studio/axure-preview.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const results = [];
-function check(name, action) {
-  try { action(); results.push({ name, passed: true }); console.log(`PASS  ${name}`); }
-  catch (error) { results.push({ name, passed: false, detail: error.message }); console.log(`FAIL  ${name} — ${error.message}`); }
-}
+const check = (name, action) => test(name, action);
 
 check('preview marker: single quotes', () => {
   assert.equal(previewFileMarker("PREVIEW_INFO = { fileName : 'scenario-host-1'}"), 'scenario-host-1');
@@ -38,13 +35,13 @@ async function previewResponse(status, body, length = Buffer.byteLength(body)) {
     await new Promise(resolve => server.close(resolve));
   }
 }
-const body = "PREVIEW_INFO = { fileName : '作业-lf' }";
-const bareLfMarker = await previewResponse('200 OK', body);
-const markerless = await previewResponse('200 OK', '<html>旧版预览</html>');
-const missingPage = await previewResponse('404 Not Found', body);
-const truncatedPage = await previewResponse('200 OK', body, Buffer.byteLength(body) + 1);
-check('preview marker: reads the production bare-LF path', () => assert.equal(bareLfMarker, '作业-lf'));
-check('preview marker: distinguishes markerless pages from failed reads', () => {
+test('preview marker HTTP response variants: bare-LF and status distinction', async () => {
+  const body = "PREVIEW_INFO = { fileName : '作业-lf' }";
+  const bareLfMarker = await previewResponse('200 OK', body);
+  const markerless = await previewResponse('200 OK', '<html>旧版预览</html>');
+  const missingPage = await previewResponse('404 Not Found', body);
+  const truncatedPage = await previewResponse('200 OK', body, Buffer.byteLength(body) + 1);
+  assert.equal(bareLfMarker, '作业-lf');
   assert.equal(markerless, null);
   assert.equal(missingPage, undefined);
   assert.equal(truncatedPage, undefined);
@@ -129,7 +126,3 @@ check('driver: legacy positional contract is preserved', () => {
   assert.ok(driver.includes('let wantPreview = arguments.count > 2 && arguments[2] == "preview"'),
     'missing positional preview flag');
 });
-
-const failed = results.filter(result => !result.passed);
-console.log(`\n${results.length - failed.length}/${results.length} passed`);
-if (failed.length) process.exitCode = 1;

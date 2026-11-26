@@ -1,3 +1,4 @@
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { mkdtempSync, existsSync, readFileSync, rmSync, symlinkSync, mkdirSync, writeFileSync, realpathSync } from 'node:fs';
@@ -21,11 +22,8 @@ const mockRunner = ([output]) => {
 };
 const mockClose = () => spawn(process.execPath, ['-e', 'console.log("closed")']);
 const manager = new JobManager({ runner: mockRunner });
-const results = [];
-const check = async (name, action) => {
-  try { await action(); results.push({ name, passed: true }); console.log(`PASS  ${name}`); }
-  catch (error) { results.push({ name, passed: false, detail: error.message }); console.log(`FAIL  ${name} — ${error.message}`); }
-};
+test('JobManager lifecycle, concurrency and write-root guards (mock runner)', async t => {
+const check = (name, action) => t.test(name, action);
 const until = async (id, status) => {
   const deadline = Date.now() + 5000;
   while (Date.now() < deadline) { if (manager.get(id).status === status) return; await new Promise(r => setTimeout(r, 10)); }
@@ -200,6 +198,4 @@ try {
   if (previousRoot === undefined) delete process.env.AXURE_WRITE_ROOT; else process.env.AXURE_WRITE_ROOT = previousRoot;
   rmSync(work, { recursive: true, force: true });
 }
-const failed = results.filter(r => !r.passed).length;
-console.log(JSON.stringify({ total: results.length, passed: results.length - failed, failed, evidence: 'mock process lifecycle; no real GUI', results }));
-process.exitCode = failed ? 1 : 0;
+});

@@ -835,6 +835,11 @@ const LIB_SCRIPTS = [
     "script": "html-import.mjs",
     "summary": "通过 Headless Chrome CDP 提取本地 HTML 或在线网页的真实排版、表单与矢量结构为 RP/1 源码与规范",
     "evidence": "internal"
+  },
+  {
+    "script": "doctor.mjs",
+    "summary": "跨平台环境自检与能力矩阵诊断 CLI（检查 Node、Python、Pillow/NumPy、Chrome 与 RP9 模板）",
+    "evidence": "internal"
   }
 ];
 

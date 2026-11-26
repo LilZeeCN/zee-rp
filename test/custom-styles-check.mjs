@@ -1,4 +1,5 @@
 // Synthetic serialization only: no Axure files or vendor style definitions shipped.
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { gzipSync } from 'node:zlib';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
@@ -48,11 +49,9 @@ function fixture(rp = false) {
   return Buffer.concat([encodeManifest(header, { root: { children } }), ...records]);
 }
 function graph(file, index) { return parsePayload(readRecords(file)[index]); }
-const checks = [];
-function check(name, fn) { fn(); checks.push(name); console.log('PASS', name); }
 for (const rp of [false, true]) {
   const source = fixture(rp), original = Buffer.from(source);
-  check(`${rp ? 'RP' : 'RPLIB'} rename cascades by GUID and library, preserving unrelated names/identities`, () => {
+  test(`${rp ? 'RP' : 'RPLIB'} rename cascades by GUID and library, preserving unrelated names/identities`, () => {
     const result = renameCustomStyle(source, 'Style_A', '新样式_测试');
     assert.equal(result.references, 6); assert.deepEqual(result.changedRecords, [0, 1, 2, 4]);
     assert.equal(listCustomStyles(result.file)[0].name, '新样式_测试');
@@ -69,7 +68,7 @@ for (const rp of [false, true]) {
     assert.deepEqual(renameCustomStyle(result.file, '新样式_测试', '新样式_测试').file, result.file);
     assert.deepEqual(source, original);
   });
-  check(`${rp ? 'RP' : 'RPLIB'} rebind changes base GUID and cache, preserving geometry/events/local overrides`, () => {
+  test(`${rp ? 'RP' : 'RPLIB'} rebind changes base GUID and cache, preserving geometry/events/local overrides`, () => {
     const result = rebindWidgets(source, B, widgetSelector({ all: true }));
     assert.equal(result.applied.length, 4);
     for (let i = 0; i < 4; i++) {
@@ -90,7 +89,7 @@ for (const rp of [false, true]) {
     assert.deepEqual(readRecords(result.file).at(-1).raw, readRecords(source).at(-1).raw);
     assert.deepEqual(source, original);
   });
-  check(`${rp ? 'RP' : 'RPLIB'} explicit override reset keeps geometry and image content`, () => {
+  test(`${rp ? 'RP' : 'RPLIB'} explicit override reset keeps geometry and image content`, () => {
     const result = rebindWidgets(source, B, widgetSelector({ record: 1, name: 'Style_A' }), { resetOverrides: true });
     assert.equal(result.applied.length, 1);
     const props = field(graph(result.file, 1).objects.get(3).body, 'PropList').items;
@@ -98,7 +97,7 @@ for (const rp of [false, true]) {
     assert.deepEqual(readRecords(result.file)[0].raw, readRecords(source)[0].raw);
   });
 }
-check('invalid names, collisions, GUIDs and selectors fail before mutation', () => {
+test('invalid names, collisions, GUIDs and selectors fail before mutation', () => {
   const file = fixture();
   for (const name of ['', ' ', null]) assert.throws(() => renameCustomStyle(file, 'Style_A', name));
   assert.throws(() => renameCustomStyle(file, 'Style_A', 'style_b'), /already exists/);
@@ -109,7 +108,7 @@ check('invalid names, collisions, GUIDs and selectors fail before mutation', () 
   for (const selector of [{}, { typo: 'x' }, { all: false }, { record: '1' }, { all: true, name: 'x' }]) assert.throws(() => widgetSelector(selector));
   assert.deepEqual(rebindWidgets(file, B, widgetSelector({ name: 'Missing' })).file, file);
 });
-check('CLI writes a new file, refuses collisions, and MCP schemas expose named arguments', () => {
+test('CLI writes a new file, refuses collisions, and MCP schemas expose named arguments', () => {
   const work = mkdtempSync(join(tmpdir(), 'zee-style-'));
   try {
     const input = join(work, 'input.rplib'), output = join(work, 'renamed.rplib'), failed = join(work, 'failed.rplib');
@@ -132,4 +131,3 @@ check('CLI writes a new file, refuses collisions, and MCP schemas expose named a
     assert.equal(inspectTool.annotations.readOnlyHint, true);
   } finally { rmSync(work, { recursive: true, force: true }); }
 });
-console.log(JSON.stringify({ total: checks.length, passed: checks.length }));

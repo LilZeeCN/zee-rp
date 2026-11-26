@@ -24,7 +24,7 @@ import { mergePages } from './merge-pages.mjs';
 import { authoringTools, captureOfficialHtmlScreenshot, isInlineRp1Text, recipes, recipeSource, runWorkflow, pythonEnvironment, exportPrototype, verifyOfficialPreview } from './authoring-workflow.mjs';
 import { importHtmlToRp1Spec, isHtmlInput } from './html-import.mjs';
 import { reviewImageStructure } from './image-structure.mjs';
-import { studioTools } from '../studio/mcp-adapter.mjs';
+import { studioTools, runStudioFixPlanOnRp1 } from '../studio/mcp-adapter.mjs';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 const SKILL_ROOT_DIR = resolve(SCRIPTS_DIR, '..');
@@ -2301,7 +2301,21 @@ if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIden
   return pathExists(autoCapPath) ? autoCapPath : null;
 }
 
-function finalizeFromImageBuild(ctx, { previewImgPath, previewCaptureMode = null, previewFallbackReason = null }) {
+function decompileRpFileToDsl(rpFilePath) {
+  const decomp = spawnPythonSync(['-B', '-c', `
+import sys
+sys.path.insert(0, sys.argv[1])
+from rp_decompile import decompile_rp
+res = decompile_rp(sys.argv[2])
+sys.stdout.write(res['dsl'])
+`, SCRIPTS_DIR, rpFilePath], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  if (decomp.status !== 0) {
+    throw Object.assign(new Error(`生成 .rp1 源码失败：${decomp.stderr || decomp.stdout || decomp.error?.message}`), { code: 'E_RP1_EMIT_FAILED' });
+  }
+  return decomp.stdout;
+}
+
+function finalizeFromImageBuild(ctx, { previewImgPath, previewCaptureMode = null, previewFallbackReason = null, overrideRp1Text = null, autoFixReport = null }) {
   const {
     stagedRp, stagedBlank, output, rp1Out, page, effectiveScale, refSource,
     traceSpec, rp9Spec, rp9Meta, structureReview, structureReviewPath,
@@ -2325,18 +2339,9 @@ function finalizeFromImageBuild(ctx, { previewImgPath, previewCaptureMode = null
   copyFileSync(stagedRp, output, constants.COPYFILE_EXCL);
   let writtenRp1Source = null;
   if (rp1Out) {
-    const decomp = spawnPythonSync(['-B', '-c', `
-import json, sys
-sys.path.insert(0, sys.argv[1])
-from rp_decompile import decompile_rp
-res = decompile_rp(sys.argv[2])
-sys.stdout.write(res['dsl'])
-`, SCRIPTS_DIR, output], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
-    if (decomp.status !== 0) {
-      throw Object.assign(new Error(`生成 .rp1 源码失败：${decomp.stderr || decomp.stdout || decomp.error?.message}`), { code: 'E_RP1_EMIT_FAILED' });
-    }
+    const rp1Text = overrideRp1Text ?? decompileRpFileToDsl(output);
     mkdirSync(dirname(rp1Out), { recursive: true });
-    writeFileSync(rp1Out, decomp.stdout, 'utf8');
+    writeFileSync(rp1Out, rp1Text, 'utf8');
     writtenRp1Source = rp1Out;
   }
 
@@ -2397,6 +2402,7 @@ sys.stdout.write(res['dsl'])
     structure,
     ...(previewCaptureMode ? { previewCaptureMode } : {}),
     ...(previewFallbackReason ? { previewFallbackReason } : {}),
+    ...(autoFixReport ? { autoFix: autoFixReport } : {}),
     visualDiff: visualDiff ? {
       comparisonSource: previewImgPath ? 'axure-preview-and-thin-page' : 'thin-page-render',
       alignmentMode: previewImgPath ? 'auto_locate_canvas_1to1' : 'logical_1to1',
@@ -2669,6 +2675,43 @@ async function generateFromImageAsync(options = {}) {
   const prep = prepareFromImageBuild(options);
   if (prep.done) return prep.done;
   try {
+    let autoFixReport = null;
+    let overrideRp1Text = null;
+    if (options.autoFix === true && prep.ctx.stagedRp) {
+      try {
+        const initialRp1 = decompileRpFileToDsl(prep.ctx.stagedRp);
+        const fixRes = await runStudioFixPlanOnRp1({
+          rp1: initialRp1,
+          projectDir: join(prep.ctx.artifactDir, 'autofix-studio'),
+        });
+        autoFixReport = {
+          attempted: true,
+          applied: fixRes.applied,
+          appliedCount: fixRes.appliedCount,
+          skippedEmpty: fixRes.skippedEmpty,
+          beforeBlockers: fixRes.beforeBlockers,
+          afterBlockers: fixRes.afterBlockers,
+          remainingManualCount: fixRes.remainingManualCount,
+        };
+        if (fixRes.applied && fixRes.appliedCount > 0 && fixRes.rp1Text) {
+          const healedRpPath = join(prep.ctx.artifactDir, 'autofix-healed.rp');
+          const rebuilt = generatePrototype({ rp1: fixRes.rp1Text, output: healedRpPath, cwd: prep.ctx.artifactDir });
+          if (rebuilt?.status === 'completed' && pathExists(healedRpPath)) {
+            copyFileSync(healedRpPath, prep.ctx.stagedRp);
+            prep.ctx.rp = readRp(readFileSync(prep.ctx.stagedRp), { path: prep.ctx.output });
+            prep.ctx.structure = zerosOf(prep.ctx.rp);
+            overrideRp1Text = fixRes.rp1Text;
+            autoFixReport.recompiledRp = true;
+          } else {
+            autoFixReport.recompiledRp = false;
+            autoFixReport.compileWarning = rebuilt?.diagnostics?.[0]?.message || rebuilt?.message || '自愈后重编 .rp 未完成，已保留原可编辑 .rp';
+          }
+        }
+      } catch (err) {
+        autoFixReport = { attempted: true, applied: false, appliedCount: 0, error: err.message };
+      }
+    }
+
     let previewImgPath = prep.ctx.previewImgPath;
     let previewCaptureMode = previewImgPath ? 'explicit-preview-file' : null;
     let previewFallbackReason = null;
@@ -2696,7 +2739,42 @@ async function generateFromImageAsync(options = {}) {
         if (previewImgPath) previewCaptureMode = 'axure-gui-window-fallback';
       }
     }
-    return finalizeFromImageBuild(prep.ctx, { previewImgPath, previewCaptureMode, previewFallbackReason });
+    const result = finalizeFromImageBuild(prep.ctx, { previewImgPath, previewCaptureMode, previewFallbackReason, overrideRp1Text, autoFixReport });
+    if (result.status === 'completed' && Array.isArray(options.verify) && options.verify.length > 0) {
+      let verifySourcePath = result.rp1Source || null;
+      if (!verifySourcePath) {
+        const tempVerifyRp1 = join(prep.ctx.artifactDir, 'verify-source.rp1');
+        writeFileSync(tempVerifyRp1, overrideRp1Text ?? decompileRpFileToDsl(result.output), 'utf8');
+        verifySourcePath = tempVerifyRp1;
+      }
+      const verifyReport = await verifyOfficialPreview({
+        rp: result.output,
+        source: verifySourcePath,
+        steps: options.verify,
+        engine: options.verifyEngine || 'auto',
+        cwd: options.cwd ?? options.projectDir,
+        includeStoryboard: true,
+        includeImage: false,
+      }, {
+        runWorkflow,
+        exportHtml: async expOpts => exportPrototype({ ...expOpts, cwd: options.cwd ?? options.projectDir }),
+      });
+      if (verifyReport?.status !== 'completed') {
+        return {
+          ...result,
+          status: 'failed',
+          stage: 'verify',
+          verificationReport: verifyReport,
+          verification: { ...result.verification, behavior: false, evidence: verifyReport?.evidence ?? null },
+        };
+      }
+      return {
+        ...result,
+        verificationReport: verifyReport,
+        verification: { ...result.verification, behavior: true, evidence: verifyReport.evidence },
+      };
+    }
+    return result;
   } catch (error) {
     return generateFromImageFailure(error, 'output', prep.ctx.artifactDir);
   }
@@ -3355,6 +3433,9 @@ export const sessionTools = [
       preview: { oneOf: [{ type: 'boolean' }, { type: 'string', minLength: 1 }], description: '可选：传入真实 Axure 预览截图路径，或 true（优先走无弹窗本机 Axure 官方 HTML + 无头 Chrome 截取 1:1 真实渲染做差分）。' },
       emitRp1: { type: 'boolean', description: '可选：true 时同步将重建后的可编辑页面导出为伴随 .rp1 源码（默认 <output 去.rp>.rp1）。' },
       outSource: { type: 'string', minLength: 1, description: '可选：显式指定输出的 .rp1 源码路径（传此项时自动生成 .rp1，禁止覆盖已有文件）。' },
+      autoFix: { type: 'boolean', description: '可选：true 时自动导入临时 Studio 会话执行 fix_plan(apply:true) 原子收敛 L1 阻塞项，并在有实际修复时用自愈源码重编原生 .rp 与伴随 .rp1。' },
+      verify: { type: 'array', description: '可选：生成完成后执行真实 Chrome 行为验收步骤列表（同 generate_prototype.verify）。', items: { type: 'object' } },
+      verifyEngine: { type: 'string', enum: ['auto', 'official', 'studio-html'], description: '可选：verify 验收引擎，默认 auto（无 Axure 时自动回退 studio-html）。' },
       guiPaste: { type: 'boolean', description: '当 version=11 时是否立即执行 Axure RP 11 GUI 粘贴，默认 false。' },
     }, required: ['output'], additionalProperties: false },
     handler: sessionHandlers.generate_from_image,
