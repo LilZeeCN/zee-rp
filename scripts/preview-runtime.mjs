@@ -263,7 +263,9 @@ export function observeAxure({ names = [], variables = [] } = {}) {
 
 export function resolvePreviewSymbol(map, target) {
   const found = (map.symbols ?? []).filter(s =>
-    [s.id, s.logicalId, s.name, s.display, s.label, s.pointer].filter(Boolean).includes(target)
+    [s.id, s.logicalId, s.name, s.display, s.label, s.pointer, ...(Array.isArray(s.aliases) ? s.aliases : [])]
+      .filter(Boolean)
+      .includes(target)
     || (typeof s.id === 'string' && s.id.endsWith('/' + target))
   );
   if (found.length !== 1) throw Object.assign(new Error(`目标 "${target}" 缺失或重名，请使用 page/id 或精确 data-label。`),
@@ -316,6 +318,26 @@ export function previewMismatch(step, observation, widget, map, baselineWidget =
   return failures;
 }
 
+function collectStudioNodeNames(studioDoc) {
+  const namesByScoped = new Map();
+  const walk = (node, pageId) => {
+    if (!node || typeof node !== 'object') return;
+    if (node.id && typeof node.name === 'string' && node.name.trim()) {
+      namesByScoped.set(`${pageId}/${node.id}`, node.name.trim());
+    }
+    for (const child of node.children ?? []) walk(child, pageId);
+    for (const st of node.states ?? []) {
+      if (st.root) walk(st.root, pageId);
+      for (const child of st.children ?? []) walk(child, pageId);
+    }
+    if (node.template) walk(node.template, pageId);
+  };
+  for (const page of studioDoc?.pages ?? []) {
+    if (page?.id && page.root) walk(page.root, page.id);
+  }
+  return namesByScoped;
+}
+
 function buildVerificationMap({ source, rp, runWorkflow }) {
   if (source) {
     const absSrc = resolve(source);
@@ -329,18 +351,31 @@ function buildVerificationMap({ source, rp, runWorkflow }) {
       const base = JSON.parse(readFileSync(`${rp}.baseline.json`, 'utf8'));
       const pages = [];
       const seenPages = new Set();
-      for (const s of base.sourceMap ?? []) {
+      let studioNames = null;
+      if (base.studioOrigin?.sourceFile) {
+        const studioDocPath = resolve(dirname(rp), base.studioOrigin.sourceFile);
+        if (existsSync(studioDocPath)) {
+          try {
+            studioNames = collectStudioNodeNames(JSON.parse(readFileSync(studioDocPath, 'utf8')));
+          } catch {}
+        }
+      }
+      const symbols = (base.sourceMap ?? []).map(s => {
         if (s.pageId && !seenPages.has(s.pageId)) {
           seenPages.add(s.pageId);
           pages.push({ id: s.pageId, name: s.pageName ?? s.pageId });
         }
-      }
+        const studioName = studioNames?.get(s.id);
+        const studioQualified = studioName && s.pageId ? `${s.pageId}/${studioName}` : null;
+        const aliases = [studioName, studioQualified].filter(a => a && a !== s.label && a !== s.id);
+        return aliases.length ? { ...s, aliases } : s;
+      });
       return {
         ok: true,
         semanticHash: base.semanticHash ?? null,
         variables: Object.keys(base.sourceSpec?.variables ?? {}),
         pages,
-        symbols: base.sourceMap ?? [],
+        symbols,
       };
     } catch {}
   }

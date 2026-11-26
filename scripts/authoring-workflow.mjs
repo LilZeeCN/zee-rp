@@ -1,6 +1,7 @@
 import { execFile, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, extname, basename, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -18,6 +19,60 @@ const RECIPE_DIR = join(ROOT, 'examples/authoring');
 const ASSEMBLY_BRIDGE = 'tools/native-assembly/bridge.mjs';
 const ASSEMBLY_WORKER = 'tools/native-assembly/Worker.cs';
 const invoke = promisify(execFile);
+
+export function isInlineRp1Text(value) {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.startsWith('{') || trimmed.startsWith('[')) return false;
+  if (!trimmed.includes('\n') && /\.(?:rp1|json)$/i.test(trimmed)) return false;
+  if (/^rp\/1(?:\s|$)/m.test(trimmed)) return true;
+  return trimmed.includes('\n') && /^(?:palette:|tab-bar:|var\s+[A-Za-z_]|page\s+#?|component\s+|master\s+|dataset\s+|tokens:)/m.test(trimmed);
+}
+
+export function withTempRp1File(rp1Text, fn) {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-rp1-inline-'));
+  const file = join(dir, 'inline.rp1');
+  const content = String(rp1Text ?? '').endsWith('\n') ? String(rp1Text) : `${rp1Text}\n`;
+  writeFileSync(file, content, 'utf8');
+  try {
+    return fn(file);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+export const verifyStepItemsSchema = {
+  type: 'object',
+  properties: {
+    action: { type: 'string', enum: ['click', 'fill', 'drag', 'swipe', 'wait', 'advanceTime', 'navigate', 'expect'] },
+    target: { type: 'string', minLength: 1 },
+    value: { type: 'string' },
+    rowIndex: { type: 'integer', minimum: 0 },
+    dx: { type: 'number' },
+    dy: { type: 'number' },
+    steps: { type: 'integer', minimum: 1, maximum: 60 },
+    stepDelayMs: { type: 'integer', minimum: 0, maximum: 100 },
+    direction: { type: 'string', enum: ['left', 'right', 'up', 'down'] },
+    distance: { type: 'number', minimum: 20, maximum: 2000 },
+    ms: { type: 'integer', minimum: 0, maximum: 30000 },
+    page: { type: 'string', minLength: 1 },
+    expect: {
+      type: 'object',
+      properties: {
+        text: { type: 'string' }, value: { type: 'string' }, visible: { type: 'boolean' },
+        enabled: { type: 'boolean' }, checked: { type: 'boolean' }, panelState: { type: 'string' },
+        width: { type: 'number', minimum: 0 }, height: { type: 'number', minimum: 0 },
+        x: { type: 'number' }, y: { type: 'number' }, left: { type: 'number' }, right: { type: 'number' },
+        top: { type: 'number' }, bottom: { type: 'number' }, dx: { type: 'number' }, dy: { type: 'number' },
+        tolerance: { type: 'number', minimum: 0, maximum: 50 },
+        page: { type: 'string' }, variable: { type: 'string' }, equals: {},
+      },
+      additionalProperties: false,
+    },
+  },
+  required: ['action'],
+  additionalProperties: false,
+};
 
 export const mcpInstructions = [
   'Create an editable Axure .rp from RP/1 with generate_prototype. Use prototype_recipe for runnable examples, includeImage:true for direct visual review, and diagnose_prototype to repair source errors. For a free canvas project use studio_describe(topic="workflow") before writing.',
@@ -401,29 +456,7 @@ export function authoringTools({ generate, sync, listTools }) {
         includeImage: { type: 'boolean', description: 'true 时在 MCP 响应中附带最终截图 PNG。' },
         storyboard: { type: 'string', minLength: 1, description: '可选 .png 交互时序关键帧拼图输出路径（禁止覆盖已有文件）。' },
         includeStoryboard: { type: 'boolean', description: 'true 时在 MCP 响应中附带横向标注每步交互状态的关键帧拼图 PNG。' },
-        steps: { type: 'array', minItems: 0, maxItems: 60, items: { type: 'object', properties: {
-          action: { type: 'string', enum: ['click', 'fill', 'drag', 'swipe', 'wait', 'advanceTime', 'navigate', 'expect'] },
-          target: { type: 'string', minLength: 1 },
-          value: { type: 'string' },
-          rowIndex: { type: 'integer', minimum: 0 },
-          dx: { type: 'number' },
-          dy: { type: 'number' },
-          steps: { type: 'integer', minimum: 1, maximum: 60 },
-          stepDelayMs: { type: 'integer', minimum: 0, maximum: 100 },
-          direction: { type: 'string', enum: ['left', 'right', 'up', 'down'] },
-          distance: { type: 'number', minimum: 20, maximum: 2000 },
-          ms: { type: 'integer', minimum: 0, maximum: 30000 },
-          page: { type: 'string', minLength: 1 },
-          expect: { type: 'object', properties: {
-            text: { type: 'string' }, value: { type: 'string' }, visible: { type: 'boolean' },
-            enabled: { type: 'boolean' }, checked: { type: 'boolean' }, panelState: { type: 'string' },
-            width: { type: 'number', minimum: 0 }, height: { type: 'number', minimum: 0 },
-            x: { type: 'number' }, y: { type: 'number' }, left: { type: 'number' }, right: { type: 'number' },
-            top: { type: 'number' }, bottom: { type: 'number' }, dx: { type: 'number' }, dy: { type: 'number' },
-            tolerance: { type: 'number', minimum: 0, maximum: 50 },
-            page: { type: 'string' }, variable: { type: 'string' }, equals: {},
-          }, additionalProperties: false },
-        }, required: ['action'], additionalProperties: false } },
+        steps: { type: 'array', minItems: 0, maxItems: 60, items: verifyStepItemsSchema },
       }, additionalProperties: false },
       handler: input => verifyOfficialPreview(input, { runWorkflow, exportHtml: exportPrototype }), readOnly: false },
     { name: 'preview_prototype', description: '在已有 ego lite 任务空间中验证真实 Axure 预览。按逻辑 ID 点击、输入并断言文字/变量/面板状态，返回实际状态、源码位置及报告截图。用 export_prototype + verify_prototype 进行无头 Chrome 验收，或先运行 gui_roundtrip(preview:true)；不接管用户空间，不把模拟当原生证据。',
@@ -449,9 +482,10 @@ export function authoringTools({ generate, sync, listTools }) {
     { name: 'prototype_recipe', description: '查看完整 RP/1 创作范例（含原生轮播、左右滑动、拖动与输入长度）、RP/1 零算高语法速查表（cheatsheet/tokens/gotchas）、推荐修改入口和可直接调用的生成参数；不写文件。',
       inputSchema: { type: 'object', properties: { recipe: { type: 'string', enum: recipes.map(r => r.id) }, includeSource: { type: 'boolean' } }, additionalProperties: false },
       handler: recipeCatalog, readOnly: true },
-    { name: 'diagnose_prototype', description: '统一只读诊断与审阅入口（不改源码/不写产物）：1) 默认诊断 RP/1 source（语法/语义/自适应，返回行列号、当前值与候选补丁）；2) 传 target（或 mode="binding"）解释 RP/1 元件数据绑定、依赖变量、初始值与刷新事件；3) 传图片分层 spec（或 mode="image"）审阅卡片分组、重复结构与共享样式候选。',
+    { name: 'diagnose_prototype', description: '统一只读诊断与审阅入口（不改源码/不写产物）：1) 默认诊断 RP/1 source 或内联 rp1 文本（语法/语义/自适应，返回行列号、当前值与候选补丁）；2) 传 target（或 mode="binding"）解释 RP/1 元件数据绑定、依赖变量、初始值与刷新事件；3) 传图片分层 spec（或 mode="image"）审阅卡片分组、重复结构与共享样式候选。',
       inputSchema: { type: 'object', properties: {
         mode: { type: 'string', enum: ['diagnose', 'binding', 'image'], description: '诊断模式：diagnose（默认，RP/1 静态诊断）、binding（数据绑定与刷新链路解释）、image（图片还原 trace spec 结构审阅）。省略时按 target/spec 自动推断。' },
+        rp1: { type: 'string', minLength: 1, description: '可选：直接内联 RP/1 缩进源码文本（无需先写文件）。' },
         source: sourceSchema,
         target: { type: 'string', minLength: 1, description: '可选：要解释绑定的元件逻辑 ID（如 page/widget）或源码指针；提供时执行绑定解释。' },
         spec: { oneOf: [{ type: 'string', minLength: 1 }, { type: 'object' }], description: '可选：图片还原 trace spec 路径、JSON 文本或对象；提供且无 source（或 mode="image"）时执行图片结构只读审阅。' },
@@ -459,21 +493,34 @@ export function authoringTools({ generate, sync, listTools }) {
         cwd: { type: 'string', minLength: 1 },
         projectDir: { type: 'string', minLength: 1 },
       }, additionalProperties: false },
-      handler: ({ mode, source, target, spec, limit, cwd, projectDir } = {}) => {
+      handler: ({ mode, rp1, source, target, spec, limit, cwd, projectDir } = {}) => {
         const workDir = resolveWorkDir(cwd ?? projectDir);
         const resolveInput = val => {
           if (typeof val !== 'string') return val;
           if (val.trimStart().startsWith('{')) return JSON.parse(val);
           return isAbsolute(val) ? resolve(val) : resolve(workDir, val);
         };
-        const effectiveMode = mode ?? (target !== undefined ? 'binding' : (source === undefined && spec !== undefined ? 'image' : 'diagnose'));
+        const effectiveMode = mode ?? (target !== undefined ? 'binding' : (rp1 === undefined && source === undefined && spec !== undefined ? 'image' : 'diagnose'));
         if (effectiveMode === 'image') {
           const traceInput = spec ?? source;
           if (traceInput === undefined) throw new Error('diagnose_prototype(mode="image") 需要提供 spec。');
           return reviewImageStructure({ spec: typeof traceInput === 'string' && !traceInput.trimStart().startsWith('{') ? resolveInput(traceInput) : traceInput, limit });
         }
+        if (rp1 !== undefined && (source !== undefined || spec !== undefined)) {
+          throw new Error('diagnose_prototype 中 rp1 与 source/spec 不能同时提供。');
+        }
+        const inlineRp1 = rp1 ?? (isInlineRp1Text(source) ? source : (isInlineRp1Text(spec) ? spec : null));
+        if (inlineRp1 !== null) {
+          return withTempRp1File(inlineRp1, tempRp1 => {
+            if (effectiveMode === 'binding') {
+              if (!target) throw new Error('diagnose_prototype(mode="binding") 需要提供 target（如 page/widget）。');
+              return runWorkflow('binding', tempRp1, { target, cwd, projectDir });
+            }
+            return runWorkflow('diagnose', tempRp1, { limit, cwd, projectDir });
+          });
+        }
         const rpSource = resolveInput(source ?? spec);
-        if (rpSource === undefined) throw new Error('diagnose_prototype 需要提供 source（RP/1）或 spec（图片分层规格）。');
+        if (rpSource === undefined) throw new Error('diagnose_prototype 需要提供 rp1、source（RP/1）或 spec（图片分层规格）。');
         if (effectiveMode === 'binding') {
           if (!target) throw new Error('diagnose_prototype(mode="binding") 需要提供 target（如 page/widget）。');
           return runWorkflow('binding', rpSource, { target, cwd, projectDir });

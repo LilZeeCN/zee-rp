@@ -6,8 +6,9 @@ description: Reconstruct screenshots as editable Axure layouts, compile RP/1 spe
 # zee-rp（RP/1 零手算原型创作与原生编辑）
 
 > **能力边界与入口路由表**：
-> - **标准/高交互原生原型（表单、状态联动、有界拖拽/碰撞、手势轮播）** → 用 RP/1 `generate_prototype`（支持缩进式事件块、`carousel`/`slider-captcha` 宏与 `verify: true` 一站式浏览器自验） + `revise_prototype` + `verify_prototype`。
-> - **自由画布设计探索、视觉评审与像素级打磨** → 用 `studio_stage` → `studio_command` → `studio_design(action:"review")` → `studio_export`。
+> - **标准/高交互原生原型（表单、状态联动、有界拖拽/碰撞、手势轮播）** → 用 RP/1 `generate_prototype({ rp1: "...", output: "app.rp", verify: true, virtualClock: true, includeStoryboard: true })`（**零 JSON 直传缩进源码 + 无需先调写文件工具 + 一步官方 HTML/Chrome 真机自验**） + `revise_prototype`。
+> - **接管任意存量/第三方 `.rp` 文件** → 用 `sync_prototype({ mode: "decompile", rp: "legacy.rp", outSource: "legacy.rp1", output: "legacy-editable.rp" })` 一步反编译为可编辑 `.rp1` + `.baseline.json`（或导入 `studio_open_project` 自由画布改版），比逐条手工打补丁高一个维度。
+> - **自由画布设计探索、视觉评审与像素级打磨** → 用 `studio_open_project({ projectDir, cwd })` → `studio_stage` → `studio_command` → `studio_design(action:"review")` → `studio_export({ format: "rp", verify: true })`（导出同时支持真机 Axure HTML/Chrome 行为验证）。
 > - **存量 `.rp` 直接补多组交互（需保留源工程外额外动作）** → 用 `axure_open` → `rp_command({ command: "add-interaction", params: { items: [...] } })`（自动读 `.baseline.json` 解析逻辑 ID）→ `axure_save({ as, cleanup: true })`。
 > - **省上下文启动**：`node bin/mcp.mjs --profile=core` 仅暴露 16 个核心闭环工具（工具 Schema token 降低约 80%）；`--profile=studio` 含 17 个画布与浏览器验收工具；`--profile=author` 含 26 个创作+画布工具；默认 `--profile=full` 暴露收敛后的全部 30 个工具。
 
@@ -47,21 +48,24 @@ Studio 开发版本的验收层级、真实浏览器/Axure操作与字体边界�
 
 > ⚡ **零跳读声明**：本文件已包含日常原型创作、单图视觉联审与增量改稿所需的**全部 RP/1 语法、宏属性表、完整范例与 MCP 调用模板**。日常从零做原型与改稿**只需读完本文件即可直接动手**，无需再翻阅 `references/` 子文档或 `scripts/` 源码！
 
-## 一、标准 3 步极速闭环（生成 → 单图联审 → 增量改稿）
+## 一、标准极速闭环（零 JSON 直出 → 单图联审 → 增量改稿 / 逆向接管）
 
-1. **生成原型**：编写 `.rp1` 源码（或直接选内置范例 `recipe: "mobile-cards" | "list-detail" | "step-form"`），调用 MCP `generate_prototype`：
+1. **生成与一键真机自验（零 JSON、无需先调写文件工具）**：直接内联传零 JSON 缩进式 `rp1` 文本（或从 `prototype_recipe` 选范例），调用 MCP `generate_prototype`：
    ```json
-   {"source": "/abs/path/app.rp1", "output": "/abs/path/app.rp", "strictAudit": true}
+   {"rp1": "rp/1 target=9 name=\"示例\"\npage #home name=\"首页\" device=iphone-17\n  ...", "output": "app.rp", "strictAudit": true, "verify": true, "includeStoryboard": true}
    ```
-   - 默认 `autoHeal: false`，与 CLI 一致；显式传 `true` 时尝试自愈，完整重验后回退引入新错误的变更，审计记录属性清单与回退原因，并产出 `<output>.baseline.json`。
+   - 自动在当前工作目录（`cwd`/`projectDir`）写齐 `app.rp` + 同名 `app.rp1` 源码 + `app.rp.baseline.json`；内联含 `verify:` 块且传 `verify:true` 时一步完成本机官方 HTML 导出与无头 Chrome 点击/滑动/拖动/`virtualClock` 断言及关键帧拼图回看。
+   - 默认 `autoHeal: false`；显式传 `true` 时尝试自愈并记录回退详情；可用 `diagnose_prototype({ rp1: "..." })` 只读预检语法/自适应问题。
 2. **单图全景视觉联审（1 次看图审完全局）**：
-   - 直接用 `read_file` 读取返回结果 `previews` 同目录下的 **`pages-sheet.png`**（或顶层 `contactSheet` 字段，全页面横向拼图）与 **`states-sheet.png`**（或顶层 `statesSheet` 字段，过滤内部合成态后的纯净动态面板状态拼图），无需逐页翻看单张 `01-*.png`。
-3. **增量改稿（属性修改 + 结构级增删节点 + 跨面板深层定位）**：调用 MCP `revise_prototype`（保留原文件，输出新文件名或设 `"output": "auto"` 自动递增 `-v2.rp`）：
+   - 传 `includeImage:true` 或直接用 `read_file` 读取返回结果 `contactSheet`（`pages-sheet.png` 全页面横向拼图）与 `statesSheet`（`states-sheet.png` 全动态面板状态拼图）。
+3. **接管存量外部 `.rp`（反编译闭环）**：
+   - 收到不含源码/基线的存量 `.rp` 时，先调用 `sync_prototype({ mode: "decompile", rp: "legacy.rp", outSource: "legacy.rp1", output: "legacy-editable.rp" })` 一键还原出可读缩进 `.rp1` + 共同基线，再进入下方 `revise_prototype` 或导入 `studio_open_project`。
+4. **增量改稿（属性修改 + 结构级增删节点 + 跨面板深层定位）**：调用 MCP `revise_prototype`（保留原文件，输出新文件名或设 `"output": "auto"` 自动递增 `-v2.rp`）：
    ```json
    {
-     "source": "/abs/path/app.rp1",
-     "rp": "/abs/path/app.rp",
-     "output": "/abs/path/app-v2.rp",
+     "source": "app.rp1",
+     "rp": "app.rp",
+     "output": "app-v2.rp",
      "operations": [
        {"target": "home/hero", "property": "title", "value": "全新主标题"},
        {"target": "home/nested_btn", "property": "text", "value": "面板内深层节点直改"},
@@ -78,7 +82,7 @@ Studio 开发版本的验收层级、真实浏览器/Axure操作与字体边界�
 
 ---
 
-## 二、RP/1 语法与全组件/宏属性速查表（零算高 `[fillxhug]` 模式）
+## 二、RP/1 语法与全组件/宏属性速查表（零算高 `[fillxhug]` + 零 JSON 事件/验收）
 
 - **尺寸铁律**：纵向容器、卡片、多行文本、动态面板、中继器一律写 **`[fillxhug]`**（宽铺满、高按内容自动测量；`panel` 自动取最高 `:state` 高度），按钮/输入框写 **`[fillx44]`** 或 **`[120x44]`**。节点 ID 前的 `#` 可写可省略。
 - **属性边界与零静默丢参约定**：`fontSize` 范围为 `(0,120]`（含字号简写与 spans），`letterSpacing` 非负；`after` 必须引用同容器中的另一个节点，不存在会报 `E_REFERENCE`。未知属性、未知宏插槽名（`slots`）、`progress-bar` 同时声明 `percent` 与 `value`、以及对非 `enum` 字段声明 `filters: "auto"` 均返回 `E_PROPERTY` 错误，任何无法生效的声明或守卫（如 `wizard-card` 的 `nextWhen`）绝不静默丢弃。
@@ -99,11 +103,11 @@ Studio 开发版本的验收层级、真实浏览器/Axure操作与字体边界�
 | **多态面板 `panel`** | `panel #view_panel [fillxhug] tabs=["清单视图","统计视图"]:` 后缩进写 `:state list` 与 `:state chart`。每个 `:state` 下**直接缩进写多个子元件**（无需包 `root` 容器）；`tabs=[...]` 自动在各态顶部生成对应高亮的分段切换栏。 |
 | **进度条 `progress-bar`** | `progress-bar #prog [fillxhug] value={"variable":"done"} max=5 label="完成进度" showValue=true barHeight=8`（隐藏右侧数值设 `showValue=false`） |
 | **基础元件** | - 单行/折行标签：`label #lbl [fillxhug] "静态文字或 '=表达式'" fontSize=14 fontWeight=600 color=$text`<br>- 多行正文：`paragraph #p [fillxhug] "长段落自动折行..." fontSize=14 lineHeight=22 color=$muted`<br>- 原生输入框：`input #inp [fillx44] value="初始文本" placeholder="请输入..."`（离线预览图直接渲染文本）<br>- 按钮：`button #btn [fillx44] "提交" variant=primary goto="detail"`（`variant` 可选：`primary`/`brand`、`secondary`、`outline`、`ghost`、`soft`、`danger`/`error`、`success`、`warning`；可直接加 `goto="页面ID"` 跳页）<br>- 布局盒：`box #row_box [fillxhug] layout=row gap=8 padding=12 radius=12 fill=$surface`（`layout` 可选 `column` \| `row` \| `grid`） |
-| **事件与表达式** | 元件下缩进写 `+onClick [...]`（动作数组）：<br>- 改变量：`{"type":"set-variable","variable":"done","value":"=var.done + 1"}`<br>- 改文本：`{"type":"set-text","target":"lbl","value":"='已记：' + @inp + ' (' + text(var.done) + ')'"}`<br>- 切面板：`{"type":"set-panel-state","target":"view_panel","state":"chart"}`<br>- 跳页面：`{"type":"link","page":"detail"}`（亦支持别名 `{"type":"goto","page":"detail"}` 或 `{"goto":"detail"}`）<br>- 显隐控制：`{"type":"show","target":"tip"}` / `{"type":"hide","target":"tip"}`（节点初始隐藏可加属性 `visible=false`）<br>**表达式速记**：读全局变量用 `var.变量名`，读同页输入框用 `@输入框ID`，拼接字符串用 `='前缀 ' + text(var.done) + ' 后缀'`。 |
+| **零 JSON 事件、宏与 `verify:` 块** | 元件下缩进写 **`+onClick:` / `+onSwipeLeft:` / `+onDrag:` / `+onDragDrop:`**（同时兼容 `+onLoad:` / `+onStateChange:`）：<br>- 改变量：`set $done = var.done + 1`<br>- 改文本：`set feedback = "已记：${@inp} (${text(var.done)})"`<br>- 切面板：`panel view_panel chart`（轮播支持 `next loop=true repeatInterval=3000 enterAnimation=slideLeft`）<br>- 跳页面 / 显隐：`goto detail`、`show tip`、`hide tip`<br>- 有界拖动：`move thumb drag-x within track` + `if @piece.x >= @target.x - 2:`<br>- 顶部内联行为断言块：`verify:` 下写 `click btn`、`fill inp "hi"`、`drag thumb dx=179 dy=0`、`swipe banner left distance=160 panelState=s2`、`advanceTime 3300`、`expect feedback text="..."`（搭配 `generate_prototype({ rp1, output, verify: true })`）。<br>**表达式速记**：读全局变量用 `var.变量名`，读同页输入框用 `@输入框ID`，模板插值用 `${...}`。 |
 
 ---
 
-## 三、可直接复制改写的完整多页 `.rp1` 模板
+## 三、可直接复制改写的完整零 JSON 多页 `.rp1` 模板
 
 ```text
 rp/1 target=9 name="极速原型模板" domain=mobile theme=mobile-hifi
@@ -135,7 +139,17 @@ page #detail name="打卡录入" device=iphone-17
       input #note_inp [fillx44] value="晚间复盘" placeholder="输入新的专注主题..."
       label #feedback [fillxhug] "='当前已打卡 ' + text(var.done) + ' 次，主题：' + var.note" fontSize=14 color=$muted
       button #save_btn [fillx44] "打卡 +1 并同步主题" variant=primary
-        +onClick [{"type":"set-variable","variable":"done","value":"=var.done + 1"},{"type":"set-variable","variable":"note","value":"=@note_inp"},{"type":"set-text","target":"feedback","value":"='已更新！共 ' + text(var.done) + ' 次，主题：' + @note_inp"}]
+        +onClick:
+          set $done = var.done + 1
+          set $note = @note_inp
+          set feedback = "已更新！共 ${text(var.done)} 次，主题：${@note_inp}"
+
+verify:
+  click item1
+  expect form_title text="更新当前专注主题"
+  fill note_inp "冲刺复习"
+  click save_btn
+  expect feedback text="已更新！共 3 次，主题：冲刺复习"
 ```
 
 ---
@@ -144,7 +158,7 @@ page #detail name="打卡录入" device=iphone-17
 
 - **视觉细节**：单个 label 在 `align=center justify=center` 的 row/column 中默认居中（显式 align 优先）；`image.radius/opacity` 写入图片 Alpha。导航可用 `activeIndicator=underline|dot|none`、`activeVariant`、`justify`、`itemFlex`，或让 `phone-shell.tabBar` 接完整 box。`panel [fillxhug]` 取所有状态的最大高度；状态拼图标注 viewport/content 尺寸。RP/1 暂无 `fontFamily` 和独立 `previewInitial`；字体、位图光效、初始态和导航示例见 [视觉创作说明](references/visual-authoring.md)。
 
-- **安全与证据原则**：切勿覆盖用户原始 `.rp`（可用 `AXURE_PROTECTED_PATHS` / `AXURE_WRITE_ROOT` 限制）；汇报时区分结构校验、Axure 打开、离线预览、GUI 编辑与保存重开。
+- **安全与证据原则**：切勿覆盖用户原始 `.rp`；默认允许任意本地工作目录自由读写（`AXURE_WRITE_ROOT` 仅作可选兜底，仅当显式设置 `AXURE_STRICT_WRITE_ROOT=1` 时启用严格目录白名单），红线受保护路径（`AXURE_PROTECTED_PATHS`）、系统受保护目录与技能源码目录始终禁止写入。汇报时区分结构校验、Axure 打开、离线预览、GUI 编辑与保存重开。
 - **按需扩展文档（仅在对应特殊任务时读取）**：
   - 截图 1:1 转可编辑 `.rp`：`generate_from_image({image, output, scale, replace})` → [screenshot-workflow.md](references/screenshot-workflow.md)
   - 已有 `.rp` 检查/会话改名改字/三方同步：`rp_inspect` / `rp_patch` / `rp_command` / `sync_prototype` → [mcp-prototype.md](references/mcp-prototype.md)

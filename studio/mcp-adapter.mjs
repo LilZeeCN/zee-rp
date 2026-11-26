@@ -1,7 +1,9 @@
 import { SCENARIO_STEP_SCHEMA } from './runtime.mjs';
 import { BROWSER_SCENARIO_STEP_SCHEMA } from './scenario-executors.mjs';
 import { existsSync, readFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
+import { assertNotProtected, assertWritable, resolveWorkDir } from '../scripts/engine.mjs';
+import { exportPrototype, runWorkflow, verifyOfficialPreview, verifyStepItemsSchema } from '../scripts/authoring-workflow.mjs';
 import { INSTANCE_REGISTRY_PATH, startStudioServer } from './server.mjs';
 import { studioSourceFingerprint } from './source-fingerprint.mjs';
 import { describeAuthoring, AUTHORING_ENTRY } from './authoring-help.mjs';
@@ -341,6 +343,7 @@ export const studioHandlers = {
 
   async studio_open_project({
     projectDir,
+    cwd = null,
     sourcePath = null,
     name = 'Studio Project',
     domain = 'mobile',
@@ -357,7 +360,16 @@ export const studioHandlers = {
     if (port !== null && port !== 0 && (port < 1024 || port > 65535)) {
       throw Object.assign(new Error('port 需为 0（由系统分配空闲端口）或 1024–65535'), { code: 'E_INVALID_PORT', requestedPort: port });
     }
-    const absDir = resolve(projectDir);
+    const workDir = resolveWorkDir(cwd);
+    const absDir = isAbsolute(projectDir) ? resolve(projectDir) : resolve(workDir, projectDir);
+    assertNotProtected(absDir);
+    assertWritable(join(absDir, 'document.json'));
+    const resolvedSourcePath = typeof sourcePath === 'string' && sourcePath.trim() && !sourcePath.trimStart().startsWith('{')
+      ? (isAbsolute(sourcePath) ? resolve(sourcePath) : resolve(workDir, sourcePath))
+      : sourcePath;
+    if (typeof resolvedSourcePath === 'string' && resolvedSourcePath && !resolvedSourcePath.trimStart().startsWith('{')) {
+      assertNotProtected(resolvedSourcePath);
+    }
     lastActiveProjectDir = absDir;
     const respond = (body, extra = {}) => {
       const diskFingerprint = studioSourceFingerprint();
@@ -380,7 +392,7 @@ export const studioHandlers = {
     if (url) {
       const body = await callServerJson(url.replace(/\/$/, ''), '/api/project/open', 'POST', {
         projectDir: absDir,
-        sourcePath,
+        sourcePath: resolvedSourcePath,
         name,
         domain,
       });
@@ -395,8 +407,8 @@ export const studioHandlers = {
           code: 'E_INSTANCE_PORT_MISMATCH', projectDir: absDir, currentPort: known.studio.port, requestedPort: port,
         });
       }
-      const body = sourcePath
-        ? known.studio.openProject({ projectDir: absDir, sourcePath, name, domain })
+      const body = resolvedSourcePath
+        ? known.studio.openProject({ projectDir: absDir, sourcePath: resolvedSourcePath, name, domain })
         : known.studio.buildContextPayload();
       return respond(body);
     }
@@ -412,14 +424,14 @@ export const studioHandlers = {
         });
       }
       inProcessServers.set(absDir, { kind: 'remote', url: record.url.replace(/\/$/, '') });
-      const body = sourcePath
-        ? await callServerJson(record.url, '/api/project/open', 'POST', { projectDir: absDir, sourcePath, name, domain })
+      const body = resolvedSourcePath
+        ? await callServerJson(record.url, '/api/project/open', 'POST', { projectDir: absDir, sourcePath: resolvedSourcePath, name, domain })
         : live;
       return respond({ ...body, reusedInstance: true });
     }
 
     // 新工程：起独立实例。端口冲突由 server.start() 自动递增，天然得到并行端口。
-    const { studio } = await startStudioServer({ projectDir: absDir, sourcePath, name, port: port ?? 4310, domain });
+    const { studio } = await startStudioServer({ projectDir: absDir, sourcePath: resolvedSourcePath, name, port: port ?? 4310, domain });
     inProcessServers.set(absDir, { kind: 'local', studio });
     return respond(studio.buildContextPayload(), { authoring: AUTHORING_ENTRY });
   },
@@ -530,26 +542,83 @@ export const studioHandlers = {
   // ---- 导出:原生 rp / 离线代码包 / 便携工程包 三出口合一 ----
   async studio_export(args = {}) {
     const format = args.format || null;
+    if (args.async && args.verify) {
+      return {
+        ok: false,
+        status: 'failed',
+        diagnostics: [{
+          code: 'E_VERIFY_ASYNC',
+          message: 'verify:true 与 async:true 不能同时使用；请省略 async 或在导出完成后单独调用 verify_prototype。',
+        }],
+      };
+    }
+    const workDir = resolveWorkDir(args.cwd);
+    const normalizedArgs = args.projectDir
+      ? { ...args, projectDir: isAbsolute(args.projectDir) ? resolve(args.projectDir) : resolve(workDir, args.projectDir) }
+      : args;
+    const outputWorkDir = resolveWorkDir(args.cwd ?? normalizedArgs.projectDir);
+    const resolveOut = p => (typeof p === 'string' && p.trim() ? (isAbsolute(p) ? resolve(p) : resolve(outputWorkDir, p)) : p);
     if (format === 'rp') {
-      const baseUrl = await resolveServerUrl(args);
-      return callServerJson(baseUrl, '/api/export-rp', 'POST', {
-        outRpPath: args.outRpPath || args.output || null,
-        outReportPath: args.outReportPath || null,
+      const baseUrl = await resolveServerUrl(normalizedArgs);
+      const outRpPath = resolveOut(args.outRpPath || args.output || null);
+      const outReportPath = resolveOut(args.outReportPath || null);
+      if (outRpPath) assertWritable(outRpPath);
+      if (outReportPath) assertWritable(outReportPath);
+      const expRes = await callServerJson(baseUrl, '/api/export-rp', 'POST', {
+        outRpPath,
+        outReportPath,
         ...(args.baseRevision !== undefined ? { baseRevision: args.baseRevision } : {}),
         ...(args.async !== undefined ? { async: args.async, requestKey: args.requestKey } : {}),
       });
+      if (!expRes?.ok || args.async || !expRes.outRpPath) {
+        return expRes;
+      }
+      if (!args.verify) {
+        return {
+          ...expRes,
+          nextActions: [
+            { tool: 'verify_prototype', arguments: { rp: expRes.outRpPath } },
+            { tool: 'export_prototype', arguments: { rp: expRes.outRpPath } },
+          ],
+        };
+      }
+      const bv = await verifyOfficialPreview({
+        rp: expRes.outRpPath,
+        cwd: outputWorkDir,
+        steps: args.verifySteps,
+        viewport: args.verifyViewport,
+        virtualClock: args.virtualClock,
+        includeStoryboard: args.includeStoryboard,
+        includeImage: args.includeImage,
+      }, { runWorkflow, exportHtml: exportPrototype });
+      const { mcpImages: verifyImgs, ...bvSummary } = bv;
+      return {
+        ...expRes,
+        status: bv.status === 'completed' ? 'completed' : 'failed',
+        ok: Boolean(expRes.ok && bv.status === 'completed'),
+        behaviorVerification: bvSummary,
+        ...(bv.status !== 'completed' ? { diagnostics: bv.diagnostics } : {}),
+        ...(verifyImgs?.length ? { mcpImages: verifyImgs } : {}),
+      };
     }
     if (format === 'code') {
-      const baseUrl = await resolveServerUrl(args);
+      const baseUrl = await resolveServerUrl(normalizedArgs);
+      const outDir = resolveOut(args.outDir || args.output || null);
+      if (outDir) assertWritable(outDir);
       return callServerJson(baseUrl, '/api/export-code', 'POST', {
-        outDir: args.outDir || args.output || null,
+        outDir,
         ...(args.baseRevision !== undefined ? { baseRevision: args.baseRevision } : {}),
         ...(args.resetRegistration !== undefined ? { resetRegistration: args.resetRegistration } : {}),
         ...(args.async !== undefined ? { async: args.async, requestKey: args.requestKey } : {}),
       });
     }
     if (format === 'bundle') {
-      return studioHandlers._bundle(args);
+      return studioHandlers._bundle({
+        ...normalizedArgs,
+        ...(args.outDir ? { outDir: resolveOut(args.outDir) } : {}),
+        ...(args.bundleDir ? { bundleDir: resolveOut(args.bundleDir) } : {}),
+        ...(args.targetProjectDir ? { targetProjectDir: resolveOut(args.targetProjectDir) } : {}),
+      });
     }
     throw Object.assign(new Error(`format 需要 rp / code / bundle,收到 ${format}`), { code: 'E_EXPORT_FORMAT' });
   },
@@ -820,11 +889,12 @@ const connectionProperties = { url: { type: 'string' }, port: { type: 'integer' 
 export const studioTools = [
   {
     name: 'studio_open_project',
-    description: '打开或初始化自由画布工程目录(可选从 RP/1 JSON 或 .rp1 源码导入),启动或复用本机单端口 Studio 服务并返回画布上下文和 studioRuntime 指纹状态。这是每个工程的第一步。',
+    description: '打开或初始化自由画布工程目录(可选从 RP/1 JSON 或 .rp1 源码导入),启动或复用本机单端口 Studio 服务并返回画布上下文和 studioRuntime 指纹状态。支持相对路径+cwd/本地工作目录。这是每个工程的第一步。',
     inputSchema: {
       type: 'object',
       properties: {
         projectDir: { type: 'string', minLength: 1 },
+        cwd: { type: 'string', minLength: 1, description: '可选：解析相对 projectDir / sourcePath 时的本地工作目录。' },
         sourcePath: { type: 'string' },
         name: { type: 'string' },
         domain: { type: 'string', enum: ['mobile', 'web'] },
@@ -928,15 +998,17 @@ export const studioTools = [
   },
   {
     name: 'studio_export',
-    description: '从当前权威快照导出三种产物。format:rp——原生 .rp 与逐节点兼容报告(baseRevision 指定时必须仍为当前版);format:code——独立可运行 HTML/CSS/JS 代码工程包(资源闭包、manifest、运行说明,显式列明未支持交互);format:bundle——自包含可迁移工程包(action:report/export/verify/import/compare,资源/字体/组件闭包+兼容诊断)。async:true 加 requestKey 返回持久句柄,用 studio_operations 核对或取消。',
+    description: '从当前权威快照导出三种产物（支持相对路径 + cwd）。format:rp——原生 .rp 与逐节点兼容报告（支持传 verify:true 一键调用本机 Axure 官方 HTML + 无头 Chrome 真机点击/滑动/拖动行为验收）；format:code——独立可运行 HTML/CSS/JS 代码工程包；format:bundle——自包含可迁移工程包。async:true 加 requestKey 返回持久句柄。',
     inputSchema: {
       type: 'object',
       properties: {
         url: { type: 'string' },
         port: { type: 'integer' },
         projectDir: { type: 'string' },
+        cwd: { type: 'string', minLength: 1, description: '可选：解析相对输出路径时的本地工作目录。' },
         format: { type: 'string', enum: ['rp', 'code', 'bundle'] },
         outRpPath: { type: 'string' },
+        output: { type: 'string', description: 'outRpPath（format:rp）或 outDir（format:code）的通用相对/绝对输出路径别名。' },
         outReportPath: { type: 'string' },
         outDir: { type: 'string' },
         resetRegistration: { type: 'boolean' },
@@ -946,6 +1018,12 @@ export const studioTools = [
         includeVersions: { type: 'boolean' },
         includeThumbnails: { type: 'boolean' },
         overwrite: { type: 'boolean' },
+        verify: { type: 'boolean', description: '仅 format:rp；true 时导出后自动调用本机 Axure 导出官方 HTML 并在无头 Chrome 中运行 verifySteps 行为断言。' },
+        verifySteps: { type: 'array', minItems: 0, maxItems: 60, items: verifyStepItemsSchema },
+        verifyViewport: { type: 'object', properties: { width: { type: 'integer', minimum: 320, maximum: 3840 }, height: { type: 'integer', minimum: 320, maximum: 2160 }, dpr: { type: 'number', minimum: 1, maximum: 3 } }, additionalProperties: false },
+        virtualClock: { type: 'boolean', description: '配合 verify:true 使用：加速 >=200ms 定时器。' },
+        includeStoryboard: { type: 'boolean', description: '配合 verify:true 使用：在回包中附带关键帧时序拼图 PNG。' },
+        includeImage: { type: 'boolean', description: '配合 verify:true 使用：在回包中附带最终 Chrome 截图 PNG。' },
         ...OPERATION_PROPERTIES,
       },
       required: ['format'],

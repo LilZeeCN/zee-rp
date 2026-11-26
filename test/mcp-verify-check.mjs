@@ -281,5 +281,89 @@ test('one-shot generate_prototype verify+virtualClock+storyboard and daemon cach
     assert.equal(macroRun.status, 'completed');
     assert.equal(macroRun.behaviorVerification.passed, macroRun.behaviorVerification.total);
     assert.equal(macroRun.behaviorVerification.passed, 7);
+
+    // Zero-JSON inline rp1 directly passed to generate_prototype with verify + includeImage + includeStoryboard (no prior write_file)
+    const inlineRaw = await callRaw('generate_prototype', {
+      rp1: [
+        'rp/1 target=9 name="内联一步验证" domain=web theme=enterprise-light',
+        'page #home name="首页" canvas=[440,360]',
+        '  box #root [440x360] layout=stack fill=#FFFFFF',
+        '    label #msg [360x28] x=24 y=24 "待触发" fontSize=16 color=#0F172A',
+        '    button #trigger_btn [160x40] x=24 y=72 "一步验证"',
+        '      +onClick:',
+        '        set msg = "内联直传验证通过"',
+        'verify:',
+        '  expect msg text="待触发"',
+        '  click trigger_btn',
+        '  expect msg text="内联直传验证通过"',
+      ].join('\n'),
+      output: 'inline-oneshot.rp',
+      verify: true,
+      includeImage: true,
+      includeStoryboard: true,
+    });
+    const inlineOneShot = inlineRaw.structuredContent ?? JSON.parse(inlineRaw.content[0].text);
+    assert.equal(inlineOneShot.status, 'completed');
+    assert.equal(existsSync(join(work, 'inline-oneshot.rp1')), true);
+    assert.equal(inlineOneShot.behaviorVerification.passed, 3);
+    assert.equal(inlineRaw.content.filter(p => p.type === 'image').length >= 2, true);
+
+    // Studio free-canvas -> studio_export(format:"rp", verify:true) -> Official HTML + Chrome pointer & alias verification
+    const openStudio = await call('studio_open_project', {
+      projectDir: 'studio-chrome-proj',
+      cwd: work,
+      port: 0,
+      domain: 'mobile',
+      name: 'StudioChromeVerify',
+    });
+    assert.equal(openStudio.ok, true);
+    const cmdStudio = await call('studio_command', {
+      baseRevision: openStudio.appliedRevision ?? openStudio.revision ?? 1,
+      idempotencyKey: 'studio-chrome-widgets',
+      pageId: 'home',
+      commands: [
+        {
+          type: 'addNode',
+          pageId: 'home',
+          parentId: 'home_screen',
+          node: { id: 'res_lbl', type: 'label', name: '结果文案', x: 24, y: 80, w: 260, h: 28, text: '初始等待', fontSize: 16 },
+        },
+        {
+          type: 'addNode',
+          pageId: 'home',
+          parentId: 'home_screen',
+          node: {
+            id: 'submit_btn',
+            type: 'button',
+            name: '点我提交',
+            x: 24,
+            y: 136,
+            w: 160,
+            h: 44,
+            text: '提交',
+            on: { click: [{ type: 'set-text', target: 'res_lbl', text: 'Studio官网直验通过' }] },
+          },
+        },
+      ],
+    });
+    assert.equal(cmdStudio.ok, true);
+    const studioExpRaw = await callRaw('studio_export', {
+      format: 'rp',
+      cwd: work,
+      outRpPath: 'studio-verified.rp',
+      verify: true,
+      includeStoryboard: true,
+      verifySteps: [
+        { action: 'expect', target: 'home/res_lbl', expect: { text: '初始等待' } },
+        { action: 'click', target: '点我提交' },
+        { action: 'expect', target: '结果文案', expect: { text: 'Studio官网直验通过' } },
+      ],
+    });
+    const studioExp = studioExpRaw.structuredContent ?? JSON.parse(studioExpRaw.content[0].text);
+    assert.equal(studioExp.ok, true);
+    assert.equal(studioExp.threeZerosPassed, true);
+    assert.equal(studioExp.behaviorVerification.passed, 3);
+    assert.equal(studioExp.behaviorVerification.verification.behaviorVerified, true);
+    assert.equal(studioExpRaw.content.filter(p => p.type === 'image').length, 1);
   });
 });

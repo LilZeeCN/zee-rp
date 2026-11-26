@@ -21,7 +21,7 @@ import { expandSpec, pasteAxvg } from './axvg.mjs';
 import { createBlankProject } from './create-blank-project.mjs';
 import { writeNativeScene } from './native-scene.mjs';
 import { mergePages } from './merge-pages.mjs';
-import { authoringTools, recipes, recipeSource, runWorkflow, pythonEnvironment, exportPrototype, verifyOfficialPreview } from './authoring-workflow.mjs';
+import { authoringTools, isInlineRp1Text, recipes, recipeSource, runWorkflow, pythonEnvironment, exportPrototype, verifyOfficialPreview } from './authoring-workflow.mjs';
 import { reviewImageStructure } from './image-structure.mjs';
 import { studioTools } from '../studio/mcp-adapter.mjs';
 
@@ -1322,41 +1322,37 @@ function loadSpecObjectFromSource(sourcePath) {
   return JSON.parse(proc.stdout);
 }
 
-export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sourcePath: sourcePathAlias, recipe, output: requestedOutput, cwd, projectDir, strictAudit = false, autoHeal = false, variants, overwrite = false, compact = true, template, baseRp, prefer = 'fail', resolutions }, { beforePublish } = {}) {
+export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: sourcePathArg, sourcePath: sourcePathAlias, recipe, output: requestedOutput, cwd, projectDir, strictAudit = false, autoHeal = false, variants, overwrite = false, compact = true, template, baseRp, prefer = 'fail', resolutions }, { beforePublish } = {}) {
   let spec = { language: 'rp/1', target: 9 };
-  let stage = 'validation', output, artifactDir, source, resolvedSourceFile = null, plan;
-  let publishedRecipeSource = null, publishedRecipeOutput = null;
+  let stage = 'validation', output, artifactDir, source, resolvedSourceFile = null, inlineCompilePath = null, plan;
+  let publishedCompanionRp1 = null, publishedRecipeOutput = null;
   try {
     const explicitWorkDir = cwd ?? projectDir;
     const workDir = resolveWorkDir(explicitWorkDir);
     if (typeof inputSpec === 'string' && inputSpec.trimStart().startsWith('{')) inputSpec = JSON.parse(inputSpec);
-    if ([inputSpec, sourcePathArg, sourcePathAlias, recipe].filter(v => v !== undefined).length > 1)
-      throw new Error('recipe、spec、source、sourcePath 只能选择一个输入入口。');
-    if (recipe && (inputSpec || sourcePathArg || sourcePathAlias)) throw new Error('recipe 与 spec/source 只能选择一个。');
-    const rawSourceArg = recipe ? recipeSource(recipe) : sourcePathArg ?? sourcePathAlias;
+    if ([inlineRp1Arg, inputSpec, sourcePathArg, sourcePathAlias, recipe].filter(v => v !== undefined).length > 1)
+      throw new Error('rp1、recipe、spec、source、sourcePath 只能选择一个输入入口。');
+    const inlineRp1Text = typeof inlineRp1Arg === 'string'
+      ? inlineRp1Arg
+      : (isInlineRp1Text(inputSpec) ? inputSpec : (isInlineRp1Text(sourcePathArg ?? sourcePathAlias) ? (sourcePathArg ?? sourcePathAlias) : null));
+    if (inlineRp1Text !== null && !inlineRp1Text.trim()) {
+      throw new Error('rp1 源码不能为空。');
+    }
+    const rawSourceArg = recipe ? recipeSource(recipe) : (inlineRp1Text !== null ? null : (sourcePathArg ?? sourcePathAlias));
     resolvedSourceFile = typeof rawSourceArg === 'string'
       ? resolveInWork(rawSourceArg, explicitWorkDir)
-      : (typeof inputSpec === 'string' ? resolveInWork(inputSpec, explicitWorkDir) : null);
-    const rawSpecObj = (inputSpec && typeof inputSpec === 'object' && !Array.isArray(inputSpec))
-      ? inputSpec
-      : (resolvedSourceFile ? loadSpecObjectFromSource(resolvedSourceFile) : null);
-    if (!rawSpecObj) {
-      throw new Error('arguments.spec 必须是对象（或通过 source 提供 .rp1/.json 路径）');
-    }
-    spec = { language: 'rp/1', target: 9, ...rawSpecObj };
-    if (!Array.isArray(spec.pages) || spec.pages.length < 1) {
-      throw new Error('arguments.spec.pages 至少需要 1 项');
-    }
+      : (inlineRp1Text === null && typeof inputSpec === 'string' ? resolveInWork(inputSpec, explicitWorkDir) : null);
     if (typeof requestedOutput !== 'string' || !requestedOutput.trim()) {
       throw new Error('output 必须是有效的 .rp 路径。');
     }
     let effectiveRequestedOutput = requestedOutput;
+    const hasCompanionRp1 = Boolean(recipe || inlineRp1Text !== null);
     if (requestedOutput === 'auto') {
       const sourceOutsideSkill = !recipe && resolvedSourceFile
         && !resolvedSourceFile.startsWith(`${SKILL_ROOT_DIR}/`) && resolvedSourceFile !== SKILL_ROOT_DIR;
       const baseDir = (!explicitWorkDir && sourceOutsideSkill) ? dirname(resolvedSourceFile) : workDir;
       const baseStem = recipe ? recipe : (resolvedSourceFile ? basename(resolvedSourceFile, extname(resolvedSourceFile)) : 'prototype');
-      const isAvailable = cand => !pathExists(cand) && !pathExists(`${cand}.assets`) && !pathExists(`${cand}.baseline.json`) && (!recipe || !pathExists(`${cand.slice(0, -3)}.rp1`));
+      const isAvailable = cand => !pathExists(cand) && !pathExists(`${cand}.assets`) && !pathExists(`${cand}.baseline.json`) && (!hasCompanionRp1 || !pathExists(`${cand.slice(0, -3)}.rp1`));
       const cand0 = join(baseDir, `${baseStem}.rp`);
       if (isAvailable(cand0)) effectiveRequestedOutput = cand0;
       else {
@@ -1370,10 +1366,14 @@ export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sour
     if (extname(resolvedOutput).toLowerCase() !== '.rp')
       throw new Error('output 必须是新的 .rp 路径。');
     assertWritable(resolvedOutput);
-    const recipeOutputSource = recipe ? resolvedOutput.slice(0, -3) + '.rp1' : null;
-    if (recipeOutputSource) {
-      assertWritable(recipeOutputSource);
-      if (pathExists(recipeOutputSource)) throw new Error(`范例源码已存在，请通过 source 继续改稿：${recipeOutputSource}`);
+    const companionRp1Target = hasCompanionRp1 ? resolvedOutput.slice(0, -3) + '.rp1' : null;
+    if (companionRp1Target) {
+      assertWritable(companionRp1Target);
+      if (pathExists(companionRp1Target) && !(inlineRp1Text !== null && overwrite)) {
+        throw new Error(recipe
+          ? `范例源码已存在，请通过 source 继续改稿：${companionRp1Target}`
+          : `源码文件已存在，请通过 source 继续改稿（或传 overwrite: true）：${companionRp1Target}`);
+      }
     }
     const resolvedTpl = template !== undefined ? resolveInWork(template, explicitWorkDir) : undefined;
     if (resolvedTpl !== undefined) {
@@ -1416,11 +1416,27 @@ export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sour
     mkdirSync(dirname(resolvedOutput), { recursive: true });
     output = writablePath(resolvedOutput);
     artifactDir = mkdtempSync(join(dirname(output), '.' + basename(output, extname(output)) + '.build-'));
+    if (inlineRp1Text !== null) {
+      inlineCompilePath = join(artifactDir, 'inline.rp1');
+      writeFileSync(inlineCompilePath, inlineRp1Text.endsWith('\n') ? inlineRp1Text : `${inlineRp1Text}\n`, 'utf8');
+    }
+    const rawSpecObj = (inlineRp1Text !== null)
+      ? loadSpecObjectFromSource(inlineCompilePath)
+      : ((inputSpec && typeof inputSpec === 'object' && !Array.isArray(inputSpec))
+          ? inputSpec
+          : (resolvedSourceFile ? loadSpecObjectFromSource(resolvedSourceFile) : null));
+    if (!rawSpecObj) {
+      throw new Error('arguments.spec 必须是对象（或通过 rp1/source 提供 RP/1 源码）');
+    }
+    spec = { language: 'rp/1', target: 9, ...rawSpecObj };
+    if (!Array.isArray(spec.pages) || spec.pages.length < 1) {
+      throw new Error('arguments.spec.pages 至少需要 1 项');
+    }
     source = join(artifactDir, 'source.json');
     writeFileSync(source, JSON.stringify(spec, null, 2) + '\n', { flag: 'wx' });
     stage = 'compile';
     reportPrototypeProgress('compile', 0, 1);
-    const compiled = compilePrototype(resolvedSourceFile ?? source, artifactDir, { strictAudit, autoHeal: Boolean(autoHeal) });
+    const compiled = compilePrototype(resolvedSourceFile ?? inlineCompilePath ?? source, artifactDir, { strictAudit, autoHeal: Boolean(autoHeal) });
     reportPrototypeProgress('compile', 1, 1);
     plan = JSON.parse(readFileSync(compiled.planPath, 'utf8'));
     if (!compiled.ok) {
@@ -1504,9 +1520,10 @@ export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sour
     stage = 'output';
     beforePublish?.();
     assertWritable(output);
+    const companionExistedBefore = companionRp1Target ? pathExists(companionRp1Target) : false;
     if (overwrite) copyFileSync(staged, output);
     else copyFileSync(staged, output, constants.COPYFILE_EXCL);
-    if (recipe) publishedRecipeOutput = output;
+    if (recipe || !overwrite) publishedRecipeOutput = output;
     const stagedBaseline = `${staged}.baseline.json`;
     const outputBaseline = `${output}.baseline.json`;
     if (pathExists(stagedBaseline)) {
@@ -1519,14 +1536,18 @@ export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sour
       unlinkSync(stagedBaseline);
     }
     unlinkSync(staged);
-    if (recipeOutputSource) {
-      copyFileSync(resolvedSourceFile, recipeOutputSource, constants.COPYFILE_EXCL);
-      publishedRecipeSource = recipeOutputSource;
-      resolvedSourceFile = recipeOutputSource;
-      const baseMeta = JSON.parse(readFileSync(outputBaseline, 'utf8'));
-      baseMeta.sourcePath = resolvedSourceFile;
-      baseMeta.sourceSha256 = sha256Of(resolvedSourceFile);
-      writeFileSync(outputBaseline, JSON.stringify(baseMeta, null, 2) + '\n');
+    if (companionRp1Target) {
+      const companionSrc = resolvedSourceFile ?? inlineCompilePath;
+      if (overwrite && !recipe) copyFileSync(companionSrc, companionRp1Target);
+      else copyFileSync(companionSrc, companionRp1Target, constants.COPYFILE_EXCL);
+      if (!companionExistedBefore) publishedCompanionRp1 = companionRp1Target;
+      resolvedSourceFile = companionRp1Target;
+      if (pathExists(outputBaseline)) {
+        const baseMeta = JSON.parse(readFileSync(outputBaseline, 'utf8'));
+        baseMeta.sourcePath = resolvedSourceFile;
+        baseMeta.sourceSha256 = sha256Of(resolvedSourceFile);
+        writeFileSync(outputBaseline, JSON.stringify(baseMeta, null, 2) + '\n');
+      }
     }
     const buildPrefix = `.${basename(output, extname(output))}.build-`;
     const currentBuildDirName = basename(artifactDir);
@@ -1588,24 +1609,25 @@ export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sour
       verification,
     };
   } catch (error) {
-    if (publishedRecipeSource) rmSync(publishedRecipeSource, { force: true });
+    if (publishedCompanionRp1) rmSync(publishedCompanionRp1, { force: true });
     if (publishedRecipeOutput) {
       rmSync(publishedRecipeOutput, { force: true });
       rmSync(`${publishedRecipeOutput}.baseline.json`, { force: true });
     }
+    const diagnoseInput = resolvedSourceFile ?? inlineCompilePath ?? spec;
     const raw = error.diagnostics ?? [{ code: `E_GENERATE_${stage.toUpperCase()}`, pointer: undefined, message: error.message }];
     let diagnostics = raw.map(d => generationDiagnostic(d, spec, plan));
     let hints = [];
-    try { hints = runWorkflow('diagnose', resolvedSourceFile ?? spec).hints ?? []; } catch {}
+    try { hints = runWorkflow('diagnose', diagnoseInput).hints ?? []; } catch {}
     if (stage === 'compile' && !raw.some(d => d.code === 'E_LAYOUT')) {
       try {
-        const checked = runWorkflow('diagnose', resolvedSourceFile ?? spec);
+        const checked = runWorkflow('diagnose', diagnoseInput);
         if (!checked.ok) diagnostics = checked.diagnostics.map(d => generationDiagnostic(d, spec, plan));
       } catch { /* Preserve the original compiler diagnostic if secondary diagnosis is unavailable. */ }
     }
     const result = { status: 'failed', stage, message: error.message,
       diagnostics, ...(hints.length ? { hints } : {}),
-      ...(artifactDir ? { artifacts: { directory: artifactDir, source: resolvedSourceFile ?? source } } : {}),
+      ...(artifactDir ? { artifacts: { directory: artifactDir, source: resolvedSourceFile ?? inlineCompilePath ?? source } } : {}),
     };
     if (artifactDir) writeFileSync(join(artifactDir, 'failure.json'), JSON.stringify(result, null, 2) + '\n');
     return result;
@@ -1660,6 +1682,7 @@ function syncPrototype({
   resolutions,
   expectedRpSha256,
   expectedSemanticHash,
+  overwrite = false,
   includeSpec = false,
 }, { beforePublish } = {}) {
   let stage = 'validation', tmpDir;
@@ -1688,6 +1711,10 @@ function syncPrototype({
     if (!rpFile || !pathExists(rpFile)) {
       throw Object.assign(new Error(`目标 .rp 文件不存在：${rpFile ?? '(未指定)'}`), { code: 'E_RP_NOT_FOUND' });
     }
+    assertNotProtected(rpFile);
+    if (extname(rpFile).toLowerCase() !== '.rp') {
+      throw Object.assign(new Error(`目标必须是 .rp 文件：${rpFile}`), { code: 'E_RP_NOT_FOUND' });
+    }
     const rpShaAtStart = sha256Of(rpFile);
     if (expectedRpSha256 && rpShaAtStart !== expectedRpSha256) {
       throw Object.assign(new Error(`目标 .rp 已被外部修改（期望 SHA-256 ${expectedRpSha256}，实际 ${rpShaAtStart}），拒绝过期提交。`), { code: 'E_STALE_SYNC_STATE' });
@@ -1711,6 +1738,119 @@ function syncPrototype({
         throw Object.assign(new Error('outSource 必须是有效的文件路径。'), { code: 'E_OUT_SOURCE_PATH' });
       assertNotProtected(outSource);
       assertWritable(outSource);
+    }
+
+    if (mode === 'decompile') {
+      stage = 'decompile';
+      if (outSource && !overwrite && pathExists(outSource)) {
+        throw Object.assign(new Error(`源码输出已存在，拒绝覆盖（如需覆盖请传 overwrite: true）：${outSource}`), { code: 'E_OUTPUT_EXISTS' });
+      }
+      if (output && !overwrite && pathExists(output)) {
+        throw Object.assign(new Error(`输出 .rp 已存在，拒绝覆盖（如需覆盖请传 overwrite: true）：${output}`), { code: 'E_OUTPUT_EXISTS' });
+      }
+      if (outSource && !['.rp1', '.json'].includes(extname(outSource).toLowerCase())) {
+        throw Object.assign(new Error('outSource 必须是 .rp1 或 .json 路径。'), { code: 'E_OUT_SOURCE_PATH' });
+      }
+      tmpDir = mkdtempSync(join(tmpdir(), 'zee-rp-decompile-'));
+      const reportPath = join(tmpDir, 'decompile-report.json');
+      const pyScript = `
+import json, sys
+sys.path.insert(0, ${JSON.stringify(SCRIPTS_DIR)})
+from rp_decompile import decompile_rp
+res = decompile_rp(${JSON.stringify(rpFile)})
+with open(${JSON.stringify(reportPath)}, 'w', encoding='utf-8') as f:
+    json.dump(res, f, ensure_ascii=False, indent=2)
+`;
+      const proc = spawnPythonSync(['-c', pyScript], { encoding: 'utf8' });
+      if (proc.status !== 0 || !pathExists(reportPath)) {
+        throw Object.assign(new Error(`decompile 失败：${(proc.stderr || proc.stdout || '').trim()}`), { code: 'E_DECOMPILE_FAILED' });
+      }
+      const decomp = JSON.parse(readFileSync(reportPath, 'utf8'));
+      const sourceTextOut = outSource && extname(outSource).toLowerCase() === '.json'
+        ? JSON.stringify(decomp.spec, null, 2) + '\n'
+        : (decomp.rp1.endsWith('\n') ? decomp.rp1 : `${decomp.rp1}\n`);
+      const stagedSource = join(tmpDir, outSource && extname(outSource).toLowerCase() === '.json' ? 'decompiled.json' : 'decompiled.rp1');
+      writeFileSync(stagedSource, sourceTextOut, 'utf8');
+
+      let stagedOutputRp = null;
+      let buildResult = null;
+      if (output) {
+        stage = 'rebuild';
+        stagedOutputRp = join(tmpDir, 'decompiled.rp');
+        buildResult = generatePrototype({ source: stagedSource, output: stagedOutputRp, compact: false });
+        if (buildResult.status === 'failed') {
+          throw Object.assign(new Error(`反编译后重编译 .rp 失败：${buildResult.message}`), { code: 'E_DECOMPILE_REBUILD_FAILED', diagnostics: buildResult.diagnostics });
+        }
+      }
+      if (sha256Of(rpFile) !== rpShaAtStart) {
+        throw Object.assign(new Error('目标 .rp 在反编译过程中被外部修改，中止提交。'), { code: 'E_CONCURRENT_MODIFICATION' });
+      }
+      const publishedFiles = [];
+      try {
+        if (outSource) {
+          beforePublish?.();
+          const existed = pathExists(outSource);
+          mkdirSync(dirname(outSource), { recursive: true });
+          if (overwrite) copyFileSync(stagedSource, outSource);
+          else copyFileSync(stagedSource, outSource, constants.COPYFILE_EXCL);
+          if (!existed) publishedFiles.push(outSource);
+        }
+        if (output && stagedOutputRp) {
+          beforePublish?.();
+          const existed = pathExists(output);
+          mkdirSync(dirname(output), { recursive: true });
+          if (overwrite) copyFileSync(stagedOutputRp, output);
+          else copyFileSync(stagedOutputRp, output, constants.COPYFILE_EXCL);
+          if (!existed) publishedFiles.push(output);
+          if (pathExists(`${stagedOutputRp}.baseline.json`)) {
+            const bMeta = JSON.parse(readFileSync(`${stagedOutputRp}.baseline.json`, 'utf8'));
+            bMeta.outputRp = output;
+            bMeta.rpSha256 = sha256Of(output);
+            bMeta.sourcePath = outSource ?? null;
+            bMeta.sourceSha256 = outSource ? sha256Of(outSource) : null;
+            writeFileSync(`${output}.baseline.json`, JSON.stringify(bMeta, null, 2) + '\n');
+            publishedFiles.push(`${output}.baseline.json`);
+          }
+        }
+      } catch (pubErr) {
+        for (const p of publishedFiles) rmSync(p, { recursive: true, force: true });
+        throw pubErr;
+      }
+
+      const countWidgets = node => {
+        if (!node || typeof node !== 'object') return 0;
+        let total = 1;
+        for (const c of node.children ?? []) total += countWidgets(c);
+        for (const st of node.states ?? []) for (const c of st.children ?? []) total += countWidgets(c);
+        return total;
+      };
+      const widgetCount = (decomp.spec?.pages ?? []).reduce((sum, pg) => sum + (pg.root ? countWidgets(pg.root) : 0), 0);
+      return {
+        ok: true,
+        status: decomp.status || 'decompiled',
+        mode: 'decompile',
+        rp: rpFile,
+        outSource: outSource ?? null,
+        outSpec: outSource ?? null,
+        output: output ?? null,
+        ...(output ? { sha256: sha256Of(output), baseline: pathExists(`${output}.baseline.json`) ? `${output}.baseline.json` : null } : {}),
+        ...(!outSource || includeSpec ? { rp1: decomp.rp1 } : {}),
+        ...(includeSpec ? { spec: decomp.spec } : {}),
+        summary: {
+          pages: (decomp.spec?.pages ?? []).length,
+          widgets: widgetCount,
+          variables: Object.keys(decomp.spec?.variables ?? {}).length,
+          compiledSymbols: decomp.compiledSymbolCount ?? 0,
+          unsupportedNativeChanges: (decomp.unsupportedNativeChanges ?? []).length,
+        },
+        unsupportedNativeChanges: decomp.unsupportedNativeChanges ?? [],
+        ...(output && outSource ? { syncStatus: computeSyncStatus(output, outSource, rpFile) } : {}),
+        nextActions: [
+          ...(outSource && output ? [{ tool: 'revise_prototype', arguments: { source: outSource, rp: output, output: 'auto', operations: [] } }] : []),
+          ...(outSource && !output ? [{ tool: 'generate_prototype', arguments: { source: outSource, output: 'auto' } }] : []),
+          ...(outSource ? [{ tool: 'studio_open_project', arguments: { projectDir: 'studio-from-decompile', sourcePath: outSource } }] : []),
+        ],
+      };
     }
 
     const workParentDir = dirname(output ? resolve(output) : rpFile);
@@ -2876,10 +3016,11 @@ export const sessionTools = [
   } }),
   {
     name: 'generate_prototype',
-    description: '一次生成完整单页/多页原生 RP9 原型：spec 直接传 RP/1 结构化页面（或 .rp1/.json 文件路径）、共享 theme/palette/components、variables 与交互，自动编译、装配和检查跨页引用及事件覆盖，并记录 <output>.baseline.json 共同基线；无需装配脚本。若提供 baseRp 且检测到原生已改稿，自动按 prefer 执行三方合并或冲突保护。output 为 .rp 路径（支持绝对路径、基于 cwd/projectDir 或当前工作目录解析的相对路径，或 "auto" 自动生成不重名路径）。',
+    description: '一次生成完整单页/多页原生 RP9 原型：可直接内联传 rp1 零 JSON 缩进源码（无需先写文件，自动保留同名 .rp1），或传 spec 对象 / .rp1|.json 文件路径 / recipe 范例，自动编译、装配、记录 <output>.baseline.json 共同基线；传 verify:true 可一键导出官方 HTML 并跑完无头 Chrome 真机点击/拖拽/虚拟时钟/时序拼图验收。output 支持绝对路径、基于 cwd/projectDir 的相对路径或 "auto"。',
     inputSchema: { type: 'object', properties: {
-      recipe: { type: 'string', enum: recipes.map(recipe => recipe.id), description: '从完整范例直接生成；与 spec/source 二选一。成功后在 .rp 旁保留独立 .rp1 源码。' },
-      spec: { description: 'RP/1 内联对象或 .rp1/.json 文件路径。文件输入优先使用 source；二者互斥。', oneOf: [
+      recipe: { type: 'string', enum: recipes.map(recipe => recipe.id), description: '从完整范例直接生成；与 rp1/spec/source 二选一。成功后在 .rp 旁保留独立 .rp1 源码。' },
+      rp1: { type: 'string', minLength: 1, description: '可选：直接内联 RP/1 缩进源码文本（零 JSON、无需先调写文件工具；生成成功后自动在 .rp 旁保留同名 .rp1 源码，与 spec/source/recipe 互斥）。' },
+      spec: { description: 'RP/1 内联 JSON 对象、内联 RP/1 缩进源码文本或 .rp1/.json 文件路径。文件输入优先使用 source；与 rp1/source 互斥。', oneOf: [
         { type: 'string', minLength: 1 }, { type: 'object', properties: {
         language: { type: 'string', enum: ['rp/1', 'RP/1'] }, target: { type: 'integer', enum: [9] },
         domain: { type: 'string', enum: ['mobile', 'web', 'doc', 'test'] },
@@ -2889,7 +3030,7 @@ export const sessionTools = [
         variables: { oneOf: [{ type: 'object' }, { type: 'array', items: { type: 'object' } }] },
         pages: { type: 'array', minItems: 1, items: { type: 'object', properties: { id: { type: 'string', minLength: 1 }, name: { type: 'string' }, domain: { type: 'string', enum: ['mobile', 'web', 'doc', 'test'] }, device: { type: 'string' }, shell: { oneOf: [{ type: 'boolean' }, { type: 'string' }] }, canvas: { oneOf: [{ type: 'array', minItems: 2, maxItems: 2, items: { type: 'number' } }, { type: 'object' }] }, root: { type: 'object' }, master: { type: 'string' }, slot: { type: 'object' } }, required: ['id'] } },
       }, required: ['pages'] }] },
-      source: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径（.rp1 或 .json），与 spec 二选一（别名 sourcePath）。' },
+      source: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径（.rp1 或 .json），与 spec/rp1 二选一（别名 sourcePath）。' },
       sourcePath: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径（同 source）。' },
       output: { type: 'string', minLength: 1, description: '输出 .rp 路径（绝对路径，或基于 cwd/projectDir/当前工作目录解析的相对路径；传 "auto" 时按源码或工作目录自动生成不重名 .rp 路径）。' },
       cwd: { type: 'string', minLength: 1, description: '可选：解析相对路径与 output="auto" 时的本地工作目录（别名 projectDir）。' },
@@ -2956,10 +3097,10 @@ export const sessionTools = [
   },
   {
     name: 'sync_prototype',
-    description: '源码（RP/1 .rp1/.json 或内联 spec）、MCP 原生改稿与 Axure GUI 改稿三方一致性同步工具。支持 status（检查源码与原生 .rp 是否漂移）、lift（将原生文字/几何/样式/改名/增删元件/交互提取回 RP/1 源码）、merge（基于共同基线做源码与原生改稿三方合并并可输出合并后 .rp 与源码）及 rebuild（带原生改稿防覆盖保护的重建）。默认返回精简变更摘要与输出文件路径；如需内联完整 spec/rp1，可传 includeSpec=true。',
+    description: '源码（RP/1 .rp1/.json 或内联 spec）、MCP 原生改稿与 Axure GUI 改稿三方一致性同步与逆向反编译工具。支持 status（检查源码与原生 .rp 是否漂移）、decompile（从无源码/无基线的任意历史 .rp 逆向反编译出可读 .rp1 源码、兼容清单并可选重编译与生成 .baseline.json）、lift（将原生修改提取回源码）、merge（三方合并）及 rebuild（防漂移重建）。默认返回精简变更摘要与输出文件路径；如需内联完整 spec/rp1，可传 includeSpec=true。',
     inputSchema: { type: 'object', properties: {
-      mode: { type: 'string', enum: ['status', 'lift', 'merge', 'rebuild'], description: '同步模式：status 检查状态，lift 导回源码，merge 三方合并，rebuild 受保护重建。默认 merge。' },
-      source: { type: 'string', minLength: 1, description: 'RP/1 源码路径（.rp1 或 .json，别名 sourcePath）；省略时尝试从基线读取。' },
+      mode: { type: 'string', enum: ['status', 'lift', 'merge', 'rebuild', 'decompile'], description: '同步模式：status 检查状态，decompile 从任意 .rp 反编译还原 .rp1 源码，lift 导回源码，merge 三方合并，rebuild 受保护重建。默认 merge。' },
+      source: { type: 'string', minLength: 1, description: 'RP/1 源码路径（.rp1 或 .json，别名 sourcePath）；省略时尝试从基线读取（decompile 模式无需）。' },
       sourcePath: { type: 'string', minLength: 1, description: 'RP/1 源码路径（同 source）。' },
       spec: { oneOf: [{ type: 'string', minLength: 1 }, { type: 'object' }], description: '可选：RP/1 源码路径（.rp1 或 .json）或内联 JSON 规格。' },
       rp: { type: 'string', minLength: 1, description: '当前原生 .rp 路径（别名 path/rpFile/file）；省略时使用当前活动会话的链尾或源文件。' },
@@ -2969,17 +3110,18 @@ export const sessionTools = [
       baseRp: { type: 'string', minLength: 1, description: '可选：显式指定共同基线 .rp 路径。' },
       baseline: { type: 'string', minLength: 1, description: '可选：显式指定 .baseline.json 路径（别名 baselinePath）。' },
       baselinePath: { type: 'string', minLength: 1, description: '可选：显式指定 .baseline.json 路径（同 baseline）。' },
-      output: { type: 'string', minLength: 1, description: '可选：合并或重建后的 .rp 输出路径（别名 outRp）。' },
-      outRp: { type: 'string', minLength: 1, description: '可选：合并或重建后的 .rp 输出路径（同 output）。' },
-      outSource: { type: 'string', minLength: 1, description: '可选：导回或合并后的源码输出路径（.rp1 或 .json，别名 outSpec）。' },
-      outSpec: { type: 'string', minLength: 1, description: '可选：导回或合并后的源码输出路径（.rp1 或 .json，同 outSource）。' },
+      output: { type: 'string', minLength: 1, description: '可选：合并、重建或 decompile 规范化重编译后的 .rp 输出路径（别名 outRp）。' },
+      outRp: { type: 'string', minLength: 1, description: '可选：合并、重建或重编译后的 .rp 输出路径（同 output）。' },
+      outSource: { type: 'string', minLength: 1, description: '可选：decompile / lift / merge 写出的源码文件路径（.rp1 或 .json，别名 outSpec）。' },
+      outSpec: { type: 'string', minLength: 1, description: '可选：写出的源码文件路径（.rp1 或 .json，同 outSource）。' },
       cwd: { type: 'string', minLength: 1, description: '可选：解析相对路径时的本地工作目录（别名 projectDir）。' },
       projectDir: { type: 'string', minLength: 1, description: '可选：解析相对路径时的本地工作目录（同 cwd）。' },
       prefer: { type: 'string', enum: ['fail', 'source', 'native'], description: '冲突解决策略：fail（默认，报冲突并保留原文件）、source（源码优先）、native（原生改稿优先）。' },
       resolutions: { type: 'object', description: '可选：逐项冲突解决方案映射（键为 logicalId:prop 或 pointer:prop，值为 "source"、"native" 或 {"value": ...}）。' },
       expectedRpSha256: { type: 'string', minLength: 1, description: '可选：乐观并发校验的期望 .rp SHA-256；若磁盘文件已变化则拒绝提交。' },
       expectedSemanticHash: { type: 'string', minLength: 1, description: '可选：期望的基线 semanticHash；若基线已过期则拒绝提交。' },
-      includeSpec: { type: 'boolean', description: '可选：是否在返回 JSON 中内联完整 spec/rp1 源码文本，默认 false。' },
+      overwrite: { type: 'boolean', description: '可选：mode="decompile" 时是否允许覆盖已存在的 outSource/output，默认 false。' },
+      includeSpec: { type: 'boolean', description: '可选：是否在返回 JSON 中内联完整 spec/rp1 源码文本，默认 false（decompile 未指定 outSource 时自动返回 rp1）。' },
     }, additionalProperties: false },
     handler: sessionHandlers.sync_prototype,
   },
