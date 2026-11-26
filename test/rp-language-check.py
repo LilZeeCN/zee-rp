@@ -962,6 +962,35 @@ class LanguageContract(unittest.TestCase):
         self.assertEqual(len(prog_bar), 1)
         self.assertGreater(prog_bar[0]["w"], 50)
 
+    def test_spatial_panel_state_isover_and_bounded_move_contracts(self):
+        from rp_language_cli import read_source
+        spec = read_source(ROOT / "examples/rp-language/carousel-slider-captcha.rp1")
+        lowered, ir = compile_language(spec)
+        self.assertEqual(ir["irVersion"], 2)
+        self.assertGreater(len(lowered["pages"][0]["interactions"]), 0)
+
+        # Negative validation checks for new move, bounds, and spatial accessors
+        bad = sugar_fixture()
+        root_children = bad["pages"][0]["root"]["children"]
+        root_children[2]["onClick"] = [{"type": "set-text", "target": "status", "text": "=@apply.state"}]
+        self.reject(bad, "E_TARGET_TYPE")
+
+        bad = sugar_fixture()
+        bad["pages"][0]["root"]["children"][2]["onClick"] = [{"type": "move", "target": "receipt", "mode": "locationBeforeDrag", "bounds": {"left": 0}}]
+        self.reject(bad, "E_ACTION")
+
+        bad = sugar_fixture()
+        bad["pages"][0]["root"]["children"][2]["onClick"] = [{"type": "move", "target": "receipt", "mode": "drag-x", "x": 10}]
+        self.reject(bad, "E_ACTION")
+
+        bad = sugar_fixture()
+        bad["pages"][0]["root"]["children"][2]["onClick"] = [{"type": "move", "target": "receipt", "mode": "withThis"}]
+        self.reject(bad, "E_EVENT_TARGET")
+
+        bad = sugar_fixture()
+        bad["pages"][0]["root"]["children"][2]["onClick"] = [{"type": "move", "target": "receipt", "mode": "location", "x": 10, "bounds": {}}]
+        self.reject(bad, "E_ACTION")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

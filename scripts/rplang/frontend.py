@@ -6,7 +6,7 @@ import hashlib
 import math
 import re
 import string
-from .core import DRAG_MODES, PANEL_ANIMATIONS, PANEL_GESTURES, PANEL_MODES
+from .core import BOUND_OPS, BOUND_SIDES, DRAG_MODES, MOVE_EASINGS, MOVE_MODES, PANEL_ANIMATIONS, PANEL_GESTURES, PANEL_MODES, WIDGET_GEOM_ACCESSORS
 from .core import ACTION_PROPS, BOX_ALIGN_ALIASES, BOX_TEXT_CONTAINER_KEYS, BOX_TEXT_STYLE_KEYS, CARD_CONTENT_KEYS, CHECK_KINDS, COLOR_TOKENS, DEVICE_CANVAS_PRESETS, EVENTS, EVENT_SHORTHANDS, FORM_KINDS, GEOMETRY, INLINE_EXPR_HINT_RE, JUSTIFY_ALIASES, LanguageError, MACRO_ITEM_PROPS, MACRO_PROPS, MACRO_SLOTS, NODE_PROPS, NODE_SOURCE_ALIASES, OPTION_KINDS, SCALARS, SHORTHAND_NODE_KINDS, STATE_STYLE_KEYS, TEXT_ALIGN_ALIASES, THEMES, _estimate_visual_px, _resolve_pointer, are_when_asts_mutually_exclusive, expand_data_table_macro, expand_detail_card_macro, expand_form_card_macro, expand_kv_list_macro, expand_list_item_macro, expand_master_detail_macro, expand_nav_bar_macro, expand_phone_shell_macro, expand_progress_bar_macro, expand_searchable_list_macro, expand_stat_row_macro, expand_tab_bar_macro, expand_wizard_card_macro, fail, fields, ident, normalize_color_token, normalize_font_weight, normalize_panel_state_dict, normalize_panel_states_in_tree, parse_domain_type, parse_font_shorthand, parse_inline_expr, parse_template_string, ptr, sanitize_dingbats, validate_device, validate_font_size, validate_source_tree, validate_statecharts
 
 class Frontend:
@@ -1521,8 +1521,8 @@ class Frontend:
                 return {"caller": parts[1]}
             if parts[0] == "var" and len(parts) == 2 and parts[1]:
                 return {"variable": parts[1]}
-            if parts[0] == "widget" and len(parts) == 3 and parts[1] and parts[2] in ("text", "checked", "selected", "value"):
-                return {"widget": parts[1]}
+            if parts[0] == "widget" and len(parts) == 3 and parts[1] and parts[2] in ("text", "checked", "selected", "value", "state", *WIDGET_GEOM_ACCESSORS):
+                return {"widget": {"ref": f"{parts[1]}.{parts[2]}"}}
             avail_env = sorted(k for k in env.keys() if not k.startswith("_"))
             hint = difflib.get_close_matches(parts[0], avail_env, n=3)
             fail("E_DATA_NAME", path, f"Unknown data name '{parts[0]}'", suggestions=hint)
@@ -2284,6 +2284,21 @@ class Frontend:
         if kind == "variable": return self.variables[ast["name"]]["value"]
         if kind == "widget":
             node = self._native_nodes[ast["name"]]
+            acc = ast.get("accessor")
+            if acc == "state":
+                states = node.get("states") or []
+                return states[0]["name"] if states else ""
+            if acc in WIDGET_GEOM_ACCESSORS:
+                x = node.get("x", 0) if isinstance(node.get("x"), (int, float)) else 0
+                y = node.get("y", 0) if isinstance(node.get("y"), (int, float)) else 0
+                w = node.get("w", 0) if isinstance(node.get("w"), (int, float)) else 0
+                h = node.get("h", 0) if isinstance(node.get("h"), (int, float)) else 0
+                if acc in ("x", "left"): return x
+                if acc in ("y", "top"): return y
+                if acc == "right": return x + w
+                if acc == "bottom": return y + h
+                if acc == "width": return w
+                if acc == "height": return h
             if node["type"] in CHECK_KINDS: return node.get("checked", False)
             if node["type"] in OPTION_KINDS:
                 indices = node.get("selectedIndices", [node.get("selectedIndex", 0)])
@@ -2301,8 +2316,10 @@ class Frontend:
                           ">=":lambda:left>=right,"<=":lambda:left<=right,"&&":lambda:left and right,"||":lambda:left or right}
             try: return operations[ast["op"]]()
             except ZeroDivisionError: return 0
-        args = [self._eval_static_ast(a, row_override) for a in ast["args"]]
+        args = [self._eval_static_ast(a, row_override) for a in ast.get("args", []) if a.get("kind") != "widget-ref"]
         fn = ast["fn"]
+        if fn == "isOver": return False
+        if fn == "isNotOver": return True
         if fn == "text": return str(args[0]).lower() if type(args[0]) is bool else str(int(args[0])) if type(args[0]) is float and args[0].is_integer() else str(args[0])
         if fn == "concat": return "".join(self._format_scalar(a) if type(a) in (str, int, float, bool) else str(a) for a in args)
         if fn == "lower": return args[0].lower()
@@ -2689,11 +2706,18 @@ class Frontend:
             b_inputs = set().union(*(b["widgets"] for b in page_bindings if b["symbol"]["pageId"] == page["slug"])) if page_bindings else set()
             c_inputs = set().union(*(pc["widgets"] for pc in page_conditionals if pc["pageId"] == page["slug"])) if page_conditionals else set()
             for name in sorted(b_inputs | f_inputs | a_inputs | c_inputs):
-                if name in symbols_by_name and symbols_by_name[name]["pageId"] == page["slug"] and symbols_by_name[name]["kind"] in FORM_KINDS:
-                    page["interactions"].append({"trigger":name,"sourceId":symbols_by_name[name]["id"],
-                        "sourcePointer":symbols_by_name[name]["pointer"],"events":[{"event":"OnTextChange","cases":[{
-                        "description":"RP/1 input binding","isNewIfGroup":True,"when":{"left":True,"op":"==","right":True},
-                        "actions":[{"type":"binding-refresh","changedWidget":name}]}]}]})
+                if name in symbols_by_name and symbols_by_name[name]["pageId"] == page["slug"]:
+                    sym = symbols_by_name[name]
+                    if sym["kind"] in FORM_KINDS:
+                        page["interactions"].append({"trigger":name,"sourceId":sym["id"],
+                            "sourcePointer":sym["pointer"],"events":[{"event":"OnTextChange","cases":[{
+                            "description":"RP/1 input binding","isNewIfGroup":True,"when":{"left":True,"op":"==","right":True},
+                            "actions":[{"type":"binding-refresh","changedWidget":name}]}]}]})
+                    elif sym["kind"] == "dynamic-panel":
+                        page["interactions"].append({"trigger":name,"sourceId":sym["id"],
+                            "sourcePointer":sym["pointer"],"events":[{"event":"OnPanelStateChange","cases":[{
+                            "description":"RP/1 panel binding","isNewIfGroup":True,"when":{"left":True,"op":"==","right":True},
+                            "actions":[{"type":"binding-refresh","changedWidget":name}]}]}]})
             for interaction in page["interactions"]:
                 for event in interaction["events"]:
                     event_changed_variables, event_changed_widgets = set(), set()
@@ -2747,7 +2771,7 @@ class Frontend:
                             if action["type"] == "set-variable":
                                 changed_variables.add(action["variable"])
 
-                            if action["type"] == "set-text":
+                            if action["type"] in ("set-text", "set-panel-state", "move"):
                                 changed_widgets.add(action["target"])
                             for computed in getattr(self, "computed_order", []):
                                 if not (changed_variables & set(computed["variables"]) or changed_widgets & set(computed["widgets"])):
@@ -2863,26 +2887,49 @@ class Frontend:
                 typ = self.variables[name]["type"]
                 out = {"kind": "variable", "name": name, "valueType": typ}
             elif "widget" in value:
-                fields(value, {"widget"}, path)
+                fields(value, {"widget", "accessor"}, path)
                 raw_wref = value["widget"]
+                explicit_acc = value.get("accessor")
+                if explicit_acc is not None:
+                    self.typecheck(explicit_acc, "text", ptr(path, "accessor"))
+                    if explicit_acc not in ("text", "checked", "selected", "value", "state", *WIDGET_GEOM_ACCESSORS):
+                        fail("E_EXPRESSION", ptr(path, "accessor"), f"Unknown widget accessor '{explicit_acc}'")
+                suffix_acc = None
+                all_accessors = ("text", "checked", "selected", "value", "state", *WIDGET_GEOM_ACCESSORS)
                 if isinstance(raw_wref, dict) and isinstance(raw_wref.get("ref"), str) and "." in raw_wref["ref"]:
                     base_ref, suffix_prop = raw_wref["ref"].rsplit(".", 1)
-                    if suffix_prop in ("text", "checked", "selected", "value") and base_ref:
+                    if suffix_prop in all_accessors and base_ref:
                         raw_wref = {**raw_wref, "ref": base_ref}
+                        suffix_acc = suffix_prop
                 elif isinstance(raw_wref, str) and "." in raw_wref:
                     base_ref, suffix_prop = raw_wref.rsplit(".", 1)
-                    if suffix_prop in ("text", "checked", "selected", "value") and base_ref:
+                    if suffix_prop in all_accessors and base_ref:
                         raw_wref = base_ref
+                        suffix_acc = suffix_prop
+                if explicit_acc is not None and suffix_acc is not None and explicit_acc != suffix_acc:
+                    fail("E_EXPRESSION", path, f"Conflicting widget accessors '{suffix_acc}' and '{explicit_acc}'")
+                chosen_acc = explicit_acc or suffix_acc
                 symbol = self.resolve(raw_wref, scope, ptr(path, "widget"))
-                if symbol["pageId"] != scope.split("/")[0] or symbol["kind"] not in FORM_KINDS | {"label", "paragraph", "button", "badge"}:
-                    fail("E_TARGET_TYPE", path, "Runtime text read needs a text-capable widget in this page")
+                if symbol["pageId"] != scope.split("/")[0]:
+                    fail("E_TARGET_TYPE", path, "Runtime widget read requires a widget in this page")
                 source_row = self.row_context(symbol["id"])[0]
                 if source_row and source_row != self.row_context(scope)[0]:
                     fail("E_ROW_SCOPE", path, "Row widget text belongs to its row instance")
-                typ = "boolean" if symbol["kind"] in CHECK_KINDS else "text"
-                out = {"kind": "widget", "name": symbol["name"], "valueType": typ}
-                if symbol["kind"] in CHECK_KINDS: out["accessor"] = "checked"
-                elif symbol["kind"] in OPTION_KINDS: out["accessor"] = "value"
+                if chosen_acc == "state":
+                    if symbol["kind"] != "dynamic-panel":
+                        fail("E_TARGET_TYPE", path, "Panel state read requires a dynamic panel in this page")
+                    typ = "text"
+                    out = {"kind": "widget", "name": symbol["name"], "accessor": "state", "valueType": "text"}
+                elif chosen_acc in WIDGET_GEOM_ACCESSORS:
+                    typ = "number"
+                    out = {"kind": "widget", "name": symbol["name"], "accessor": chosen_acc, "valueType": "number"}
+                else:
+                    if symbol["kind"] not in FORM_KINDS | {"label", "paragraph", "button", "badge"}:
+                        fail("E_TARGET_TYPE", path, "Runtime text read needs a text-capable widget in this page")
+                    typ = "boolean" if symbol["kind"] in CHECK_KINDS else "text"
+                    out = {"kind": "widget", "name": symbol["name"], "valueType": typ}
+                    if symbol["kind"] in CHECK_KINDS: out["accessor"] = "checked"
+                    elif symbol["kind"] in OPTION_KINDS: out["accessor"] = "value"
             elif "item" in value:
                 fields(value, {"item"}, path)
                 rid, context = row or self.row_context(scope)
@@ -2952,29 +2999,53 @@ class Frontend:
                 fields(value, {"fn", "args"}, path)
                 fn, args = value["fn"], value.get("args")
                 self.typecheck(fn, "text", ptr(path, "fn"))
-                signatures = {"text": (None, "text"), "number": (None, "number"), "not": ("boolean", "boolean"),
-                              "lower": ("text", "text"), "upper": ("text", "text"), "length": ("text", "number"),
-                              "contains": ("text", "boolean"), "remove": ("text", "text")}
-                arity = {"contains": 2, "remove": 2}.get(fn, 1)
-                if not isinstance(args, list) or (fn == "concat" and len(args) < 2) or (fn != "concat" and len(args) != arity):
-                    fail("E_ARGUMENT", path, f"concat needs at least two values; {fn} needs {arity}")
-                if fn != "concat" and fn not in signatures:
-                    fail("E_FUNCTION", path, f"Unknown runtime function '{fn}'")
-                arg_type, typ = (None, "text") if fn == "concat" else signatures[fn]
-                compiled = [self.runtime(v, scope, ptr(ptr(path, "args"), i), expected=arg_type, row=row) for i, v in enumerate(args)]
-                if fn == "concat":
-                    coerced = []
-                    for c in compiled:
-                        if c.get("valueType") == "text":
-                            coerced.append(c)
-                        elif c.get("kind") == "literal" and type(c.get("value")) in (int, float, bool):
-                            coerced.append({"kind": "literal", "value": self._format_scalar(c["value"]), "valueType": "text"})
+                if fn in ("isOver", "isNotOver"):
+                    if not isinstance(args, list) or len(args) != 2:
+                        fail("E_ARGUMENT", path, f"{fn} requires exactly two widget references")
+                    refs_compiled = []
+                    for i, raw_arg in enumerate(args):
+                        ap = ptr(ptr(path, "args"), i)
+                        if isinstance(raw_arg, dict) and set(raw_arg.keys()) == {"widget"}:
+                            wref = raw_arg["widget"]
+                        elif isinstance(raw_arg, dict) and set(raw_arg.keys()) == {"ref"}:
+                            wref = raw_arg
+                        elif isinstance(raw_arg, str) and raw_arg.strip():
+                            wref = {"ref": raw_arg.strip()}
                         else:
-                            coerced.append({"kind": "call", "fn": "text", "args": [c], "valueType": "text"})
-                    compiled = coerced
-                if fn == "number" and compiled[0]["valueType"] not in {"text", "number"}:
-                    fail("E_TYPE", ptr(path, "args"), "number requires text or number")
-                out = {"kind": "call", "fn": fn, "args": compiled, "valueType": typ}
+                            fail("E_REFERENCE", ap, f"{fn} argument must be a widget reference")
+                        sym = self.resolve(wref, scope, ap)
+                        if sym["pageId"] != scope.split("/")[0]:
+                            fail("E_TARGET_TYPE", ap, f"{fn} widgets must belong to this page")
+                        source_row = self.row_context(sym["id"])[0]
+                        if source_row and source_row != self.row_context(scope)[0]:
+                            fail("E_ROW_SCOPE", ap, "Row widget geometry belongs to its row instance")
+                        refs_compiled.append({"kind": "widget-ref", "name": sym["name"]})
+                    typ = "boolean"
+                    out = {"kind": "call", "fn": fn, "args": refs_compiled, "valueType": "boolean"}
+                else:
+                    signatures = {"text": (None, "text"), "number": (None, "number"), "not": ("boolean", "boolean"),
+                                  "lower": ("text", "text"), "upper": ("text", "text"), "length": ("text", "number"),
+                                  "contains": ("text", "boolean"), "remove": ("text", "text")}
+                    arity = {"contains": 2, "remove": 2}.get(fn, 1)
+                    if not isinstance(args, list) or (fn == "concat" and len(args) < 2) or (fn != "concat" and len(args) != arity):
+                        fail("E_ARGUMENT", path, f"concat needs at least two values; {fn} needs {arity}")
+                    if fn != "concat" and fn not in signatures:
+                        fail("E_FUNCTION", path, f"Unknown runtime function '{fn}'")
+                    arg_type, typ = (None, "text") if fn == "concat" else signatures[fn]
+                    compiled = [self.runtime(v, scope, ptr(ptr(path, "args"), i), expected=arg_type, row=row) for i, v in enumerate(args)]
+                    if fn == "concat":
+                        coerced = []
+                        for c in compiled:
+                            if c.get("valueType") == "text":
+                                coerced.append(c)
+                            elif c.get("kind") == "literal" and type(c.get("value")) in (int, float, bool):
+                                coerced.append({"kind": "literal", "value": self._format_scalar(c["value"]), "valueType": "text"})
+                            else:
+                                coerced.append({"kind": "call", "fn": "text", "args": [c], "valueType": "text"})
+                        compiled = coerced
+                    if fn == "number" and compiled[0]["valueType"] not in {"text", "number"}:
+                        fail("E_TYPE", ptr(path, "args"), "number requires text or number")
+                    out = {"kind": "call", "fn": fn, "args": compiled, "valueType": typ}
             else:
                 fail("E_EXPRESSION", path, "Expected variable, widget, item, op or fn")
         else:
@@ -3264,9 +3335,90 @@ class Frontend:
                 elif out.get("stateMode") in ("next", "previous"):
                     out["repeatSkipFirst"] = False
             if kind == "move":
-                if action.get("mode") not in DRAG_MODES:
-                    fail("E_ACTION", ptr(path, "mode"), f"Expected one of {DRAG_MODES}")
-                out["duration"] = 0
+                mode = action.get("mode")
+                if mode not in MOVE_MODES:
+                    fail("E_ACTION", ptr(path, "mode"), f"Expected one of {MOVE_MODES}")
+                dur = action.get("duration", 0)
+                self.typecheck(dur, "number", ptr(path, "duration"))
+                if dur < 0:
+                    fail("E_SIZE", ptr(path, "duration"), "move duration must be nonnegative")
+                out["duration"] = dur
+                if "easing" in action:
+                    easing = action["easing"]
+                    self.typecheck(easing, "text", ptr(path, "easing"))
+                    if easing not in MOVE_EASINGS:
+                        fail("E_ENUM", ptr(path, "easing"), f"Expected one of {MOVE_EASINGS}")
+                    out["easing"] = easing
+                else:
+                    out["easing"] = "none" if dur == 0 else "swing"
+                if mode in ("location", "delta"):
+                    if "x" not in action and "y" not in action:
+                        fail("E_ACTION", path, f"{mode} move requires x and/or y")
+                    for axis in ("x", "y"):
+                        rt_key = f"{axis}Runtime"
+                        if axis in action:
+                            coord = self.runtime(action[axis], scope, ptr(path, axis), expected="number")
+                            if coord["kind"] == "literal":
+                                out[axis] = coord["value"]
+                                out.pop(rt_key, None)
+                            else:
+                                out.pop(axis, None)
+                                out[rt_key] = coord
+                        elif mode == "delta":
+                            out[axis] = 0
+                            out.pop(rt_key, None)
+                        else:
+                            out.pop(axis, None)
+                            out[rt_key] = {"kind": "widget", "name": target["name"], "accessor": axis, "valueType": "number"}
+                else:
+                    for axis in ("x", "y"):
+                        if axis in action:
+                            fail("E_ACTION", ptr(path, axis), f"{mode} move does not accept {axis}")
+                if "bounds" in action:
+                    if mode == "locationBeforeDrag":
+                        fail("E_ACTION", ptr(path, "bounds"), "locationBeforeDrag does not accept bounds")
+                    b_spec = action["bounds"]
+                    bp = ptr(path, "bounds")
+                    if not isinstance(b_spec, dict):
+                        fail("E_OBJECT", bp, "move bounds must be an object")
+                    fields(b_spec, {"within", *BOUND_SIDES}, bp)
+                    default_ops = {"left": ">=", "right": "<=", "top": ">=", "bottom": "<="}
+                    side_map = {}
+                    if "within" in b_spec:
+                        w_sym = self.resolve(b_spec["within"], scope, ptr(bp, "within"))
+                        if w_sym["pageId"] != scope.split("/")[0]:
+                            fail("E_ACTION_SCOPE", ptr(bp, "within"), "bounds.within must reference a widget on the current page")
+                        w_row = self.row_context(w_sym["id"])[0]
+                        if w_row and w_row != self.row_context(scope)[0]:
+                            fail("E_ROW_SCOPE", ptr(bp, "within"), "Row widget bounds belong to their own row events")
+                        active_sides = ("left", "right") if mode == "drag-x" else ("top", "bottom") if mode == "drag-y" else BOUND_SIDES
+                        for side in active_sides:
+                            side_map[side] = {
+                                "side": side,
+                                "op": default_ops[side],
+                                "value": {"kind": "widget", "name": w_sym["name"], "accessor": side, "valueType": "number"},
+                            }
+                    for side in BOUND_SIDES:
+                        if side not in b_spec:
+                            continue
+                        s_val = b_spec[side]
+                        sp = ptr(bp, side)
+                        if isinstance(s_val, dict) and ("op" in s_val or "value" in s_val):
+                            fields(s_val, {"op", "value"}, sp)
+                            op_val = s_val.get("op", default_ops[side])
+                            self.typecheck(op_val, "text", ptr(sp, "op"))
+                            if op_val not in BOUND_OPS:
+                                fail("E_OPERATOR", ptr(sp, "op"), f"Expected bound operator in {BOUND_OPS}")
+                            if "value" not in s_val:
+                                fail("E_PROPERTY_REQUIRED", sp, f"bounds.{side} object requires 'value'")
+                            c_val = self.runtime(s_val["value"], scope, ptr(sp, "value"), expected="number")
+                        else:
+                            op_val = default_ops[side]
+                            c_val = self.runtime(s_val, scope, sp, expected="number")
+                        side_map[side] = {"side": side, "op": op_val, "value": c_val}
+                    if not side_map:
+                        fail("E_ACTION", bp, "bounds requires within or at least one of left/right/top/bottom")
+                    out["bounds"] = [side_map[s] for s in BOUND_SIDES if s in side_map]
             out["target"] = target["name"]
         if kind in {"set-check", "set-selected", "set-option"}:
             expected_kinds = CHECK_KINDS if kind == "set-check" else OPTION_KINDS if kind == "set-option" else {"label", "paragraph", "button", "badge"}
@@ -3401,9 +3553,10 @@ class Frontend:
                             "actions": [item for j, a in enumerate(desugared_acts) for result in [self.action(a, scope, ptr(ep if shorthand else ptr(cp, "actions"), j))] for item in (result if isinstance(result, list) else [result])]}
                 for act in compiled["actions"]:
                     if act["type"] == "move":
-                        expected_event = "OnDragDrop" if act["mode"] == "locationBeforeDrag" else "OnDrag"
-                        if native != expected_event:
-                            fail("E_EVENT_TARGET", cp, f"{act['mode']} requires {expected_event}")
+                        if act["mode"] in ("drag", "drag-x", "drag-y", "withThis") and native != "OnDrag":
+                            fail("E_EVENT_TARGET", cp, f"{act['mode']} requires OnDrag")
+                        elif act["mode"] == "locationBeforeDrag" and native != "OnDragDrop":
+                            fail("E_EVENT_TARGET", cp, f"{act['mode']} requires OnDragDrop")
                 if case.get("else"):
                     if i == 0 or "when" in case or i != len(cases) - 1 or not any("when" in c for c in cases[:i]):
                         fail("E_CONDITION", cp, "else must end a conditional chain")

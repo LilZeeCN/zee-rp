@@ -4,7 +4,7 @@ Check remains authoritative for expression types, dynamic component arguments,
 references, row scope, dataset columns and target-specific behavior support.
 """
 from rp_language import (
-    NODE_PROPS, ACTION_PROPS, GEOMETRY, THEMES, EVENTS, EVENT_SHORTHANDS, DRAG_MODES, PANEL_ANIMATIONS, PANEL_GESTURES, PANEL_MODES,
+    NODE_PROPS, ACTION_PROPS, GEOMETRY, THEMES, EVENTS, EVENT_SHORTHANDS, DRAG_MODES, MOVE_MODES, MOVE_EASINGS, WIDGET_GEOM_ACCESSORS, BOUND_OPS, PANEL_ANIMATIONS, PANEL_GESTURES, PANEL_MODES,
     MACRO_PROPS, MACRO_ITEM_PROPS, DEVICE_CANVAS_PRESETS, MAX_FONT_SIZE,
     OPTION_KINDS, STATE_STYLE_KEYS,
     CARD_CONTENT_KEYS, CARD_CONTENT_OPTIONS, BOX_TEXT_STYLE_KEYS, BOX_TEXT_CONTAINER_KEYS, NODE_SOURCE_ALIASES,
@@ -39,10 +39,10 @@ def language_schema():
         "dataValue": either(scalar, array(ref("dataValue")), {"type": "object", "additionalProperties": ref("dataValue")}),
     }
     defs["runtime"] = {"oneOf": [scalar,
-        obj({"variable": ident}, ["variable"]), obj({"widget": ref("reference")}, ["widget"]),
+        obj({"variable": ident}, ["variable"]), obj({"widget": ref("reference"), "accessor": {"enum": ["text", "value", "checked", "selected", "state", *WIDGET_GEOM_ACCESSORS]}}, ["widget"]),
         obj({"item": ident}, ["item"]), obj({"caller": ident}, ["caller"]),
         obj({"op": {"enum": ["+", "-", "*", "/", "==", "!=", ">", "<", ">=", "<=", "&&", "||"]}, "left": ref("value"), "right": ref("value")}, ["op", "left", "right"]),
-        obj({"fn": {"enum": ["text", "number", "not", "lower", "upper", "length", "concat", "contains", "remove"]}, "args": array(ref("value"), 1)}, ["fn", "args"])]}
+        obj({"fn": {"enum": ["text", "number", "not", "lower", "upper", "length", "concat", "contains", "remove", "isOver", "isNotOver"]}, "args": array(either(ref("value"), obj({"widget": ref("reference")}, ["widget"])), 1)}, ["fn", "args"])]}
     defs["value"] = either(ref("runtime"), ref("compileExpression"))
     runtime_object = {"allOf": [ref("runtime"), {"type": "object"}]}
     defs["booleanValue"] = either({"type": "boolean"}, {"type": "string", "pattern": "^(?:=(?!=)|\\[\\[)"}, ref("compileExpression"), runtime_object)
@@ -332,7 +332,20 @@ def language_schema():
                 props[phase + "Duration"] = {**nonnegative_int, "maximum": 2147483647}
             optional = fields - {"target"}
         if kind == "move":
-            props["mode"] = {"enum": list(DRAG_MODES)}
+            bound_edge = either(ref("value"), obj({"op": {"enum": list(BOUND_OPS)}, "value": ref("value")}, ["value"]))
+            props["mode"] = {"enum": list(MOVE_MODES)}
+            props["x"] = ref("value")
+            props["y"] = ref("value")
+            props["duration"] = {"type": "number", "minimum": 0}
+            props["easing"] = {"enum": list(MOVE_EASINGS)}
+            props["bounds"] = obj({
+                "within": ref("reference"),
+                "left": bound_edge,
+                "right": bound_edge,
+                "top": bound_edge,
+                "bottom": bound_edge,
+            })
+            optional = {"x", "y", "duration", "easing", "bounds"}
         if kind == "data-sort":
             props["direction"] = {"enum": ["ascending", "descending", "asc", "desc"]}
         if kind == "data-add":

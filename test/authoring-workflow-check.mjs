@@ -51,9 +51,9 @@ try {
     assert(tools.find(t => t.name === 'diagnose_prototype').annotations.readOnlyHint);
     assert.equal(tools.find(t => t.name === 'revise_prototype').annotations.readOnlyHint, false);
   });
-  await check('recipe discovery provides three complete scenarios without expanding source by default', async () => {
+  await check('recipe discovery provides complete scenarios without expanding source by default', async () => {
     const found = await request('prototype_recipe', {});
-    assert.equal(found.recipes.length, 4);
+    assert.equal(found.recipes.length, 5);
     assert(found.recipes.every(r => existsSync(r.source) && r.scenario && r.customize.length));
     assert(!JSON.stringify(found).includes('sourceText'));
   });

@@ -2,10 +2,10 @@
 
 ## 从 RP/1 到官方 HTML
 
-1. 调用 `prototype_recipe({recipe:"native-gestures", includeSource:true})`，查看可直接生成的轮播、滑动、拖动和输入长度范例，以及 RP/1 源码。
+1. 调用 `prototype_recipe({recipe:"carousel-slider-captcha", includeSource:true})`（或 `"native-gestures"`），查看可直接生成的同步轮播、有界滑动、拖动吸附和输入长度范例，以及 RP/1 源码。
 2. 执行范例回包里的 `generate` 调用。成品是可编辑的 `.rp`。同步调用传 `includeImage:true` 可直接取得页面总览图片。回包的 `nextActions` 给出可直接执行的官方 HTML 导出参数。
 3. 调用 `export_prototype({rp:"/path/to/design.rp"})`，或用 `output` 指定新目录。相对路径可用 `cwd` 解析。省略 `output` 会在原型旁创建 `design-html`，保留原 RP 和已有输出。
-4. 通过本地 HTTP 打开返回的 `entry`（`start.html`），验证用户要求的交互。导出回包分别标记 HTML 导出、浏览器加载与行为验收。
+4. 直接调用 `verify_prototype({html:"/path/to/design-html", rp:"/path/to/design.rp", steps:[...]})`（或仅传 `rp` 由工具自动导出临时官方 HTML）在内置无头 Chrome CDP 中执行真实点击、填表、滑动（`swipe`）、拖动（`drag`）、等待（`wait`）与状态/坐标断言（`text`/`panelState`/`variable`/`x`/`y`/`dx`/`dy`），也可通过本地 HTTP 打开 `start.html` 人工查看。导出与验证回包分别标记官方 HTML 导出、浏览器加载与行为验收。
 
 导出按文件头选择本机 Axure RP9 或 RP11，使用官方生成器的默认发布设置。已验证的宿主组合见[程序集研究](../docs/native-assembly-research.md)。定制发布配置继续走 Axure 编辑器。有安装或版本问题时，`runtime_info().host.officialHtml` 返回平台和发现到的安装，实际启动由导出时验证。
 

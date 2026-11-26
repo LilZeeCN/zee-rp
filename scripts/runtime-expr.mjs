@@ -93,7 +93,7 @@ export function nativeRuntimeValue(ast, ctx, { targetRows = false } = {}) {
     if (node.kind === 'literal') return quote(node.value);
     if (node.kind === 'binary') return `(${render(node.left)} ${node.op} ${render(node.right)})`;
     if (node.kind === 'call') {
-      const args = node.args.map(render), a = args[0];
+      const args = node.args.map(arg => (node.fn === 'isOver' || node.fn === 'isNotOver') ? arg : render(arg)), a = args[0];
       switch (node.fn) {
         case 'text': return `((${a}).toString())`;
         case 'number': return `(((${a})*1)||0)`;
@@ -104,6 +104,29 @@ export function nativeRuntimeValue(ast, ctx, { targetRows = false } = {}) {
         case 'length': return `(${a}).length`;
         case 'contains': return `((${a}).indexOf(${args[1]})>=0)`;
         case 'remove': return `(${a}).replace(${args[1]},"")`;
+        case 'isOver':
+        case 'isNotOver': {
+          const nameA = node.args[0]?.name;
+          const nameB = node.args[1]?.name;
+          const key = `spatial:${node.fn}:${nameA}:${nameB}`;
+          if (reads.has(key)) return coerce(reads.get(key), 'boolean');
+          const rectCall = wName => {
+            const w = findWidget(wName);
+            const path = pathTo(w.id);
+            const lit = obj(newGuid(), 'Axure:Expr:DiagramObjectPathLiteral', { value: ref(path.id) });
+            return obj(newGuid(), 'Axure:Expr:FCall', { 'function-name': str('GetWidgetRectangles'), args: list([ref(lit.id)]) });
+          };
+          const rectA = rectCall(nameA);
+          const rectB = rectCall(nameB);
+          const alias = `rpv${reads.size}`;
+          const spatialCall = obj(newGuid(), 'Axure:Expr:FCall', {
+            'function-name': str(node.fn === 'isOver' ? 'IsOver' : 'IsNotOver'),
+            args: list([ref(rectA.id), ref(rectB.id)]),
+          });
+          scope.push([str(alias), ref(spatialCall.id)]);
+          reads.set(key, alias);
+          return coerce(alias, 'boolean');
+        }
         default: throw new Error(`Unknown runtime function ${node.fn}`);
       }
     }
@@ -119,18 +142,22 @@ export function nativeRuntimeValue(ast, ctx, { targetRows = false } = {}) {
       return coerce(`${targetRows?'TargetItem':'Item'}.${node.field}`,node.valueType);
     }
     if (node.kind !== 'variable' && node.kind !== 'widget') throw new Error(`Unknown runtime value ${node.kind}`);
-    let widget, getter;
+    const geomProps = ['x', 'y', 'left', 'right', 'top', 'bottom', 'width', 'height'];
+    let widget, getter, accessor;
     if (node.kind === 'widget') {
       widget = findWidget(node.name);
       const isChoice = ['Axure:DiagramObject:ComboBox', 'Axure:DiagramObject:ListBox'].includes(widget.className);
       const isCheck = ['Axure:DiagramObject:Checkbox', 'Axure:DiagramObject:RadioButton'].includes(widget.className);
-      const accessor = node.accessor ?? (isCheck ? 'checked' : 'value');
-      if (!['checked', 'selected', 'value', 'text'].includes(accessor)) throw new Error(`Unknown widget accessor ${accessor}`);
-      getter = accessor === 'checked' || accessor === 'selected' ? 'GetCheckState'
+      accessor = node.accessor ?? (isCheck ? 'checked' : 'value');
+      if (!['checked', 'selected', 'value', 'text', 'state', ...geomProps].includes(accessor)) throw new Error(`Unknown widget accessor ${accessor}`);
+      getter = accessor === 'state' ? 'GetPanelState'
+        : geomProps.includes(accessor) ? 'GetWidget'
+        : accessor === 'checked' || accessor === 'selected' ? 'GetCheckState'
         : accessor === 'value' && isChoice ? 'GetSelectedOption' : 'GetWidgetText';
     }
     const key = node.kind === 'widget' ? `widget:${node.name}:${getter}` : `${node.kind}:${node.name}`;
-    if (reads.has(key)) return coerce(reads.get(key),node.valueType);
+    const formatAlias = alias => getter === 'GetWidget' ? `${alias}.${accessor}` : alias;
+    if (reads.has(key)) return coerce(formatAlias(reads.get(key)), node.valueType);
     const alias = `rpv${reads.size}`;
     let read;
     if (node.kind === 'variable') {
@@ -146,7 +173,7 @@ export function nativeRuntimeValue(ast, ctx, { targetRows = false } = {}) {
       read = obj(newGuid(),'Axure:Expr:FCall',{'function-name':str(getter),args:list([ref(literal.id)])});
     }
     scope.push([str(alias),ref(read.id)]); reads.set(key,alias);
-    return coerce(alias,node.valueType);
+    return coerce(formatAlias(alias), node.valueType);
   };
   const expression = render(ast);
   const value = obj(newGuid(),'Axure:Expr:StringLiteral',{

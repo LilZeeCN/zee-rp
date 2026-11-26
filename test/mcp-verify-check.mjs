@@ -1,0 +1,173 @@
+import assert from 'node:assert/strict';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
+import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+
+const root = fileURLToPath(new URL('../', import.meta.url));
+const evidence = process.env.AXURE_MCP_VERIFY_OUTPUT;
+const verifyHost = process.env.AXURE_MCP_EXPORT_HOST === '1';
+
+async function session(run, env = {}) {
+  const dir = evidence ? resolve(evidence) : mkdtempSync(join(tmpdir(), 'zee-rp-verify-'));
+  if (evidence) mkdirSync(dir, { recursive: true });
+  const work = mkdtempSync(join(dir, 'stdio-'));
+  const client = new Client({ name: 'zee-rp-verify-check', version: '1.0.0' });
+  const transport = new StdioClientTransport({
+    command: process.execPath,
+    args: [join(root, 'bin/mcp.mjs')],
+    cwd: work,
+    stderr: 'pipe',
+    env: { ...process.env, AXURE_WRITE_ROOT: work, AXURE_PROTECTED_PATHS: join(work, 'protected.rp'), ...env },
+  });
+  try {
+    await client.connect(transport);
+    const callRaw = async (name, args = {}, isError = false) => {
+      const result = await client.callTool({ name, arguments: args }, undefined, { timeout: 180_000 });
+      assert.equal(Boolean(result.isError), isError, result.content[0].text);
+      return result;
+    };
+    const call = async (name, args = {}, isError = false) => {
+      const result = await callRaw(name, args, isError);
+      return result.structuredContent ?? JSON.parse(result.content[0].text);
+    };
+    return await run({ client, call, callRaw, work: realpathSync(work) });
+  } finally {
+    await client.close();
+    if (!evidence) rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('verify_prototype tool discovery and input safety guards work offline', async () => {
+  await session(async ({ client, call, work }) => {
+    assert.match(client.getInstructions(), /generate_prototype.*export_prototype.*verify_prototype.*gui_roundtrip/);
+    const { tools } = await client.listTools();
+    const verifyTool = tools.find(t => t.name === 'verify_prototype');
+    assert.ok(verifyTool, 'verify_prototype must be exposed');
+    assert.equal(verifyTool.inputSchema.additionalProperties, false);
+    assert.equal(verifyTool.annotations.readOnlyHint, false);
+
+    const runtime = await call('runtime_info');
+    assert.equal(runtime.host.officialHtml.verifyTool, 'verify_prototype');
+    assert.equal(typeof runtime.host.officialHtml.chromeAvailable, 'boolean');
+
+    const missingInput = await call('verify_prototype', {}, true);
+    assert.equal(missingInput.diagnostics[0].code, 'E_VERIFY_INPUT');
+
+    const invalidHtml = await call('verify_prototype', { html: join(work, 'empty-html') }, true);
+    assert.equal(invalidHtml.diagnostics[0].code, 'E_VERIFY_HTML');
+
+    const protectedErr = await call('verify_prototype', { rp: join(work, 'protected.rp') }, true);
+    assert.match(protectedErr.diagnostics[0].message, /受保护/);
+
+    const existingPng = join(work, 'keep.png');
+    writeFileSync(existingPng, 'keep');
+    mkdirSync(join(work, 'mock-html'));
+    writeFileSync(join(work, 'mock-html', 'start.html'), '<html></html>');
+    const overwriteErr = await call('verify_prototype', { html: join(work, 'mock-html'), screenshot: existingPng }, true);
+    assert.equal(overwriteErr.diagnostics[0].code, 'E_VERIFY_SCREENSHOT_EXISTS');
+    assert.equal(readFileSync(existingPng, 'utf8'), 'keep');
+  });
+});
+
+test('carousel-slider-captcha → RP9 → export_prototype → verify_prototype in real headless Chrome', {
+  skip: !verifyHost && 'Set AXURE_MCP_EXPORT_HOST=1 on a verified macOS Axure host.',
+}, async () => {
+  await session(async ({ call, callRaw, work }) => {
+    const gen = await call('generate_prototype', { recipe: 'carousel-slider-captcha', output: 'captcha.rp' });
+    assert.equal(gen.status, 'completed');
+    const exp = await call('export_prototype', { rp: gen.output });
+    assert.equal(exp.status, 'completed');
+    assert.match(exp.nextAction, /verify_prototype/);
+
+    const raw = await callRaw('verify_prototype', {
+      html: exp.output,
+      rp: gen.output,
+      viewport: { width: 440, height: 700, dpr: 1 },
+      includeImage: true,
+      screenshot: join(work, 'verified.png'),
+      steps: [
+        { action: 'expect', target: 'banner', expect: { panelState: 's1' } },
+        { action: 'expect', target: 'indicator', expect: { panelState: 's1' } },
+        { action: 'swipe', target: 'banner', direction: 'left', distance: 160, expect: { panelState: 's2' } },
+        { action: 'expect', target: 'indicator', expect: { panelState: 's2' } },
+        { action: 'expect', target: 'banner_state', expect: { text: '当前幻灯片：s2' } },
+        // Auto-rotation resumes after 3000ms on swipe
+        { action: 'wait', ms: 3300 },
+        { action: 'expect', target: 'banner', expect: { panelState: 's3' } },
+        { action: 'expect', target: 'indicator', expect: { panelState: 's3' } },
+        // Bounded drag: dragging 500px right must clamp thumb inside track (right == 400, x == 340)
+        // Here we verify failure reset back to x == 40
+        { action: 'drag', target: 'thumb', dx: 500, dy: 60 },
+        { action: 'expect', target: 'captcha_status', expect: { text: '验证失败' } },
+        { action: 'expect', target: 'thumb', expect: { x: 40, tolerance: 2 } },
+        { action: 'expect', target: 'piece', expect: { x: 40, tolerance: 2 } },
+        { action: 'click', target: 'check_overlap' },
+        { action: 'expect', target: 'overlap_status', expect: { text: '未重叠' } },
+        // Drag within ±2px of target.x (target=220, start=40 => dx=179 => piece.x=219 -> snaps to 220)
+        { action: 'drag', target: 'thumb', dx: 179, dy: 0 },
+        { action: 'expect', target: 'captcha_status', expect: { text: '验证成功' } },
+        { action: 'expect', target: 'piece', expect: { x: 220, tolerance: 2 } },
+        { action: 'click', target: 'check_overlap' },
+        { action: 'expect', target: 'overlap_status', expect: { text: '已重叠' } },
+      ],
+    });
+    const verified = raw.structuredContent ?? JSON.parse(raw.content[0].text);
+    assert.equal(verified.status, 'completed');
+    assert.deepEqual(verified.verification, {
+      officialHtmlExported: false,
+      browserLoaded: true,
+      behaviorVerified: true,
+    });
+    assert.equal(verified.passed, verified.total);
+    assert.deepEqual(verified.errors, []);
+    assert(existsSync(join(work, 'verified.png')));
+    assert.equal(verified.previewImage, 'attached');
+    const img = raw.content.find(p => p.type === 'image');
+    assert(img && img.mimeType === 'image/png' && img.data.length > 100);
+  });
+});
+
+test('verify_prototype auto-exports from rp only and proves real Chrome BoundaryCondition clamping', {
+  skip: !verifyHost && 'Set AXURE_MCP_EXPORT_HOST=1 on a verified macOS Axure host.',
+}, async () => {
+  await session(async ({ call, work }) => {
+    const specPath = join(work, 'bounds-clamp.rp1');
+    writeFileSync(specPath, [
+      'rp/1 target=9 name="有界拖动钳位验证" domain=web theme=enterprise-light',
+      'page #demo name="有界拖动" canvas=[440,320]',
+      '  box #root [440x320] layout=stack fill=#F8FAFC',
+      '    box #track [360x44] x=40 y=120 layout=stack fill=#CBD5E1 radius=22',
+      '    dynamic-panel #knob [60x44] x=40 y=120',
+      '      +onDrag [{"type":"move","target":"knob","mode":"drag-x","bounds":{"within":"track"}}]',
+      '      :state s1',
+      '        box #knob_box [60x44] fill=#4F46E5 radius=22',
+    ].join('\n'));
+    const gen = await call('generate_prototype', { source: specPath, output: 'bounds-clamp.rp' });
+    assert.equal(gen.status, 'completed');
+
+    const clamped = await call('verify_prototype', {
+      rp: gen.output,
+      viewport: { width: 440, height: 360, dpr: 1 },
+      steps: [
+        { action: 'expect', target: 'knob', expect: { x: 40, y: 120, right: 100, tolerance: 2 } },
+        { action: 'drag', target: 'knob', dx: 500, dy: 50 },
+        { action: 'expect', target: 'knob', expect: { x: 340, y: 120, right: 400, tolerance: 2 } },
+        { action: 'drag', target: 'knob', dx: -600, dy: -40 },
+        { action: 'expect', target: 'knob', expect: { x: 40, y: 120, left: 40, tolerance: 2 } },
+      ],
+    });
+    assert.equal(clamped.status, 'completed');
+    assert.deepEqual(clamped.verification, {
+      officialHtmlExported: true,
+      browserLoaded: true,
+      behaviorVerified: true,
+    });
+    assert.equal(clamped.passed, clamped.total);
+    assert.deepEqual(clamped.errors, []);
+    assert.deepEqual(readdirSync(work).filter(n => n.startsWith('.zee-verify-')), []);
+  });
+});

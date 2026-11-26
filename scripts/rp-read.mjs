@@ -200,13 +200,24 @@ function describeAction(graph, action, version, widgetsByGuid, panelStates) {
             const gv = graph.objects.get(callArgs[0]?.value);
             const vName = strOf(field(gv?.body ?? {}, 'variable-name'));
             if (vName) replacement = `var.${vName}`;
-          } else if (fnName === 'GetWidgetText') {
+          } else if (fnName === 'GetWidgetText' || fnName === 'GetPanelState' || fnName === 'GetWidget') {
             const pl = graph.objects.get(callArgs[0]?.value);
             const pObj = graph.objects.get(field(pl?.body ?? {}, 'value')?.value);
             const wId = field(pObj?.body ?? {}, 'object-id')?.value;
             const wTarget = resolveWidget(wId);
             const wName = wTarget ? widgetName(wTarget) : null;
-            if (wName) replacement = `@${wName}`;
+            if (wName) replacement = fnName === 'GetPanelState' ? `@${wName}.state` : `@${wName}`;
+          } else if (fnName === 'IsOver' || fnName === 'IsNotOver') {
+            const nameOfRectArg = argNode => {
+              const rc = graph.objects.get(argNode?.value);
+              const pl = graph.objects.get((field(rc?.body ?? {}, 'args')?.items ?? [])[0]?.value);
+              const pObj = graph.objects.get(field(pl?.body ?? {}, 'value')?.value);
+              const wTarget = resolveWidget(field(pObj?.body ?? {}, 'object-id')?.value);
+              return wTarget ? widgetName(wTarget) : null;
+            };
+            const aName = nameOfRectArg(callArgs[0]);
+            const bName = nameOfRectArg(callArgs[1]);
+            if (aName && bName) replacement = `${fnName}(@${aName}, @${bName})`;
           }
         } else if (exprObj.className === 'Axure:Expr:StringLiteral') {
           const sVal = strOf(field(exprObj.body, 'value'));
@@ -278,15 +289,15 @@ function describeAction(graph, action, version, widgetsByGuid, panelStates) {
       const move = bodyOf('MoveInfos');
       const mode = intOf(field(move, 'MoveType'));
       const duration = intOf(field(move, 'Duration'));
+      const boundary = field(move, 'BoundaryCondition');
+      const hasBoundary = Boolean(boundary && graph.objects.has(boundary.value));
       type = mode === 0 ? 'set-position' : 'move';
       const verb = ['移动到', '相对移动', '跟随拖动', '跟随水平拖动', '跟随垂直拖动', '回到拖动前的位置', '随触发元件移动'][mode] ?? `移动（模式 ${mode}）`;
       const xy = mode === 0 || mode === 1 ? ` x=${literal(field(move, 'XValue'))} y=${literal(field(move, 'YValue'))}` : '';
       const names = targets(['WidgetPaths', 'panelobjectpaths']);
-      human = `${verb} ${names.join('、') || '(未指定)'}${xy}（${duration}ms）`;
+      human = `${verb} ${names.join('、') || '(未指定)'}${xy}（${duration}ms${hasBoundary ? '，有边界限制' : ''}）`;
       const dragMode = { 2: 'drag', 3: 'drag-x', 4: 'drag-y', 5: 'locationBeforeDrag' }[mode];
       if (dragMode) {
-        const boundary = field(move, 'BoundaryCondition');
-        const hasBoundary = boundary && graph.objects.has(boundary.value);
         rp1 = names.length === 1 && field(action.body, 'MoveInfos')?.items?.length === 1
           && !hasBoundary && [0, undefined].includes(intOf(field(move, 'MoveTrajectory'))) && duration === 0
           ? { type: 'move', target: names[0], mode: dragMode } : null;

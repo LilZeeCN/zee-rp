@@ -1,7 +1,7 @@
 import copy
 import math
 import re
-from .core import CHECK_KINDS, EVENTS, FORM_KINDS, OPTION_KINDS, fail
+from .core import CHECK_KINDS, EVENTS, FORM_KINDS, OPTION_KINDS, WIDGET_GEOM_ACCESSORS, fail
 from .frontend import compile_language
 
 class ReferenceRuntime:
@@ -29,14 +29,23 @@ class ReferenceRuntime:
         self.offsets = {}
         self.drag_origins = {}
         self.drag_delta = (0, 0)
+        self.base_rects = {}
+        self.last_move_delta = {}
+        self.current_trigger = None
         for p in self.ir["pages"]:
             self._index_tree(p["root"], p["slug"], None)
         self.current_page = self.ir["pages"][0]["slug"]
         self._run_page_load(self.current_page)
 
-    def _index_tree(self, node, page_slug, rep_name, parent=None, panel_states=()):
+    def _index_tree(self, node, page_slug, rep_name, parent=None, panel_states=(), parent_xy=(0, 0)):
         name, kind = node.get("name"), node.get("type")
+        nx = node.get("x") if isinstance(node.get("x"), (int, float)) else 0
+        ny = node.get("y") if isinstance(node.get("y"), (int, float)) else 0
+        nw = node.get("w") if isinstance(node.get("w"), (int, float)) else 0
+        nh = node.get("h") if isinstance(node.get("h"), (int, float)) else 0
+        abs_x, abs_y = parent_xy[0] + nx, parent_xy[1] + ny
         if name:
+            self.base_rects[name] = (abs_x, abs_y, nw, nh)
             self.widgets[name] = {
                 "name": name, "kind": kind, "page": page_slug, "repeater": rep_name,
                 "text": str(node.get("value" if kind == "input" else "text", "")),
@@ -60,7 +69,7 @@ class ReferenceRuntime:
             states = [s["name"] for s in node.get("states", [])]
             self.panels[name] = {"current": states[0] if states else "", "states": states, "page": page_slug}
             for st in node.get("states", []):
-                self._index_tree(st["root"], page_slug, rep_name, name, (*panel_states, (name, st["name"])))
+                self._index_tree(st["root"], page_slug, rep_name, name, (*panel_states, (name, st["name"])), (abs_x, abs_y))
         elif kind == "repeater":
             self.repeaters[name] = {
                 "name": name, "page": page_slug, "model": copy.deepcopy(node.get("model", {})),
@@ -69,9 +78,9 @@ class ReferenceRuntime:
                 "visible_rows": None,
             }
             if isinstance(node.get("template"), dict):
-                self._index_tree(node["template"], page_slug, name, name, panel_states)
+                self._index_tree(node["template"], page_slug, name, name, panel_states, (abs_x, abs_y))
         for child in node.get("children", []):
-            self._index_tree(child, page_slug, rep_name, name, panel_states)
+            self._index_tree(child, page_slug, rep_name, name, panel_states, (abs_x, abs_y))
 
     def _get_row_widget(self, rep_name, row_index, wname):
         key = (rep_name, row_index, wname)
@@ -122,6 +131,11 @@ class ReferenceRuntime:
             return self._compute_visible_rows(rep_name)
         return copy.deepcopy(rep["visible_rows"])
 
+    def _widget_rect(self, name):
+        bx, by, bw, bh = self.base_rects.get(name, (0, 0, 0, 0))
+        dx, dy = self.offsets.get(name, (0, 0))
+        return bx + dx, by + dy, bw, bh
+
     def eval_expr(self, ast, row=None):
         if not isinstance(ast, dict):
             return ast
@@ -133,8 +147,19 @@ class ReferenceRuntime:
         if kind == "variable" or "variable" in ast:
             return self.variables.get(ast.get("name", ast.get("variable")), "")
         if kind == "widget":
+            acc = ast.get("accessor")
+            if acc == "state":
+                return self.panels.get(ast["name"], {}).get("current", "")
+            if acc in WIDGET_GEOM_ACCESSORS:
+                rx, ry, rw, rh = self._widget_rect(ast["name"])
+                if acc in ("x", "left"): return rx
+                if acc in ("y", "top"): return ry
+                if acc == "right": return rx + rw
+                if acc == "bottom": return ry + rh
+                if acc == "width": return rw
+                if acc == "height": return rh
             w = self.widgets.get(ast["name"], {})
-            return w.get("checked", w.get("selected", False)) if ast.get("accessor") in {"checked", "selected"} else w.get("text", "")
+            return w.get("checked", w.get("selected", False)) if acc in {"checked", "selected"} else w.get("text", "")
         if kind in ("item", "caller_item"):
             if row is not None and ast["field"] in row:
                 return row[ast["field"]]
@@ -171,6 +196,11 @@ class ReferenceRuntime:
             if op == "<=": return l <= r
         if kind == "call":
             fn = ast["fn"]
+            if fn in ("isOver", "isNotOver"):
+                ax, ay, aw, ah = self._widget_rect(ast["args"][0]["name"])
+                bx, by, bw, bh = self._widget_rect(ast["args"][1]["name"])
+                over = (ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by)
+                return over if fn == "isOver" else not over
             args = [self.eval_expr(a, row=row) for a in ast.get("args", [])]
             if fn == "text":
                 v = args[0]
@@ -237,9 +267,12 @@ class ReferenceRuntime:
         if self.event_depth >= 64:
             fail("E_RUNTIME_LIMIT", interaction.get("sourcePointer", "/"), "Reference event recursion exceeded 64 nested events")
         self.event_depth += 1
+        prev_trigger = self.current_trigger
+        self.current_trigger = interaction.get("trigger")
         try:
             return self._exec_event_cases(interaction, native_event, row, reason, row_index=row_index)
         finally:
+            self.current_trigger = prev_trigger
             self.event_depth -= 1
 
     def _exec_event_cases(self, interaction, native_event, row, reason, row_index=None):
@@ -331,15 +364,71 @@ class ReferenceRuntime:
             fired.extend(self._progress_panel(act, row, row_index))
         fail("E_RUNTIME_LIMIT", "/advanceMs", "Reference execution exceeded 10000 timer ticks")
 
-    def _move_with_drag(self, target, mode):
+    def _clamp_bounds(self, target, dx, dy, bounds, row=None):
+        if not bounds:
+            return dx, dy
+        bx, by, bw, bh = self.base_rects.get(target, (0, 0, 0, 0))
+        nx, ny = bx + dx, by + dy
+        for b in bounds:
+            side, op = b["side"], b["op"]
+            val = self.eval_expr(b["value"], row=row)
+            if type(val) not in (int, float) or isinstance(val, bool):
+                continue
+            if side == "left":
+                if op in (">=", ">"):
+                    if nx < val: nx = val
+                elif op in ("<=", "<"):
+                    if nx > val: nx = val
+            elif side == "right":
+                if op in ("<=", "<"):
+                    if nx + bw > val: nx = val - bw
+                elif op in (">=", ">"):
+                    if nx + bw < val: nx = val - bw
+            elif side == "top":
+                if op in (">=", ">"):
+                    if ny < val: ny = val
+                elif op in ("<=", "<"):
+                    if ny > val: ny = val
+            elif side == "bottom":
+                if op in ("<=", "<"):
+                    if ny + bh > val: ny = val - bh
+                elif op in (">=", ">"):
+                    if ny + bh < val: ny = val - bh
+        return nx - bx, ny - by
+
+    def _move_with_drag(self, target, act, row=None):
+        mode = act["mode"]
+        bounds = act.get("bounds")
+        cur_off = self.offsets.get(target, (0, 0))
         if mode == "locationBeforeDrag":
             if target in self.drag_origins:
-                self.offsets[target] = self.drag_origins[target]
-        else:
-            x, y = self.drag_origins.setdefault(target, self.offsets.get(target, (0, 0)))
+                new_off = self.drag_origins[target]
+                self.offsets[target] = new_off
+                self.last_move_delta[target] = (new_off[0] - cur_off[0], new_off[1] - cur_off[1])
+            return
+        if mode in ("drag", "drag-x", "drag-y"):
+            x, y = self.drag_origins.setdefault(target, cur_off)
             dx, dy = self.drag_delta
-            self.offsets[target] = (x + (0 if mode == "drag-y" else dx),
-                                    y + (0 if mode == "drag-x" else dy))
+            nx = x + (0 if mode == "drag-y" else dx)
+            ny = y + (0 if mode == "drag-x" else dy)
+        elif mode == "withThis":
+            self.drag_origins.setdefault(target, cur_off)
+            tdx, tdy = self.last_move_delta.get(self.current_trigger, self.drag_delta)
+            nx, ny = cur_off[0] + tdx, cur_off[1] + tdy
+        elif mode == "location":
+            bx, by, _, _ = self.base_rects.get(target, (0, 0, 0, 0))
+            tx = self.eval_expr(act["xRuntime"], row=row) if "xRuntime" in act else act.get("x", bx + cur_off[0])
+            ty = self.eval_expr(act["yRuntime"], row=row) if "yRuntime" in act else act.get("y", by + cur_off[1])
+            nx, ny = tx - bx, ty - by
+        elif mode == "delta":
+            ddx = self.eval_expr(act["xRuntime"], row=row) if "xRuntime" in act else act.get("x", 0)
+            ddy = self.eval_expr(act["yRuntime"], row=row) if "yRuntime" in act else act.get("y", 0)
+            nx, ny = cur_off[0] + ddx, cur_off[1] + ddy
+        else:
+            return
+        new_off = self._clamp_bounds(target, nx, ny, bounds, row=row)
+        self.offsets[target] = new_off
+        self.last_move_delta[target] = (new_off[0] - cur_off[0], new_off[1] - cur_off[1])
 
     def _exec_action(self, act, row=None, row_index=None, defer_refresh=False):
         kind = act["type"]
@@ -369,7 +458,7 @@ class ReferenceRuntime:
             elif act.get("state") in self.panels[target]["states"]:
                 self._set_panel_state(target, act["state"], row, row_index or 0)
         elif kind == "move":
-            self._move_with_drag(target, act["mode"])
+            self._move_with_drag(target, act, row=row)
         elif kind == "raise-event":
             ev_name = "OnPanelStateChange" if act.get("eventType") == 278 else "OnClick"
             self.trigger(target, ev_name, row=row, row_index=row_index or 0)

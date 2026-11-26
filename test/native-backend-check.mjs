@@ -315,5 +315,26 @@ try {
     ['missing image', n => n.backgroundFills = [{ type: 3, image: 'absent' }]],
     ['asymmetric corners', n => n.corners[1] = 3],
   ]) check(`reject ${label}`, () => { const copy = structuredClone(scene); edit(copy.scene.items[0]); assert.throws(() => writeNativeScene(seed, copy), /Native/); });
+  check('carousel-slider-captcha native RP9 serialization includes BoundaryDirectionLiteral, GetWidget, GetPanelState, IsOver', () => {
+    const bundle = join(work, 'captcha-bundle');
+    const result = spawnPy([join(root, 'scripts/proto.py'), 'compile', '--spec', join(root, 'examples/rp-language/carousel-slider-captcha.rp1'), '--out-dir', bundle], { encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    const outRp = join(work, 'captcha.rp');
+    const report = buildInteractiveRp(join(bundle, 'compile-plan.json'), outRp);
+    assert.deepEqual(report.threeZeros, { danglingRefs: 0, sentinelSlotsNonZero: 0, problems: 0 });
+    assert.equal(report.eventCoverage.declared, report.eventCoverage.materialized);
+    const graphs = readRecords(readFileSync(outRp)).filter(r => ['Axure:Page', 'Axure:PanelState'].includes(r.className)).map(parsePayload);
+    const allObjs = graphs.flatMap(g => [...g.objects.values()]);
+    const fcallNames = new Set(allObjs.filter(o => o.className === 'Axure:Expr:FCall').map(o => field(o.body, 'function-name')?.text));
+    for (const fn of ['GetWidget', 'GetPanelState', 'IsOver', 'GetWidgetRectangles']) {
+      assert(fcallNames.has(fn), `Missing native FCall ${fn}`);
+    }
+    const boundaryDirs = allObjs.filter(o => o.className === 'Axure:Expr:BoundaryDirectionLiteral');
+    assert(boundaryDirs.length >= 2, `Expected BoundaryDirectionLiteral nodes, got ${boundaryDirs.length}`);
+    assert.deepEqual(boundaryDirs.map(b => field(b.body, 'boundaryDirection')?.text).sort(), ['left', 'right']);
+    const boundedMoves = allObjs.filter(o => o.className === 'Axure:MoveWidgetInfo' && field(o.body, 'MoveType')?.value === 3);
+    assert.equal(boundedMoves.length, 1);
+    assert(field(boundedMoves[0].body, 'BoundaryCondition')?.value !== graphs[0].roots.find(n => n.tag === 0x1e).values.indexOf('0'.repeat(32)) + 1);
+  });
   console.log(JSON.stringify({ ok: true, checks, reports }, null, 2));
 } finally { childProcess.spawnSync = spawn; syncBuiltinESMExports(); rmSync(work, { recursive: true, force: true }); }

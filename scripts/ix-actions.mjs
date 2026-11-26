@@ -639,12 +639,60 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         // 拖动类（MoveType 2/3/4）跟随指针；drag-x / drag-y 即 Axure 的「限制水平/垂直方向拖动」。
         // 拖动跟随必须是 0 时长，否则会带着缓动慢慢追，松手后还在滑。
         const dragMode = ['drag', 'drag-x', 'drag-y'].includes(mode);
+        const xRef = spec.xRuntime ? ref(runtimeValue(spec.xRuntime).id) : ref(literal(spec.x ?? 0).id);
+        const yRef = spec.yRuntime ? ref(runtimeValue(spec.yRuntime).id) : ref(literal(spec.y ?? 0).id);
+        let boundaryId = nullId;
+        if (Array.isArray(spec.bounds) && spec.bounds.length > 0) {
+          const validSides = new Set(['left', 'right', 'top', 'bottom']);
+          const validBoundOps = new Set(['>', '<', '>=', '<=']);
+          const clauseExprs = spec.bounds.map(clause => {
+            const side = String(clause?.side ?? '');
+            const op = String(clause?.op ?? '');
+            if (!validSides.has(side)) throw new Error(`Unknown move boundary side "${side}"`);
+            if (!validBoundOps.has(op)) throw new Error(`Unknown move boundary op "${op}"`);
+            const isX = side === 'left' || side === 'right';
+            const deltaVar = dragMode ? (isX ? 'DragX' : 'DragY') : (mode === 'withThis' ? (isX ? 'withX' : 'withY') : null);
+            const bdId = newGuid();
+            const bdExprText = deltaVar ? `[[Target.${side} + ${deltaVar}]]` : `[[Target.${side}]]`;
+            const varNames = deltaVar ? ['Target', deltaVar] : ['Target'];
+            const tvIds = varNames.map(vName => ref(obj(newGuid(), 'Axure:Expr:TextVariableIdentifier', {
+              Id: { tag: 0x11, value: newGuid() },
+              Name: str(vName),
+              Expr: ref(bdId),
+              TargetOverride: bool(false),
+            }).id));
+            obj(bdId, 'Axure:Expr:BoundaryDirectionLiteral', {
+              value: str(bdExprText),
+              'variable-identifiers': list(tvIds),
+              'repeater-scope': ref(nullId),
+              TargetRepeaterScope: ref(nullId),
+              boundaryDirection: str(side),
+            });
+            const rightNode = (clause.value && typeof clause.value === 'object' && clause.value.kind)
+              ? (clause.value.kind === 'literal' ? literal(String(clause.value.value)) : runtimeValue(clause.value))
+              : literal(String(clause.value ?? 0));
+            return obj(newGuid(), 'Axure:Expr:BinaryExpr', {
+              'left-expr': ref(bdId),
+              'right-expr': ref(rightNode.id),
+              operation: int(OPS[op]),
+            });
+          });
+          let combined = clauseExprs[0];
+          for (let i = 1; i < clauseExprs.length; i++) {
+            combined = obj(newGuid(), 'Axure:Expr:BinaryExpr', {
+              'left-expr': ref(combined.id),
+              'right-expr': ref(clauseExprs[i].id),
+              operation: int(OPS['&&']),
+            });
+          }
+          boundaryId = combined.id;
+        }
         const moveInfo = info('Axure:MoveWidgetInfo', {
           Easing: int(pick(EASE, spec.easing ?? (dragMode ? 'none' : 'swing'), 'easing')),
           Duration: f64(spec.duration ?? (dragMode ? 0 : 300)),
-          XValue: ref(literal(spec.x ?? 0).id), YValue: ref(literal(spec.y ?? 0).id),
+          XValue: xRef, YValue: yRef,
           MoveType: int(moveType),
-          BoundaryCondition: ref(nullId), MoveTrajectory: int(0), scope: dict([])
+          BoundaryCondition: ref(boundaryId), MoveTrajectory: int(0), scope: dict([])
         });
         return obj(newGuid(), 'Axure:InteractionMoveWidgetAction', {
           Disabled: bool(false), panelobjectpaths: list([ref(path.id)]),

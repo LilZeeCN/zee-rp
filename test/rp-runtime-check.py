@@ -145,4 +145,43 @@ with tempfile.TemporaryDirectory() as temp:
     assert compile_language(json.loads(source.read_text()))[1]==compile_language(json.loads(out.read_text()))[1]
     assert subprocess.run(args,capture_output=True).returncode==1
     checks+=1;print('PASS formatter preserves meaning and refuses overwrite')
+
+def spatial_and_bounded_motion():
+    from rp_language import ReferenceRuntime, compile_language
+    from rp_language_cli import read_source
+    spec = read_source(ROOT / 'examples/rp-language/carousel-slider-captcha.rp1')
+    rt = ReferenceRuntime(compile_language(spec))
+    n = rt.resolve_trigger_name
+    assert rt.panels[n('banner')]['current'] == 's1'
+    assert rt.panels[n('indicator')]['current'] == 's1'
+    rt.advance(3000)
+    assert rt.panels[n('banner')]['current'] == 's2'
+    assert rt.panels[n('indicator')]['current'] == 's2'
+    rt.trigger('banner', 'swipeleft')
+    assert rt.panels[n('banner')]['current'] == 's3'
+    assert rt.panels[n('indicator')]['current'] == 's3'
+    rt.trigger('banner', 'swiperight')
+    assert rt.panels[n('banner')]['current'] == 's2'
+    assert rt.panels[n('indicator')]['current'] == 's2'
+    # Over-drag past right boundary of track (track right=400, thumb width=60 => max x=340)
+    rt.trigger('thumb', 'drag', dx=500, dy=80)
+    assert rt.eval_expr({'kind': 'widget', 'name': n('thumb'), 'accessor': 'right', 'valueType': 'number'}) == 400
+    assert rt.eval_expr({'kind': 'widget', 'name': n('piece'), 'accessor': 'x', 'valueType': 'number'}) == 340
+    assert rt.eval_expr({'kind': 'widget', 'name': n('piece'), 'accessor': 'y', 'valueType': 'number'}) == 310
+    rt.trigger('thumb', 'dragdrop')
+    assert rt.widgets[n('captcha_status')]['text'] == '验证失败'
+    assert rt.eval_expr({'kind': 'widget', 'name': n('thumb'), 'accessor': 'x', 'valueType': 'number'}) == 40
+    assert rt.eval_expr({'kind': 'widget', 'name': n('piece'), 'accessor': 'x', 'valueType': 'number'}) == 40
+    rt.trigger('check_overlap', 'click')
+    assert rt.widgets[n('overlap_status')]['text'] == '未重叠'
+    # Drag within +/-2px of target.x (220 - 40 = 180; test dx=179 => x=219)
+    rt.trigger('thumb', 'drag', dx=179, dy=0)
+    assert rt.eval_expr({'kind': 'widget', 'name': n('piece'), 'accessor': 'x', 'valueType': 'number'}) == 219
+    rt.trigger('thumb', 'dragdrop')
+    assert rt.widgets[n('captcha_status')]['text'] == '验证成功'
+    assert rt.eval_expr({'kind': 'widget', 'name': n('piece'), 'accessor': 'x', 'valueType': 'number'}) == 220
+    rt.trigger('check_overlap', 'click')
+    assert rt.widgets[n('overlap_status')]['text'] == '已重叠'
+check('spatial accessors, bounded drag, tolerance snap and isOver runtime', spatial_and_bounded_motion)
+
 print(json.dumps({'ok':True,'checks':checks}))

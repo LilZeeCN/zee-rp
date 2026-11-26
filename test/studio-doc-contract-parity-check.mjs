@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * 文档与公开工具面一致性门禁（Batch 6 B6.4）：
- *  1. 锁定公开 MCP 工具总数为 72（其中 studioTools 精确为 13 个动词化工具）
+ *  1. 锁定公开 MCP 工具总数为 74（其中 studioTools 精确为 13 个动词化工具，含 export_prototype 与 verify_prototype）
  *  2. 断言 SKILL.md、studio/authoring-help.mjs（全部 6 个 topic 返回值）、studioTools schema 及现行 docs/*.md 中
  *     出现的每一个 studio_* 标识符都属于公开注册的 13 个 studioTools，杜绝已删旧工具名残留误导 AI
  *  3. 断言上述活跃入口中不再残留已删裸工具名（get_design_context / run_scenario / apply_commands 等）
@@ -41,7 +41,7 @@ const BANNED_LEGACY_BARE_NAMES = [
 test('公开 MCP 工具面规模与 13 个 studio_* 动词锁定', () => {
   const allMcpTools = [...listMcpTools(), ...jobTools];
   assert.equal(studioTools.length, 13, `studioTools 应保持 13 个动词工具，实际为 ${studioTools.length}`);
-  assert.equal(allMcpTools.length, 72, `公开 MCP 工具总数应为 72，实际为 ${allMcpTools.length}`);
+  assert.equal(allMcpTools.length, 74, `公开 MCP 工具总数应为 74，实际为 ${allMcpTools.length}`);
 });
 
 test('SKILL.md、authoring-help、公开 schema 与现行文档零旧工具名残留', () => {

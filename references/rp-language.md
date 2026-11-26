@@ -210,7 +210,7 @@ node scripts/proto.mjs build-rp --plan ./bundle/compile-plan.json --out ./anothe
 | `set-text` | `target:{ref},text`；目标 label/button/badge/input |
 | `set-variable` | `variable,value`；严格匹配声明类型 |
 | `set-panel-state` | `target` 加 `state` 或 `mode`。用 `state` 指定面板内声明的状态，用 `mode` 选 `next`、`previous` 或 `current` |
-| `move` | `target,mode`。在 `drag` 事件使用 `drag`、`drag-x` 或 `drag-y`，在 `dragdrop` 事件使用 `locationBeforeDrag` |
+| `move` | `target,mode`；`mode` 支持 `drag`/`drag-x`/`drag-y`/`withThis`（须在 `drag` 事件）、`locationBeforeDrag`（须在 `dragdrop` 事件）、`location`/`delta`（任意事件，需 `x`/`y` 数字或运行期表达式，默认 `duration=0, easing="none"`）；支持 `bounds: { within, left, right, top, bottom }` 编译为原生 `BoundaryCondition`（不接受于 `locationBeforeDrag`） |
 | `set-size` | `target:{ref},width,height`；可选 `duration`（毫秒）、`easing`、`anchor`，实际尺寸/动画行为须在目标宿主验证 |
 | `show,hide,toggle` | `target:{ref}` |
 | `enable,disable,focus` | `target:{ref}`；目标原生输入 |
@@ -221,7 +221,9 @@ node scripts/proto.mjs build-rp --plan ./bundle/compile-plan.json --out ./anothe
 `enable/disable/focus` 仅接受原生 input。普通按钮要拦截提交，请使用条件 Case 守卫或显隐状态。
 `next` 和 `previous` 支持 `loop:true` 首尾循环、`repeatInterval` 定时和可选的 `repeatSkipFirst`。配置了间隔时，默认等一整个间隔再切换。用 `mode:"current"` 停止轮播并保持当前卡片，重新触发定时动作即可恢复。切换支持 `enterAnimation`、`exitAnimation` 和对应的 `enterDuration`、`exitDuration`。动画可用 `none`、`fade`、`slideLeft`、`slideRight`、`slideUp`、`slideDown`，时长以整数毫秒为单位。
 
-原生 `input` 的 `maxLength` 为非负整数，浏览器按 UTF-16 代码单元限制手动键入。原生动作样例可直接用 [native-gestures.rp1](../examples/rp-language/native-gestures.rp1) 生成 .rp。参考运行器用 `{"advanceMs":450}` 推进虚拟时钟，拖动步骤用 `{"target":"horizontal","event":"drag","dx":90,"dy":40}` 表示从开始位置累计的拖动量。参考运行器报告状态与位移，视觉运动用 Axure 生成的播放器验证。
+表达式还支持读取同页任意元件几何（`@w.x` / `@w.y` / `@w.left` / `@w.right` / `@w.top` / `@w.bottom` / `@w.width` / `@w.height`，数值型）、读取动态面板当前状态名（`@panel.state`，文本型；可在 `onStateChange` 或文本绑定中使用并自动刷新）以及矩形重叠判断 `isOver(@a, @b)` / `isNotOver(@a, @b)`（布尔型，编译为原生 `IsOver(GetWidgetRectangles(a), GetWidgetRectangles(b))`）。完整“同步轮播 + 有界滑块拼图 ±2px 自动吸附”单源示例见 [carousel-slider-captcha.rp1](../examples/rp-language/carousel-slider-captcha.rp1)。
+
+原生 `input` 的 `maxLength` 为非负整数，浏览器按 UTF-16 代码单元限制手动键入。原生动作样例可直接用 [native-gestures.rp1](../examples/rp-language/native-gestures.rp1) 与 [carousel-slider-captcha.rp1](../examples/rp-language/carousel-slider-captcha.rp1) 生成 .rp。参考运行器用 `{"advanceMs":450}` 推进虚拟时钟，拖动步骤用 `{"target":"horizontal","event":"drag","dx":90,"dy":40}` 表示从开始位置累计的拖动量。参考运行器报告状态与位移，视觉运动用 Axure 生成的播放器或 `verify_prototype` 验证。
 
 ## 单份详情视图
 

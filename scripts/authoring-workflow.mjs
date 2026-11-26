@@ -7,8 +7,9 @@ import { promisify } from 'node:util';
 import { assertNotProtected, assertWritable, defaultWriteRoot } from './engine.mjs';
 import { pythonInvocation } from './python.mjs';
 import { appExists, supportedVersions, templateCandidates, tryDetectFileVersion } from './version.mjs';
-import { previewPrototype } from './preview-runtime.mjs';
+import { previewPrototype, verifyOfficialPreview } from './preview-runtime.mjs';
 import { reviewImageStructure } from './image-structure.mjs';
+import { findChromeExecutable } from '../studio/cdp.mjs';
 import { listImplementationFiles } from '../studio/source-fingerprint.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -20,7 +21,7 @@ const invoke = promisify(execFile);
 export const mcpInstructions = [
   'Create an editable Axure .rp from RP/1 with generate_prototype. Use prototype_recipe for runnable examples, includeImage:true for direct visual review, and diagnose_prototype to repair source errors. For a free canvas project use studio_describe(topic="workflow") before writing.',
   'Use revise_prototype to edit an existing RP/1 project with its .rp; preserve the shared baseline for native edits.',
-  'Use export_prototype for official Axure HTML from an existing .rp, then verify the requested behavior in a real browser. Use gui_roundtrip when evidence must include editor open/save/reopen. Report structure, HTML export and browser behavior as separate results.',
+  'Use export_prototype for official Axure HTML from an existing .rp, and verify_prototype to run real clicks, drags, swipes, fills, waits and geometry/state assertions in headless Chrome. Use gui_roundtrip when evidence must include editor open/save/reopen. Report structure, HTML export and browser behavior as separate results.',
 ].join(' ');
 const digest = value => createHash('sha256').update(value).digest('hex');
 const fileHash = path => { assertNotProtected(path); return digest(readFileSync(path)); };
@@ -29,7 +30,7 @@ export const packageVersion = JSON.parse(readFileSync(join(ROOT, 'package.json')
 function implementation() {
   const sourceDirs = ['scripts', 'bin', 'studio', 'examples/authoring'];
   const files = ['package.json', 'references/rp-language.schema.json', ...sourceDirs.flatMap(listImplementationFiles),
-    ...[ASSEMBLY_BRIDGE, ASSEMBLY_WORKER, 'examples/rp-language/native-gestures.rp1'].filter(path => existsSync(join(ROOT, path)))];
+    ...[ASSEMBLY_BRIDGE, ASSEMBLY_WORKER, 'examples/rp-language/native-gestures.rp1', 'examples/rp-language/carousel-slider-captcha.rp1'].filter(path => existsSync(join(ROOT, path)))];
   const packsRoot = join(ROOT, 'examples/studio/reference-packs');
   if (existsSync(packsRoot)) for (const name of readdirSync(packsRoot)) {
     for (const file of ['manifest.json','source.json']) {
@@ -55,6 +56,9 @@ export const recipes = [
   { id: 'native-gestures', name: '原生轮播、手势与输入长度', file: '../rp-language/native-gestures.rp1', pages: ['demo'],
     scenario: '轮播启动、停止、重启 → 左右滑动 → 双轴拖动与松手复位 → 输入长度上限',
     customize: ['面板的切态与 repeatInterval', 'onSwipeLeft / onSwipeRight', '拖动 axis 与 onDragDrop 复位', '文本框 maxLength'] },
+  { id: 'carousel-slider-captcha', name: '同步轮播与有界滑块拼图验证', file: '../rp-language/carousel-slider-captcha.rp1', pages: ['demo'],
+    scenario: '自动轮播+@panel.state指示器同步+滑动重启计时 → within有界水平拖滑块 → ±2px自动吸附校准与失败复位',
+    customize: ['onStateChange 读取 @banner.state 同步指示器', 'drag-x 的 bounds: { within } 轨道边界', 'dragdrop 中 @piece.x 与 @target.x 容差判断与自动吸附'] },
 ];
 
 export function recipeSource(id) {
@@ -144,8 +148,10 @@ export function runtimeInfo(toolList) {
       axureInstalled: appExists(9), blankTemplate: templateCandidates(9).find(c => existsSync(c.path))?.path ?? null,
       officialHtml: {
         tool: 'export_prototype',
+        verifyTool: 'verify_prototype',
         platformSupported: process.platform === 'darwin' && process.arch === 'arm64',
         discoveredVersions: supportedVersions().filter(appExists),
+        chromeAvailable: (() => { try { findChromeExecutable(); return true; } catch { return false; } })(),
         generatorSettings: 'fresh-defaults',
       } },
     nextAction: changedFiles.length ? '磁盘实现已变化，请重新连接 MCP 以加载一致版本；Python 子进程每次读取磁盘实现。'
@@ -330,7 +336,7 @@ async function exportPrototype({ rp, output, cwd, projectDir }) {
     return {
       status: 'completed', rp: source, rpVersion, output: htmlDir, entry, axureBuild: identity.build, generatorSettings,
       verification: { officialHtmlExported: true, browserLoaded: false, behaviorVerified: false },
-      nextAction: '通过本地 HTTP 服务打开输出目录中的 start.html，再按原型需求验证浏览器交互。',
+      nextAction: '可用 verify_prototype(html=output, steps=[...]) 在无头 Chrome 中直接验证点击、滑动、拖动与状态/坐标断言，或打开输出目录中的 start.html 人工查看。',
     };
   } catch (error) {
     let nativeError;
@@ -362,6 +368,47 @@ export function authoringTools({ generate, sync, listTools }) {
         projectDir: { type: 'string', minLength: 1, description: 'cwd 的别名。' },
       }, required: ['rp'], additionalProperties: false },
       handler: exportPrototype, readOnly: false },
+    { name: 'verify_prototype', description: '零外部依赖（复用内置无头 Chrome CDP 与本地环回 HTTP）验证 Axure 官方 HTML 交互行为：支持 click / fill / drag / swipe / wait / navigate / expect（支持文案、可见性、面板状态、变量、x/y/dx/dy 坐标与宽高等断言），可自动从 .rp 导出官方 HTML 或复用 html 目录，并支持 screenshot/includeImage 截图回看。',
+      inputSchema: { type: 'object', properties: {
+        rp: { type: 'string', minLength: 1, description: '现有 .rp 路径；若未传 html 将自动导出临时官方 HTML。' },
+        html: { type: 'string', minLength: 1, description: '已导出的 Axure 官方 HTML 目录（含 start.html）。' },
+        source: { type: 'string', minLength: 1, description: '可选 RP/1 源码路径；省略时自动读取 .rp.baseline.json 或按页面 [data-label] 匹配。' },
+        page: { type: 'string', minLength: 1, description: '可选起始页面 ID 或名称。' },
+        cwd: { type: 'string', minLength: 1 },
+        projectDir: { type: 'string', minLength: 1 },
+        timeoutMs: { type: 'integer', minimum: 500, maximum: 30000 },
+        viewport: { type: 'object', properties: {
+          width: { type: 'integer', minimum: 320, maximum: 3840 },
+          height: { type: 'integer', minimum: 320, maximum: 2160 },
+          dpr: { type: 'number', minimum: 1, maximum: 3 },
+        }, additionalProperties: false },
+        screenshot: { type: 'string', minLength: 1, description: '可选 .png 截图输出路径（禁止覆盖已有文件）。' },
+        includeImage: { type: 'boolean', description: 'true 时在 MCP 响应中附带最终截图 PNG。' },
+        steps: { type: 'array', minItems: 0, maxItems: 60, items: { type: 'object', properties: {
+          action: { type: 'string', enum: ['click', 'fill', 'drag', 'swipe', 'wait', 'navigate', 'expect'] },
+          target: { type: 'string', minLength: 1 },
+          value: { type: 'string' },
+          rowIndex: { type: 'integer', minimum: 0 },
+          dx: { type: 'number' },
+          dy: { type: 'number' },
+          steps: { type: 'integer', minimum: 1, maximum: 60 },
+          stepDelayMs: { type: 'integer', minimum: 0, maximum: 100 },
+          direction: { type: 'string', enum: ['left', 'right', 'up', 'down'] },
+          distance: { type: 'number', minimum: 20, maximum: 2000 },
+          ms: { type: 'integer', minimum: 0, maximum: 30000 },
+          page: { type: 'string', minLength: 1 },
+          expect: { type: 'object', properties: {
+            text: { type: 'string' }, value: { type: 'string' }, visible: { type: 'boolean' },
+            enabled: { type: 'boolean' }, checked: { type: 'boolean' }, panelState: { type: 'string' },
+            width: { type: 'number', minimum: 0 }, height: { type: 'number', minimum: 0 },
+            x: { type: 'number' }, y: { type: 'number' }, left: { type: 'number' }, right: { type: 'number' },
+            top: { type: 'number' }, bottom: { type: 'number' }, dx: { type: 'number' }, dy: { type: 'number' },
+            tolerance: { type: 'number', minimum: 0, maximum: 50 },
+            page: { type: 'string' }, variable: { type: 'string' }, equals: {},
+          }, additionalProperties: false },
+        }, required: ['action'], additionalProperties: false } },
+      }, additionalProperties: false },
+      handler: input => verifyOfficialPreview(input, { runWorkflow, exportHtml: exportPrototype }), readOnly: false },
     { name: 'preview_prototype', description: '在已有 ego lite 任务空间中验证真实 Axure 预览。按逻辑 ID 点击、输入并断言文字/变量/面板状态，返回实际状态、源码位置及报告截图。用 export_prototype 准备官方 HTML 地址，或先运行 gui_roundtrip(preview:true)；不接管用户空间，不把模拟当原生证据。',
       inputSchema: { type: 'object', properties: {
         source: { type: 'string', minLength: 1 }, output: { type: 'string', minLength: 1 },

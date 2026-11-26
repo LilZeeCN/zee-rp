@@ -1,16 +1,37 @@
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, extname, resolve } from 'node:path';
+import { once } from 'node:events';
+import { createReadStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createServer } from 'node:http';
+import { dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { assertNotProtected, assertWritable } from './engine.mjs';
+import { assertNotProtected, assertWritable, defaultWriteRoot } from './engine.mjs';
+import { findChromeExecutable, launchChrome } from '../studio/cdp.mjs';
 
 const sha = value => createHash('sha256').update(value).digest('hex');
+
+const MIME_TYPES = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.mjs': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.json': 'application/json; charset=utf-8',
+  '.woff': 'font/woff',
+  '.woff2': 'font/woff2',
+  '.ttf': 'font/ttf',
+};
 
 // Serialized into the real browser. Only reads Axure state and installs bounded
 // passive listeners; never evaluates source expressions or writes test values.
 export function observeAxure({ names = [], variables = [] } = {}) {
   const windows = [window];
+  const wantFilter = Array.isArray(names) && names.length > 0;
   for (let i = 0; i < windows.length && i < 20; i++) {
     const w = windows[i];
     try {
@@ -26,38 +47,96 @@ export function observeAxure({ names = [], variables = [] } = {}) {
             w.addEventListener('error', e => add(probe.errors, { message: e.message, source: e.filename, line: e.lineno }));
             w.addEventListener('unhandledrejection', e => add(probe.errors, { message: String(e.reason) }));
           }
-          const widgets = [...d.querySelectorAll('[data-label]')].filter(el => names.includes(el.getAttribute('data-label'))).map(el => {
-            let r = el.getBoundingClientRect();
-            // Axure Layer wrappers have zero CSS size while their children are
-            // visible and receive the group's click. Measure actual children.
-            if ((!r.width || !r.height) && /^grp-/.test(el.getAttribute('data-label') || '')) {
-              const rects = [...el.querySelectorAll('[data-label]')].filter(child => {
-                for (let cur = child; cur && cur !== el; cur = cur.parentElement) {
-                  const cs = w.getComputedStyle(cur);
-                  if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+          let offX = 0, offY = 0, curW = w;
+          while (curW && curW !== window) {
+            const fe = curW.frameElement;
+            if (!fe) break;
+            const fr = fe.getBoundingClientRect();
+            offX += fr.left + (fe.clientLeft || 0);
+            offY += fr.top + (fe.clientTop || 0);
+            curW = curW.parent;
+          }
+          const widgets = [...d.querySelectorAll('[data-label]')]
+            .filter(el => !el.classList.contains('panel_state'))
+            .filter(el => !wantFilter || names.includes(el.getAttribute('data-label')))
+            .map(el => {
+              let r = el.getBoundingClientRect();
+              // Axure Layer wrappers have zero CSS size while their children are
+              // visible and receive the group's click. Measure actual children.
+              if ((!r.width || !r.height) && (/^grp-/.test(el.getAttribute('data-label') || '') || el.classList.contains('ax_default'))) {
+                const rects = [...el.querySelectorAll('[data-label]')].filter(child => {
+                  for (let cur = child; cur && cur !== el; cur = cur.parentElement) {
+                    const cs = w.getComputedStyle(cur);
+                    if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+                  }
+                  return true;
+                }).map(child => child.getBoundingClientRect()).filter(rect => rect.width && rect.height);
+                if (rects.length) {
+                  const left = Math.min(...rects.map(rc => rc.left));
+                  const top = Math.min(...rects.map(rc => rc.top));
+                  const right = Math.max(...rects.map(rc => rc.right));
+                  const bottom = Math.max(...rects.map(rc => rc.bottom));
+                  r = { left, top, right, bottom, width: right - left, height: bottom - top };
                 }
-                return true;
-              }).map(child => child.getBoundingClientRect()).filter(rect => rect.width && rect.height);
-              if (rects.length) r = { width: Math.max(...rects.map(r => r.right)) - Math.min(...rects.map(r => r.left)), height: Math.max(...rects.map(r => r.bottom)) - Math.min(...rects.map(r => r.top)) };
-            }
-            const input = el.matches('input,textarea,select') ? el : el.querySelector('input,textarea,select');
-            let visible = r.width > 0 && r.height > 0;
-            for (let cur = el; cur; cur = cur.parentElement) {
-              const cs = w.getComputedStyle(cur);
-              if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') visible = false;
-            }
-            const state = [...el.children].find(c => c.classList.contains('panel_state') && w.getComputedStyle(c).display !== 'none' && w.getComputedStyle(c).visibility !== 'hidden');
-            return { id: el.id, name: el.getAttribute('data-label'), text: input ? input.value : el.innerText?.trim() ?? '', visible,
-              enabled: !input?.disabled && el.getAttribute('aria-disabled') !== 'true' && !el.classList.contains('disabled'),
-              inputId: input?.id ?? null, panelState: state?.getAttribute('data-label') ?? null,
-              width: r.width, height: r.height };
-          });
+              }
+              const input = el.matches('input,textarea,select') ? el : el.querySelector('input,textarea,select');
+              let visible = r.width > 0 && r.height > 0;
+              for (let cur = el; cur; cur = cur.parentElement) {
+                const cs = w.getComputedStyle(cur);
+                if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') visible = false;
+              }
+              let panelState = null;
+              if (el.querySelector(':scope > .panel_state')) {
+                const sid = ax.visibility?.GetPanelState?.(el.id);
+                const stateEl = sid ? d.getElementById(sid) : null;
+                panelState = stateEl?.getAttribute('data-label') ?? null;
+                if (!panelState) {
+                  const st = [...el.children].find(c => c.classList.contains('panel_state') && w.getComputedStyle(c).display !== 'none' && w.getComputedStyle(c).visibility !== 'hidden');
+                  panelState = st?.getAttribute('data-label') ?? null;
+                }
+              }
+              const info = typeof ax.getWidgetInfo === 'function' ? ax.getWidgetInfo(el.id) : null;
+              const x = typeof info?.x === 'number' ? info.x : r.left;
+              const y = typeof info?.y === 'number' ? info.y : r.top;
+              const width = typeof info?.width === 'number' && info.width > 0 ? info.width : r.width;
+              const height = typeof info?.height === 'number' && info.height > 0 ? info.height : r.height;
+              const textVal = input ? input.value : (el.innerText?.trim() ?? '');
+              return {
+                id: el.id,
+                name: el.getAttribute('data-label'),
+                text: textVal,
+                value: textVal,
+                visible,
+                enabled: !input?.disabled && el.getAttribute('aria-disabled') !== 'true' && !el.classList.contains('disabled'),
+                checked: Boolean(input?.checked),
+                inputId: input?.id ?? null,
+                inputTag: input?.tagName?.toLowerCase() ?? null,
+                panelState,
+                x, y, left: x, top: y, right: x + width, bottom: y + height,
+                width, height,
+                centerX: offX + r.left + r.width / 2,
+                centerY: offY + r.top + r.height / 2,
+              };
+            });
           const values = {};
           const defined = ax.globalVariableProvider.getDefinedVariables();
-          for (const name of variables) if (defined.some(key => key.toLowerCase() === name.toLowerCase()))
-            values[name] = ax.globalVariableProvider.getVariableValue(name);
-          return { ready: true, page: ax.pageData.page.name, url: w.location.href, widgets, variables: values,
-            events: [...w.__zeeRpPreviewProbe.events], errors: [...w.__zeeRpPreviewProbe.errors] };
+          const wantVars = variables.length ? variables : defined;
+          for (const name of wantVars) {
+            if (defined.some(key => key.toLowerCase() === name.toLowerCase())) {
+              values[name] = ax.globalVariableProvider.getVariableValue(name);
+            }
+          }
+          const animating = Boolean(w.jQuery && w.jQuery(':animated').length > 0);
+          return {
+            ready: true,
+            page: ax.pageData.page.name,
+            url: w.location.href,
+            animating,
+            widgets,
+            variables: values,
+            events: [...w.__zeeRpPreviewProbe.events],
+            errors: [...w.__zeeRpPreviewProbe.errors],
+          };
         }
       }
       for (let n = 0; n < w.frames.length; n++) { try { if (w.frames[n].document) windows.push(w.frames[n]); } catch {} }
@@ -67,8 +146,11 @@ export function observeAxure({ names = [], variables = [] } = {}) {
 }
 
 export function resolvePreviewSymbol(map, target) {
-  const found = map.symbols.filter(s => [s.id, s.name, s.display, s.pointer].includes(target) || s.id.endsWith('/' + target));
-  if (found.length !== 1) throw Object.assign(new Error('目标缺失或重名，请使用 page/id。'),
+  const found = (map.symbols ?? []).filter(s =>
+    [s.id, s.logicalId, s.name, s.display, s.label, s.pointer].filter(Boolean).includes(target)
+    || (typeof s.id === 'string' && s.id.endsWith('/' + target))
+  );
+  if (found.length !== 1) throw Object.assign(new Error(`目标 "${target}" 缺失或重名，请使用 page/id 或精确 data-label。`),
     { code: 'E_PREVIEW_TARGET', candidates: found.map(s => s.id) });
   return found[0];
 }
@@ -88,19 +170,421 @@ export function clickObservedAxure({ url, id }) {
   return false;
 }
 
-export function previewMismatch(step, observation, widget, map) {
+export function previewMismatch(step, observation, widget, map, baselineWidget = null) {
   const expected = step.expect ?? {}, failures = [];
+  const tol = typeof expected.tolerance === 'number' && Number.isFinite(expected.tolerance) ? expected.tolerance : 1.5;
   if ('page' in expected) {
-    const page = map.pages.find(p => p.id === expected.page);
+    const page = (map?.pages ?? []).find(p => p.id === expected.page);
     if (observation.page !== (page?.name ?? expected.page)) failures.push({ field: 'page', expected: page?.name ?? expected.page, actual: observation.page });
   }
   if ('variable' in expected && (!Object.hasOwn(observation.variables, expected.variable) || String(observation.variables[expected.variable]) !== String(expected.equals)))
     failures.push({ field: 'variable:' + expected.variable, expected: expected.equals, actual: observation.variables[expected.variable] ?? null });
-  for (const field of ['text', 'visible', 'panelState']) if (field in expected && widget?.[field] !== expected[field])
-    failures.push({ field, expected: expected[field], actual: widget?.[field] ?? null });
-  for (const field of ['width', 'height']) if (field in expected && (typeof widget?.[field] !== 'number' || Math.abs(widget[field] - expected[field]) > .5))
-    failures.push({ field, expected: expected[field], actual: widget?.[field] ?? null });
+  for (const field of ['text', 'value', 'visible', 'enabled', 'checked', 'panelState']) {
+    if (field in expected && widget?.[field] !== expected[field]) {
+      failures.push({ field, expected: expected[field], actual: widget?.[field] ?? null });
+    }
+  }
+  for (const field of ['width', 'height', 'x', 'y', 'left', 'right', 'top', 'bottom']) {
+    if (field in expected && (typeof widget?.[field] !== 'number' || Math.abs(widget[field] - expected[field]) > (['width', 'height'].includes(field) ? 0.5 : tol))) {
+      failures.push({ field, expected: expected[field], actual: widget?.[field] ?? null });
+    }
+  }
+  if ('dx' in expected) {
+    const actualDx = baselineWidget && widget ? widget.x - baselineWidget.x : null;
+    if (actualDx === null || Math.abs(actualDx - expected.dx) > tol) failures.push({ field: 'dx', expected: expected.dx, actual: actualDx });
+  }
+  if ('dy' in expected) {
+    const actualDy = baselineWidget && widget ? widget.y - baselineWidget.y : null;
+    if (actualDy === null || Math.abs(actualDy - expected.dy) > tol) failures.push({ field: 'dy', expected: expected.dy, actual: actualDy });
+  }
   return failures;
+}
+
+function buildVerificationMap({ source, rp, runWorkflow }) {
+  if (source) {
+    const absSrc = resolve(source);
+    assertNotProtected(absSrc);
+    const map = runWorkflow('preview-map', absSrc);
+    if (!map.ok) throw Object.assign(new Error(map.diagnostics?.[0]?.message || 'Unable to read RP/1 preview map'), { code: 'E_VERIFY_SOURCE' });
+    return map;
+  }
+  if (rp && existsSync(`${rp}.baseline.json`)) {
+    try {
+      const base = JSON.parse(readFileSync(`${rp}.baseline.json`, 'utf8'));
+      const pages = [];
+      const seenPages = new Set();
+      for (const s of base.sourceMap ?? []) {
+        if (s.pageId && !seenPages.has(s.pageId)) {
+          seenPages.add(s.pageId);
+          pages.push({ id: s.pageId, name: s.pageName ?? s.pageId });
+        }
+      }
+      return {
+        ok: true,
+        semanticHash: base.semanticHash ?? null,
+        variables: Object.keys(base.sourceSpec?.variables ?? {}),
+        pages,
+        symbols: base.sourceMap ?? [],
+      };
+    } catch {}
+  }
+  return null;
+}
+
+function findWidgetMatch(observation, symbol, target, { allowHidden = false, rowIndex = 0 } = {}) {
+  const pool = observation.widgets ?? [];
+  const candidates = symbol
+    ? pool.filter(w => [symbol.name, symbol.display, symbol.label].filter(Boolean).includes(w.name) && (allowHidden || w.visible))
+    : pool.filter(w => w.name === target && (allowHidden || w.visible));
+  return { candidates, widget: candidates[rowIndex] };
+}
+
+function startStaticServer(rootDir) {
+  const realRoot = realpathSync(rootDir);
+  const server = createServer((req, res) => {
+    try {
+      const reqPath = decodeURIComponent(new URL(req.url, 'http://127.0.0.1').pathname);
+      const relPath = reqPath === '/' ? 'start.html' : reqPath.replace(/^\/+/, '');
+      const full = realpathSync(resolve(realRoot, relPath));
+      if (!full.startsWith(realRoot + sep) || !statSync(full).isFile()) {
+        res.writeHead(404).end();
+        return;
+      }
+      res.setHeader('Content-Type', MIME_TYPES[extname(full).toLowerCase()] ?? 'application/octet-stream');
+      createReadStream(full).on('error', () => res.destroy()).pipe(res);
+    } catch {
+      res.writeHead(404).end();
+    }
+  });
+  return server;
+}
+
+export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) {
+  const workDir = resolve(input.cwd ?? input.projectDir ?? defaultWriteRoot());
+  const rpPath = input.rp ? resolve(workDir, input.rp) : null;
+  const htmlInputDir = input.html ? resolve(workDir, input.html) : null;
+  const sourcePath = input.source ? resolve(workDir, input.source) : null;
+  const screenshotPath = input.screenshot ? resolve(workDir, input.screenshot) : null;
+  if (!rpPath && !htmlInputDir) {
+    throw Object.assign(new Error('verify_prototype 需要至少提供 rp（已生成 .rp）或 html（官方 HTML 目录）之一。'), { code: 'E_VERIFY_INPUT' });
+  }
+  if (rpPath) assertNotProtected(rpPath);
+  if (sourcePath) assertNotProtected(sourcePath);
+  if (htmlInputDir) assertNotProtected(htmlInputDir);
+  if (screenshotPath) {
+    assertNotProtected(screenshotPath);
+    assertWritable(screenshotPath);
+    if (extname(screenshotPath).toLowerCase() !== '.png') {
+      throw Object.assign(new Error('screenshot 必须是以 .png 结尾的新文件路径。'), { code: 'E_VERIFY_SCREENSHOT' });
+    }
+    if (lstatSync(screenshotPath, { throwIfNoEntry: false })) {
+      throw Object.assign(new Error(`截图输出已存在，禁止覆盖：${screenshotPath}`), { code: 'E_VERIFY_SCREENSHOT_EXISTS' });
+    }
+  }
+
+  const steps = input.steps ?? [];
+  const timeoutMs = input.timeoutMs ?? 8000;
+  const vp = {
+    width: input.viewport?.width ?? 1280,
+    height: input.viewport?.height ?? 900,
+    dpr: input.viewport?.dpr ?? 1,
+  };
+  let tempStageDir = null;
+  let activeHtmlDir = htmlInputDir;
+  let officialHtmlExported = false;
+  if (activeHtmlDir) {
+    if (!existsSync(join(activeHtmlDir, 'start.html'))) {
+      throw Object.assign(new Error(`官方 HTML 目录缺少 start.html：${activeHtmlDir}`), { code: 'E_VERIFY_HTML' });
+    }
+    findChromeExecutable();
+  } else {
+    findChromeExecutable();
+  }
+  const map = buildVerificationMap({ source: sourcePath, rp: rpPath, runWorkflow });
+  if (!activeHtmlDir) {
+    tempStageDir = mkdtempSync(join(defaultWriteRoot(), '.zee-verify-'));
+    const exportedHtml = join(tempStageDir, 'html');
+    const exp = await exportHtml({ rp: rpPath, output: exportedHtml, cwd: workDir });
+    if (exp.status !== 'completed') {
+      rmSync(tempStageDir, { recursive: true, force: true });
+      return {
+        status: 'failed',
+        evidence: 'axure-official-html-cdp',
+        verification: { officialHtmlExported: false, browserLoaded: false, behaviorVerified: false },
+        diagnostics: exp.diagnostics,
+      };
+    }
+    activeHtmlDir = exp.output;
+    officialHtmlExported = true;
+  }
+
+  const extraNames = steps.flatMap(s => s.target ? [s.target] : []);
+  const mapNames = map ? map.symbols.flatMap(s => [s.name, s.display, s.label]).filter(Boolean) : [];
+  const names = map ? [...new Set([...mapNames, ...extraNames])] : [];
+  const variables = [...new Set([...(map?.variables ?? []), ...steps.flatMap(s => s.expect?.variable ? [s.expect.variable] : [])])];
+
+  const observeExpr = `(${observeAxure.toString()})(${JSON.stringify({ names, variables })})`;
+  const server = startStaticServer(activeHtmlDir);
+  let browser = null;
+  let page = null;
+  const history = [];
+  const result = {
+    status: 'completed',
+    evidence: 'axure-official-html-cdp',
+    verification: { officialHtmlExported, browserLoaded: false, behaviorVerified: false },
+    passed: 0,
+    total: steps.length,
+    ...(rpPath ? { rp: rpPath } : {}),
+    html: htmlInputDir ?? '(temporary)',
+    steps: history,
+  };
+
+  try {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const port = server.address().port;
+    const baseUrl = `http://127.0.0.1:${port}/start.html`;
+    let startUrl = baseUrl;
+    if (input.page) {
+      const pageEntry = map?.pages?.find(p => p.id === input.page || p.name === input.page);
+      startUrl += `#p=${encodeURIComponent(pageEntry?.name ?? input.page)}`;
+    }
+
+    browser = await launchChrome({ headless: true, width: vp.width, height: vp.height, dpr: vp.dpr });
+    page = await browser.openPage(startUrl);
+
+    const observe = () => page.evaluate(observeExpr);
+    await page.waitForFunction(`(() => { const r = ${observeExpr}; return Boolean(r && r.ready); })()`, { timeoutMs, pollMs: 50 });
+    const settle = async (waitMs = Math.min(timeoutMs, 2500)) => {
+      const deadline = Date.now() + waitMs;
+      while (Date.now() < deadline) {
+        const obs = await observe();
+        if (obs.ready && !obs.animating) return obs;
+        await new Promise(r => setTimeout(r, 40));
+      }
+      return observe();
+    };
+
+    let before = await settle();
+    result.verification.browserLoaded = true;
+    result.initial = before;
+
+    for (let i = 0; i < steps.length; i++) {
+      const step = steps[i];
+      let symbol = null;
+      if (step.target) {
+        try { symbol = map ? resolvePreviewSymbol(map, step.target) : null; }
+        catch (err) {
+          const direct = before.widgets.find(w => w.name === step.target);
+          if (!direct) throw err;
+        }
+      }
+      const allowHidden = step.action === 'expect' && step.expect?.visible === false;
+      const { candidates, widget } = step.target
+        ? findWidgetMatch(before, symbol, step.target, { allowHidden, rowIndex: step.rowIndex ?? 0 })
+        : { candidates: [], widget: null };
+      const entry = { index: i, action: step.action, target: symbol?.id ?? step.target ?? null, status: 'running' };
+      history.push(entry);
+      if (step.target && step.rowIndex === undefined && candidates.length > 1) {
+        throw Object.assign(new Error(`目标 "${step.target}" 在预览中匹配到 ${candidates.length} 个实例，请指定 rowIndex。`), { code: 'E_PREVIEW_AMBIGUOUS', stepIndex: i });
+      }
+      if (step.target && !widget && !allowHidden) {
+        throw Object.assign(new Error(`当前页未找到可见目标 "${step.target}"。`), { code: 'E_PREVIEW_NOT_VISIBLE', stepIndex: i });
+      }
+
+      const baselineWidget = widget ? { ...widget } : null;
+
+      if (step.action === 'click') {
+        if (!widget.enabled) throw Object.assign(new Error(`目标 "${step.target}" 当前被禁用。`), { code: 'E_PREVIEW_DISABLED', stepIndex: i });
+        await page.mouseClick(widget.centerX, widget.centerY);
+        await new Promise(r => setTimeout(r, 60));
+      } else if (step.action === 'fill') {
+        if (!widget.enabled) throw Object.assign(new Error(`目标 "${step.target}" 当前被禁用。`), { code: 'E_PREVIEW_DISABLED', stepIndex: i });
+        if (!widget.inputId) throw Object.assign(new Error(`目标 "${step.target}" 不含原生表单输入控件。`), { code: 'E_PREVIEW_INPUT', stepIndex: i });
+        const fillResult = await page.evaluate(`(() => {
+          const wins = [window];
+          for (let k = 0; k < wins.length && k < 20; k++) {
+            const w = wins[k];
+            try {
+              const el = w.document.getElementById(${JSON.stringify(widget.inputId)});
+              if (el) {
+                el.focus();
+                if (el.tagName === 'SELECT') {
+                  el.value = ${JSON.stringify(step.value ?? '')};
+                  el.dispatchEvent(new Event('change', { bubbles: true }));
+                  return { mode: 'select', ok: true };
+                }
+                if (el.type === 'checkbox' || el.type === 'radio') {
+                  el.click();
+                  return { mode: 'check', ok: true };
+                }
+                el.value = '';
+                el.dispatchEvent(new Event('input', { bubbles: true }));
+                if (typeof el.select === 'function') el.select();
+                return { mode: 'text', ok: true };
+              }
+              for (let n = 0; n < w.frames.length; n++) { try { if (w.frames[n].document) wins.push(w.frames[n]); } catch {} }
+            } catch {}
+          }
+          return { ok: false };
+        })()`);
+        if (!fillResult?.ok) throw Object.assign(new Error(`无法聚焦输入框 "${step.target}"。`), { code: 'E_PREVIEW_INPUT', stepIndex: i });
+        if (fillResult.mode === 'text') {
+          await page.send('Input.insertText', { text: String(step.value ?? '') });
+          await page.evaluate(`(() => {
+            const wins = [window];
+            for (let k = 0; k < wins.length && k < 20; k++) {
+              const w = wins[k];
+              try {
+                const el = w.document.getElementById(${JSON.stringify(widget.inputId)});
+                if (el) {
+                  el.dispatchEvent(new Event('change', { bubbles: true }));
+                  el.blur();
+                  return true;
+                }
+                for (let n = 0; n < w.frames.length; n++) { try { if (w.frames[n].document) wins.push(w.frames[n]); } catch {} }
+              } catch {}
+            }
+            return false;
+          })()`);
+        }
+        await new Promise(r => setTimeout(r, 60));
+      } else if (step.action === 'drag') {
+        const dx = Number(step.dx ?? 0);
+        const dy = Number(step.dy ?? 0);
+        await page.mouseDrag(widget.centerX, widget.centerY, widget.centerX + dx, widget.centerY + dy, {
+          steps: step.steps ?? 12,
+          stepDelayMs: step.stepDelayMs ?? 10,
+        });
+        await new Promise(r => setTimeout(r, 60));
+      } else if (step.action === 'swipe') {
+        const dist = Number(step.distance ?? 160);
+        const dir = step.direction ?? 'left';
+        const vec = { left: [-dist, 0], right: [dist, 0], up: [0, -dist], down: [0, dist] }[dir];
+        if (!vec) throw Object.assign(new Error(`不支持的滑动方向 "${dir}"`), { code: 'E_VERIFY_INPUT', stepIndex: i });
+        await page.mouseDrag(widget.centerX, widget.centerY, widget.centerX + vec[0], widget.centerY + vec[1], {
+          steps: step.steps ?? 6,
+          stepDelayMs: 8,
+        });
+        await new Promise(r => setTimeout(r, 120));
+      } else if (step.action === 'wait') {
+        await new Promise(r => setTimeout(r, Number(step.ms ?? 250)));
+      } else if (step.action === 'navigate') {
+        const pageEntry = map?.pages?.find(p => p.id === step.page || p.name === step.page);
+        const targetPageName = pageEntry?.name ?? step.page;
+        await page.navigate(`${baseUrl}#p=${encodeURIComponent(targetPageName)}`, timeoutMs);
+        await page.waitForFunction(`(() => { const r = ${observeExpr}; return Boolean(r && r.ready); })()`, { timeoutMs, pollMs: 50 });
+      } else if (step.action !== 'expect') {
+        throw Object.assign(new Error(`未知验收步骤动作 "${step.action}"`), { code: 'E_VERIFY_INPUT', stepIndex: i });
+      }
+
+      const deadline = Date.now() + timeoutMs;
+      let current = await settle();
+      let failures = [];
+      do {
+        current = await observe();
+        if (!current.ready || current.animating) {
+          await new Promise(r => setTimeout(r, 50));
+          continue;
+        }
+        const match = step.target
+          ? findWidgetMatch(current, symbol, step.target, { allowHidden, rowIndex: step.rowIndex ?? 0 })
+          : { widget: null };
+        failures = step.expect ? previewMismatch(step, current, match.widget, map, baselineWidget) : [];
+        if (!failures.length) break;
+        await new Promise(r => setTimeout(r, 80));
+      } while (Date.now() < deadline);
+
+      if (!current.ready || current.animating) {
+        current = await observe();
+      }
+      const finalMatch = step.target
+        ? findWidgetMatch(current, symbol, step.target, { allowHidden, rowIndex: step.rowIndex ?? 0 })
+        : { widget: null };
+      if (step.expect && !failures.length) {
+        failures = previewMismatch(step, current, finalMatch.widget, map, baselineWidget);
+      }
+
+      entry.variableChanges = Object.fromEntries(
+        Object.entries(current.variables ?? {}).filter(([key, value]) => String(before.variables?.[key]) !== String(value))
+      );
+      if (finalMatch.widget) {
+        entry.observedWidget = {
+          name: finalMatch.widget.name,
+          text: finalMatch.widget.text,
+          visible: finalMatch.widget.visible,
+          panelState: finalMatch.widget.panelState,
+          x: finalMatch.widget.x,
+          y: finalMatch.widget.y,
+          width: finalMatch.widget.width,
+          height: finalMatch.widget.height,
+        };
+      }
+      entry.failures = failures;
+      entry.status = failures.length ? 'failed' : 'passed';
+      before = current;
+      if (failures.length) {
+        throw Object.assign(new Error(`步骤 #${i} (${step.action}) 与真实 Axure 预览断言不一致。`), {
+          code: 'E_VERIFY_ASSERTION', stepIndex: i, actual: current,
+        });
+      }
+      if ((current.errors?.length ?? 0) > 0 || (page?.scriptErrors?.length ?? 0) > 0) {
+        throw Object.assign(new Error('Axure 官方 HTML 运行期间捕获到 JS 运行错误。'), {
+          code: 'E_VERIFY_RUNTIME_ERROR', stepIndex: i, actual: current,
+        });
+      }
+    }
+
+    result.passed = history.filter(s => s.status === 'passed').length;
+    result.final = { page: before.page, url: before.url, variables: before.variables, errors: before.errors ?? [] };
+    result.errors = [...(before.errors ?? []), ...(page?.scriptErrors ?? []).map(e => ({ message: e.text }))];
+    result.verification.behaviorVerified = steps.some(s => Object.keys(s.expect ?? {}).length > 0) || (steps.length > 0 && result.errors.length === 0);
+  } catch (error) {
+    result.status = 'failed';
+    result.passed = history.filter(s => s.status === 'passed').length;
+    const index = error.stepIndex ?? history.at(-1)?.index ?? null;
+    const step = index !== null ? steps[index] : null;
+    if (history.at(-1)?.status === 'running') history.at(-1).status = 'failed';
+    const observed = error.actual;
+    result.diagnostics = [{
+      code: error.code ?? 'E_VERIFY_BROWSER',
+      message: error.message,
+      stepIndex: index,
+      target: step?.target ?? null,
+      expected: step?.expect ?? null,
+      failures: history.at(-1)?.failures ?? null,
+      actual: observed ? {
+        page: observed.page,
+        variables: observed.variables,
+        widgets: (observed.widgets ?? []).slice(0, 12).map(w => ({
+          name: w.name, text: w.text, visible: w.visible, panelState: w.panelState, x: w.x, y: w.y,
+        })),
+        errors: observed.errors,
+      } : null,
+      nextAction: '对照 actual 中的真实面板状态、坐标与变量，调整 RP/1 交互或 bounds/expression 后重新生成并验证。',
+    }];
+  } finally {
+    if (page && (screenshotPath || input.includeImage)) {
+      try {
+        const png = await page.screenshot({ format: 'png' });
+        if (screenshotPath) {
+          mkdirSync(dirname(screenshotPath), { recursive: true });
+          writeFileSync(screenshotPath, png, { flag: 'wx' });
+          result.screenshot = screenshotPath;
+        }
+        if (input.includeImage) {
+          result.previewImage = 'attached';
+          result.mcpImages = [{ mimeType: 'image/png', data: png.toString('base64') }];
+        }
+      } catch (err) {
+        result.screenshotError = err.message;
+      }
+    }
+    try { await browser?.close(); } catch {}
+    try { server.close(); server.closeAllConnections?.(); } catch {}
+    if (tempStageDir) rmSync(tempStageDir, { recursive: true, force: true });
+  }
+  return result;
 }
 
 // Called by ego-browser nodejs in an existing, agent-owned TaskSpace. Browser

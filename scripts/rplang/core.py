@@ -294,6 +294,11 @@ PANEL_GESTURES = {
 PANEL_MODES = ("next", "previous", "current")
 PANEL_ANIMATIONS = ("none", "fade", "slideLeft", "slideRight", "slideUp", "slideDown")
 DRAG_MODES = ("drag", "drag-x", "drag-y", "locationBeforeDrag")
+MOVE_MODES = ("drag", "drag-x", "drag-y", "locationBeforeDrag", "location", "delta", "withThis")
+MOVE_EASINGS = ("none", "swing", "linear", "easeInCubic", "easeOutCubic", "easeInSine", "easeOutSine", "easeInOutSine", "easeInQuad", "easeOutQuad", "easeInOutQuad", "easeInOutCubic")
+WIDGET_GEOM_ACCESSORS = ("x", "y", "left", "right", "top", "bottom", "width", "height")
+BOUND_SIDES = ("left", "right", "top", "bottom")
+BOUND_OPS = (">", "<", ">=", "<=")
 
 EVENTS = {**PANEL_GESTURES,"click": "OnClick", "change": "OnTextChange", "load": "OnLoad",
           "mouseover": "OnMouseOver", "mouseout": "OnMouseOut",
@@ -304,7 +309,7 @@ ACTION_PROPS = {
     "set-variable": {"variable", "value"},
     "set-panel-state": {"target", "state", "mode", "loop", "repeatInterval", "repeatSkipFirst",
                         "enterAnimation", "enterDuration", "exitAnimation", "exitDuration"},
-    "move": {"target", "mode"},
+    "move": {"target", "mode", "x", "y", "duration", "easing", "bounds"},
     "show": {"target"}, "hide": {"target"}, "toggle": {"target"},
     "enable": {"target"}, "disable": {"target"}, "focus": {"target"},
     "link": {"page"}, "wait": {"ms"},
@@ -423,7 +428,7 @@ DINGBAT_SAFE_MAP = str.maketrans({
 INLINE_EXPR_HINT_RE = re.compile(
     r"(\$[A-Za-z_]|@[A-Za-z_]|(?<![A-Za-z0-9_])(item|row|caller|var|widget|param)\.[A-Za-z_]"
     r"|==|!=|>=|<=|&&|\|\||[><+\-*/!]"
-    r"|\b(not|number|length|text|lower|upper|concat)\s*\()"
+    r"|\b(not|number|length|text|lower|upper|concat|isOver|isNotOver)\s*\()"
 )
 TOKEN_RE = re.compile(
     r"""\s*(?:"""
