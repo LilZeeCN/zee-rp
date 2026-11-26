@@ -552,18 +552,26 @@ export const studioHandlers = {
         }],
       };
     }
+    const resolveRelativeToWork = !((args.url || args.port) && !args.cwd && !args.projectDir);
     const workDir = resolveWorkDir(args.cwd);
     const normalizedArgs = args.projectDir
       ? { ...args, projectDir: isAbsolute(args.projectDir) ? resolve(args.projectDir) : resolve(workDir, args.projectDir) }
       : args;
     const outputWorkDir = resolveWorkDir(args.cwd ?? normalizedArgs.projectDir);
-    const resolveOut = p => (typeof p === 'string' && p.trim() ? (isAbsolute(p) ? resolve(p) : resolve(outputWorkDir, p)) : p);
+    const resolveOut = p => {
+      if (typeof p !== 'string' || !p.trim()) return p;
+      if (isAbsolute(p)) return resolve(p);
+      return resolveRelativeToWork ? resolve(outputWorkDir, p) : p;
+    };
+    const guardOut = p => {
+      if (typeof p === 'string' && p.trim() && (isAbsolute(p) || resolveRelativeToWork)) assertWritable(p);
+    };
     if (format === 'rp') {
       const baseUrl = await resolveServerUrl(normalizedArgs);
       const outRpPath = resolveOut(args.outRpPath || args.output || null);
       const outReportPath = resolveOut(args.outReportPath || null);
-      if (outRpPath) assertWritable(outRpPath);
-      if (outReportPath) assertWritable(outReportPath);
+      guardOut(outRpPath);
+      guardOut(outReportPath);
       const expRes = await callServerJson(baseUrl, '/api/export-rp', 'POST', {
         outRpPath,
         outReportPath,
@@ -604,7 +612,7 @@ export const studioHandlers = {
     if (format === 'code') {
       const baseUrl = await resolveServerUrl(normalizedArgs);
       const outDir = resolveOut(args.outDir || args.output || null);
-      if (outDir) assertWritable(outDir);
+      guardOut(outDir);
       return callServerJson(baseUrl, '/api/export-code', 'POST', {
         outDir,
         ...(args.baseRevision !== undefined ? { baseRevision: args.baseRevision } : {}),
