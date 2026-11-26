@@ -692,3 +692,126 @@ test('GPT-6 retest polish: verify_prototype limits 120000ms/120steps documented,
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('v10 parity upgrades: runtime DOM text clip audit, shared Studio scenario steps in verify_prototype + artboard frame, and partial command help', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-v10-upgrades-'));
+  try {
+    const projectDir = join(dir, 'proj');
+    const opened = await studioHandlers.studio_open_project({ projectDir, domain: 'mobile', port: 0 });
+    assert.equal(opened.ok, true, JSON.stringify(opened));
+
+    // 1. Partial command help + targeted suggestions (default strict preserved, partial:true returns ok:true)
+    const strictHelp = await studioHandlers.studio_describe({ topic: 'command', names: ['setText', 'updatePage'] });
+    assert.equal(strictHelp.ok, false);
+    assert.equal(strictHelp.code, 'E_COMMAND_HELP');
+    assert.equal(strictHelp.partialSuccess, true);
+    assert.equal(strictHelp.contracts.length, 1);
+    assert(strictHelp.missing?.[0]?.suggestions?.includes('renamePage'), `missing suggestions should include renamePage: ${JSON.stringify(strictHelp.missing)}`);
+
+    const partialHelp = await studioHandlers.studio_describe({ topic: 'command', names: ['setText', 'updatePage'], partial: true });
+    assert.equal(partialHelp.ok, true, JSON.stringify(partialHelp));
+    assert.equal(partialHelp.partial, true);
+    assert.equal(partialHelp.contracts.length, 1);
+    assert.equal(partialHelp.missing[0].requested, 'updatePage');
+
+    // 2. Runtime DOM text clipping audit catches multi-state text clip on narrow label and passes after widening
+    const tx1 = await studioHandlers.studio_command({
+      projectDir,
+      pageId: 'home',
+      baseRevision: opened.appliedRevision,
+      idempotencyKey: 'v10-clip-1',
+      commands: [
+        {
+          type: 'addNode',
+          parentId: 'home_screen',
+          node: { id: 'word', type: 'label', x: 24, y: 120, w: 180, h: 48, fontSize: 32, text: 'abandon', color: '#0F172A' },
+        },
+        {
+          type: 'addNode',
+          parentId: 'home_screen',
+          node: {
+            id: 'next_btn',
+            type: 'button',
+            x: 24,
+            y: 220,
+            w: 160,
+            h: 48,
+            text: '下一词',
+            on: { click: [{ type: 'set-text', target: 'word', text: 'counterrevolutionary' }] },
+          },
+        },
+      ],
+    });
+    assert.equal(tx1.ok, true, JSON.stringify(tx1));
+
+    const sharedSteps = [
+      { action: 'expect', expect: { text: { word: 'abandon' }, visible: { word: true } } },
+      { action: 'click', target: 'next_btn', expect: { text: { word: { includes: 'counter' } }, visible: { next_btn: true } } },
+    ];
+
+    if (!chromeSkipReason()) {
+      const scenWarn = await studioHandlers.studio_scenario({
+        projectDir,
+        startPageId: 'home',
+        hitTest: true,
+        steps: sharedSteps,
+      });
+      assert.equal(scenWarn.ok, true, JSON.stringify(scenWarn));
+      assert((scenWarn.runtimeLayoutAudit?.issueCount ?? 0) > 0, 'narrow word box must trigger runtimeLayoutAudit warning');
+      assert(scenWarn.runtimeLayoutAudit.issues.some(i => i.code === 'W_RUNTIME_TEXT_CLIP' && i.nodeId === 'word'));
+
+      const scenBlocked = await studioHandlers.studio_scenario({
+        projectDir,
+        startPageId: 'home',
+        hitTest: true,
+        failOnLayoutIssue: true,
+        steps: sharedSteps,
+      });
+      assert.equal(scenBlocked.ok, false);
+      assert.equal(scenBlocked.code, 'E_SCENARIO_LAYOUT_CLIP');
+
+      // Widen #word so counterrevolutionary renders cleanly without clipping
+      const tx2 = await studioHandlers.studio_command({
+        projectDir,
+        pageId: 'home',
+        baseRevision: tx1.appliedRevision,
+        idempotencyKey: 'v10-widen-word',
+        commands: [{ type: 'setProperties', nodeId: 'word', properties: { w: 354, fontSize: 28 } }],
+      });
+      assert.equal(tx2.ok, true, JSON.stringify(tx2));
+
+      const scenClean = await studioHandlers.studio_scenario({
+        projectDir,
+        startPageId: 'home',
+        hitTest: true,
+        failOnLayoutIssue: true,
+        steps: sharedSteps,
+      });
+      assert.equal(scenClean.ok, true, JSON.stringify(scenClean));
+      assert.equal(scenClean.runtimeLayoutAudit.issueCount, 0);
+
+      // 3. Shared Studio steps + frame:"artboard" work directly in verify_prototype(engine:"studio-html")
+      if (!nativeTemplateSkipReason()) {
+        const rpPath = join(dir, 'shared.rp');
+        const expRp = await studioHandlers.studio_export({ projectDir, format: 'rp', outRpPath: rpPath });
+        assert.equal(expRp.ok, true, JSON.stringify(expRp));
+
+        const shotPath = join(dir, 'artboard-verify.png');
+        const verified = await mcpToolMap.verify_prototype({
+          rp: rpPath,
+          engine: 'studio-html',
+          frame: 'artboard',
+          screenshot: shotPath,
+          steps: sharedSteps,
+        });
+        assert.equal(verified.status, 'completed', JSON.stringify(verified));
+        assert.equal(verified.frame, 'artboard');
+        assert.equal(verified.verification.behaviorVerified, true);
+        assert.ok(existsSync(shotPath));
+      }
+    }
+  } finally {
+    await closeInProcessStudioServer();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

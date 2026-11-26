@@ -1498,9 +1498,25 @@ export class StudioServer {
             }
             // 指针层通过后重建语义会话（指针重放已重置/推进过共享会话）并照常执行语义层
             freshSemanticSession();
+            if (body.failOnLayoutIssue === true && (browser.runtimeLayoutAudit?.issueCount ?? 0) > 0) {
+              const topMsgs = browser.runtimeLayoutAudit.issues.slice(0, 3).map(i => i.message).join('；');
+              sendJson(res, 200, {
+                ok: false,
+                code: 'E_SCENARIO_LAYOUT_CLIP',
+                message: `真实浏览器重放检测到 ${browser.runtimeLayoutAudit.issueCount} 处运行态文本裁切或越板问题：${topMsgs}`,
+                runtimeLayoutAudit: browser.runtimeLayoutAudit,
+                hitTest: { layer: 'browser', passed: true, verification: 'real-browser-pointer', assertionCount: browser.assertionCount },
+                designContentHash: this.store.doc.contentHash,
+              });
+              return;
+            }
             const result = this.runtimeSession.runScenario(body.steps || []);
+            const layoutWarnings = (browser.runtimeLayoutAudit?.issues || []).map(iss => ({ severity: 'warning', ...iss }));
+            const mergedWarnings = [...(result.warnings || []), ...layoutWarnings];
             sendJson(res, 200, {
               ...result,
+              ...(mergedWarnings.length ? { warnings: mergedWarnings } : {}),
+              runtimeLayoutAudit: browser.runtimeLayoutAudit,
               hitTest: { layer: 'browser', passed: true, verification: 'real-browser-pointer', assertionCount: browser.assertionCount },
               designContentHash: this.store.doc.contentHash,
             });

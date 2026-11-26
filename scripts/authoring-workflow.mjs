@@ -44,7 +44,7 @@ export function withTempRp1File(rp1Text, fn) {
 export const verifyStepItemsSchema = {
   type: 'object',
   properties: {
-    action: { type: 'string', enum: ['click', 'fill', 'drag', 'swipe', 'wait', 'advanceTime', 'navigate', 'expect'] },
+    action: { type: 'string', enum: ['click', 'fill', 'input', 'drag', 'swipe', 'wait', 'advanceTime', 'navigate', 'expect', 'assert'] },
     target: { type: 'string', minLength: 1 },
     value: { type: 'string' },
     rowIndex: { type: 'integer', minimum: 0 },
@@ -59,8 +59,9 @@ export const verifyStepItemsSchema = {
     expect: {
       type: 'object',
       properties: {
-        text: { type: 'string' }, value: { type: 'string' }, visible: { type: 'boolean' },
-        enabled: { type: 'boolean' }, checked: { type: 'boolean' }, panelState: { type: 'string' },
+        text: { anyOf: [{ type: 'string' }, { type: 'object' }] }, value: { type: 'string' }, visible: { anyOf: [{ type: 'boolean' }, { type: 'object' }] },
+        enabled: { type: 'boolean' }, checked: { anyOf: [{ type: 'boolean' }, { type: 'object' }] }, panelState: { anyOf: [{ type: 'string' }, { type: 'object' }] },
+        variables: { type: 'object' },
         width: { type: 'number', minimum: 0 }, height: { type: 'number', minimum: 0 },
         x: { type: 'number' }, y: { type: 'number' }, left: { type: 'number' }, right: { type: 'number' },
         top: { type: 'number' }, bottom: { type: 'number' }, dx: { type: 'number' }, dy: { type: 'number' },
@@ -437,11 +438,12 @@ export function authoringTools({ generate, sync, listTools }) {
         projectDir: { type: 'string', minLength: 1, description: 'cwd 的别名。' },
       }, required: ['rp'], additionalProperties: false },
       handler: exportPrototype, readOnly: false },
-    { name: 'verify_prototype', description: '零外部依赖（复用内置无头 Chrome CDP 与本地环回 HTTP）验证原型交互行为：支持 click / fill / drag / swipe / wait / advanceTime(虚拟时钟秒推定时器) / navigate / expect 与双引擎（auto 有本机 Axure 时自动导出官方 HTML、无 Axure 平台/环境自动降级或显式 engine="studio-html" 走 Studio 离线 HTML），可读取源码内联 verify: 块并生成 screenshot/storyboard/includeStoryboard 交互时序拼图回看。',
+    { name: 'verify_prototype', description: '零外部依赖（复用内置无头 Chrome CDP 与本地环回 HTTP）验证原型交互行为：支持 click / fill / drag / swipe / wait / advanceTime(虚拟时钟秒推定时器) / navigate / expect 与双引擎（auto 有本机 Axure 时自动导出官方 HTML、无 Axure 平台/环境自动降级或显式 engine="studio-html" 走 Studio 离线 HTML）；steps 同时原生兼容 studio_scenario 剧本格式（无需重写即可跨引擎复用），可选 frame:"artboard" 裁剪主画板截出干净截图与 storyboard 拼图。',
       inputSchema: { type: 'object', properties: {
         rp: { type: 'string', minLength: 1, description: '现有 .rp 路径；若未传 html 将自动导出官方 HTML 或（无 Axure 时）Studio HTML。' },
         html: { type: 'string', minLength: 1, description: '已导出的官方 HTML 目录（含 start.html）或 Studio 导出 HTML 目录（含 index.html）。' },
         engine: { type: 'string', enum: ['auto', 'official', 'studio-html'], description: '验证引擎：auto（默认，有本机 Axure 走官方导出，否则自动切 Studio 离线 HTML）、official（仅官方导出）、studio-html（直接走 Studio 离线 HTML，秒级运行且跨平台可用）。' },
+        frame: { type: 'string', enum: ['viewport', 'artboard'], description: '截图取景模式：viewport（默认，按视口整帧截取）或 artboard（自动裁剪至页面主画板/内容包围盒，避开 Axure 播放器工具栏与外框干扰）。' },
         source: { type: 'string', minLength: 1, description: '可选 RP/1 源码路径；省略时自动读取 .rp.baseline.json 或按页面 [data-label] 匹配（若含 verify: 块且未传 steps 时自动载入）。' },
         page: { type: 'string', minLength: 1, description: '可选起始页面 ID 或名称。' },
         cwd: { type: 'string', minLength: 1 },

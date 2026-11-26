@@ -288,6 +288,116 @@ export function clickObservedAxure({ url, id }) {
   return false;
 }
 
+const normVerifyWs = value => String(value ?? '').replace(/[ \t]+/g, ' ').trim();
+
+function isPlainObject(v) {
+  return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
+}
+
+function normalizeVerifySteps(rawSteps = []) {
+  const out = [];
+  for (const step of rawSteps || []) {
+    if (!step || typeof step !== 'object') continue;
+    const rawAction = step.action === 'assert' ? 'expect' : step.action === 'input' ? 'fill' : (step.action || 'expect');
+    const exp = step.expect;
+    const hasStudioExpectMaps = isPlainObject(exp) && (
+      isPlainObject(exp.visible)
+      || isPlainObject(exp.checked)
+      || isPlainObject(exp.panelState)
+      || isPlainObject(exp.variables)
+      || (isPlainObject(exp.text) && !Object.hasOwn(exp.text, 'includes') && !Object.hasOwn(exp.text, 'contains'))
+    );
+    if (!hasStudioExpectMaps) {
+      out.push(rawAction === step.action ? step : { ...step, action: rawAction });
+      continue;
+    }
+    if (rawAction !== 'expect') {
+      const { expect: _dropped, ...actionOnly } = step;
+      out.push({ ...actionOnly, action: rawAction });
+    }
+    if ('page' in exp) {
+      out.push({ action: 'expect', expect: { page: exp.page } });
+    }
+    if (isPlainObject(exp.variables)) {
+      for (const [variable, equals] of Object.entries(exp.variables)) {
+        out.push({ action: 'expect', expect: { variable, equals } });
+      }
+    }
+    if (isPlainObject(exp.visible)) {
+      for (const [target, visible] of Object.entries(exp.visible)) {
+        out.push({ action: 'expect', target, expect: { visible } });
+      }
+    }
+    if (isPlainObject(exp.text)) {
+      for (const [target, text] of Object.entries(exp.text)) {
+        out.push({ action: 'expect', target, expect: { text } });
+      }
+    }
+    if (isPlainObject(exp.checked)) {
+      for (const [target, checked] of Object.entries(exp.checked)) {
+        out.push({ action: 'expect', target, expect: { checked } });
+      }
+    }
+    if (isPlainObject(exp.panelState)) {
+      for (const [target, panelState] of Object.entries(exp.panelState)) {
+        out.push({ action: 'expect', target, expect: { panelState } });
+      }
+    }
+  }
+  return out;
+}
+
+async function captureFramedScreenshot(page, { frame = 'viewport', activeEngine, canvasW = null, canvasH = null, vp }) {
+  if (frame !== 'artboard') return page.screenshot({ format: 'png' });
+  try {
+    const clip = await page.evaluate(`(() => {
+      const vw = window.innerWidth || ${Math.round(vp?.width || 1280)};
+      const vh = window.innerHeight || ${Math.round(vp?.height || 900)};
+      const cw = ${Number.isFinite(canvasW) && canvasW > 0 ? Math.round(canvasW) : 'null'};
+      const ch = ${Number.isFinite(canvasH) && canvasH > 0 ? Math.round(canvasH) : 'null'};
+      if (${JSON.stringify(activeEngine)} === 'studio-html') {
+        const el = document.querySelector('#studio-export-board') || document.querySelector('#screen-root') || document.querySelector('.artboard-outer');
+        if (el) {
+          const r = el.getBoundingClientRect();
+          if (r.width >= 32 && r.height >= 32) {
+            const x = Math.max(0, Math.floor(r.left));
+            const y = Math.max(0, Math.floor(r.top));
+            return { x, y, width: Math.min(vw - x, Math.ceil(r.width)), height: Math.min(vh - y, Math.ceil(r.height)) };
+          }
+        }
+      } else {
+        const mainFrame = document.querySelector('#mainFrame') || document.querySelector('iframe');
+        const frameRect = mainFrame ? mainFrame.getBoundingClientRect() : { left: 0, top: 0, width: vw, height: vh };
+        const doc = mainFrame?.contentDocument || document;
+        const base = doc.getElementById('base') || doc.body;
+        const items = [...doc.querySelectorAll('[data-label]')].map(el => el.getBoundingClientRect()).filter(r => r.width > 0 && r.height > 0);
+        let x = Math.max(0, Math.floor(frameRect.left));
+        let y = Math.max(0, Math.floor(frameRect.top));
+        if (items.length && !cw) {
+          const minL = Math.min(...items.map(r => r.left));
+          const minT = Math.min(...items.map(r => r.top));
+          const maxR = Math.max(...items.map(r => r.right));
+          const maxB = Math.max(...items.map(r => r.bottom));
+          const w = Math.min(vw - x, Math.ceil(maxR - Math.max(0, minL)));
+          const h = Math.min(vh - y, Math.ceil(maxB - Math.max(0, minT)));
+          x = Math.max(0, Math.floor(frameRect.left + Math.max(0, minL)));
+          y = Math.max(0, Math.floor(frameRect.top + Math.max(0, minT)));
+          if (w >= 32 && h >= 32) return { x, y, width: w, height: h };
+        }
+        const bRect = base ? base.getBoundingClientRect() : frameRect;
+        const w = Math.min(vw - x, Math.round(cw || bRect.width || frameRect.width));
+        const h = Math.min(vh - y, Math.round(ch || bRect.height || frameRect.height));
+        if (w >= 32 && h >= 32) return { x, y, width: w, height: h };
+      }
+      return null;
+    })()`);
+    if (clip && clip.width >= 32 && clip.height >= 32) {
+      return await page.screenshot({ format: 'png', clip: { ...clip, scale: 1 } });
+    }
+  } catch {}
+  return page.screenshot({ format: 'png' });
+}
+
 export function previewMismatch(step, observation, widget, map, baselineWidget = null) {
   const expected = step.expect ?? {}, failures = [];
   const tol = typeof expected.tolerance === 'number' && Number.isFinite(expected.tolerance) ? expected.tolerance : 1.5;
@@ -297,7 +407,16 @@ export function previewMismatch(step, observation, widget, map, baselineWidget =
   }
   if ('variable' in expected && (!Object.hasOwn(observation.variables, expected.variable) || String(observation.variables[expected.variable]) !== String(expected.equals)))
     failures.push({ field: 'variable:' + expected.variable, expected: expected.equals, actual: observation.variables[expected.variable] ?? null });
-  for (const field of ['text', 'value', 'visible', 'enabled', 'checked', 'panelState']) {
+  if ('text' in expected) {
+    const actualText = String(widget?.text ?? '');
+    const expText = expected.text;
+    const needle = isPlainObject(expText) ? (expText.includes ?? expText.contains) : null;
+    const textMatched = needle !== null && needle !== undefined
+      ? (actualText.includes(String(needle)) || normVerifyWs(actualText).includes(normVerifyWs(needle)))
+      : (actualText.trim() === String(expText).trim() || normVerifyWs(actualText) === normVerifyWs(expText));
+    if (!widget || !textMatched) failures.push({ field: 'text', expected: expText, actual: widget?.text ?? null });
+  }
+  for (const field of ['value', 'visible', 'enabled', 'checked', 'panelState']) {
     if (field in expected && widget?.[field] !== expected[field]) {
       failures.push({ field, expected: expected[field], actual: widget?.[field] ?? null });
     }
@@ -535,7 +654,9 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
     findChromeExecutable();
   }
   const map = buildVerificationMap({ source: sourcePath, rp: rpPath, runWorkflow });
-  const steps = (Array.isArray(input.steps) && input.steps.length > 0) ? input.steps : (map?.verifySteps ?? []);
+  const frameMode = input.frame === 'artboard' ? 'artboard' : 'viewport';
+  const rawSteps = (Array.isArray(input.steps) && input.steps.length > 0) ? input.steps : (map?.verifySteps ?? []);
+  const steps = normalizeVerifySteps(rawSteps);
   const useVirtualClock = Boolean(input.virtualClock || steps.some(s => s.action === 'advanceTime'));
   const wantStoryboard = Boolean(storyboardPath || input.includeStoryboard);
   const storyboardFrames = [];
@@ -588,6 +709,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
   const result = {
     status: 'completed',
     engine: activeEngine,
+    frame: frameMode,
     evidence: activeEngine === 'official' ? 'axure-official-html-cdp' : 'studio-html-cdp',
     verification: activeEngine === 'official'
       ? { officialHtmlExported, browserLoaded: false, behaviorVerified: false }
@@ -648,7 +770,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
     result.verification.browserLoaded = true;
     result.initial = before;
     if (wantStoryboard) {
-      storyboardFrames.push({ label: '#0 Initial', png: await page.screenshot({ format: 'png' }), failed: false });
+      storyboardFrames.push({ label: '#0 Initial', png: await captureFramedScreenshot(page, { frame: frameMode, activeEngine, canvasW, canvasH, vp }), failed: false });
     }
 
     for (let i = 0; i < steps.length; i++) {
@@ -826,7 +948,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
         const tag = step.target ? `${step.action} ${step.target}` : `${step.action} ${step.ms ?? step.page ?? ''}`.trim();
         storyboardFrames.push({
           label: `#${i + 1} ${tag} ${failures.length ? 'FAIL' : 'OK'}`,
-          png: await page.screenshot({ format: 'png' }),
+          png: await captureFramedScreenshot(page, { frame: frameMode, activeEngine, canvasW: Number(map?.pages?.[0]?.canvas?.[0] ?? map?.pages?.[0]?.canvas?.w), canvasH: Number(map?.pages?.[0]?.canvas?.[1] ?? map?.pages?.[0]?.canvas?.h), vp }),
           failed: Boolean(failures.length),
         });
       }
@@ -882,7 +1004,13 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
   } finally {
     if (page && (screenshotPath || input.includeImage)) {
       try {
-        const png = await page.screenshot({ format: 'png' });
+        const png = await captureFramedScreenshot(page, {
+          frame: frameMode,
+          activeEngine,
+          canvasW: Number(map?.pages?.[0]?.canvas?.[0] ?? map?.pages?.[0]?.canvas?.w),
+          canvasH: Number(map?.pages?.[0]?.canvas?.[1] ?? map?.pages?.[0]?.canvas?.h),
+          vp,
+        });
         if (screenshotPath) {
           mkdirSync(dirname(screenshotPath), { recursive: true });
           writeFileSync(screenshotPath, png, { flag: 'wx' });

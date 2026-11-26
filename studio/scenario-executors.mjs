@@ -217,10 +217,94 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
     if (!native) return page.evaluate(`(() => {
       const state = window.__STUDIO_APP__.state;
       const rt = state.runtimeState;
-      const widgets = [...document.querySelectorAll('#screen-root .studio-node')].map(el => ({
-        name: el.dataset.nodeId, scopedId: el.dataset.scopedId, text: el.matches('input,textarea,select') ? el.value : el.innerText,
-        visible: el.getBoundingClientRect().width > 0 && el.getBoundingClientRect().height > 0 && getComputedStyle(el).visibility !== 'hidden'
-      }));
+      const screenEl = document.querySelector('#screen-root');
+      const boardRect = screenEl ? screenEl.getBoundingClientRect() : null;
+      const allEls = [...document.querySelectorAll('#screen-root .studio-node')];
+      const scrollScopes = new Set();
+      const layoutIssues = [];
+      const widgets = [];
+      for (const el of allEls) {
+        const rect = el.getBoundingClientRect();
+        const cs = getComputedStyle(el);
+        const visible = rect.width > 0 && rect.height > 0 && cs.visibility !== 'hidden' && cs.display !== 'none';
+        const nodeId = el.dataset.nodeId;
+        const scopedId = el.dataset.scopedId;
+        const nodeType = el.dataset.nodeType || '';
+        const parentEl = el.parentElement?.closest?.('.studio-node');
+        const parentScrolled = parentEl && scrollScopes.has(parentEl.dataset.scopedId);
+        const selfScrolled = ['auto', 'scroll'].includes(cs.overflowX) || ['auto', 'scroll'].includes(cs.overflowY);
+        if (parentScrolled || selfScrolled) scrollScopes.add(scopedId);
+        widgets.push({
+          name: nodeId,
+          scopedId,
+          text: el.matches('input,textarea,select') ? el.value : el.innerText,
+          visible,
+        });
+        if (!visible) continue;
+        if (['label', 'paragraph', 'button', 'badge'].includes(nodeType) && (el.innerText || '').trim()) {
+          const hScrollOver = el.scrollWidth - el.clientWidth;
+          const vScrollOver = el.scrollHeight - el.clientHeight;
+          let hRangeOver = 0;
+          let vRangeOver = 0;
+          let reqW = el.scrollWidth;
+          let reqH = el.scrollHeight;
+          try {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const rRect = range.getBoundingClientRect();
+            hRangeOver = rRect.right - rect.right;
+            vRangeOver = rRect.bottom - rect.bottom;
+            reqW = Math.max(reqW, rRect.width || 0);
+            reqH = Math.max(reqH, rRect.height || 0);
+          } catch {}
+          const horizOver = Math.max(hScrollOver, hRangeOver);
+          const vertOver = Math.max(vScrollOver, vRangeOver);
+          if (horizOver > 2 || vertOver > 2) {
+            const dir = horizOver >= vertOver ? 'horizontal' : 'vertical';
+            const px = Math.round(Math.max(horizOver, vertOver));
+            const aw = Math.round(rect.width);
+            const ah = Math.round(rect.height);
+            const rw = Math.round(Math.max(rect.width, reqW));
+            const rh = Math.round(Math.max(rect.height, reqH));
+            layoutIssues.push({
+              code: 'W_RUNTIME_TEXT_CLIP',
+              nodeId,
+              scopedId,
+              nodeType,
+              text: (el.innerText || '').trim().slice(0, 80),
+              direction: dir,
+              overflowPx: px,
+              actualSize: { w: aw, h: ah },
+              requiredSize: { w: rw, h: rh },
+              message: '运行态文本节点 "' + nodeId + '" 发生' + (dir === 'horizontal' ? '水平' : '垂直') + '裁切（超出 ' + px + 'px，容器 ' + aw + '×' + ah + '，实需 ' + rw + '×' + rh + '）',
+            });
+          }
+        }
+        if (boardRect && !parentScrolled && nodeType !== 'phone-shell' && el.parentElement && el.parentElement.id !== 'screen-root') {
+          const overL = rect.left < boardRect.left - 2 ? boardRect.left - rect.left : 0;
+          const overT = rect.top < boardRect.top - 2 ? boardRect.top - rect.top : 0;
+          const overR = rect.right > boardRect.right + 2 ? rect.right - boardRect.right : 0;
+          const overB = rect.bottom > boardRect.bottom + 2 ? rect.bottom - boardRect.bottom : 0;
+          const maxOver = Math.max(overL, overT, overR, overB);
+          if (maxOver > 0) {
+            layoutIssues.push({
+              code: 'W_RUNTIME_BOARD_OVERFLOW',
+              nodeId,
+              scopedId,
+              nodeType,
+              overflowPx: Math.round(maxOver),
+              bounds: {
+                x: Math.round(rect.left - boardRect.left),
+                y: Math.round(rect.top - boardRect.top),
+                w: Math.round(rect.width),
+                h: Math.round(rect.height),
+              },
+              board: { w: Math.round(boardRect.width), h: Math.round(boardRect.height) },
+              message: '运行态节点 "' + nodeId + '" 越出画板边界 ' + Math.round(maxOver) + 'px',
+            });
+          }
+        }
+      }
       return {
         ready: Boolean(rt),
         page: rt?.currentPageId,
@@ -232,6 +316,7 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
         datasets: rt?.datasets,
         nodes: rt?.activePageScene?.nodes,
         widgets,
+        layoutIssues,
       };
     })()`);
     const labels = await page.evaluate(`(() => {
@@ -480,7 +565,20 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
     }
     currentStepInfo = null;
     const assertions = history.filter(step => step.expected && Object.keys(step.expected).length);
-    return { passed: history.length === steps.length && assertions.length > 0 && history.every(s => s.passed), status: 'executed', layer, assertionCount, history };
+    const runtimeLayoutIssues = history.flatMap(h => (h.actual?.layoutIssues || []).map(iss => ({
+      stepIndex: h.stepIndex,
+      action: h.action,
+      target: h.target ?? null,
+      ...iss,
+    })));
+    const runtimeLayoutAudit = {
+      checked: !native,
+      issueCount: runtimeLayoutIssues.length,
+      clippedNodes: [...new Set(runtimeLayoutIssues.filter(i => i.code === 'W_RUNTIME_TEXT_CLIP').map(i => i.scopedId || i.nodeId))],
+      overflowNodes: [...new Set(runtimeLayoutIssues.filter(i => i.code === 'W_RUNTIME_BOARD_OVERFLOW').map(i => i.scopedId || i.nodeId))],
+      issues: runtimeLayoutIssues,
+    };
+    return { passed: history.length === steps.length && assertions.length > 0 && history.every(s => s.passed), status: 'executed', layer, assertionCount, runtimeLayoutAudit, history };
   } catch (error) {
     const stepPrefix = currentStepInfo
       ? `[步骤 ${currentStepInfo.stepIndex}/${currentStepInfo.totalSteps}: ${currentStepInfo.action}${currentStepInfo.target ? ` ${currentStepInfo.target}` : ''}] `

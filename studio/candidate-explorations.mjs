@@ -114,7 +114,17 @@ export async function previewCandidates(studio, { pageId, baseRevision, candidat
         const browser = await runInteractionSteps(page, sandbox.store.doc, state.steps, { layer: 'browser', startPageId: pageId });
         if (!browser.passed) { writeFileSync(join(projectDir, `state-${index}-browser.json`), JSON.stringify(browser)); result.frames.push({ id: state.id, status: 'failed', layer: 'browser', code: browser.code, detailsPath: join(projectDir, `state-${index}-browser.json`) }); verified = false; continue; }
         const shot = await runtimeScreenshot(page, join(projectDir, `state-${index}.png`));
-        result.frames.push({ id: state.id, ...(state.label ? { label: state.label } : {}), status: 'passed', ...shot, assertionCount: browser.assertionCount, verification: 'real-browser-pointer' });
+        const layoutIssueCount = browser.runtimeLayoutAudit?.issueCount ?? 0;
+        result.frames.push({
+          id: state.id,
+          ...(state.label ? { label: state.label } : {}),
+          status: 'passed',
+          ...shot,
+          assertionCount: browser.assertionCount,
+          verification: 'real-browser-pointer',
+          layoutIssueCount,
+          ...(layoutIssueCount ? { layoutIssues: browser.runtimeLayoutAudit.issues } : {}),
+        });
       }
       result.projectDir = projectDir;
       result.status = verified ? 'rendered' : 'failed';

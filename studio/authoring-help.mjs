@@ -40,7 +40,7 @@ const INTERACTION_GUIDE = {
     ],
   },
 };
-const fail = (code, message, candidates) => { throw Object.assign(new Error(message), { code, candidates }); };
+const fail = (code, message, candidates, extra = {}) => { throw Object.assign(new Error(message), { code, candidates, ...extra }); };
 const NODE_DESCRIBE_ALIASES = {
   textarea: 'input',
   select: 'combobox',
@@ -60,7 +60,33 @@ const COMMAND_DESCRIBE_ALIASES = {
   'dataset-op': 'datasetOp',
 };
 
-export function describeAuthoring({ topic = 'workflow', name = null, names = null, intent = 'learning', platform = 'mobile', guideId = null,fields=null,operation='edit',surface=null } = {}) {
+function suggestCommandNames(requested, limit = 4) {
+  const all = Object.keys(COMMAND_CONTRACTS);
+  const raw = String(requested || '').trim();
+  if (!raw) return all.slice(0, limit);
+  const tokens = raw.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(/[-_\s]+/).filter(t => t.length >= 2);
+  const lower = raw.toLowerCase();
+  return all
+    .map(cmd => {
+      const cmdLower = cmd.toLowerCase();
+      let score = 0;
+      if (cmdLower.includes(lower) || lower.includes(cmdLower)) score += 5;
+      if (cmdLower.startsWith(lower.slice(0, 4))) score += 2;
+      for (const tok of tokens) {
+        if (cmdLower.includes(tok)) score += 3;
+      }
+      if (lower.includes('page') && cmdLower.includes('page')) score += 2;
+      if (lower.includes('node') && cmdLower.includes('node')) score += 2;
+      if ((lower.includes('update') || lower.includes('rename')) && (cmdLower.includes('rename') || cmdLower.includes('set') || cmdLower.includes('edit') || cmdLower.includes('resize'))) score += 1;
+      return { cmd, score };
+    })
+    .filter(item => item.score > 0)
+    .sort((a, b) => b.score - a.score || a.cmd.localeCompare(b.cmd))
+    .slice(0, limit)
+    .map(item => item.cmd);
+}
+
+export function describeAuthoring({ topic = 'workflow', name = null, names = null, partial = false, intent = 'learning', platform = 'mobile', guideId = null,fields=null,operation='edit',surface=null } = {}) {
   if((fields!==null||surface!==null||operation!=='edit')&&topic!=='node')fail('E_NODE_CAPABILITY_QUERY','fields/operation/surface只用于topic:node');
   if (topic === 'workflow') return { ok: true, entry: AUTHORING_ENTRY,
     interactionGuide: structuredClone(INTERACTION_GUIDE),
@@ -78,11 +104,34 @@ export function describeAuthoring({ topic = 'workflow', name = null, names = nul
   if (topic === 'command') {
     if (names) {
       if (name || !Array.isArray(names) || !names.length || names.length > 8) fail('E_COMMAND_HELP', 'names 需为1–8个命令名，不能与name混用', Object.keys(COMMAND_CONTRACTS));
-      return { ok: true, contracts: names.map(item => describeAuthoring({ topic, name: item })), next: '使用同一份字段定义校验，按所需命令批量发现。' };
+      const contracts = [];
+      const missing = [];
+      for (const item of names) {
+        try {
+          contracts.push(describeAuthoring({ topic, name: item }));
+        } catch (err) {
+          if (err?.code === 'E_COMMAND_HELP') {
+            missing.push({ requested: item, suggestions: suggestCommandNames(item) });
+          } else {
+            throw err;
+          }
+        }
+      }
+      if (!missing.length) {
+        return { ok: true, contracts, next: '使用同一份字段定义校验，按所需命令批量发现。' };
+      }
+      if (partial === true && contracts.length > 0) {
+        return { ok: true, partial: true, contracts, missing, next: '有效命令契约已返回在 contracts；未命中命令请按 missing[].suggestions 调整后再查。' };
+      }
+      const firstMissing = missing[0];
+      fail('E_COMMAND_HELP', `暂未提供 ${firstMissing.requested} 的详细参数契约（相近可用命令：${firstMissing.suggestions.join(', ') || '见 candidates'}）；其余 ${contracts.length} 个有效契约已保留在 contracts`, Object.keys(COMMAND_CONTRACTS), { missing });
     }
     if (!name) return { ok: true, groups: COMMAND_TYPES_BY_GROUP, detailedContracts: Object.keys(COMMAND_CONTRACTS), next: '传name按需读取一个精确契约，避免加载全部命令' };
     const canonicalCmd = COMMAND_CONTRACTS[name] ? name : (COMMAND_DESCRIBE_ALIASES[name] || name);
-    if (!COMMAND_CONTRACTS[canonicalCmd]) fail('E_COMMAND_HELP', `暂未提供 ${name} 的详细参数契约；常用契约见 candidates，完整命令范围见不带name的查询`, Object.keys(COMMAND_CONTRACTS));
+    if (!COMMAND_CONTRACTS[canonicalCmd]) {
+      const suggestions = suggestCommandNames(name);
+      fail('E_COMMAND_HELP', `暂未提供 ${name} 的详细参数契约；相近可用命令：${suggestions.join(', ') || '见 candidates'}，完整命令范围见不带name的查询`, Object.keys(COMMAND_CONTRACTS), { missing: [{ requested: name, suggestions }] });
+    }
     const boundary = canonicalCmd === 'booleanPathOp'
       ? '布尔运算内部先把输入贝塞尔按每段16个采样点展平求交，装配后把结果中落在同一源贝塞尔上的连续折线段还原为原生 C 段（de Casteljau 子区间控制点，形状与源曲线一致）：产物圆弧输出为 C 段而非折线，直线段保持 L；求交点位置按展平弦近似（弦距≈采样误差）。'
       : null;

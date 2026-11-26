@@ -337,8 +337,14 @@ export const studioHandlers = {
       const contracts = args.topic === 'command' && Array.isArray(args.names) ? args.names.flatMap(name => {
         try { return [describeAuthoring({ topic: 'command', name })]; } catch { return []; }
       }) : [];
-      return { ok: false, code: error.code || 'E_AUTHORING_HELP', message: error.message,
-        ...(error.candidates ? { candidates: error.candidates } : {}), ...(contracts.length ? { contracts } : {}) };
+      return {
+        ok: false,
+        code: error.code || 'E_AUTHORING_HELP',
+        message: error.message,
+        ...(error.candidates ? { candidates: error.candidates } : {}),
+        ...(contracts.length ? { contracts, partialSuccess: true } : {}),
+        ...(error.missing ? { missing: error.missing } : {}),
+      };
     }
   },
 
@@ -828,6 +834,7 @@ export const studioHandlers = {
       startPageId: args.startPageId || null,
       reset: args.reset !== false,
       ...(args.hitTest !== undefined ? { hitTest: args.hitTest === true } : {}),
+      ...(args.failOnLayoutIssue !== undefined ? { failOnLayoutIssue: args.failOnLayoutIssue === true } : {}),
       steps: args.steps || [],
     });
     const executionLayer = args.hitTest ? 'studio-semantic+real-browser-pointer' : 'studio-semantic';
@@ -1028,7 +1035,7 @@ export const studioTools = [
   {
     name: 'studio_describe', readOnly: true,
     description: '按需发现AI创作流程、RP/1、命令schema与craft指导。topic:command用name或names;fields/operation/surface仅用于topic:node。节点用name+fields查询；源码许可与真实生效验证分开登记。无需打开工程。',
-    inputSchema: { type: 'object', properties: { topic: { type: 'string', enum: ['workflow', 'rp1', 'command', 'node', 'design', 'craft'] }, name: { type: 'string' }, names: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' } }, fields: { type: 'array', minItems: 1, maxItems: 16, items: { type: 'string', minLength: 1 }, description: '仅用于 topic:"node"：指定要查询的属性名' }, operation: { enum: ['create', 'edit'], description: '仅用于 topic:"node"' }, surface: { enum: ['canvas', 'runtime', 'native', 'full-rp1'], description: '仅用于 topic:"node"' }, intent: { type: 'string', enum: ['editorial', 'task', 'learning'] }, platform: { type: 'string', enum: ['mobile', 'web'] }, guideId: { type: 'string' } }, additionalProperties: false },
+    inputSchema: { type: 'object', properties: { topic: { type: 'string', enum: ['workflow', 'rp1', 'command', 'node', 'design', 'craft'] }, name: { type: 'string' }, names: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' } }, partial: { type: 'boolean', description: '仅 topic:"command" + names 批量查询生效：true 时允许部分成功（ok:true，返回已命中的 contracts 与 missing[].suggestions）；默认 false 仍对未知命令返回 E_COMMAND_HELP 并附带有效 contracts 与 missing 精准建议。' }, fields: { type: 'array', minItems: 1, maxItems: 16, items: { type: 'string', minLength: 1 }, description: '仅用于 topic:"node"：指定要查询的属性名' }, operation: { enum: ['create', 'edit'], description: '仅用于 topic:"node"' }, surface: { enum: ['canvas', 'runtime', 'native', 'full-rp1'], description: '仅用于 topic:"node"' }, intent: { type: 'string', enum: ['editorial', 'task', 'learning'] }, platform: { type: 'string', enum: ['mobile', 'web'] }, guideId: { type: 'string' } }, additionalProperties: false },
     handler: studioHandlers.studio_describe,
   },
   {
@@ -1252,7 +1259,7 @@ export const studioTools = [
   },
   {
     name: 'studio_scenario',
-    description: '在隔离的交互运行态会话（StudioRuntimeSession）中执行业务交互剧本并断言变量、面板状态、文本、显隐与数据集，不污染设计态文档。action:"expect" 与 action:"assert" 语义完全等价（均需传 expect 对象）；click/input 等步骤也可直接带 expect。expect.text 支持精确全文或 {includes:"子串"}（兼容 {contains:"子串"}），且仅读取文本节点自身文字，容器不聚合子节点文字；写错不存在的 nodeId 会附带相近 ID 提示或 W_ASSERT_UNKNOWN_TARGET 告警。默认走语义执行层，不做遮挡/hitTest校验：click只要求目标在当前运行态可见，通过≠真实可点。hitTest:true 先用真实浏览器指针重放校验每个点击/输入与跨页跳转（支持宽屏桌面画板自动避让编辑器浮层、click 触发 link 跨页与显式 navigate 步骤；遮挡/命中按真实DOM结论），被遮挡返回E_SCENARIO_OCCLUDED（含nodeId/occludedBy遮挡者/stepIndex，语义层不执行该步）；真实浏览器不可用返回E_SCENARIO_HITTEST_UNAVAILABLE（不静默降级）；含dataset等浏览器层无法重放的步骤返回E_SCENARIO_HITTEST_UNSUPPORTED。步骤示例：{action:"click",target:"reveal",expect:{visible:{answer:true},text:{feedback:{includes:"再练"}}}}；未知步骤或零断言会拒绝。acceptance:true 改为执行12个语义验收模板（faultInjection:true 跑故障注入对照）；无操作脚本或不支持的断言返回unsupported，不记为通过。',
+    description: '在隔离的交互运行态会话（StudioRuntimeSession）中执行业务交互剧本并断言变量、面板状态、文本、显隐与数据集，不污染设计态文档。action:"expect" 与 action:"assert" 语义完全等价（均需传 expect 对象）；click/input 等步骤也可直接带 expect。expect.text 支持精确全文或 {includes:"子串"}（兼容 {contains:"子串"}），且仅读取文本节点自身文字，容器不聚合子节点文字；写错不存在的 nodeId 会附带相近 ID 提示或 W_ASSERT_UNKNOWN_TARGET 告警。默认走语义执行层，不做遮挡/hitTest校验：click只要求目标在当前运行态可见，通过≠真实可点。hitTest:true 先用真实浏览器指针重放校验每个点击/输入与跨页跳转，并自动对每个交互态做真实 DOM 文本裁切与越板审计（返回 runtimeLayoutAudit 与 W_RUNTIME_TEXT_CLIP / W_RUNTIME_BOARD_OVERFLOW；若传 failOnLayoutIssue:true 则遇到裁切直接阻断并返回 E_SCENARIO_LAYOUT_CLIP）；被遮挡返回E_SCENARIO_OCCLUDED；真实浏览器不可用返回E_SCENARIO_HITTEST_UNAVAILABLE（不静默降级）。步骤示例：{action:"click",target:"reveal",expect:{visible:{answer:true},text:{feedback:{includes:"再练"}}}}；且同一份 steps 可直接传给 verify_prototype 在官方 Axure HTML 重放。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1263,7 +1270,8 @@ export const studioTools = [
         startPageId: { type: 'string' },
         verbose: { type: 'boolean', description: 'true返回完整运行场景与轨迹' },
         reset: { type: 'boolean' },
-        hitTest: { type: 'boolean', description: '真实浏览器指针校验,被遮挡返回 E_SCENARIO_OCCLUDED' },
+        hitTest: { type: 'boolean', description: '真实浏览器指针校验,被遮挡返回 E_SCENARIO_OCCLUDED，并附带 runtimeLayoutAudit 运行态文本裁切审计' },
+        failOnLayoutIssue: { type: 'boolean', description: '仅 hitTest:true 生效：true 时若任意状态出现真实 DOM 文本裁切或越板（W_RUNTIME_TEXT_CLIP / W_RUNTIME_BOARD_OVERFLOW）则直接返回 E_SCENARIO_LAYOUT_CLIP 失败。' },
         steps: { type: 'array', minItems: 1, items: SCENARIO_STEP_SCHEMA },
         domain: { type: 'string', description: 'acceptance' },
         scenarioIds: { type: 'array', items: { type: 'string' }, description: 'acceptance' },
