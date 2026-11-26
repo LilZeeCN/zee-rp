@@ -1,6 +1,18 @@
-import { listMcpTools, callCommandTool, jobTools, validateInput } from '../scripts/mcp-tools.mjs';
+import { listMcpTools, callCommandTool, jobTools, validateInput, MCP_PROFILES, resolveMcpProfile } from '../scripts/mcp-tools.mjs';
 import { JobManager } from '../scripts/jobs.mjs';
 import { mcpInstructions, packageVersion } from '../scripts/authoring-workflow.mjs';
+
+const shutdownDaemons = async () => {
+  try {
+    const { closeAssemblyDaemons } = await import('../tools/native-assembly/bridge.mjs');
+    await closeAssemblyDaemons();
+  } catch {}
+};
+
+const profileFlag = process.argv.find(a => a.startsWith('--profile='))?.slice('--profile='.length)
+  ?? (process.argv.indexOf('--profile') >= 0 ? process.argv[process.argv.indexOf('--profile') + 1] : undefined);
+const activeProfile = resolveMcpProfile(profileFlag);
+if (profileFlag) process.env.ZEE_MCP_PROFILE = activeProfile;
 
 try {
   const [{ Server }, { StdioServerTransport }, { ListToolsRequestSchema, CallToolRequestSchema }] = await Promise.all([
@@ -10,7 +22,12 @@ try {
   ]);
   const server = new Server({ name: 'zee-rp', version: packageVersion }, { capabilities: { tools: {} }, instructions: mcpInstructions });
   const jobs = new JobManager();
-  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...listMcpTools(), ...jobTools] }));
+  const profileAllow = MCP_PROFILES[activeProfile];
+  const exposedTools = () => [
+    ...listMcpTools({ profile: activeProfile }),
+    ...(profileAllow ? jobTools.filter(t => profileAllow.has(t.name)) : jobTools),
+  ];
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: exposedTools() }));
   server.setRequestHandler(CallToolRequestSchema, async request => {
     try {
       const name = request.params.name, input = request.params.arguments ?? {};
@@ -36,8 +53,8 @@ try {
       return { isError: true, structuredContent: value, content: [{ type: 'text', text: JSON.stringify(value) }] };
     }
   });
-  process.stdin.once('end', () => { void jobs.close(); });
-  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { await jobs.close(); await server.close(); process.exit(0); });
+  process.stdin.once('end', () => { void jobs.close(); void shutdownDaemons(); });
+  for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { await Promise.all([jobs.close(), shutdownDaemons()]); await server.close(); process.exit(0); });
   await server.connect(new StdioServerTransport());
 } catch (error) {
   console.error(error.code === 'ERR_MODULE_NOT_FOUND' ? 'MCP 需要可选依赖：在 zee-rp 目录运行 npm ci --ignore-scripts。核心 CLI 无需安装依赖。' : error.message);

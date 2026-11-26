@@ -5,6 +5,12 @@ description: Reconstruct screenshots as editable Axure layouts, compile RP/1 spe
 
 # zee-rp（RP/1 零手算原型创作与原生编辑）
 
+> **能力边界与入口路由表**：
+> - **标准/高交互原生原型（表单、状态联动、有界拖拽/碰撞、手势轮播）** → 用 RP/1 `generate_prototype`（支持缩进式事件块、`carousel`/`slider-captcha` 宏与 `verify: true` 一站式浏览器自验） + `revise_prototype` + `verify_prototype`。
+> - **自由画布设计探索、视觉评审与像素级打磨** → 用 `studio_stage` → `studio_command` → `studio_design(action:"review")` → `studio_export`。
+> - **存量 `.rp` 直接补多组交互（需保留源工程外额外动作）** → 用 `axure_open` → `add_interaction({ items: [...] })`（自动读 `.baseline.json` 解析逻辑 ID）→ `axure_save({ as, cleanup: true })`。
+> - **省上下文启动**：`node bin/mcp.mjs --profile=core` 仅暴露 15 个核心闭环工具（工具 Schema token 降低约 80%）；`--profile=author` 含核心 + 13 个 `studio_*` 工具；默认 `--profile=full` 暴露全量 74 工具。
+
 完整 RP/1 与 Studio 画布均支持原生表单与交互样式（2026-11-12 本机开发快照）：`radio` / `checkbox` / `combobox`（别名 `select` / `droplist`）/ `listbox` / `textarea`（及 `input multiline=true`；浏览器与代码出口渲染多行 `<textarea>`，导出 `.rp` 时映射为原生可编辑 `TextBox` 并在兼容报告记录 `input.multiline`），支持勾选、互斥组、选项初值、原生取值和重置；完整 RP/1 还支持 `styles={"hover":{...},"selected":{...},"disabled":{...},"focused":{...}}` 写入原生状态样式。动作支持 `set-check`、普通元件 `set-selected`、下拉/列表 `set-option`（均支持 `"toggle"`），详情与完整四页例子见 [原生表单](references/native-forms.md)。
 
 ## MCP 创作与交付

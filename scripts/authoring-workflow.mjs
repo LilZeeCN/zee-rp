@@ -8,6 +8,7 @@ import { assertNotProtected, assertWritable, defaultWriteRoot } from './engine.m
 import { pythonInvocation } from './python.mjs';
 import { appExists, supportedVersions, templateCandidates, tryDetectFileVersion } from './version.mjs';
 import { previewPrototype, verifyOfficialPreview } from './preview-runtime.mjs';
+export { verifyOfficialPreview } from './preview-runtime.mjs';
 import { reviewImageStructure } from './image-structure.mjs';
 import { findChromeExecutable } from '../studio/cdp.mjs';
 import { listImplementationFiles } from '../studio/source-fingerprint.mjs';
@@ -143,6 +144,9 @@ export function runtimeInfo(toolList) {
     trackedFileCount: Object.keys(disk).length, compilerHashes,
     restartRequired: changedFiles.length > 0, changedFiles,
     toolCount: toolList.length, toolSchemaHash: digest(JSON.stringify(toolList)),
+    mcpProfile: process.env.ZEE_MCP_PROFILE || 'full',
+    schemaChars: JSON.stringify(toolList).length,
+    availableProfiles: ['full', 'core', 'author', 'studio'],
     python: pythonEnvironment(),
     host: { platform: process.platform, node: process.version, nativeTarget: 9,
       axureInstalled: appExists(9), blankTemplate: templateCandidates(9).find(c => existsSync(c.path))?.path ?? null,
@@ -299,7 +303,7 @@ export function revisePrototype(input, { generate, sync }) {
   }
 }
 
-async function exportPrototype({ rp, output, cwd, projectDir }) {
+export async function exportPrototype({ rp, output, cwd, projectDir }) {
   const workDir = resolve(cwd ?? projectDir ?? defaultWriteRoot());
   const source = resolve(workDir, rp);
   let rpVersion;
@@ -331,8 +335,12 @@ async function exportPrototype({ rp, output, cwd, projectDir }) {
       throw Object.assign(new Error('输出路径已存在。'), { code: 'E_HTML_OUTPUT_EXISTS' });
     }
     stage = 'assembly';
-    const { stdout } = await invoke(process.execPath, [join(ROOT, ASSEMBLY_BRIDGE), 'export', String(rpVersion), source, target]);
-    const { output: htmlDir, entry, identity, generatorSettings } = JSON.parse(stdout);
+    const { runAssemblyBridgeAsync } = await import('../tools/native-assembly/bridge.mjs');
+    const { output: htmlDir, entry, identity, generatorSettings } = await runAssemblyBridgeAsync({
+      command: 'export',
+      version: Number(rpVersion),
+      args: [source, target],
+    });
     return {
       status: 'completed', rp: source, rpVersion, output: htmlDir, entry, axureBuild: identity.build, generatorSettings,
       verification: { officialHtmlExported: true, browserLoaded: false, behaviorVerified: false },
@@ -343,7 +351,7 @@ async function exportPrototype({ rp, output, cwd, projectDir }) {
     if (error.stderr) {
       try { nativeError = JSON.parse(error.stderr.trim()); } catch { /* Keep the original error. */ }
     }
-    const code = nativeError?.code ?? (typeof error.code === 'string' && error.code.startsWith('E_HTML_')
+    const code = nativeError?.code ?? (typeof error.code === 'string' && (error.code.startsWith('E_HTML_') || error.code.startsWith('E_ASSEMBLY_'))
       ? error.code : { input: 'E_HTML_RP', output: 'E_HTML_OUTPUT', assembly: 'E_HTML_EXPORT' }[stage]);
     const nextAction = stage === 'input' ? '使用 generate_prototype 返回的 output，或指定一份可读取的 RP9/RP11 .rp。'
       : stage === 'output' || code === 'E_ASSEMBLY_OUTPUT' ? '为 output 指定一个父目录已存在、尚未创建的输出目录。'
@@ -368,24 +376,27 @@ export function authoringTools({ generate, sync, listTools }) {
         projectDir: { type: 'string', minLength: 1, description: 'cwd 的别名。' },
       }, required: ['rp'], additionalProperties: false },
       handler: exportPrototype, readOnly: false },
-    { name: 'verify_prototype', description: '零外部依赖（复用内置无头 Chrome CDP 与本地环回 HTTP）验证 Axure 官方 HTML 交互行为：支持 click / fill / drag / swipe / wait / navigate / expect（支持文案、可见性、面板状态、变量、x/y/dx/dy 坐标与宽高等断言），可自动从 .rp 导出官方 HTML 或复用 html 目录，并支持 screenshot/includeImage 截图回看。',
+    { name: 'verify_prototype', description: '零外部依赖（复用内置无头 Chrome CDP 与本地环回 HTTP）验证 Axure 官方 HTML 交互行为：支持 click / fill / drag / swipe / wait / advanceTime(虚拟时钟秒推定时器) / navigate / expect，可自动从 .rp 导出官方 HTML 或读取源码内联 verify: 块，并支持 screenshot/storyboard/includeStoryboard 交互时序拼图回看。',
       inputSchema: { type: 'object', properties: {
         rp: { type: 'string', minLength: 1, description: '现有 .rp 路径；若未传 html 将自动导出临时官方 HTML。' },
         html: { type: 'string', minLength: 1, description: '已导出的 Axure 官方 HTML 目录（含 start.html）。' },
-        source: { type: 'string', minLength: 1, description: '可选 RP/1 源码路径；省略时自动读取 .rp.baseline.json 或按页面 [data-label] 匹配。' },
+        source: { type: 'string', minLength: 1, description: '可选 RP/1 源码路径；省略时自动读取 .rp.baseline.json 或按页面 [data-label] 匹配（若含 verify: 块且未传 steps 时自动载入）。' },
         page: { type: 'string', minLength: 1, description: '可选起始页面 ID 或名称。' },
         cwd: { type: 'string', minLength: 1 },
         projectDir: { type: 'string', minLength: 1 },
         timeoutMs: { type: 'integer', minimum: 500, maximum: 30000 },
+        virtualClock: { type: 'boolean', description: 'true 时加速轮播等 >=200ms 定时器，配合 advanceTime 毫秒级推进（含 advanceTime 步骤时自动启用）。' },
         viewport: { type: 'object', properties: {
           width: { type: 'integer', minimum: 320, maximum: 3840 },
           height: { type: 'integer', minimum: 320, maximum: 2160 },
           dpr: { type: 'number', minimum: 1, maximum: 3 },
         }, additionalProperties: false },
-        screenshot: { type: 'string', minLength: 1, description: '可选 .png 截图输出路径（禁止覆盖已有文件）。' },
+        screenshot: { type: 'string', minLength: 1, description: '可选 .png 最终截图输出路径（禁止覆盖已有文件）。' },
         includeImage: { type: 'boolean', description: 'true 时在 MCP 响应中附带最终截图 PNG。' },
+        storyboard: { type: 'string', minLength: 1, description: '可选 .png 交互时序关键帧拼图输出路径（禁止覆盖已有文件）。' },
+        includeStoryboard: { type: 'boolean', description: 'true 时在 MCP 响应中附带横向标注每步交互状态的关键帧拼图 PNG。' },
         steps: { type: 'array', minItems: 0, maxItems: 60, items: { type: 'object', properties: {
-          action: { type: 'string', enum: ['click', 'fill', 'drag', 'swipe', 'wait', 'navigate', 'expect'] },
+          action: { type: 'string', enum: ['click', 'fill', 'drag', 'swipe', 'wait', 'advanceTime', 'navigate', 'expect'] },
           target: { type: 'string', minLength: 1 },
           value: { type: 'string' },
           rowIndex: { type: 'integer', minimum: 0 },

@@ -220,6 +220,57 @@ internal static class Worker
         Members("Axure.Constants.IxEventType");
     }
 
+    private static void RunDaemon()
+    {
+        Emit("ready");
+        Console.Out.Flush();
+        string line;
+        while ((line = Console.ReadLine()) != null)
+        {
+            if (line.Length == 0) continue;
+            if (line == "quit") break;
+            string[] parts = line.Split('\t');
+            string op = parts[0];
+            string[] reqArgs = parts.Skip(1).Select(s => Encoding.UTF8.GetString(Convert.FromBase64String(s))).ToArray();
+            object reqPool = Call(TypeOf("MCocoa.NSAutoreleasePool"), "Create");
+            try
+            {
+                object file = Construct(Pick("XOgG.xOgB", "zIIT.III9"));
+                using ((IDisposable)file)
+                {
+                    switch (op)
+                    {
+                        case "create":
+                            Create(file, reqArgs[0], reqArgs.Length >= 2 ? int.Parse(reqArgs[1], CultureInfo.InvariantCulture)
+                                : (int?)null, null, null);
+                            break;
+                        case "inspect":
+                            Load(file, reqArgs[0]);
+                            Inspect(file);
+                            break;
+                        case "export":
+                            Load(file, reqArgs[0]);
+                            Export(file, reqArgs[1]);
+                            break;
+                        default:
+                            throw new ArgumentException("Unsupported daemon operation: " + op);
+                    }
+                }
+                Emit("done", "ok");
+            }
+            catch (Exception error)
+            {
+                Emit("done", "err", error.Message);
+            }
+            finally
+            {
+                GC.KeepAlive(reqPool);
+                if (reqPool is IDisposable disp) disp.Dispose();
+                Console.Out.Flush();
+            }
+        }
+    }
+
     public static int Main(string[] args)
     {
         try
@@ -245,6 +296,13 @@ internal static class Worker
             }
 
             object pool = InitializeMac(args[3], args[4]);
+            if (command == "daemon")
+            {
+                RunDaemon();
+                GC.KeepAlive(pool);
+                Environment.Exit(0);
+                return 0;
+            }
             object file = Construct(Pick("XOgG.xOgB", "zIIT.III9"));
             using ((IDisposable)file)
             {

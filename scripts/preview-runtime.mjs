@@ -1,12 +1,128 @@
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { once } from 'node:events';
 import { createReadStream, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { assertNotProtected, assertWritable, defaultWriteRoot } from './engine.mjs';
+import { pythonInvocation } from './python.mjs';
 import { findChromeExecutable, launchChrome } from '../studio/cdp.mjs';
+
+const VIRTUAL_CLOCK_SHIM = `(() => {
+  if (window.__zeeClockInstalled) return;
+  window.__zeeClockInstalled = true;
+  const origSetTimeout = window.setTimeout.bind(window);
+  const origClearTimeout = window.clearTimeout.bind(window);
+  const origSetInterval = window.setInterval.bind(window);
+  const origClearInterval = window.clearInterval.bind(window);
+  let now = 0;
+  let nextId = 100000;
+  const queue = [];
+  const clock = window.__zeeClock = {
+    get now() { return now; },
+    get pending() { return queue.length; },
+    advance(ms) {
+      const delta = Math.max(0, Number(ms) || 0);
+      const target = now + delta;
+      while (true) {
+        queue.sort((a, b) => a.at - b.at || a.seq - b.seq);
+        const item = queue[0];
+        if (!item || item.at > target) break;
+        queue.shift();
+        now = item.at;
+        if (item.interval) {
+          queue.push({ ...item, at: item.at + item.delay });
+        }
+        try {
+          if (typeof item.fn === 'function') item.fn.apply(null, item.args);
+        } catch (err) {
+          setTimeout(() => { throw err; }, 0);
+        }
+      }
+      now = target;
+      return now;
+    },
+  };
+  let seq = 1;
+  window.setTimeout = function(fn, delay = 0, ...args) {
+    const d = Number(delay) || 0;
+    if (d < 200) return origSetTimeout(fn, delay, ...args);
+    const id = nextId++;
+    queue.push({ id, seq: seq++, fn, delay: d, at: now + d, interval: false, args });
+    return id;
+  };
+  window.clearTimeout = function(id) {
+    const idx = queue.findIndex(q => q.id === id);
+    if (idx >= 0) { queue.splice(idx, 1); return; }
+    origClearTimeout(id);
+  };
+  window.setInterval = function(fn, delay = 0, ...args) {
+    const d = Number(delay) || 0;
+    if (d < 200) return origSetInterval(fn, delay, ...args);
+    const id = nextId++;
+    queue.push({ id, seq: seq++, fn, delay: Math.max(200, d), at: now + Math.max(200, d), interval: true, args });
+    return id;
+  };
+  window.clearInterval = function(id) {
+    const idx = queue.findIndex(q => q.id === id);
+    if (idx >= 0) { queue.splice(idx, 1); return; }
+    origClearInterval(id);
+  };
+})();`;
+
+const STITCH_STORYBOARD_PY = `
+import json, sys
+from PIL import Image, ImageDraw
+meta = json.load(open(sys.argv[1], 'r', encoding='utf-8'))
+out_path = sys.argv[2]
+frames = meta.get('frames', [])
+if not frames:
+    sys.exit(1)
+imgs = []
+for f in frames:
+    im = Image.open(f['path']).convert('RGB')
+    imgs.append((im, f.get('label', ''), f.get('failed', False)))
+gap = 12
+header_h = 30
+max_h = max(im.height for im, _, _ in imgs)
+total_w = sum(im.width for im, _, _ in imgs) + gap * (len(imgs) + 1)
+canvas = Image.new('RGB', (total_w, max_h + header_h + gap * 2), (241, 245, 249))
+draw = ImageDraw.Draw(canvas)
+x = gap
+for im, label, failed in imgs:
+    bar_bg = (220, 38, 38) if failed else (15, 23, 42)
+    draw.rectangle([x, gap, x + im.width - 1, gap + header_h - 1], fill=bar_bg)
+    safe_lbl = ''.join(ch if 32 <= ord(ch) < 127 else '?' for ch in str(label))[:46]
+    draw.text((x + 8, gap + 9), safe_lbl, fill=(255, 255, 255))
+    canvas.paste(im, (x, gap + header_h))
+    border = (220, 38, 38) if failed else (203, 213, 225)
+    draw.rectangle([x, gap, x + im.width - 1, gap + header_h + im.height - 1], outline=border, width=2 if failed else 1)
+    x += im.width + gap
+canvas.save(out_path, format='PNG')
+`;
+
+function buildStoryboardPng(frames, outPngPath = null) {
+  if (!frames.length) return null;
+  const stage = mkdtempSync(join(tmpdir(), 'zee-storyboard-'));
+  try {
+    const manifest = frames.map((f, idx) => {
+      const p = join(stage, `frame-${idx}.png`);
+      writeFileSync(p, f.png);
+      return { path: p, label: f.label, failed: Boolean(f.failed) };
+    });
+    const metaPath = join(stage, 'manifest.json');
+    const targetPng = outPngPath || join(stage, 'storyboard.png');
+    writeFileSync(metaPath, JSON.stringify({ frames: manifest }));
+    const inv = pythonInvocation(['-B', '-c', STITCH_STORYBOARD_PY, metaPath, targetPng]);
+    const proc = spawnSync(inv.command, inv.args, { encoding: 'utf8', timeout: 30_000 });
+    if (proc.status !== 0) throw new Error(proc.stderr || 'Storyboard stitch failed');
+    return readFileSync(targetPng);
+  } finally {
+    rmSync(stage, { recursive: true, force: true });
+  }
+}
 
 const sha = value => createHash('sha256').update(value).digest('hex');
 
@@ -265,24 +381,25 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
   const htmlInputDir = input.html ? resolve(workDir, input.html) : null;
   const sourcePath = input.source ? resolve(workDir, input.source) : null;
   const screenshotPath = input.screenshot ? resolve(workDir, input.screenshot) : null;
+  const storyboardPath = input.storyboard ? resolve(workDir, input.storyboard) : null;
   if (!rpPath && !htmlInputDir) {
     throw Object.assign(new Error('verify_prototype 需要至少提供 rp（已生成 .rp）或 html（官方 HTML 目录）之一。'), { code: 'E_VERIFY_INPUT' });
   }
   if (rpPath) assertNotProtected(rpPath);
   if (sourcePath) assertNotProtected(sourcePath);
   if (htmlInputDir) assertNotProtected(htmlInputDir);
-  if (screenshotPath) {
-    assertNotProtected(screenshotPath);
-    assertWritable(screenshotPath);
-    if (extname(screenshotPath).toLowerCase() !== '.png') {
-      throw Object.assign(new Error('screenshot 必须是以 .png 结尾的新文件路径。'), { code: 'E_VERIFY_SCREENSHOT' });
+  for (const [kind, p] of [['screenshot', screenshotPath], ['storyboard', storyboardPath]]) {
+    if (!p) continue;
+    assertNotProtected(p);
+    assertWritable(p);
+    if (extname(p).toLowerCase() !== '.png') {
+      throw Object.assign(new Error(`${kind} 必须是以 .png 结尾的新文件路径。`), { code: 'E_VERIFY_SCREENSHOT' });
     }
-    if (lstatSync(screenshotPath, { throwIfNoEntry: false })) {
-      throw Object.assign(new Error(`截图输出已存在，禁止覆盖：${screenshotPath}`), { code: 'E_VERIFY_SCREENSHOT_EXISTS' });
+    if (lstatSync(p, { throwIfNoEntry: false })) {
+      throw Object.assign(new Error(`截图输出已存在，禁止覆盖：${p}`), { code: 'E_VERIFY_SCREENSHOT_EXISTS' });
     }
   }
 
-  const steps = input.steps ?? [];
   const timeoutMs = input.timeoutMs ?? 8000;
   const vp = {
     width: input.viewport?.width ?? 1280,
@@ -301,6 +418,10 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
     findChromeExecutable();
   }
   const map = buildVerificationMap({ source: sourcePath, rp: rpPath, runWorkflow });
+  const steps = (Array.isArray(input.steps) && input.steps.length > 0) ? input.steps : (map?.verifySteps ?? []);
+  const useVirtualClock = Boolean(input.virtualClock || steps.some(s => s.action === 'advanceTime'));
+  const wantStoryboard = Boolean(storyboardPath || input.includeStoryboard);
+  const storyboardFrames = [];
   if (!activeHtmlDir) {
     tempStageDir = mkdtempSync(join(defaultWriteRoot(), '.zee-verify-'));
     const exportedHtml = join(tempStageDir, 'html');
@@ -345,13 +466,31 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
     const port = server.address().port;
     const baseUrl = `http://127.0.0.1:${port}/start.html`;
     let startUrl = baseUrl;
+    const targetPageEntry = input.page
+      ? map?.pages?.find(p => p.id === input.page || p.name === input.page)
+      : map?.pages?.[0];
     if (input.page) {
-      const pageEntry = map?.pages?.find(p => p.id === input.page || p.name === input.page);
-      startUrl += `#p=${encodeURIComponent(pageEntry?.name ?? input.page)}`;
+      startUrl += `#p=${encodeURIComponent(targetPageEntry?.name ?? input.page)}`;
+    }
+    const rawCanvas = targetPageEntry?.canvas;
+    const canvasW = Array.isArray(rawCanvas) ? Number(rawCanvas[0]) : Number(rawCanvas?.w);
+    const canvasH = Array.isArray(rawCanvas) ? Number(rawCanvas[1]) : Number(rawCanvas?.h);
+    if (!input.viewport && Number.isFinite(canvasW) && canvasW > 0) {
+      vp.width = Math.min(3840, Math.max(320, Math.round(canvasW)));
+      if (Number.isFinite(canvasH) && canvasH > 0) {
+        vp.height = Math.min(2160, Math.max(320, Math.round(canvasH)));
+      }
     }
 
     browser = await launchChrome({ headless: true, width: vp.width, height: vp.height, dpr: vp.dpr });
-    page = await browser.openPage(startUrl);
+    if (useVirtualClock) {
+      page = await browser.openPage('about:blank');
+      await page.send('Page.enable');
+      await page.send('Page.addScriptToEvaluateOnNewDocument', { source: VIRTUAL_CLOCK_SHIM });
+      await page.navigate(startUrl, timeoutMs);
+    } else {
+      page = await browser.openPage(startUrl);
+    }
 
     const observe = () => page.evaluate(observeExpr);
     await page.waitForFunction(`(() => { const r = ${observeExpr}; return Boolean(r && r.ready); })()`, { timeoutMs, pollMs: 50 });
@@ -368,6 +507,9 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
     let before = await settle();
     result.verification.browserLoaded = true;
     result.initial = before;
+    if (wantStoryboard) {
+      storyboardFrames.push({ label: '#0 Initial', png: await page.screenshot({ format: 'png' }), failed: false });
+    }
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
@@ -467,8 +609,21 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
           stepDelayMs: 8,
         });
         await new Promise(r => setTimeout(r, 120));
+      } else if (step.action === 'advanceTime' || (step.action === 'wait' && useVirtualClock && Number(step.ms ?? 0) >= 200)) {
+        const advMs = Number(step.ms ?? 0);
+        await page.evaluate(`(() => {
+          const wins = [window];
+          for (let k = 0; k < wins.length && k < 20; k++) {
+            const w = wins[k];
+            try { w.__zeeClock?.advance(${JSON.stringify(advMs)}); } catch {}
+            try { for (let n = 0; n < w.frames.length; n++) wins.push(w.frames[n]); } catch {}
+          }
+          return true;
+        })()`);
+        await new Promise(r => setTimeout(r, 60));
       } else if (step.action === 'wait') {
         await new Promise(r => setTimeout(r, Number(step.ms ?? 250)));
+        await new Promise(r => setTimeout(r, 40));
       } else if (step.action === 'navigate') {
         const pageEntry = map?.pages?.find(p => p.id === step.page || p.name === step.page);
         const targetPageName = pageEntry?.name ?? step.page;
@@ -523,14 +678,22 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       entry.failures = failures;
       entry.status = failures.length ? 'failed' : 'passed';
       before = current;
+      if (wantStoryboard && storyboardFrames.length < 12 && (failures.length || !['expect'].includes(step.action))) {
+        const tag = step.target ? `${step.action} ${step.target}` : `${step.action} ${step.ms ?? step.page ?? ''}`.trim();
+        storyboardFrames.push({
+          label: `#${i + 1} ${tag} ${failures.length ? 'FAIL' : 'OK'}`,
+          png: await page.screenshot({ format: 'png' }),
+          failed: Boolean(failures.length),
+        });
+      }
       if (failures.length) {
         throw Object.assign(new Error(`步骤 #${i} (${step.action}) 与真实 Axure 预览断言不一致。`), {
-          code: 'E_VERIFY_ASSERTION', stepIndex: i, actual: current,
+          code: 'E_VERIFY_ASSERTION', stepIndex: i, actual: current, symbol,
         });
       }
       if ((current.errors?.length ?? 0) > 0 || (page?.scriptErrors?.length ?? 0) > 0) {
         throw Object.assign(new Error('Axure 官方 HTML 运行期间捕获到 JS 运行错误。'), {
-          code: 'E_VERIFY_RUNTIME_ERROR', stepIndex: i, actual: current,
+          code: 'E_VERIFY_RUNTIME_ERROR', stepIndex: i, actual: current, symbol,
         });
       }
     }
@@ -546,11 +709,18 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
     const step = index !== null ? steps[index] : null;
     if (history.at(-1)?.status === 'running') history.at(-1).status = 'failed';
     const observed = error.actual;
+    const errCanvas = map?.pages?.[0]?.canvas;
+    const canvasW = Array.isArray(errCanvas) ? Number(errCanvas[0]) : errCanvas?.w;
+    const canvasH = Array.isArray(errCanvas) ? Number(errCanvas[1]) : errCanvas?.h;
+    const coordFail = (history.at(-1)?.failures ?? []).find(f => ['x', 'left', 'right'].includes(f.field));
+    const centerShift = canvasW && vp.width > canvasW ? Math.round((vp.width - canvasW) / 2) : 0;
+    const isCenterHint = Boolean(coordFail && centerShift && Math.abs((Number(coordFail.actual) - Number(coordFail.expected)) - centerShift) <= 3);
     result.diagnostics = [{
       code: error.code ?? 'E_VERIFY_BROWSER',
       message: error.message,
       stepIndex: index,
       target: step?.target ?? null,
+      ...(error.symbol?.context?.line ? { sourceSpan: { line: error.symbol.context.line, column: error.symbol.context.column, snippet: error.symbol.context.snippet } } : {}),
       expected: step?.expect ?? null,
       failures: history.at(-1)?.failures ?? null,
       actual: observed ? {
@@ -561,7 +731,9 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
         })),
         errors: observed.errors,
       } : null,
-      nextAction: '对照 actual 中的真实面板状态、坐标与变量，调整 RP/1 交互或 bounds/expression 后重新生成并验证。',
+      nextAction: isCenterHint
+        ? `检测到 Axure Web 页面在 ${vp.width}px 视口中居中产生了 +${centerShift}px 水平偏移；请传 viewport: { width: ${canvasW}, height: ${Math.max(320, Math.round(canvasH ?? 700))}, dpr: 1 } 以 1:1 对齐画布坐标。`
+        : '对照 actual 中的真实面板状态、坐标与变量，调整 RP/1 交互或 bounds/expression 后重新生成并验证。',
     }];
   } finally {
     if (page && (screenshotPath || input.includeImage)) {
@@ -574,10 +746,23 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
         }
         if (input.includeImage) {
           result.previewImage = 'attached';
-          result.mcpImages = [{ mimeType: 'image/png', data: png.toString('base64') }];
+          result.mcpImages = [...(result.mcpImages ?? []), { mimeType: 'image/png', data: png.toString('base64') }];
         }
       } catch (err) {
         result.screenshotError = err.message;
+      }
+    }
+    if (wantStoryboard && storyboardFrames.length > 0) {
+      try {
+        if (storyboardPath) mkdirSync(dirname(storyboardPath), { recursive: true });
+        const sbPng = buildStoryboardPng(storyboardFrames, storyboardPath);
+        if (storyboardPath && sbPng) result.storyboard = storyboardPath;
+        if (input.includeStoryboard && sbPng) {
+          result.storyboardImage = 'attached';
+          result.mcpImages = [...(result.mcpImages ?? []), { mimeType: 'image/png', data: sbPng.toString('base64') }];
+        }
+      } catch (err) {
+        result.storyboardError = err.message;
       }
     }
     try { await browser?.close(); } catch {}

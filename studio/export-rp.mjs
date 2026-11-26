@@ -119,6 +119,11 @@ function normalizeSingleExportAction(act, exportCtx = null) {
     if (typeof c.text === 'string' && c.text.trim().startsWith('=') || c.text && typeof c.text === 'object') c.text = { fn: 'text', args: [c.text] };
     return c;
   }
+  if (c.type === 'move') {
+    if (c.x !== undefined) c.x = toRp1RuntimeValue(c.x);
+    if (c.y !== undefined) c.y = toRp1RuntimeValue(c.y);
+    return c;
+  }
   if (c.type === 'set-check') {
     const rawChk = c.checked !== undefined ? c.checked : c.value;
     delete c.value;
@@ -276,12 +281,25 @@ function normalizeExportEventSpec(evSpec, exportCtx = null) {
   return actions.length > 0 ? actions : structuredClone(evSpec);
 }
 
+const RP1_EVENT_KEY_MAP = {
+  dragStart: 'dragstart',
+  dragDrop: 'dragdrop',
+  swipeLeft: 'swipeleft',
+  swipeRight: 'swiperight',
+  swipeUp: 'swipeup',
+  swipeDown: 'swipedown',
+  stateChange: 'statechange',
+  mouseOver: 'mouseover',
+  mouseOut: 'mouseout',
+};
+
 function normalizeExportOn(onObj, exportCtx = null) {
   if (!onObj || typeof onObj !== 'object') return undefined;
   const out = {};
   for (const [ev, spec] of Object.entries(onObj)) {
+    const mappedEv = RP1_EVENT_KEY_MAP[ev] || ev;
     const norm = normalizeExportEventSpec(spec, exportCtx);
-    if (norm) out[ev] = norm;
+    if (norm) out[mappedEv] = norm;
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
@@ -1269,6 +1287,7 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
       if (node.placeholder !== undefined) out.placeholder = node.placeholder;
       if (node.value !== undefined) out.value = node.value;
       else if (node.text !== undefined) out.value = node.text;
+      if (Number.isInteger(node.maxLength) && node.maxLength >= 0) out.maxLength = node.maxLength;
       if (typeof node.textPaddingX === 'number') out.textPaddingX = Number(node.textPaddingX);
     } else if (node._textMetrics?.truncated) {
       out.text = node._textMetrics.displayText;

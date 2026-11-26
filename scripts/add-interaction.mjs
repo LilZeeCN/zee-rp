@@ -9,7 +9,7 @@
 // spec.json: { "target": "PanelB", "page": false, "interactions": [ { "event": "OnClick", "actions": [ { "type": "hide", "target": "PanelB" } ] } ] }
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { addInteractions, EVENTS } from './ix-actions.mjs';
+import { addInteractions, addInteractionsBatch, loadBaselineMap, resolveBaselineTarget, EVENTS } from './ix-actions.mjs';
 
 function parseArgs(argv) {
   const positional = [];
@@ -44,21 +44,31 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const jsonAt = argv.indexOf('--json');
   const onPageIdx = argv.indexOf('--on-page');
   const onPage = onPageIdx >= 0 ? argv[onPageIdx + 1] : null;
+  const baselineIdx = argv.indexOf('--baseline');
+  const baselineArg = baselineIdx >= 0 ? argv[baselineIdx + 1] : null;
   const replaceEvent = argv.includes('--replace-event');
-  let src, dst, target, interactions, page = argv.includes('--page');
+  let src, dst, target, interactions, batchItems = null, page = argv.includes('--page');
   if (jsonAt >= 0) {
     const spec = JSON.parse(readFileSync(argv[jsonAt + 1], 'utf8'));
-    const rest = argv.filter((a, i) => i !== jsonAt && i !== jsonAt + 1 && !a.startsWith('--'));
+    const rest = argv.filter((a, i) => i !== jsonAt && i !== jsonAt + 1
+      && !(baselineIdx >= 0 && (i === baselineIdx || i === baselineIdx + 1))
+      && !(onPageIdx >= 0 && (i === onPageIdx || i === onPageIdx + 1))
+      && !a.startsWith('--'));
     [src, dst] = rest;
-    target = spec.target;
-    page = page || !!spec.page;
-    interactions = spec.interactions;
+    if (Array.isArray(spec.items)) {
+      batchItems = spec.items;
+    } else {
+      target = spec.target;
+      page = page || !!spec.page;
+      if (spec.onPage && typeof target === 'string') target = { widget: target, page: spec.onPage };
+      interactions = spec.interactions;
+    }
   } else {
     const rest = [];
     for (let i = 0; i < argv.length; i++) {
       const a = argv[i];
       if (a === '--page') continue;
-      if (a === '--on-page') { i++; continue; }
+      if (a === '--on-page' || a === '--baseline') { i++; continue; }
       if (a === '--event') { i++; continue; }
       if (a === '--action') {
         i++;
@@ -71,17 +81,27 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     [src, dst, target] = rest;
     interactions = parseArgs(argv).interactions;
   }
-  if (!src || !dst || (!target && !page)) {
-    console.error('Usage: node add-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] [--replace-event] --event <EventName> --action <type> [key=value ...] ...');
+  if (!src || !dst || (!batchItems && !target && !page)) {
+    console.error('Usage: node add-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] [--baseline <file.baseline.json>] [--replace-event] --event <EventName> --action <type> [key=value ...] ...');
     console.error('  --page      目标为页面级交互');
     console.error('  --on-page   限定在某页面内找 widget（两页同名只改指定页；重名时报候选清单）');
+    console.error('  --baseline  显式指定 .baseline.json 以解析逻辑 ID（省略时自动读取 <source>.baseline.json）');
+    console.error('  --json      支持单目标 {target,interactions} 或批量事务 {items:[{target,interactions},...]}');
     console.error('  --replace-event   替换目标上同类型的唯一已有事件；多个同类型事件时报错');
     console.error('  expand-collapse-tree 可用 node=<树节点可见文本> 指定树中节点；文本含空格时引用整个 node=... 参数');
     console.error('Events: ' + Object.keys(EVENTS).join(', '));
     process.exit(1);
   }
-  const finalTarget = page ? { page: target } : (onPage ? { widget: target, page: onPage } : target);
-  const out = addInteractions(readFileSync(src), finalTarget, interactions, { replaceEvent });
-  writeFileSync(dst, out.file, { flag: 'wx' });
-  console.log(JSON.stringify(out.report, null, 2));
+  const baseline = loadBaselineMap(src, baselineArg);
+  if (batchItems) {
+    const out = addInteractionsBatch(readFileSync(src), batchItems, { replaceEvent, baseline });
+    writeFileSync(dst, out.file, { flag: 'wx' });
+    console.log(JSON.stringify(out.report, null, 2));
+  } else {
+    const rawTarget = page ? { page: target } : (onPage ? { widget: target, page: onPage } : target);
+    const finalTarget = resolveBaselineTarget(rawTarget, baseline);
+    const out = addInteractions(readFileSync(src), finalTarget, interactions, { replaceEvent });
+    writeFileSync(dst, out.file, { flag: 'wx' });
+    console.log(JSON.stringify(out.report, null, 2));
+  }
 }

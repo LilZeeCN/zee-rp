@@ -4,7 +4,7 @@ const target = value => {
   if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 1 && typeof value.ref === 'string' && value.ref) return value.ref;
   fail('交互目标需要节点ID字符串或 {ref:"节点ID"}，不能把未解析对象当成目标', 'target');
 };
-const typed = new Set(['set-var', 'set-variable', 'show', 'hide', 'toggle', 'set-text', 'set-panel-state', 'set-check', 'set-selected', 'set-option', 'link', 'navigate',
+const typed = new Set(['set-var', 'set-variable', 'show', 'hide', 'toggle', 'set-text', 'set-panel-state', 'set-check', 'set-selected', 'set-option', 'move', 'link', 'navigate',
   ...['dataset', 'repeater'].flatMap(prefix => ['add', 'update', 'delete', 'select', 'toggle-select', 'filter', 'sort', 'page'].map(op => `${prefix}-${op}`))]);
 
 function parseInlineActionString(raw) {
@@ -110,6 +110,7 @@ export function normalizeInteractionSpec(spec) {
     'set-check':['target','checked','value'],
     'set-selected':['target','selected','value'],
     'set-option':['target','value','option','selected'],
+    move:['target','mode','x','y','duration','easing','bounds'],
     link:['page','to','target'],navigate:['page','to','target']})[out.type]
     || (out.type?.startsWith('dataset-') || out.type?.startsWith('repeater-') ? dataFields : null);
   // 未知动作类型先报类型清单，而不是被字段校验抢先把错误面模糊掉。
@@ -123,7 +124,7 @@ export function normalizeInteractionSpec(spec) {
   if (out.panel !== undefined) out.panel = target(out.panel);
   if (out.type === 'set-panel-state' && !out.target && out.panel) { out.target = out.panel; delete out.panel; }
   for (const key of ['show', 'hide']) if (out[key] !== undefined) out[key] = Array.isArray(out[key]) ? out[key].map(target) : target(out[key]);
-  if (['show', 'hide', 'toggle', 'set-text', 'set-panel-state', 'set-check', 'set-selected', 'set-option'].includes(out.type) && !out.target) fail(`${out.type} 缺少target`, 'target');
+  if (['show', 'hide', 'toggle', 'set-text', 'set-panel-state', 'set-check', 'set-selected', 'set-option', 'move'].includes(out.type) && !out.target) fail(`${out.type} 缺少target`, 'target');
   if (out.type === 'set-check') {
     if (out.checked === undefined && out.value !== undefined) { out.checked = out.value; delete out.value; }
     if (typeof out.checked !== 'boolean' && out.checked !== 'toggle' && !(typeof out.checked === 'string' && out.checked.trim().startsWith('='))) fail('set-check 需要布尔值、toggle 或布尔表达式 checked', 'checked');

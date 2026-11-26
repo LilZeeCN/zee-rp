@@ -6,10 +6,11 @@ import { lintDocumentInteractions } from './interaction-lint.mjs';
 export const SCENARIO_STEP_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
-    action: { type: 'string', enum: ['navigate', 'input', 'click', 'dataset', 'expect', 'assert'] },
+    action: { type: 'string', enum: ['navigate', 'input', 'click', 'drag', 'dataset', 'expect', 'assert'] },
     target: { type: 'string' }, id: { type: 'string' }, page: { type: 'string' },
     goto: { type: 'string' }, fill: { type: 'string' }, click: { type: 'string' },
     value: {}, text: { type: 'string' },
+    dx: { type: 'number' }, dy: { type: 'number' },
     dataset: { type: 'string' }, repeater: { type: 'string' },
     op: { type: 'string', enum: ['select', 'toggle-select', 'add', 'update', 'delete', 'filter', 'sort', 'page'] },
     row: { type: 'object' }, patch: { type: 'object' }, rowId: {}, clearOthers: { type: 'boolean' },
@@ -22,6 +23,7 @@ export const SCENARIO_STEP_SCHEMA = {
       panelState: { type: 'object', minProperties: 1, additionalProperties: { type: 'string' } },
       checked: { type: 'object', minProperties: 1, additionalProperties: { type: 'boolean' } },
       selected: { type: 'object', minProperties: 1 },
+      position: { type: 'object', minProperties: 1 },
       datasetCount: { type: 'object', minProperties: 1, additionalProperties: { type: 'integer', minimum: 0 } },
       datasetFirstRow: { type: 'object', minProperties: 1 },
     } },
@@ -52,6 +54,8 @@ export class StudioRuntimeSession {
     this.textOverrides = {};
     this.textFormulas = {};
     this.panelStates = {};
+    this.widgetPositions = {};
+    this.dragStartPositions = {};
     this.datasets = {};
     this.datasetFilters = {};
     this.datasetSorts = {};
@@ -89,7 +93,8 @@ export class StudioRuntimeSession {
       this.visibility[scopedId] = false;
     }
     if (node.type === 'input') {
-      const val = node.value !== undefined ? String(node.value) : '';
+      const raw = node.value !== undefined ? String(node.value) : '';
+      const val = Number.isInteger(node.maxLength) && node.maxLength >= 0 ? raw.slice(0, node.maxLength) : raw;
       this.inputs[scopedId] = val;
     }
     if (node.type === 'checkbox' || node.type === 'radio') {
@@ -233,6 +238,9 @@ export class StudioRuntimeSession {
     const entry = this.findNodeEntry(pageId, widgetId, { scopePrefix });
     if (!entry) return false;
     const scoped = entry.scopedId;
+    if (prop === 'state') {
+      return this.panelStates[scoped] || entry.node.activeState || entry.node.activeStateId || entry.node.states?.[0]?.id || '';
+    }
     if (prop === 'checked') {
       return scoped in this.checked ? Boolean(this.checked[scoped]) : Boolean(entry.node.checked ?? entry.node.selected);
     }
@@ -248,6 +256,33 @@ export class StudioRuntimeSession {
       return scoped in this.selectedNodes ? Boolean(this.selectedNodes[scoped]) : Boolean(entry.node.selected);
     }
     return false;
+  }
+
+  getWidgetRect(widgetId, { pageId = this.currentPageId, scopePrefix = this.interactionScope } = {}) {
+    const entry = this.findNodeEntry(pageId, widgetId, { scopePrefix });
+    if (!entry) return null;
+    const scoped = entry.scopedId;
+    const baseScene = resolveDocumentScene(this.docSnapshot, {
+      projectDir: this.projectDir,
+      activePanelStates: this.panelStates,
+      runtimeState: {
+        variables: this.variables,
+        panelStates: this.panelStates,
+        visibility: this.visibility,
+        checked: this.checked,
+        selectedOptions: this.selectedOptions,
+        selectedNodes: this.selectedNodes,
+      },
+    });
+    const baseNode = (baseScene.pages.find(p => p.id === entry.pageId)?.nodes || []).find(n => n.scopedId === scoped);
+    const baseX = baseNode ? Number(baseNode.x ?? 0) : Number(entry.node.x ?? 0);
+    const baseY = baseNode ? Number(baseNode.y ?? 0) : Number(entry.node.y ?? 0);
+    const w = baseNode ? Number(baseNode.w ?? 0) : Number(entry.node.w ?? 0);
+    const h = baseNode ? Number(baseNode.h ?? 0) : Number(entry.node.h ?? 0);
+    const pos = this.widgetPositions?.[scoped];
+    const x = pos ? Number(pos.x) : baseX;
+    const y = pos ? Number(pos.y) : baseY;
+    return { x, y, left: x, top: y, right: x + w, bottom: y + h, width: w, height: h, scopedId: scoped, pageId: entry.pageId };
   }
 
   isNodeVisible(nodeId, pageId = this.currentPageId) {
@@ -295,10 +330,12 @@ export class StudioRuntimeSession {
   }
 
   evaluateExpression(expr, context = {}) {
+    const ctx = context && typeof context === 'object' ? context : {};
     return evaluatePrototypeExpression(expr, {
       variables: this.variables,
-      getWidgetText: target => this.getWidgetText(target, context),
-      getWidgetState: (target, prop) => this.getWidgetState(target, prop, context),
+      getWidgetText: target => this.getWidgetText(target, ctx),
+      getWidgetState: (target, prop) => this.getWidgetState(target, prop, ctx),
+      getWidgetRect: target => this.getWidgetRect(target, ctx),
       resolveDatasetPath: (name, prop) => this.resolveDatasetPath(name, prop),
     });
   }
@@ -506,13 +543,17 @@ export class StudioRuntimeSession {
       });
       return this.getState();
     }
-    this.inputs[scoped] = String(value);
+    const rawStr = String(value);
+    const nextVal = Number.isInteger(entry.node.maxLength) && entry.node.maxLength >= 0
+      ? rawStr.slice(0, entry.node.maxLength)
+      : rawStr;
+    this.inputs[scoped] = nextVal;
     this.trace.push({
       step: this.trace.length + 1,
       type: 'input',
       pageId: this.currentPageId,
       targetId: scoped,
-      value: String(value),
+      value: nextVal,
     });
     return this.getState();
   }
@@ -582,6 +623,113 @@ export class StudioRuntimeSession {
       variables: structuredClone(this.variables),
     });
 
+    return this.getState();
+  }
+
+  moveWidget(targetId, action = {}, executed = null, { evaluate = v => this.evaluateExpression(v), rowContext = null } = {}) {
+    const rect = this.getWidgetRect(targetId);
+    if (!rect) throw Object.assign(new Error(`页面 ${this.currentPageId} 中未找到移动目标 ${targetId}`), { code: 'E_RUNTIME_NODE_NOT_FOUND', pageId: this.currentPageId, targetId });
+    const scoped = rect.scopedId;
+    if (!(scoped in this.dragStartPositions)) {
+      this.dragStartPositions[scoped] = { x: rect.x, y: rect.y };
+    }
+    const mode = action.mode || (action.x !== undefined || action.y !== undefined ? 'location' : 'delta');
+    let nextX = rect.x;
+    let nextY = rect.y;
+    if (mode === 'locationBeforeDrag') {
+      const origin = this.dragStartPositions[scoped];
+      if (origin) {
+        nextX = origin.x;
+        nextY = origin.y;
+      }
+    } else if (mode === 'location') {
+      if (action.x !== undefined) nextX = Number(evaluate(action.x)) || 0;
+      if (action.y !== undefined) nextY = Number(evaluate(action.y)) || 0;
+    } else {
+      const dx = mode === 'drag-y' ? 0 : Number(evaluate(action.x ?? rowContext?.dragDx ?? 0)) || 0;
+      const dy = mode === 'drag-x' ? 0 : Number(evaluate(action.y ?? rowContext?.dragDy ?? 0)) || 0;
+      nextX = rect.x + dx;
+      nextY = rect.y + dy;
+    }
+    const clampWithSide = (side, op, lim) => {
+      if (!Number.isFinite(lim)) return;
+      if (side === 'left' && (op === '>=' || op === '>')) nextX = Math.max(nextX, lim);
+      else if (side === 'right' && (op === '<=' || op === '<')) nextX = Math.min(nextX, lim - rect.width);
+      else if (side === 'top' && (op === '>=' || op === '>')) nextY = Math.max(nextY, lim);
+      else if (side === 'bottom' && (op === '<=' || op === '<')) nextY = Math.min(nextY, lim - rect.height);
+    };
+    const bounds = action.bounds;
+    if (Array.isArray(bounds)) {
+      for (const cl of bounds) {
+        if (!cl || !cl.side) continue;
+        clampWithSide(cl.side, cl.op || ({ left: '>=', right: '<=', top: '>=', bottom: '<=' }[cl.side]), Number(evaluate(cl.value)));
+      }
+    } else if (bounds && typeof bounds === 'object') {
+      if (bounds.within) {
+        const wRect = this.getWidgetRect(bounds.within);
+        if (wRect) {
+          if (mode !== 'drag-y') {
+            nextX = Math.max(wRect.left, Math.min(wRect.right - rect.width, nextX));
+          }
+          if (mode !== 'drag-x') {
+            nextY = Math.max(wRect.top, Math.min(wRect.bottom - rect.height, nextY));
+          }
+        }
+      }
+      const defOps = { left: '>=', right: '<=', top: '>=', bottom: '<=' };
+      for (const side of ['left', 'right', 'top', 'bottom']) {
+        if (bounds[side] === undefined) continue;
+        const spec = bounds[side];
+        if (spec && typeof spec === 'object' && 'value' in spec) {
+          clampWithSide(side, spec.op || defOps[side], Number(evaluate(spec.value)));
+        } else {
+          clampWithSide(side, defOps[side], Number(evaluate(spec)));
+        }
+      }
+    }
+    this.widgetPositions[scoped] = { x: nextX, y: nextY };
+    if (executed) executed.push({ action: 'move', target: scoped, mode, x: nextX, y: nextY });
+    return { x: nextX, y: nextY };
+  }
+
+  drag(targetId, { dx = 0, dy = 0 } = {}) {
+    const entry = this.findNodeEntry(this.currentPageId, targetId);
+    const node = entry?.node;
+    if (!node) {
+      throw Object.assign(new Error(`当前页面 "${this.currentPageId}" 中未找到拖动目标 "${targetId}"`), { code: 'E_RUNTIME_NODE_NOT_FOUND', pageId: this.currentPageId, targetId });
+    }
+    if (!this.isNodeVisible(targetId)) {
+      throw Object.assign(new Error(`拖动目标 ${targetId} 当前不可见`), { code: 'E_RUNTIME_NODE_HIDDEN', targetId });
+    }
+    const startRect = this.getWidgetRect(entry.scopedId);
+    if (startRect) this.dragStartPositions[entry.scopedId] = { x: startRect.x, y: startRect.y };
+    const executed = [];
+    const isDisabled = Boolean(node.disabled) || ['disabled', 'loading'].includes(node.state);
+    if (!isDisabled) {
+      const previousScope = this.interactionScope;
+      this.interactionScope = entry.scopePrefix;
+      const runEv = (evName, rowContext = null) => {
+        const spec = node.on?.[evName] || node.interactions?.[evName];
+        if (spec) executePrototypeInteraction(this, spec, executed, { declaredVariables: this.docSnapshot.variables, rowContext });
+      };
+      try {
+        runEv('dragStart');
+        runEv('drag', { dragDx: dx, dragDy: dy });
+        runEv('dragDrop');
+      } finally {
+        this.interactionScope = previousScope;
+      }
+    }
+    this.trace.push({
+      step: this.trace.length + 1,
+      type: 'drag',
+      pageId: this.currentPageId,
+      targetId: entry.scopedId,
+      dx,
+      dy,
+      executed,
+      variables: structuredClone(this.variables),
+    });
     return this.getState();
   }
 
@@ -723,10 +871,10 @@ export class StudioRuntimeSession {
       const allowed = new Set(Object.keys(SCENARIO_STEP_SCHEMA.properties));
       const unknown = Object.keys(step).find(k => !allowed.has(k));
       if (unknown) return invalid(i, `未知步骤字段 ${unknown}；动作使用 action，断言使用 expect`);
-      if (step.action !== undefined && !['navigate', 'input', 'click', 'dataset', 'expect', 'assert'].includes(step.action)) return invalid(i, `未知 action: ${step.action}`);
+      if (step.action !== undefined && !['navigate', 'input', 'click', 'drag', 'dataset', 'expect', 'assert'].includes(step.action)) return invalid(i, `未知 action: ${step.action}`);
       if ((step.action === 'expect' || step.action === 'assert') && !step.expect) return invalid(i, 'expect/assert 动作需要 expect 断言');
       if (step.action === 'dataset' && !['select', 'toggle-select', 'add', 'update', 'delete', 'filter', 'sort', 'page'].includes(step.op)) return invalid(i, 'dataset 动作需要受支持的 op');
-      if (step.action && ['click', 'input'].includes(step.action) && !(step.target || step.id || step.fill || step.click)) return invalid(i, '动作缺少 target');
+      if (step.action && ['click', 'input', 'drag'].includes(step.action) && !(step.target || step.id || step.fill || step.click)) return invalid(i, '动作缺少 target');
       if (step.expect !== undefined) {
         if (!step.expect || typeof step.expect !== 'object' || Array.isArray(step.expect) || !Object.keys(step.expect).length) return invalid(i, 'expect 必须含至少一条断言');
         for (const [key, value] of Object.entries(step.expect)) {
@@ -758,6 +906,8 @@ export class StudioRuntimeSession {
         this.setInput(step.target || step.id || step.fill, step.value ?? step.text ?? '');
       } else if (step.action === 'click' || step.click) {
         this.click(step.target || step.click || step.id);
+      } else if (step.action === 'drag') {
+        this.drag(step.target || step.id, { dx: step.dx ?? 0, dy: step.dy ?? 0 });
       } else if (step.action === 'dataset') {
         const executed = [];
         this._executeDatasetAction(step, executed);
@@ -868,10 +1018,19 @@ export class StudioRuntimeSession {
           }
         }
         if (exp.datasetFirstRow) {
-          for (const [dsName, expectedFields] of Object.entries(exp.datasetFirstRow)) {
+          for (const [dsName, expectedFields] of Object.entries(step.expect.datasetFirstRow)) {
             const first = this.getVisibleDatasetRows(dsName)[0] || {};
             const passed = Object.entries(expectedFields).every(([k, v]) => String(first[k]) === String(v));
             assertions.push({ type: 'datasetFirstRow', target: dsName, expected: expectedFields, actual: first, passed });
+          }
+        }
+        if (exp.position) {
+          for (const [nodeId, expectedPos] of Object.entries(exp.position)) {
+            const rect = this.getWidgetRect(nodeId);
+            const tol = Number(expectedPos?.tolerance ?? 1);
+            const axes = ['x', 'y', 'left', 'right', 'top', 'bottom'].filter(k => typeof expectedPos?.[k] === 'number');
+            const passed = Boolean(rect && axes.length > 0 && axes.every(k => Math.abs(rect[k] - expectedPos[k]) <= tol));
+            assertions.push({ type: 'position', target: nodeId, expected: expectedPos, actual: rect, passed });
           }
         }
       }
@@ -1011,8 +1170,10 @@ export class StudioRuntimeSession {
 
     // Values are resolved before measurement; retain the row-view rendering flag.
     const runtimeNodes = (activePageScene?.nodes || []).map(n => {
+      const moved = this.widgetPositions?.[n.scopedId];
       return {
         ...n,
+        ...(moved ? { x: moved.x, y: moved.y } : {}),
         ...(n.type==='repeater'?{rowViewResolved:true}:{}),
       };
     });
@@ -1026,6 +1187,7 @@ export class StudioRuntimeSession {
       selectedOptions: structuredClone(this.selectedOptions),
       selectedNodes: structuredClone(this.selectedNodes),
       panelStates: structuredClone(this.panelStates),
+      widgetPositions: structuredClone(this.widgetPositions),
       visibility: structuredClone(this.visibility),
       datasets: visibleDatasets,
       activePageScene: activePageScene ? { ...activePageScene, nodes: runtimeNodes } : null,

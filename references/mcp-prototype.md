@@ -145,4 +145,12 @@
 - `gui_roundtrip` 支持可选参数 `preview: true`，在完成 Axure 保存、关闭、重开后自动触发原生菜单「发布 -> 预览（Publish -> Preview）」，并返回 `outputSha256`。
 - **浏览器自动化（`huashu-chrome` / Playwright）点击提示**：Axure RP 9 导出的 HTML 预览中，矩形按钮（VectorShape）渲染为外层 `<div id="uXX" class="ax_default shape">` 与内层文字 `<div id="uXX_text"><p><span>按钮文字</span></p></div>`。若通过无障碍快照拿到静态文本节点，请在触发点击时点外层 `.ax_default` 容器（或 `el.closest('.ax_default')?.click()`），以确保稳定触发绑定在元件上的 Axure `OnClick` 事件。
 
-测试：`npm run test:mcp-generate`、`npm run test:sync`、`node test/rp1-sync-b-check.mjs`、`node test/image-mcp-c-check.mjs`、`node test/zhixu-d-check.mjs`。
+---
+
+## Profile 分级裁剪、零落盘批交互与一站式 Chrome 验收
+
+- **`--profile` 工具面收敛**：启动 MCP 服务支持 `node bin/mcp.mjs --profile=<full|core|author|studio>`（或 `ZEE_MCP_PROFILE` 环境变量）。`core` 仅暴露 15 个常用闭环工具（工具 Schema 字符数压缩至约 40KB），`author` 在 `core` 基础上追加 13 个 `studio_*` 动词，`studio` 暴露 `runtime_info` / `verify_prototype` / `export_prototype` + `studio_*`，默认 `full` 保留全量 74 个工具；`runtime_info()` 返回 `mcpProfile`、`toolCount` 与 `schemaChars`。
+- **一站式 `generate_prototype({ verify: true })` 与虚拟时钟 / 故事板**：`generate_prototype` 可直接传 `verify: true`（可选 `verifySteps`、`verifyViewport`、`virtualClock: true`、`includeStoryboard: true`），生成 `.rp` 后自动复用 `.rp` 中的顶层 `verify:` 步骤在无头 Chrome 完成行为验收并返回多步骤横向拼接的 `storyboard.png` 图像附件。`verify_prototype` 支持 `virtualClock: true`（在页面脚本加载前拦截 `>= 200ms` 定时器，配合 `wait` 步瞬时推进长轮播周期）与 `storyboard` / `includeStoryboard: true`。
+- **批量交互 + 基线逻辑 ID 解析 + 一键清理保存**：`add_interaction` 支持传 `items: [{ target, event, actions }, ...]` 在单个工作节点内一次追加多组事件，并通过 `--baseline`（或自动探测旁路 `<source>.baseline.json`）将 RP/1 逻辑 ID（如 `thumb`、`check_overlap`）解析为原生控件名；`axure_save({ as, cleanup: true })` 在另存终稿后自动清理同一链条产生的 `.work-N.rp` 临时中间文件。
+
+测试：`npm run test:mcp-generate`、`npm run test:mcp-verify`、`npm run test:sync`、`node test/rp1-sync-b-check.mjs`、`node test/image-mcp-c-check.mjs`、`node test/zhixu-d-check.mjs`。

@@ -1769,6 +1769,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
         truncated: Boolean(n._textMetrics?.truncated),
         rawText: n.text ?? n.content ?? null,
         placeholder: n.placeholder ?? null,
+        ...(Number.isInteger(n.maxLength) && n.maxLength >= 0 ? { maxLength: n.maxLength } : {}),
         ...(n.multiline ? { multiline: true } : {}),
         ...(n.disabled ? { disabled: true } : {}),
         ...(['checkbox', 'radio'].includes(n.type) ? { checked: Boolean(n.checked ?? n.selected) } : {}),

@@ -11,14 +11,14 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const evidence = process.env.AXURE_MCP_VERIFY_OUTPUT;
 const verifyHost = process.env.AXURE_MCP_EXPORT_HOST === '1';
 
-async function session(run, env = {}) {
+async function session(run, env = {}, args = []) {
   const dir = evidence ? resolve(evidence) : mkdtempSync(join(tmpdir(), 'zee-rp-verify-'));
   if (evidence) mkdirSync(dir, { recursive: true });
   const work = mkdtempSync(join(dir, 'stdio-'));
   const client = new Client({ name: 'zee-rp-verify-check', version: '1.0.0' });
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [join(root, 'bin/mcp.mjs')],
+    args: [join(root, 'bin/mcp.mjs'), ...args],
     cwd: work,
     stderr: 'pipe',
     env: { ...process.env, AXURE_WRITE_ROOT: work, AXURE_PROTECTED_PATHS: join(work, 'protected.rp'), ...env },
@@ -169,5 +169,113 @@ test('verify_prototype auto-exports from rp only and proves real Chrome Boundary
     assert.equal(clamped.passed, clamped.total);
     assert.deepEqual(clamped.errors, []);
     assert.deepEqual(readdirSync(work).filter(n => n.startsWith('.zee-verify-')), []);
+  });
+});
+
+test('MCP profiles, axure_save cleanup, and batch add_interaction with baseline work offline', async () => {
+  await session(async ({ client, call }) => {
+    const { tools } = await client.listTools();
+    assert.equal(tools.length, 15);
+    const rt = await call('runtime_info');
+    assert.equal(rt.mcpProfile, 'core');
+    assert.equal(rt.toolCount, 15);
+    assert.ok(rt.schemaChars < 45000);
+  }, {}, ['--profile=core']);
+
+  await session(async ({ client }) => {
+    const { tools } = await client.listTools();
+    assert.equal(tools.length, 28);
+  }, {}, ['--profile=author']);
+
+  await session(async ({ client }) => {
+    const { tools } = await client.listTools();
+    assert.equal(tools.length, 17);
+  }, {}, ['--profile=studio']);
+
+  await session(async ({ call, work }) => {
+    const batchSpec = join(work, 'batch.rp1');
+    writeFileSync(batchSpec, [
+      'rp/1 target=9 name="批交互测试" domain=web theme=enterprise-light',
+      'page #home name="首页" canvas=[420,300]',
+      '  box #root [420x300] layout=stack fill=#FFFFFF',
+      '    button #btn_batch x=20 y=20 w=120 h=40 text="点我"',
+      '    label #lbl_out x=20 y=80 w=200 h=24 text="初始"',
+    ].join('\n'));
+    const gen = await call('generate_prototype', {
+      source: batchSpec,
+      output: join(work, 'batch.rp'),
+    });
+    assert.equal(gen.status, 'completed');
+    const opened = await call('axure_open', { path: gen.output });
+    assert.equal(opened.opened, gen.output);
+    const batchRes = await call('add_interaction', {
+      items: [
+        { target: 'btn_batch', event: 'OnClick', actions: [{ type: 'set-text', target: 'lbl_out', text: '已触发' }] },
+        { target: 'btn_batch', event: 'OnMouseOver', actions: [{ type: 'disable', target: 'btn_batch' }] },
+      ],
+    });
+    assert.equal(batchRes.status, 'completed');
+    const saved = await call('axure_save', { as: join(work, 'batch-final.rp'), cleanup: true });
+    assert.equal(saved.physicalPath, join(work, 'batch-final.rp'));
+    assert.ok(Array.isArray(saved.cleanedWorkFiles) && saved.cleanedWorkFiles.length >= 1);
+    assert.ok(existsSync(join(work, 'batch-final.rp')));
+    const leftoverWork = readdirSync(work).filter(n => /\.work-\d+\.rp/.test(n));
+    assert.deepEqual(leftoverWork, []);
+  });
+});
+
+test('one-shot generate_prototype verify+virtualClock+storyboard and daemon cache speedup in real Chrome', {
+  skip: !verifyHost && 'Set AXURE_MCP_EXPORT_HOST=1 on a verified macOS Axure host.',
+}, async () => {
+  await session(async ({ call, callRaw, work }) => {
+    const raw = await callRaw('generate_prototype', {
+      recipe: 'carousel-slider-captcha',
+      output: join(work, 'oneshot.rp'),
+      verify: true,
+      virtualClock: true,
+      includeStoryboard: true,
+    });
+    const res = raw.structuredContent ?? JSON.parse(raw.content[0].text);
+    assert.equal(res.status, 'completed');
+    assert.equal(res.behaviorVerification.passed, 19);
+    assert.equal(res.behaviorVerification.total, 19);
+    assert.equal(res.behaviorVerification.storyboardImage, 'attached');
+    assert.ok(raw.content.some(p => p.type === 'image' && p.mimeType === 'image/png' && p.data.length > 200));
+
+    // Daemon speedup check on consecutive export_prototype calls
+    const exp1 = await call('export_prototype', { rp: res.output, output: join(work, 'html-1') });
+    const t2Start = Date.now();
+    const exp2 = await call('export_prototype', { rp: res.output, output: join(work, 'html-2') });
+    const exp2Ms = Date.now() - t2Start;
+    assert.equal(exp1.status, 'completed');
+    assert.equal(exp2.status, 'completed');
+    assert.ok(exp2Ms <= 2500, `Expected warm daemon export <=2500ms, got ${exp2Ms}ms`);
+
+    // Carousel + slider-captcha macro generated and verified directly in Chrome
+    const macroSpec = join(work, 'macro-chrome.rp1');
+    writeFileSync(macroSpec, [
+      'rp/1 target=9 name="宏全链路验证" domain=web theme=enterprise-light',
+      'page #home name="首页" canvas=[440,560]',
+      '  box #root [440x560] layout=stack fill=#FFFFFF',
+      '    carousel #auto_ban [400x150] x=20 y=20 slides=["s1","s2","s3"] interval=3000',
+      '    slider-captcha #cap [360x240] x=20 y=220 targetX=200 tolerance=2',
+      'verify:',
+      '  expect #auto_ban_panel panelState=s1',
+      '  wait 3100',
+      '  expect #auto_ban_panel panelState=s2',
+      '  drag #cap_thumb dx=500 dy=0',
+      '  expect #cap_status text="验证失败"',
+      '  drag #cap_thumb dx=199 dy=0',
+      '  expect #cap_status text="验证成功"',
+    ].join('\n'));
+    const macroRun = await call('generate_prototype', {
+      source: macroSpec,
+      output: join(work, 'macro-chrome.rp'),
+      verify: true,
+      virtualClock: true,
+    });
+    assert.equal(macroRun.status, 'completed');
+    assert.equal(macroRun.behaviorVerification.passed, macroRun.behaviorVerification.total);
+    assert.equal(macroRun.behaviorVerification.passed, 7);
   });
 });

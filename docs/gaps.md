@@ -28,8 +28,8 @@
 | 15 | Studio 语义运行与离线 HTML 对同一表达式产生不同结果 | 用同一场景校验两条出口的变量、条件和文字更新 | 2026-11-10 FigCraft 对照复现，`concat()` 被 HTML 当作文字 | **closed**。Chrome 实点 Studio，再用移目录后直接打开的 HTML 跑同一场景，核对 8 个断言及条件轨迹，覆盖数值类型、引号字面量、面板局部重名、分支顺序和显隐。 |
 | 16 | 单点改字和移动走整文档复制，浏览器增量包用影响摘要推测变化 | 固定种子混合编辑和撤销重做，对照全量解算。浏览器增量更新后核对源文档、场景和画布 | 2026-11-10 FigCraft 对照 | **closed**。单条 `setText` 和自由布局中的普通 `moveNode` 复制实际修改路径，增量包比较解算节点并同步源节点。 |
 
-| 17 | 原生文本框输入上限缺少消费契约 | RP9/RP11 桥接的两份对照样本已证实 `MaxLength` 为 `0x05`，且官方播放器按值截断。将同一属性接通 RP/1、Studio、读回和同步，并比较真实键入。 | `docs/native-assembly-research.md` | **partial**。RP/1 作者、参考模拟、读回和官方浏览器已贯通。Studio 文本框属性仍待覆盖。 |
-| 18 | 面板定时和原型手势跨出口不一致 | RP9 官方播放器通过开始、停止、重启、左右滑动、双轴拖动和松手回位；RP/1 扩展同步轮播指示器（`@panel.state`）、有界拖动（`bounds`/`BoundaryDirectionLiteral`）、空间读值（`@w.x/.y/...`）、`location`/`delta`/`withThis`、`isOver`/`isNotOver` 及 `verify_prototype` 官方 HTML 无头 Chrome 验收。扩展 Studio 时对同一用例验证状态轨迹、边界配置与中断。 | `docs/native-assembly-research.md` | **partial**。RP/1 创作、参考模拟、原生 `.rp`（含 `BoundaryDirectionLiteral`/`GetWidget`/`GetPanelState`/`IsOver`）及 RP9 官方 HTML 真实浏览器已验（`carousel-slider-captcha`）；Studio 自由画布拖动边界与容差仍待覆盖。 |
+| 17 | 原生文本框输入上限缺少消费契约 | RP9/RP11 桥接的两份对照样本已证实 `MaxLength` 为 `0x05`，且官方播放器按值截断。将同一属性接通 RP/1、Studio、读回和同步，并比较真实键入。 | `docs/native-assembly-research.md` | **closed**。RP/1 作者、参考模拟、读回、官方浏览器及 Studio（运行态截断、`maxlength` HTML 属性、`input` 能力契约、原生 RP9 `TextBox.MaxLength` 三端一致导出）已全线贯通并测试锁定。 |
+| 18 | 面板定时和原型手势跨出口不一致 | RP9 官方播放器通过开始、停止、重启、左右滑动、双轴拖动和松手回位；RP/1 扩展同步轮播指示器（`@panel.state`）、有界拖动（`bounds`/`BoundaryDirectionLiteral`）、空间读值（`@w.x/.y/...`）、`location`/`delta`/`withThis`、`isOver`/`isNotOver` 及 `verify_prototype` 官方 HTML 无头 Chrome 验收。扩展 Studio 时对同一用例验证状态轨迹、边界配置与中断。 | `docs/native-assembly-research.md` | **partial**。RP/1 创作、参考模拟、原生 `.rp` 双向 `decompile`、RP9 官方 HTML 真实浏览器（含 `virtualClock` + `storyboard`），以及 Studio 运行态与独立 HTML 导出的 `@w.<geom>` / `@panel.state` / `isOver` / `move`（含 `bounds`）/`drag()` 场景已验；Studio 交互预览画布的鼠标手势绑定与定时循环 UI 仍待补齐。 |
 | 19 | 官方 HTML 缺少日常 MCP 入口 | AI 通过工具发现 RP/1 可运行范例，生成 RP9 并导出官方 HTML。RP9 与 RP11 均用真实浏览器验收，原文件哈希保持一致。 | `references/mcp-prototype.md` | **closed（macOS 已验证构建）**：真实 stdio 与 Playwright 通过。定制 HTML 配置、Windows 程序集调用和独立模型盲测各有独立验收边界。 |
 
 ## 已关闭(近期)

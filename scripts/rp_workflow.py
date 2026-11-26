@@ -250,7 +250,8 @@ def main():
         _, ir = compile_language(spec)
         result = {"ok": True, "semanticHash": ir["semanticHash"],
                   "variables": list(spec.get("variables", {})),
-                  "pages": [{"id": p["id"], "name": p.get("name", p["id"])} for p in spec["pages"]],
+                  "pages": [{"id": p["id"], "name": p.get("name", p["id"]), "canvas": p.get("canvas")} for p in spec["pages"]],
+                  "verifySteps": spec.get("verify") or [],
                   "symbols": [{**s, "context": contextualize({"pointer": s["pointer"]}, spec, spans, raw)}
                               for s in ir["symbols"]]}
     elif request["command"] == "patch":

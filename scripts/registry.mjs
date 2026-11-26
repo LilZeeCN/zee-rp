@@ -134,8 +134,8 @@ const COMMANDS = [
   {
     "command": "add-interaction",
     "script": "add-interaction.mjs",
-    "summary": "向元件或页面追加事件+动作交互（支持 --replace-event、--on-page、--json 条件/多 Case；FCall 函数名按 18 项注册表白名单校验）",
-    "usage": "node add-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] [--replace-event] --event <EventName> --action <type> [key=value ...]",
+    "summary": "向单个或多个元件/页面追加事件+动作交互（支持 items 批量事务、自动读取 .baseline.json 解析逻辑 ID、interactions JSON 与条件/边界/IsOver/GetPanelState 原生表达；优先使用 generate_prototype 内联 RP/1，此命令用于直接修补已有 .rp）",
+    "usage": "node add-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] [--baseline <file.baseline.json>] [--replace-event] (--json <spec.json> | --event <EventName> --action <type> [key=value ...])",
     "output": "index:3",
     "evidence": "gui-roundtrip"
   },
@@ -639,14 +639,48 @@ const LIB_SCRIPTS = [
             },
             "replaceEvent": {
               "type": "boolean"
+            },
+            "baseline": {
+              "type": "string",
+              "minLength": 1,
+              "description": "可选：显式指定 .baseline.json 路径，自动把逻辑 ID（如 btn_reset）解析为原生控件名。"
+            },
+            "interactions": {
+              "type": "array",
+              "minItems": 1,
+              "description": "可选：直接传入单目标多事件/多分支 JSON（[{event, cases:[{when, isNewIfGroup, actions}]}]）；支持 IsOver/GetPanelState/location/withThis/BoundaryCondition。"
+            },
+            "items": {
+              "type": "array",
+              "minItems": 1,
+              "description": "可选：单次批量写入多个元件/页面交互的事务数组，全部成功只提交一个新版本，避免生成串行多份 .work 副本。",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "target": { "type": "string", "minLength": 1 },
+                  "page": { "type": "boolean" },
+                  "onPage": { "type": "string", "minLength": 1 },
+                  "replaceEvent": { "type": "boolean" },
+                  "event": { "type": "string", "minLength": 1 },
+                  "actions": { "type": "array", "minItems": 1 },
+                  "interactions": { "type": "array", "minItems": 1 }
+                },
+                "anyOf": [
+                  { "required": ["target", "interactions"] },
+                  { "required": ["target", "event", "actions"] }
+                ],
+                "additionalProperties": false
+              }
             }
           },
           "required": [
             "source",
-            "output",
-            "target",
-            "event",
-            "action"
+            "output"
+          ],
+          "anyOf": [
+            { "required": ["target", "event", "action"] },
+            { "required": ["target", "interactions"] },
+            { "required": ["items"] }
           ],
           "additionalProperties": false
         },

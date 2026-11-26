@@ -241,6 +241,7 @@ def language_schema():
         "detail-card": ["items"],
         "wizard-card": ["steps"],
         "master-detail": ["detail"],
+        "carousel": ["slides"],
     }
     for kind, fields in MACRO_PROPS.items():
         props = {k: common[k] if k in common else property_shape(k) for k in fields if k != "type"}
@@ -263,6 +264,8 @@ def language_schema():
             if "all" in item_props:
                 item_props["all"] = {"type": "boolean"}
             if kind in ("searchable-list", "master-detail") and list_name == "filters":
+                item = either(text, obj(item_props))
+            elif kind == "carousel" and list_name == "slides":
                 item = either(text, obj(item_props))
             else:
                 item = obj(item_props)
@@ -556,6 +559,7 @@ def language_schema():
         "masters": {"type": "object", "propertyNames": ident, "additionalProperties": master},
         "adaptiveViews": array(obj({"id": ident, "name": nonempty, "width": {"type": "number", "exclusiveMinimum": 0}, "height": {"type": "number", "minimum": 0}, "condition": {"enum": ["<=", ">="]}}, ["id", "width"]), 1),
         "components": {"type": "object", "additionalProperties": obj({"params": {"type": "object", "propertyNames": ident, "additionalProperties": ident}, "root": ref("node")}, ["root"])},
+        "verify": array({"type": "object"}),
         "pages": array(page, 1)}, ["language"])
     result["anyOf"] = [{"required": ["pages"]}, {"required": ["product"]}]
     source_properties = {}

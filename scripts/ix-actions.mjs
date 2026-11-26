@@ -9,6 +9,7 @@ import { extname } from 'node:path';
 import { readRecords as readFileRecords, encodeRecord, replaceRecord, replaceRecords } from './rp-records.mjs';
 import { parsePayload as parseRecordPayload, encodePayload, field, walkNodes } from './parse-payload.mjs';
 import { detectFileVersion, resolveTargetVersion } from './version.mjs';
+import { existsSync } from 'node:fs';
 import { RP9_ENABLE_VALUES, RP11_ONLY_FCALLS, RP11_ONLY_EVENTS } from './version-fields.mjs';
 import { adaptNodesForVersion } from './version-adapt.mjs';
 
@@ -1839,5 +1840,130 @@ export function createInteractionWriter(file) {
     },
     stats() { return { interactionGroups: groups, recordsInflated: reader.records.length,
       payloadsParsed: graphs.size, recordsEncoded: reader.dirty.size }; },
+  };
+}
+
+export function loadBaselineMap(rpPath, explicitBaselinePath = null) {
+  const inferred = rpPath ? (String(rpPath).endsWith('.baseline.json') ? rpPath : `${rpPath}.baseline.json`) : null;
+  const candidates = [explicitBaselinePath, inferred].filter(Boolean);
+  const path = candidates.find(p => existsSync(p));
+  if (!path) return null;
+  try {
+    const data = JSON.parse(readFileSync(path, 'utf8'));
+    const symbols = [];
+    if (Array.isArray(data.sourceMap)) {
+      for (const s of data.sourceMap) {
+        if (!s || typeof s !== 'object') continue;
+        const nativeName = s.nativeName ?? s.name ?? s.display;
+        const logicalId = s.logicalId ?? s.id;
+        if (!nativeName || !logicalId) continue;
+        symbols.push({
+          logicalId,
+          id: logicalId,
+          nativeName,
+          name: s.label ?? String(logicalId).split('/').at(-1),
+          label: s.label,
+          pageId: s.pageId,
+          pageName: s.pageName,
+        });
+      }
+    } else if (Array.isArray(data.symbols)) {
+      symbols.push(...data.symbols);
+    }
+    if (symbols.length === 0 && data.targets && typeof data.targets === 'object') {
+      for (const [logicalId, nativeName] of Object.entries(data.targets)) {
+        if (typeof nativeName === 'string' && nativeName) {
+          symbols.push({ logicalId, id: logicalId, nativeName, name: logicalId.split('/').at(-1) });
+        }
+      }
+    }
+    const pages = Array.isArray(data.pages) ? [...data.pages] : [];
+    if (pages.length === 0) {
+      const seenPages = new Set();
+      for (const s of symbols) {
+        if (s.pageId && !seenPages.has(s.pageId)) {
+          seenPages.add(s.pageId);
+          pages.push({ id: s.pageId, name: s.pageName ?? s.pageId });
+        }
+      }
+    }
+    return { path, symbols, pages };
+  } catch {
+    return null;
+  }
+}
+
+export function resolveBaselineTarget(target, baseline) {
+  if (!baseline || !target) return target;
+  if (typeof target === 'object' && target !== null && target.page !== undefined && target.widget === undefined) {
+    const pMatch = baseline.pages.find(p => p.id === target.page || p.name === target.page);
+    return pMatch ? { ...target, page: pMatch.name ?? target.page } : target;
+  }
+  const rawWidget = typeof target === 'string' ? target : target.widget;
+  if (!rawWidget || typeof rawWidget !== 'string') return target;
+  const clean = rawWidget.replace(/^@/, '').trim();
+  const slashNorm = clean.replace(/\./g, '/');
+  const pageHint = typeof target === 'object' ? target.page : null;
+  const pageEntry = pageHint ? baseline.pages.find(p => p.id === pageHint || p.name === pageHint) : null;
+  const matches = baseline.symbols.filter(s => {
+    if (pageEntry && s.pageId !== pageEntry.id && s.pageName !== pageEntry.name) return false;
+    const lid = String(s.logicalId ?? s.id ?? '');
+    const shortId = lid.includes('/') ? lid.split('/').at(-1) : lid;
+    return lid === slashNorm || shortId === clean || s.name === clean || s.nativeName === clean || s.label === clean;
+  });
+  if (matches.length !== 1) return target;
+  const sym = matches[0];
+  const resolvedName = sym.nativeName ?? sym.name ?? rawWidget;
+  const resolvedPage = pageEntry?.name ?? sym.pageName ?? baseline.pages.find(p => p.id === sym.pageId)?.name ?? pageHint;
+  if (typeof target === 'string') {
+    return resolvedPage ? { widget: resolvedName, page: resolvedPage } : resolvedName;
+  }
+  return { ...target, widget: resolvedName, ...(resolvedPage ? { page: resolvedPage } : {}) };
+}
+
+export function addInteractionsBatch(file, items, { replaceEvent = false, version, baseline = null } = {}) {
+  if (!Array.isArray(items) || !items.length) throw new Error('No interaction batch items given');
+  const writer = createInteractionWriter(file);
+  const reports = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!item || typeof item !== 'object') throw new Error(`Batch item #${i} must be an object`);
+    let target = item.target;
+    if (item.page === true) {
+      target = { page: typeof item.target === 'string' ? item.target : item.target?.page };
+    } else if (item.onPage && typeof item.target === 'string') {
+      target = { widget: item.target, page: item.onPage };
+    }
+    target = resolveBaselineTarget(target, baseline);
+    const rawIxList = Array.isArray(item.interactions)
+      ? item.interactions
+      : (item.event ? [{ event: item.event, actions: item.actions || [] }] : null);
+    const resolveWidgetRef = rawRef => {
+      if (typeof rawRef !== 'string') return rawRef;
+      const r = resolveBaselineTarget(rawRef, baseline);
+      return typeof r === 'object' && r !== null ? (r.widget ?? rawRef) : r;
+    };
+    const resolvedIxList = Array.isArray(rawIxList) ? rawIxList.map(ix => ({
+      ...ix,
+      actions: Array.isArray(ix.actions) ? ix.actions.map(act => (act && typeof act === 'object' ? {
+        ...act,
+        ...(typeof act.target === 'string' ? { target: resolveWidgetRef(act.target) } : {}),
+        ...(typeof act.panel === 'string' ? { panel: resolveWidgetRef(act.panel) } : {}),
+      } : act)) : ix.actions,
+    })) : rawIxList;
+    const res = writer.add(target, resolvedIxList, {
+      replaceEvent: item.replaceEvent !== undefined ? Boolean(item.replaceEvent) : replaceEvent,
+      version,
+    });
+    reports.push(res.report);
+  }
+  return {
+    file: writer.finish(),
+    report: {
+      batch: true,
+      count: items.length,
+      results: reports,
+      stats: writer.stats(),
+    },
   };
 }

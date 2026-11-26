@@ -14,7 +14,7 @@ import { writeNativeScene } from '../scripts/native-scene.mjs';
 import { encodeRecord, readRecords, replaceRecord } from '../scripts/rp-records.mjs';
 import { encodePayload, parsePayload, field } from '../scripts/parse-payload.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
-import { addInteractions, createInteractionWriter } from '../scripts/ix-actions.mjs';
+import { addInteractions, addInteractionsBatch, createInteractionWriter, loadBaselineMap } from '../scripts/ix-actions.mjs';
 import { mergePages } from '../scripts/merge-pages.mjs';
 import { pythonInvocation } from '../scripts/python.mjs';
 
@@ -335,6 +335,56 @@ try {
     const boundedMoves = allObjs.filter(o => o.className === 'Axure:MoveWidgetInfo' && field(o.body, 'MoveType')?.value === 3);
     assert.equal(boundedMoves.length, 1);
     assert(field(boundedMoves[0].body, 'BoundaryCondition')?.value !== graphs[0].roots.find(n => n.tag === 0x1e).values.indexOf('0'.repeat(32)) + 1);
+
+    // Verify rp-read decodes BoundaryCondition + location/delta moves into structured rp1
+    const captchaSummary = readRp(readFileSync(outRp));
+    const widgets = captchaSummary.pages[0].widgets;
+    const byPrefix = p => widgets.find(w => w.name.startsWith(p));
+    const thumbDragAction = byPrefix('panel-thumb-').interactions.find(i => i.event === 'OnDrag').cases[0].actions[0];
+    assert.equal(thumbDragAction.rp1?.type, 'move');
+    assert.equal(thumbDragAction.rp1?.mode, 'drag-x');
+    assert.ok(thumbDragAction.rp1?.bounds?.left, 'rp-read must decode BoundaryCondition left bound');
+    assert.ok(thumbDragAction.rp1?.bounds?.right, 'rp-read must decode BoundaryCondition right bound');
+    const resetMove = byPrefix('panel-thumb-').interactions.find(i => i.event === 'OnDragDrop').cases.find(c => !c.conditionHash || c.actions.some(a => a.rp1?.mode === 'location'));
+    assert.ok(resetMove, 'rp-read should decode location move rp1');
+  });
+  check('addInteractionsBatch + .baseline.json resolves logical widget IDs and keeps three zeros', () => {
+    const macroSpec = join(work, 'macro-batch.rp1');
+    writeFileSync(macroSpec, [
+      'rp/1 target=9 name="宏与批交互测试" domain=web theme=enterprise-light',
+      'page #home name="首页" canvas=[440,520]',
+      '  box #root [440x520] layout=stack fill=#FFFFFF',
+      '    carousel #hero [400x140] x=20 y=20 slides=["s1","s2"] interval=3000',
+      '    slider-captcha #cap [360x240] x=20 y=200 targetX=200 tolerance=2',
+      '    label #msg x=20 y=460 w=200 h=24 text="待验证"',
+      '    button #extra_btn x=20 y=490 w=120 h=30 text="额外"',
+    ].join('\n'));
+    const bundle = join(work, 'macro-bundle');
+    const res = spawnPy([join(root, 'scripts/proto.py'), 'compile', '--spec', macroSpec, '--out-dir', bundle], { encoding: 'utf8' });
+    assert.equal(res.status, 0, res.stderr);
+    const outRp = join(work, 'macro.rp');
+    const rep = buildInteractiveRp(join(bundle, 'compile-plan.json'), outRp);
+    assert.deepEqual(rep.threeZeros, { danglingRefs: 0, sentinelSlotsNonZero: 0, problems: 0 });
+    writeFileSync(`${outRp}.baseline.json`, JSON.stringify({
+      targets: { 'home/extra_btn': 'extra_btn-deadbeef', 'home/msg': 'msg-deadbeef' },
+    }));
+    const actualNames = readRp(readFileSync(outRp)).pages[0].widgets.map(w => w.name);
+    const realBtn = actualNames.find(n => n.startsWith('btn-extra_btn-'));
+    const realMsg = actualNames.find(n => n.startsWith('txt-msg-'));
+    writeFileSync(`${outRp}.baseline.json`, JSON.stringify({
+      targets: { 'home/extra_btn': realBtn, 'home/msg': realMsg },
+    }));
+    const bmap = loadBaselineMap(outRp);
+    const { file: nextBuf } = addInteractionsBatch(readFileSync(outRp), [
+      { target: 'extra_btn', event: 'OnClick', actions: [{ type: 'set-text', target: 'msg', text: '批交互成功' }] },
+      { target: 'extra_btn', event: 'OnMouseOver', actions: [{ type: 'disable', target: 'extra_btn' }] },
+    ], { baseline: bmap });
+    const after = readRp(nextBuf);
+    assert.equal(after.counts.problems, 0);
+    assert.equal(after.counts.danglingRefs, 0);
+    const btnWidget = after.pages[0].widgets.find(w => w.name === realBtn);
+    assert.ok(btnWidget.interactions.some(ix => ix.event === 'OnClick'));
+    assert.ok(btnWidget.interactions.some(ix => ix.event === 'OnMouseOver'));
   });
   console.log(JSON.stringify({ ok: true, checks, reports }, null, 2));
 } finally { childProcess.spawnSync = spawn; syncBuiltinESMExports(); rmSync(work, { recursive: true, force: true }); }

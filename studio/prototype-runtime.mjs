@@ -1,6 +1,6 @@
 // These functions have no module dependencies. The code exporter embeds them
 // in its standalone script so it also works when index.html is opened directly.
-export function evaluatePrototypeExpression(expression, { variables, getWidgetText, getWidgetState, resolveDatasetPath, itemRow = null }) {
+export function evaluatePrototypeExpression(expression, { variables, getWidgetText, getWidgetState, resolveDatasetPath, itemRow = null, getWidgetRect = null }) {
   if (expression == null) return '';
   if (typeof expression === 'number' || typeof expression === 'boolean') return expression;
   const source = String(expression).trim();
@@ -35,6 +35,12 @@ export function evaluatePrototypeExpression(expression, { variables, getWidgetTe
     round: value => Math.round(Number(value) || 0),
     floor: value => Math.floor(Number(value) || 0),
     ceil: value => Math.ceil(Number(value) || 0),
+    isOver: (a, b) => {
+      const ra = typeof a === 'string' && getWidgetRect ? getWidgetRect(a) : a;
+      const rb = typeof b === 'string' && getWidgetRect ? getWidgetRect(b) : b;
+      return Boolean(ra && rb && ra.right > rb.left && ra.left < rb.right && ra.bottom > rb.top && ra.top < rb.bottom);
+    },
+    isNotOver: (a, b) => !functions.isOver(a, b),
   };
 
   function matchVarName(rest) {
@@ -53,6 +59,17 @@ export function evaluatePrototypeExpression(expression, { variables, getWidgetTe
   function tokenize(input) {
     const list = [];
     let i = 0;
+    let parenDepth = 0;
+    const spatialParenDepths = [];
+    const readWidgetProp = (target, wProp) => {
+      if (wProp === 'checked' || wProp === 'selected' || wProp === 'disabled' || wProp === 'state') {
+        return getWidgetState ? getWidgetState(target, wProp) : (wProp === 'state' ? '' : false);
+      }
+      if (['x', 'y', 'left', 'right', 'top', 'bottom', 'width', 'height'].includes(wProp)) {
+        return getWidgetRect ? (getWidgetRect(target)?.[wProp] ?? 0) : 0;
+      }
+      return getWidgetText ? getWidgetText(target) : '';
+    };
     while (i < input.length) {
       const ch = input[i];
       if (/\s/.test(ch)) {
@@ -93,13 +110,9 @@ export function evaluatePrototypeExpression(expression, { variables, getWidgetTe
         i += dsMatch[0].length;
         continue;
       }
-      const wMatch = rest.match(/^widget\.([a-zA-Z0-9_/-]+)\.(text|checked|selected|value|disabled)(?![a-zA-Z0-9_])/);
+      const wMatch = rest.match(/^widget\.([a-zA-Z0-9_/-]+)\.(text|checked|selected|value|disabled|state|x|y|left|right|top|bottom|width|height)(?![a-zA-Z0-9_])/);
       if (wMatch) {
-        const wProp = wMatch[2];
-        const wVal = (wProp === 'checked' || wProp === 'selected' || wProp === 'disabled')
-          ? (getWidgetState ? getWidgetState(wMatch[1], wProp) : false)
-          : (getWidgetText ? getWidgetText(wMatch[1]) : '');
-        list.push({ type: 'val', value: wVal });
+        list.push({ type: 'val', value: readWidgetProp(wMatch[1], wMatch[2]) });
         i += wMatch[0].length;
         continue;
       }
@@ -126,27 +139,37 @@ export function evaluatePrototypeExpression(expression, { variables, getWidgetTe
         }
       }
       if (ch === '@') {
-        const atPropMatch = rest.match(/^@([a-zA-Z0-9_/-]+)\.(text|checked|selected|value|disabled)(?![a-zA-Z0-9_])/);
+        const atPropMatch = rest.match(/^@([a-zA-Z0-9_/-]+)\.(text|checked|selected|value|disabled|state|x|y|left|right|top|bottom|width|height)(?![a-zA-Z0-9_])/);
         if (atPropMatch) {
-          const wProp = atPropMatch[2];
-          const wVal = (wProp === 'checked' || wProp === 'selected' || wProp === 'disabled')
-            ? (getWidgetState ? getWidgetState(atPropMatch[1], wProp) : false)
-            : (getWidgetText ? getWidgetText(atPropMatch[1]) : '');
-          list.push({ type: 'val', value: wVal });
+          list.push({ type: 'val', value: readWidgetProp(atPropMatch[1], atPropMatch[2]) });
           i += atPropMatch[0].length;
           continue;
         }
         const atMatch = rest.match(/^@([a-zA-Z0-9_/-]+)/);
         if (atMatch) {
-          list.push({ type: 'val', value: getWidgetText ? getWidgetText(atMatch[1]) : '' });
+          const val = spatialParenDepths.length > 0 && getWidgetRect
+            ? getWidgetRect(atMatch[1])
+            : (getWidgetText ? getWidgetText(atMatch[1]) : '');
+          list.push({ type: 'val', value: val });
           i += atMatch[0].length;
           continue;
         }
       }
       const opMatch = rest.match(/^(?:===|!==|==|!=|<=|>=|&&|\|\||\?\?|[+\-*/%<>!?:(),])/);
       if (opMatch) {
-        list.push({ type: 'op', value: opMatch[0] });
-        i += opMatch[0].length;
+        const opVal = opMatch[0];
+        if (opVal === '(') {
+          parenDepth++;
+          const prev = list.at(-1);
+          if (prev?.type === 'id' && (prev.value === 'isOver' || prev.value === 'isNotOver')) {
+            spatialParenDepths.push(parenDepth);
+          }
+        } else if (opVal === ')') {
+          if (spatialParenDepths.at(-1) === parenDepth) spatialParenDepths.pop();
+          parenDepth = Math.max(0, parenDepth - 1);
+        }
+        list.push({ type: 'op', value: opVal });
+        i += opVal.length;
         continue;
       }
       const idName = matchVarName(rest);
@@ -429,6 +452,9 @@ export function executePrototypeInteraction(runtime, spec, executed, { declaredV
       executed.push({ action: 'set-panel-state', panel, state });
     }
 
+    if (type === 'move' && typeof runtime.moveWidget === 'function') {
+      runtime.moveWidget(action.target, action, executed, { evaluate, rowContext });
+    }
     if (action.datasetAction || type?.startsWith('dataset-') || type?.startsWith('repeater-')) {
       runtime._executeDatasetAction(action.datasetAction || action, executed, rowContext);
     }

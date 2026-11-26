@@ -21,7 +21,7 @@ import { expandSpec, pasteAxvg } from './axvg.mjs';
 import { createBlankProject } from './create-blank-project.mjs';
 import { writeNativeScene } from './native-scene.mjs';
 import { mergePages } from './merge-pages.mjs';
-import { authoringTools, recipes, recipeSource, runWorkflow, pythonEnvironment } from './authoring-workflow.mjs';
+import { authoringTools, recipes, recipeSource, runWorkflow, pythonEnvironment, exportPrototype, verifyOfficialPreview } from './authoring-workflow.mjs';
 import { reviewImageStructure } from './image-structure.mjs';
 import { studioTools } from '../studio/mcp-adapter.mjs';
 
@@ -47,8 +47,43 @@ function commandIO(command) {
   return null; // Axvg 的输入输出不是 RP，会话不会改写其参数。
 }
 
-export function listMcpTools() {
-  return [...listCommands().map(c => ({
+export const MCP_PROFILES = {
+  full: null,
+  core: new Set([
+    'generate_prototype', 'revise_prototype', 'export_prototype', 'verify_prototype',
+    'prototype_recipe', 'diagnose_prototype', 'explain_binding', 'sync_prototype',
+    'generate_from_image', 'review_image_structure', 'add_interaction',
+    'axure_open', 'axure_save', 'runtime_info', 'gui_roundtrip',
+  ]),
+  studio: new Set([
+    'studio_open_project', 'studio_describe', 'studio_command', 'studio_inspect',
+    'studio_screenshot', 'studio_export', 'studio_history', 'studio_stage',
+    'studio_design', 'studio_scenario', 'studio_media', 'studio_merge', 'studio_operations',
+    'export_prototype', 'verify_prototype', 'gui_roundtrip', 'runtime_info',
+  ]),
+  author: new Set([
+    'generate_prototype', 'revise_prototype', 'export_prototype', 'verify_prototype',
+    'prototype_recipe', 'diagnose_prototype', 'explain_binding', 'sync_prototype',
+    'generate_from_image', 'review_image_structure', 'add_interaction',
+    'axure_open', 'axure_save', 'runtime_info', 'gui_roundtrip',
+    'studio_open_project', 'studio_describe', 'studio_command', 'studio_inspect',
+    'studio_screenshot', 'studio_export', 'studio_history', 'studio_stage',
+    'studio_design', 'studio_scenario', 'studio_media', 'studio_merge', 'studio_operations',
+  ]),
+};
+
+export function resolveMcpProfile(profile) {
+  const name = String(profile || process.env.ZEE_MCP_PROFILE || 'full').trim().toLowerCase();
+  if (!Object.hasOwn(MCP_PROFILES, name)) {
+    throw Object.assign(new Error(`未知 MCP profile "${name}"；可选：${Object.keys(MCP_PROFILES).join(', ')}`), { code: 'E_MCP_PROFILE' });
+  }
+  return name;
+}
+
+export function listMcpTools({ profile } = {}) {
+  const active = resolveMcpProfile(profile);
+  const allow = MCP_PROFILES[active];
+  const all = [...listCommands().map(c => ({
     name: toolName(c.command),
     description: `${c.summary}。${commandIO(c) ? '具名调用省略宿主源/输出即使用会话链；原始 args 用 session:true 并省略这两个参数（多源工具保留导入源）。显式路径不推进链。' : ''} 登记证据 ${c.evidence}，只适用 capabilities.md 的已验样本。CLI: ${c.usage}${c.command.startsWith('axvg ') ? '；args 省略子命令词，服务自动加入。' : ''}`,
     inputSchema: commandSchema(c.command),
@@ -57,6 +92,7 @@ export function listMcpTools() {
     name, description, inputSchema,
     annotations: { readOnlyHint: readOnly ?? ['axure_state', 'locate', 'inspect', 'read_interactions', 'verify'].includes(name), destructiveHint: false, openWorldHint: false },
   }))];
+  return allow ? all.filter(t => allow.has(t.name)) : all;
 }
 
 function commandSchema(commandName) {
@@ -101,7 +137,7 @@ function runCommandTool(command, input) {
   const io = commandIO(command);
   const raw = Object.hasOwn(input, 'args');
   let args = commandArgs(command, input);
-  let state = null, node = null, source = null, before = null;
+  let state = null, node = null, source = null, before = null, tempSpecFile = null;
   try {
   if (io) {
     const useSession = raw ? input.session === true : input[io.source] === undefined && input[io.output] === undefined;
@@ -126,6 +162,25 @@ function runCommandTool(command, input) {
       source = raw ? args.filter(a => !a.startsWith('--'))[io.external ? 1 : 0] : input[io.source];
       if (!io.source) source = null;
       if (source) { assertNotProtected(source); before = countsOf(readRp(readFileSync(source), { path: source })); }
+    }
+  }
+  if (command.command === 'add-interaction' && !raw) {
+    const effectiveSrc = source ?? input.source;
+    const effectiveOut = node ?? input.output;
+    const baselinePath = findBaselineForRp(effectiveSrc, input.baseline, state);
+    if (Array.isArray(input.items) || Array.isArray(input.interactions)) {
+      tempSpecFile = join(tmpdir(), `zee-add-ix-${randomUUID()}.json`);
+      const specObj = Array.isArray(input.items)
+        ? { items: input.items }
+        : { target: input.target, ...(input.page ? { page: true } : {}), ...(input.onPage ? { onPage: input.onPage } : {}), interactions: input.interactions };
+      writeFileSync(tempSpecFile, JSON.stringify(specObj, null, 2));
+      args = [effectiveSrc, effectiveOut, '--json', tempSpecFile];
+      if (input.replaceEvent) args.push('--replace-event');
+      if (input.page) args.push('--page');
+      if (input.onPage) args.push('--on-page', input.onPage);
+      if (baselinePath) args.push('--baseline', baselinePath);
+    } else if (baselinePath && !args.includes('--baseline')) {
+      args.push('--baseline', baselinePath);
     }
   }
   if (command.command.startsWith('axvg ')) args = [command.command.split(' ')[1], ...args];
@@ -160,7 +215,10 @@ function runCommandTool(command, input) {
     if (output) { assertNotProtected(output); value.output = output; value.before = before; value.after = countsOf(readRp(readFileSync(output), { path: output })); }
   }
   return toolResult(value);
-  } finally { if (node) releaseWorkNode(node); }
+  } finally {
+    if (tempSpecFile) try { unlinkSync(tempSpecFile); } catch {}
+    if (node) releaseWorkNode(node);
+  }
 }
 
 function errorCandidates(command, input, args, source, message) {
@@ -2234,7 +2292,7 @@ const sessionHandlers = {
     const syncStatus = computeSyncStatus(state);
     return { active: true, ...sessionSummary(state), structure: zerosOf(state.rp), ...(syncStatus ? { syncStatus } : {}) };
   },
-  axure_save({ as }) {
+  axure_save({ as, cleanup = false } = {}) {
     const state = refreshState(requireSession());
     const tail = state.chain.at(-1);
     if (Object.values(zerosOf(state.rp)).some(Boolean)) throw new Error('链尾结构不健康，拒绝另存；先 verify 查看问题。');
@@ -2249,8 +2307,29 @@ const sessionHandlers = {
       copyFileSync(srcBaseline, `${target}.baseline.json`);
     }
     const digest = sha256Of(target);
-    state.timeline.push({ op: 'save', at: now(), from: tail, path: target, sha256: digest });
-    return { path: isAbsolute(as) ? as : join(process.cwd(), as), physicalPath: target, sha256: digest, fromChainTail: tail };
+    const cleanedWorkFiles = [];
+    if (cleanup) {
+      const keep = new Set([state.sourceFile, target].filter(Boolean));
+      for (const workPath of state.chain) {
+        if (!workPath || keep.has(workPath)) continue;
+        try {
+          assertNotProtected(workPath);
+          unlinkSync(workPath);
+          cleanedWorkFiles.push(workPath);
+        } catch (err) {
+          if (err?.code !== 'ENOENT') throw err;
+        }
+      }
+      state.chain = [target];
+    }
+    state.timeline.push({ op: 'save', at: now(), from: tail, path: target, sha256: digest, ...(cleanedWorkFiles.length ? { cleanedWorkFiles } : {}) });
+    return {
+      path: isAbsolute(as) ? as : join(process.cwd(), as),
+      physicalPath: target,
+      sha256: digest,
+      fromChainTail: tail,
+      ...(cleanup ? { cleanedWorkFiles } : {}),
+    };
   },
   locate({ path, rp, file, rpFile, query, page, type, limit = 50, offset = 0 } = {}) {
     const targetPath = path ?? rp ?? file ?? rpFile;
@@ -2399,7 +2478,11 @@ const targetSchema = {
 };
 
 export const sessionTools = [
-  ...authoringTools({ generate: generatePrototype, sync: syncPrototype, listTools: () => [...listMcpTools(), ...jobTools] }),
+  ...authoringTools({ generate: generatePrototype, sync: syncPrototype, listTools: () => {
+    const active = resolveMcpProfile();
+    const allow = MCP_PROFILES[active];
+    return [...listMcpTools({ profile: active }), ...(allow ? jobTools.filter(t => allow.has(t.name)) : jobTools)];
+  } }),
   {
     name: 'generate_prototype',
     description: '一次生成完整单页/多页原生 RP9 原型：spec 直接传 RP/1 结构化页面（或 .rp1/.json 文件路径）、共享 theme/palette/components、variables 与交互，自动编译、装配和检查跨页引用及事件覆盖，并记录 <output>.baseline.json 共同基线；无需装配脚本。若提供 baseRp 且检测到原生已改稿，自动按 prefer 执行三方合并或冲突保护。output 为 .rp 路径（相对路径基于 AXURE_WRITE_ROOT 或当前工作目录解析）。',
@@ -2429,18 +2512,51 @@ export const sessionTools = [
       baseRp: { type: 'string', minLength: 1, description: '可选：已有 .rp 路径；若检测到原生改稿则自动走三方合并而非静默覆盖。' },
       prefer: { type: 'string', enum: ['fail', 'source', 'native'], description: '当 baseRp 有原生改稿且出现同属性冲突时的策略，默认 fail。' },
       resolutions: { type: 'object', description: '可选：按冲突键（logicalId:prop 或 pointer:prop）指定 source/native/{value}。' },
+      verify: { type: 'boolean', description: 'true 时生成完成后自动调用本机 Axure 导出官方 HTML 并在无头 Chrome 中运行内联 verify: 或 verifySteps 行为断言。' },
+      verifySteps: { type: 'array', minItems: 0, maxItems: 60, description: '可选：配合 verify:true 传入的行为验收步骤；省略时自动读取 .rp1 中的 verify: 区块。' },
+      verifyViewport: { type: 'object', properties: { width: { type: 'integer', minimum: 320, maximum: 3840 }, height: { type: 'integer', minimum: 320, maximum: 2160 }, dpr: { type: 'number', minimum: 1, maximum: 3 } }, additionalProperties: false },
+      virtualClock: { type: 'boolean', description: '配合 verify:true 使用：加速 >=200ms 定时器，使 advanceTime 在毫秒内完成轮播计时验收。' },
+      includeStoryboard: { type: 'boolean', description: '配合 verify:true 使用：在回包中附带每步交互与状态判定的横向关键帧拼图 PNG。' },
     }, required: ['output'], additionalProperties: false },
-    handler: ({ includeImage, ...input }) => {
+    handler: ({ includeImage, verify, verifySteps, verifyViewport, virtualClock, includeStoryboard, ...input }) => {
       const result = generatePrototype(input);
-      if (!includeImage || result.status !== 'completed') return result;
-      const path = result.contactSheet;
-      try {
-        if (path && lstatSync(path).size <= 1024 * 1024) {
-          const data = readFileSync(path).toString('base64');
-          return { ...result, previewImage: 'attached', mcpImages: [{ mimeType: 'image/png', data }] };
+      if (result.status !== 'completed') return result;
+      const images = [];
+      if (includeImage) {
+        const path = result.contactSheet;
+        try {
+          if (path && lstatSync(path).size <= 1024 * 1024) {
+            images.push({ mimeType: 'image/png', data: readFileSync(path).toString('base64') });
+            result.previewImage = 'attached';
+          } else {
+            result.previewImage = 'use-preview-paths';
+          }
+        } catch {
+          result.previewImage = 'use-preview-paths';
         }
-      } catch { /* Keep the .rp, report, and preview paths available. */ }
-      return { ...result, previewImage: 'use-preview-paths' };
+      }
+      if (!verify) {
+        return images.length ? { ...result, mcpImages: images } : result;
+      }
+      return (async () => {
+        const bv = await verifyOfficialPreview({
+          rp: result.output,
+          source: result.source ?? input.source ?? input.sourcePath,
+          steps: verifySteps,
+          viewport: verifyViewport,
+          virtualClock,
+          includeStoryboard,
+        }, { runWorkflow, exportHtml: exportPrototype });
+        const { mcpImages: verifyImgs, ...bvSummary } = bv;
+        const allImgs = [...images, ...(verifyImgs ?? [])].slice(0, 4);
+        return {
+          ...result,
+          status: bv.status === 'completed' ? 'completed' : 'failed',
+          behaviorVerification: bvSummary,
+          ...(bv.status !== 'completed' ? { diagnostics: bv.diagnostics } : {}),
+          ...(allImgs.length ? { mcpImages: allImgs } : {}),
+        };
+      })();
     },
   },
   {
@@ -2511,8 +2627,8 @@ export const sessionTools = [
   },
   {
     name: 'axure_save',
-    description: '链尾另存为交付文件（白名单+防覆盖，只写新文件），返回绝对路径与 SHA-256；省略 as 时返回链尾现状（路径/SHA/三零）。',
-    inputSchema: { type: 'object', properties: { as: { type: 'string', minLength: 1 } }, additionalProperties: false },
+    description: '链尾另存为交付文件（白名单+防覆盖，只写新文件），返回绝对路径与 SHA-256；省略 as 时返回链尾现状（路径/SHA/三零）。传 cleanup:true 可在另存成功后自动清理中间 .work-*.rp 副本并保持链尾连续。',
+    inputSchema: { type: 'object', properties: { as: { type: 'string', minLength: 1 }, cleanup: { type: 'boolean', description: 'true 时清理中间 .work-*.rp 副本（绝不删除源文件与输出文件）。' } }, additionalProperties: false },
     handler: sessionHandlers.axure_save,
   },
   {

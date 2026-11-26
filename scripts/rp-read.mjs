@@ -290,17 +290,99 @@ function describeAction(graph, action, version, widgetsByGuid, panelStates) {
       const mode = intOf(field(move, 'MoveType'));
       const duration = intOf(field(move, 'Duration'));
       const boundary = field(move, 'BoundaryCondition');
-      const hasBoundary = Boolean(boundary && graph.objects.has(boundary.value));
+      const boundaryRoot = boundary ? graph.objects.get(boundary.value) : null;
+      const hasBoundary = Boolean(boundaryRoot);
       type = mode === 0 ? 'set-position' : 'move';
       const verb = ['移动到', '相对移动', '跟随拖动', '跟随水平拖动', '跟随垂直拖动', '回到拖动前的位置', '随触发元件移动'][mode] ?? `移动（模式 ${mode}）`;
       const xy = mode === 0 || mode === 1 ? ` x=${literal(field(move, 'XValue'))} y=${literal(field(move, 'YValue'))}` : '';
       const names = targets(['WidgetPaths', 'panelobjectpaths']);
       human = `${verb} ${names.join('、') || '(未指定)'}${xy}（${duration}ms${hasBoundary ? '，有边界限制' : ''}）`;
-      const dragMode = { 2: 'drag', 3: 'drag-x', 4: 'drag-y', 5: 'locationBeforeDrag' }[mode];
-      if (dragMode) {
-        rp1 = names.length === 1 && field(action.body, 'MoveInfos')?.items?.length === 1
-          && !hasBoundary && [0, undefined].includes(intOf(field(move, 'MoveTrajectory'))) && duration === 0
-          ? { type: 'move', target: names[0], mode: dragMode } : null;
+      const MOVE_MODES_BY_CODE = { 0: 'location', 1: 'delta', 2: 'drag', 3: 'drag-x', 4: 'drag-y', 5: 'locationBeforeDrag', 6: 'withThis' };
+      const EASE_NAMES = {
+        0: 'none', 1: 'swing', 2: 'linear', 3: 'easeInCubic', 4: 'easeOutCubic', 8: 'easeInSine', 9: 'easeInQuad',
+        10: 'easeInQuart', 11: 'easeInQuint', 12: 'easeInExpo', 13: 'easeInCirc', 14: 'easeInBack',
+        15: 'easeInElastic', 16: 'easeInBounce', 17: 'easeOutSine', 18: 'easeOutQuad', 19: 'easeOutQuart',
+        20: 'easeOutQuint', 21: 'easeOutExpo', 22: 'easeOutCirc', 23: 'easeOutBack', 24: 'easeOutElastic',
+        25: 'easeOutBounce', 26: 'easeInOutSine', 27: 'easeInOutQuad', 28: 'easeInOutCubic',
+      };
+      const BOUND_OP_BY_CODE = { 5: '>', 6: '<', 7: '>=', 8: '<=' };
+      const DEFAULT_BOUND_OP = { left: '>=', right: '<=', top: '>=', bottom: '<=' };
+      const decodeBoundaryCondition = root => {
+        if (!root?.body) return null;
+        const clauses = {};
+        const visitBound = node => {
+          if (!node?.body || node.className !== 'Axure:Expr:BinaryExpr') return false;
+          const opCode = intOf(field(node.body, 'operation'));
+          const leftObj = graph.objects.get(field(node.body, 'left-expr')?.value);
+          const rightObj = graph.objects.get(field(node.body, 'right-expr')?.value);
+          if (opCode === 1) {
+            return visitBound(leftObj) && visitBound(rightObj);
+          }
+          const boundOp = BOUND_OP_BY_CODE[opCode];
+          if (!boundOp || !leftObj || leftObj.className !== 'Axure:Expr:BoundaryDirectionLiteral') return false;
+          const side = strOf(field(leftObj.body, 'boundaryDirection'));
+          if (!['left', 'right', 'top', 'bottom'].includes(side)) return false;
+          const rawVal = rightObj?.className === 'Axure:Expr:NumberLiteral'
+            ? intOf(field(rightObj.body, 'value'))
+            : (rightObj ? resolveStringLiteral(rightObj) : literal(field(node.body, 'right-expr')));
+          if (rawVal === undefined || rawVal === null) return false;
+          const trimmedVal = String(rawVal).trim();
+          const parsedVal = /^-?\d+(?:\.\d+)?$/.test(trimmedVal) ? Number(trimmedVal) : trimmedVal;
+          clauses[side] = boundOp === DEFAULT_BOUND_OP[side] ? parsedVal : { op: boundOp, value: parsedVal };
+          return true;
+        };
+        return visitBound(root) && Object.keys(clauses).length > 0 ? clauses : null;
+      };
+      const moveModeName = MOVE_MODES_BY_CODE[mode];
+      const decodedBounds = hasBoundary ? decodeBoundaryCondition(boundaryRoot) : null;
+      const easingName = EASE_NAMES[intOf(field(move, 'Easing')) ?? 0];
+      const canLiftBase = Boolean(
+        moveModeName
+        && names.length === 1
+        && field(action.body, 'MoveInfos')?.items?.length === 1
+        && (!hasBoundary || decodedBounds)
+        && [0, undefined].includes(intOf(field(move, 'MoveTrajectory')))
+        && easingName
+      );
+      if (!canLiftBase) {
+        rp1 = null;
+      } else if (['drag', 'drag-x', 'drag-y', 'locationBeforeDrag', 'withThis'].includes(moveModeName)) {
+        if (duration === 0 && easingName === 'none') {
+          rp1 = {
+            type: 'move', target: names[0], mode: moveModeName,
+            ...(decodedBounds ? { bounds: decodedBounds } : {}),
+          };
+        } else if (moveModeName === 'locationBeforeDrag' && duration === 0) {
+          rp1 = { type: 'move', target: names[0], mode: moveModeName };
+        } else if (moveModeName !== 'locationBeforeDrag') {
+          rp1 = {
+            type: 'move', target: names[0], mode: moveModeName, duration,
+            ...(easingName !== 'swing' ? { easing: easingName } : {}),
+            ...(decodedBounds ? { bounds: decodedBounds } : {}),
+          };
+        } else {
+          rp1 = null;
+        }
+      } else if (moveModeName === 'location' || moveModeName === 'delta') {
+        const rawX = literal(field(move, 'XValue'));
+        const rawY = literal(field(move, 'YValue'));
+        const parseAxis = raw => {
+          if (raw === undefined || raw === null) return undefined;
+          const s = String(raw).trim();
+          return /^-?\d+(?:\.\d+)?$/.test(s) ? Number(s) : s;
+        };
+        const xVal = parseAxis(rawX);
+        const yVal = parseAxis(rawY);
+        rp1 = {
+          type: 'move', target: names[0], mode: moveModeName,
+          ...(xVal !== undefined ? { x: xVal } : {}),
+          ...(yVal !== undefined ? { y: yVal } : {}),
+          ...(duration ? { duration } : {}),
+          ...(duration && easingName !== 'swing' ? { easing: easingName } : {}),
+          ...(decodedBounds ? { bounds: decodedBounds } : {}),
+        };
+      } else {
+        rp1 = null;
       }
       break;
     }

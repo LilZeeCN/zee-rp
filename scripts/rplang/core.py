@@ -337,7 +337,7 @@ SHORTHAND_NODE_KINDS = {
     "data-table", "searchable-list", "form-card", "kv-list",
     "detail-card", "wizard-card", "master-detail",
     "tab-bar", "nav-bar", "progress-bar", "phone-shell",
-    "stat-row", "list-item",
+    "stat-row", "list-item", "carousel", "slider-captcha",
 }
 FORM_KINDS = {"input", "radio", "checkbox", "combobox", "listbox"}
 CHECK_KINDS = {"radio", "checkbox"}
@@ -384,6 +384,8 @@ MACRO_PROPS = {
     },
     "stat-row": MACRO_COMMON_PROPS | {"items", "gap", "padding", "cardPadding", "fill", "stroke", "radius", "valueFontSize", "equalHeight"},
     "list-item": MACRO_COMMON_PROPS | {"title", "text", "subtitle", "tag", "badge", "badgeVariant", "tagTone", "tone", "index", "icon", "rightText", "meta", "value", "status", "rightBadge", "rightVariant", "rightTone", "goto", "page", "link", "padding", "gap", "fill", "stroke", "radius"},
+    "carousel": MACRO_COMMON_PROPS | {"slides", "interval", "repeatInterval", "indicator", "showStateLabel", "animation", "duration", "w", "h", "radius", "gap", "fill", "stroke"},
+    "slider-captcha": MACRO_COMMON_PROPS | {"w", "sceneHeight", "trackHeight", "pieceSize", "thumbWidth", "targetX", "tolerance", "hint", "successText", "failText", "idleText", "accent", "fill", "stroke", "radius"},
 }
 MACRO_ITEM_PROPS = {
     "data-table": {"columns": {"header", "title", "field", "align", "headerAlign", "width", "w", "flex", "headerId", "headerFontSize", "headerFontWeight", "headerColor", "cell", "kind", "text", "id", "h", "font", "fontSize", "fontWeight", "color", "variant", "fill", "stroke", "radius", "on", "onClick"}},
@@ -411,6 +413,10 @@ MACRO_ITEM_PROPS = {
         "items": {"id", "label", "title", "value", "text", "sub", "subtitle", "trend", "color", "subColor", "fill", "stroke", "radius", "valueFontSize", "on", "onClick", "goto", "page", "link"},
     },
     "list-item": {},
+    "carousel": {
+        "slides": {"id", "title", "subtitle", "text", "fill", "color"},
+    },
+    "slider-captcha": {},
 }
 MACRO_SLOTS = {
     "data-table": {"header", "toolbar", "rowActions", "empty", "emptyState", "footer"},
@@ -2571,6 +2577,377 @@ def expand_list_item_macro(source, path):
     }
     if source.get("goto") or source.get("page") or source.get("link"):
         out["onClick"] = [{"goto": source.get("goto", source.get("page", source.get("link")))}]
+    for gk in ("x", "y", "right", "bottom", "flex", "visible", "hidden"):
+        if gk in source:
+            out[gk] = copy.deepcopy(source[gk])
+    return out
+
+
+def expand_carousel_macro(source, path):
+    cid = ident(source.get("id"), ptr(path, "id"))
+    slides = source.get("slides")
+    if not isinstance(slides, list) or len(slides) < 2:
+        fail("E_PROPERTY_REQUIRED", ptr(path, "slides"), "carousel requires at least 2 slides")
+    w = source.get("w", 360)
+    h = source.get("h", 160)
+    radius = source.get("radius", 12)
+    gap = source.get("gap", 10)
+    interval = source.get("interval", source.get("repeatInterval", 3000))
+    anim = source.get("animation", "slideLeft")
+    dur = source.get("duration", 120)
+    show_indicator = source.get("indicator", True)
+    show_state_label = source.get("showStateLabel", False)
+    slide_fills = ["#DBEAFE", "#EDE9FE", "#DCFCE7", "#FEF3C7"]
+    slide_colors = ["#1E3A8A", "#4C1D95", "#14532D", "#78350F"]
+    ind_fills = ["#2563EB", "#7C3AED", "#16A34A", "#D97706"]
+    panel_id = f"{cid}_panel"
+    ind_id = f"{cid}_indicator"
+    state_label_id = f"{cid}_state_label"
+    panel_states = []
+    ind_states = []
+    state_cases = []
+    total = len(slides)
+    for i, raw_slide in enumerate(slides):
+        if isinstance(raw_slide, str):
+            sid = f"s{i + 1}"
+            title = raw_slide
+            subtitle = None
+            s_fill = slide_fills[i % len(slide_fills)]
+            s_color = slide_colors[i % len(slide_colors)]
+        elif isinstance(raw_slide, dict):
+            sid = str(raw_slide.get("id") or f"s{i + 1}")
+            title = str(raw_slide.get("title", raw_slide.get("text", f"幻灯片 {i + 1}")))
+            subtitle = raw_slide.get("subtitle")
+            s_fill = raw_slide.get("fill", slide_fills[i % len(slide_fills)])
+            s_color = raw_slide.get("color", slide_colors[i % len(slide_colors)])
+        else:
+            fail("E_OBJECT", ptr(ptr(path, "slides"), i), "slide item must be a string or object")
+        card_children = [{
+            "type": "label",
+            "id": f"{cid}_slide_{i + 1}_title",
+            "text": title,
+            "x": 20,
+            "y": 54 if subtitle else 62,
+            "w": max(80, int(w) - 40) if isinstance(w, (int, float)) else 280,
+            "h": 36,
+            "fontSize": 15,
+            "fontWeight": 600,
+            "color": s_color,
+            "align": "center",
+        }]
+        if subtitle:
+            card_children.append({
+                "type": "label",
+                "id": f"{cid}_slide_{i + 1}_sub",
+                "text": str(subtitle),
+                "x": 20,
+                "y": 94,
+                "w": max(80, int(w) - 40) if isinstance(w, (int, float)) else 280,
+                "h": 24,
+                "fontSize": 12,
+                "color": s_color,
+                "align": "center",
+            })
+        panel_states.append({
+            "id": sid,
+            "root": {
+                "type": "box",
+                "id": f"{cid}_card_{i + 1}",
+                "layout": "stack",
+                "w": w,
+                "h": h,
+                "fill": s_fill,
+                "radius": radius,
+                "children": card_children,
+            },
+        })
+        if show_indicator:
+            ind_states.append({
+                "id": sid,
+                "root": {
+                    "type": "box",
+                    "id": f"{cid}_ind_box_{i + 1}",
+                    "layout": "stack",
+                    "w": 84,
+                    "h": 24,
+                    "fill": ind_fills[i % len(ind_fills)],
+                    "radius": 12,
+                    "children": [{
+                        "type": "label",
+                        "id": f"{cid}_ind_lbl_{i + 1}",
+                        "text": f"{i + 1} / {total}",
+                        "x": 0,
+                        "y": 3,
+                        "w": 84,
+                        "h": 18,
+                        "fontSize": 12,
+                        "color": "#FFFFFF",
+                        "align": "center",
+                    }],
+                },
+            })
+            act = {"type": "set-panel-state", "target": ind_id, "state": sid}
+            if i < total - 1:
+                state_cases.append({"when": f"=@{panel_id}.state == '{sid}'", "actions": [act]})
+            else:
+                state_cases.append({"else": True, "actions": [act]})
+    prev_anim = "slideRight" if anim == "slideLeft" else ("slideLeft" if anim == "slideRight" else anim)
+    timer_opts = {"loop": True, "repeatInterval": int(interval)} if interval and interval > 0 else {}
+    panel_node = {
+        "type": "dynamic-panel",
+        "id": panel_id,
+        "w": w,
+        "h": h,
+        "states": panel_states,
+        "onSwipeLeft": [{"type": "set-panel-state", "target": panel_id, "mode": "next",
+                         **({"repeatSkipFirst": False} if timer_opts else {}),
+                         **timer_opts, "enterAnimation": anim, "enterDuration": dur}],
+        "onSwipeRight": [{"type": "set-panel-state", "target": panel_id, "mode": "previous",
+                          **({"repeatSkipFirst": False} if timer_opts else {}),
+                          **timer_opts, "enterAnimation": prev_anim, "enterDuration": dur}],
+        **({"onStateChange": {"cases": state_cases}} if show_indicator and state_cases else {}),
+    }
+    children = [panel_node]
+    if show_indicator or show_state_label:
+        footer_children = []
+        if show_state_label:
+            footer_children.append({
+                "type": "label",
+                "id": state_label_id,
+                "text": f"当前：${{@{panel_id}.state}}",
+                "w": "hug",
+                "h": 24,
+                "fontSize": 12,
+                "color": "$ink-2",
+            })
+        if show_indicator:
+            footer_children.append({
+                "type": "dynamic-panel",
+                "id": ind_id,
+                "w": 84,
+                "h": 24,
+                "states": ind_states,
+            })
+        children.append({
+            "type": "box",
+            "id": f"{cid}_footer",
+            "layout": "row",
+            "w": w,
+            "h": "hug",
+            "justify": "space-between" if show_state_label and show_indicator else "end",
+            "align": "center",
+            "children": footer_children,
+        })
+    out = {
+        "type": "box",
+        "id": cid,
+        "layout": "column",
+        "w": w,
+        "h": "hug",
+        "gap": gap,
+        "padding": 0,
+        "children": children,
+    }
+    for gk in ("x", "y", "right", "bottom", "flex", "visible", "hidden"):
+        if gk in source:
+            out[gk] = copy.deepcopy(source[gk])
+    return out
+
+
+def expand_slider_captcha_macro(source, path):
+    cid = ident(source.get("id"), ptr(path, "id"))
+    w = int(source.get("w", 360))
+    scene_h = int(source.get("sceneHeight", 140))
+    track_h = int(source.get("trackHeight", 44))
+    piece_sz = int(source.get("pieceSize", 48))
+    thumb_w = int(source.get("thumbWidth", 60))
+    target_x = int(source.get("targetX", 180))
+    tol = int(source.get("tolerance", 2))
+    hint = str(source.get("hint", "向右拖动滑块对齐目标"))
+    success_text = str(source.get("successText", "验证成功"))
+    fail_text = str(source.get("failText", "验证失败"))
+    idle_text = str(source.get("idleText", "待验证"))
+    accent = source.get("accent", "#4F46E5")
+    radius = source.get("radius", 12)
+    piece_y = max(8, (scene_h - piece_sz) // 2)
+    track_y = scene_h + 16
+    status_y = track_y + track_h + 14
+    total_h = status_y + 28
+    scene_id = f"{cid}_scene"
+    target_id = f"{cid}_target"
+    piece_id = f"{cid}_piece"
+    track_id = f"{cid}_track"
+    thumb_id = f"{cid}_thumb"
+    status_id = f"{cid}_status"
+    out = {
+        "type": "box",
+        "id": cid,
+        "layout": "stack",
+        "w": w,
+        "h": total_h,
+        "fill": source.get("fill", "#FFFFFF00"),
+        "children": [
+            {
+                "type": "box",
+                "id": scene_id,
+                "layout": "stack",
+                "x": 0,
+                "y": 0,
+                "w": w,
+                "h": scene_h,
+                "fill": "#E2E8F0",
+                "radius": radius,
+                "children": [],
+            },
+            {
+                "type": "box",
+                "id": target_id,
+                "layout": "stack",
+                "x": target_x,
+                "y": piece_y,
+                "w": piece_sz,
+                "h": piece_sz,
+                "fill": "#334155",
+                "radius": 6,
+                "children": [{
+                    "type": "label",
+                    "id": f"{cid}_target_lbl",
+                    "text": "目标",
+                    "x": 0,
+                    "y": max(0, (piece_sz - 20) // 2),
+                    "w": piece_sz,
+                    "h": 20,
+                    "fontSize": 11,
+                    "color": "#F8FAFC",
+                    "align": "center",
+                }],
+            },
+            {
+                "type": "dynamic-panel",
+                "id": piece_id,
+                "x": 0,
+                "y": piece_y,
+                "w": piece_sz,
+                "h": piece_sz,
+                "states": [{
+                    "id": "idle",
+                    "root": {
+                        "type": "box",
+                        "id": f"{cid}_piece_box",
+                        "layout": "stack",
+                        "w": piece_sz,
+                        "h": piece_sz,
+                        "fill": accent,
+                        "radius": 6,
+                        "children": [{
+                            "type": "label",
+                            "id": f"{cid}_piece_lbl",
+                            "text": "拼图",
+                            "x": 0,
+                            "y": max(0, (piece_sz - 20) // 2),
+                            "w": piece_sz,
+                            "h": 20,
+                            "fontSize": 11,
+                            "color": "#FFFFFF",
+                            "align": "center",
+                        }],
+                    },
+                }],
+            },
+            {
+                "type": "box",
+                "id": track_id,
+                "layout": "stack",
+                "x": 0,
+                "y": track_y,
+                "w": w,
+                "h": track_h,
+                "fill": "#CBD5E1",
+                "stroke": "#94A3B8",
+                "radius": track_h // 2,
+                "children": [{
+                    "type": "label",
+                    "id": f"{cid}_track_hint",
+                    "text": hint,
+                    "x": thumb_w + 10,
+                    "y": max(0, (track_h - 24) // 2),
+                    "w": max(80, w - thumb_w - 20),
+                    "h": 24,
+                    "fontSize": 12,
+                    "color": "#475569",
+                }],
+            },
+            {
+                "type": "dynamic-panel",
+                "id": thumb_id,
+                "x": 0,
+                "y": track_y,
+                "w": thumb_w,
+                "h": track_h,
+                "onDrag": [
+                    {"type": "move", "target": thumb_id, "mode": "drag-x", "bounds": {"within": track_id}},
+                    {"type": "move", "target": piece_id, "mode": "location", "x": f"=@{thumb_id}.x", "duration": 0},
+                ],
+                "onDragDrop": {
+                    "cases": [
+                        {
+                            "when": f"=@{piece_id}.x >= @{target_id}.x - {tol} && @{piece_id}.x <= @{target_id}.x + {tol}",
+                            "actions": [
+                                {"type": "move", "target": piece_id, "mode": "location", "x": f"=@{target_id}.x", "duration": 0},
+                                {"type": "move", "target": thumb_id, "mode": "location", "x": f"=@{target_id}.x", "duration": 0},
+                                {"type": "set-text", "target": status_id, "text": success_text},
+                            ],
+                        },
+                        {
+                            "else": True,
+                            "actions": [
+                                {"type": "move", "target": thumb_id, "mode": "locationBeforeDrag", "duration": 0},
+                                {"type": "move", "target": piece_id, "mode": "location", "x": f"=@{track_id}.x", "duration": 0},
+                                {"type": "set-text", "target": status_id, "text": fail_text},
+                            ],
+                        },
+                    ],
+                },
+                "states": [{
+                    "id": "ready",
+                    "root": {
+                        "type": "box",
+                        "id": f"{cid}_thumb_box",
+                        "layout": "stack",
+                        "w": thumb_w,
+                        "h": track_h,
+                        "fill": accent,
+                        "radius": track_h // 2,
+                        "children": [{
+                            "type": "label",
+                            "id": f"{cid}_thumb_lbl",
+                            "text": ">>>",
+                            "x": 0,
+                            "y": max(0, (track_h - 24) // 2),
+                            "w": thumb_w,
+                            "h": 24,
+                            "fontSize": 14,
+                            "fontWeight": 700,
+                            "color": "#FFFFFF",
+                            "align": "center",
+                        }],
+                    },
+                }],
+            },
+            {
+                "type": "label",
+                "id": status_id,
+                "text": idle_text,
+                "x": 0,
+                "y": status_y,
+                "w": w,
+                "h": 28,
+                "fontSize": 14,
+                "fontWeight": 600,
+                "color": "#0F172A",
+            },
+        ],
+    }
     for gk in ("x", "y", "right", "bottom", "flex", "visible", "hidden"):
         if gk in source:
             out[gk] = copy.deepcopy(source[gk])

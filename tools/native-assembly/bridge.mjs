@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto';
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import {
   constants, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
-  readdirSync, realpathSync, rmSync, writeFileSync,
+  readdirSync, realpathSync, renameSync, rmSync, writeFileSync,
 } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, extname, join, resolve, sep } from 'node:path';
@@ -113,7 +113,9 @@ function buildWorker(installation, temp, env, cwd) {
     .map(line => /^(\d+(?:\.\d+){2}[^ ]*) \[(.+)\]$/.exec(line)).filter(Boolean).at(-1);
   if (!sdk) throw code('E_ASSEMBLY_RUNTIME', 'The bridge requires a local .NET SDK to compile its worker.');
   const csc = join(sdk[2], sdk[1], 'Roslyn', 'bincore', 'csc.dll');
-  const executable = join(temp, 'Worker.exe');
+  const workerCsPath = fileURLToPath(new URL('Worker.cs', import.meta.url));
+  const workerSource = readFileSync(workerCsPath, 'utf8');
+  let runtimeVer = null;
   let references;
   if (installation.mono) {
     const monoLib = join(installation.mono, 'lib', 'mono');
@@ -124,46 +126,76 @@ function buildWorker(installation, temp, env, cwd) {
     references = ['System.Private.CoreLib', 'System.Runtime', 'System.Console', 'System.Linq',
       'System.Collections', 'System.Runtime.InteropServices', 'System.IO.FileSystem', 'System.Runtime.Extensions']
       .map(name => join(installation.managed, `${name}.dll`));
-    const runtime = run(dotnet, ['--list-runtimes'], { env, cwd })
+    runtimeVer = run(dotnet, ['--list-runtimes'], { env, cwd })
       .trim().split(/\r?\n/).map(line => /^Microsoft\.AspNetCore\.App (\d+\.\d+\.\d+) /.exec(line))
       .filter(match => match && Number(match[1].split('.')[0]) >= 8).at(-1)?.[1];
-    if (!runtime) {
+    if (!runtimeVer) {
       throw code('E_ASSEMBLY_RUNTIME', 'RP11 needs an arm64 Microsoft.AspNetCore.App runtime, version 8 or newer.');
     }
-    writeFileSync(join(temp, 'Worker.runtimeconfig.json'), JSON.stringify({ runtimeOptions: {
-      tfm: `net${runtime.split('.').slice(0, 2).join('.')}`,
-      framework: { name: 'Microsoft.AspNetCore.App', version: runtime },
-    } }));
   }
-  run(dotnet, [csc, '-nologo', '-noconfig', '-nostdlib',
-    ...references.map(path => `-r:${path}`), `-out:${executable}`,
-    fileURLToPath(new URL('Worker.cs', import.meta.url)),
-  ], { env, cwd });
-  return executable;
+  const cacheRoot = join(tmpdir(), 'zee-rp-assembly-cache');
+  const cacheKey = createHash('sha256')
+    .update(`${workerSource}|${installation.version}|${installation.sha256}|${sdk[1]}|${runtimeVer ?? 'mono'}`)
+    .digest('hex').slice(0, 24);
+  const cacheDir = join(cacheRoot, cacheKey);
+  const cachedExe = join(cacheDir, 'Worker.exe');
+  const cachedCfg = join(cacheDir, 'Worker.runtimeconfig.json');
+  if (existsSync(cachedExe) && (installation.mono || existsSync(cachedCfg))) {
+    return cachedExe;
+  }
+  mkdirSync(cacheRoot, { recursive: true });
+  const stageDir = mkdtempSync(join(cacheRoot, `.stage-${cacheKey}-`));
+  try {
+    const stagedExe = join(stageDir, 'Worker.exe');
+    if (!installation.mono) {
+      writeFileSync(join(stageDir, 'Worker.runtimeconfig.json'), JSON.stringify({ runtimeOptions: {
+        tfm: `net${runtimeVer.split('.').slice(0, 2).join('.')}`,
+        framework: { name: 'Microsoft.AspNetCore.App', version: runtimeVer },
+      } }));
+    }
+    run(dotnet, [csc, '-nologo', '-noconfig', '-nostdlib',
+      ...references.map(path => `-r:${path}`), `-out:${stagedExe}`, workerCsPath,
+    ], { env, cwd });
+    try {
+      renameSync(stageDir, cacheDir);
+      return cachedExe;
+    } catch {
+      if (existsSync(cachedExe) && (installation.mono || existsSync(cachedCfg))) {
+        rmSync(stageDir, { recursive: true, force: true });
+        return cachedExe;
+      }
+      copyFileSync(stagedExe, join(temp, 'Worker.exe'));
+      if (!installation.mono) {
+        copyFileSync(join(stageDir, 'Worker.runtimeconfig.json'), join(temp, 'Worker.runtimeconfig.json'));
+      }
+      rmSync(stageDir, { recursive: true, force: true });
+      return join(temp, 'Worker.exe');
+    }
+  } catch (err) {
+    rmSync(stageDir, { recursive: true, force: true });
+    throw err;
+  }
 }
 
-function worker(installation, profile, temp, command, args) {
+function workerEnvAndRuntime(installation, temp) {
   const home = join(temp, 'home');
   const scratch = join(temp, 'scratch');
-  mkdirSync(home);
-  mkdirSync(scratch);
+  mkdirSync(home, { recursive: true });
+  mkdirSync(scratch, { recursive: true });
+  const mono = installation.mono;
+  const runtime = mono ? join(mono, 'bin', 'mono-sgen') : dotnet;
   const env = {
     ...process.env,
     HOME: home, CFFIXED_USER_HOME: home, XDG_CONFIG_HOME: join(home, '.config'),
     XDG_DATA_HOME: join(home, '.local', 'share'), TMPDIR: scratch, DOTNET_CLI_HOME: home,
     DOTNET_NOLOGO: '1', DOTNET_CLI_TELEMETRY_OPTOUT: '1',
+    DYLD_LIBRARY_PATH: [installation.managed, mono && join(mono, 'lib')].filter(Boolean).join(delimiter),
+    ...(mono ? { MONO_PATH: installation.managed, MONO_CFG_DIR: join(mono, 'etc') } : {}),
   };
-  const executable = buildWorker(installation, temp, env, home);
-  const mono = installation.mono;
-  const runtime = mono ? join(mono, 'bin', 'mono-sgen') : dotnet;
-  env.DYLD_LIBRARY_PATH = [installation.managed, mono && join(mono, 'lib')].filter(Boolean).join(delimiter);
-  if (mono) {
-    env.MONO_PATH = installation.managed;
-    env.MONO_CFG_DIR = join(mono, 'etc');
-  }
-  const stdout = run(runtime, [
-    executable, installation.entry, profile.mvid, command, installation.resources, scratch, ...args,
-  ], { env, cwd: home });
+  return { home, scratch, runtime, env };
+}
+
+function parseAssemblyRows(stdout, profile) {
   const rows = stdout.split(/\r?\n/).filter(line => line.startsWith('zee-assembly:')).map(line => {
     const [kind, ...values] = line.slice('zee-assembly:'.length).split('\t');
     return { kind, values: values.map(value => Buffer.from(value, 'base64').toString('utf8')) };
@@ -173,6 +205,267 @@ function worker(installation, profile, temp, command, args) {
     throw code('E_ASSEMBLY_IDENTITY', 'The native worker did not confirm the selected build and process architecture.');
   }
   return { identity: { build, mvid, architecture, clr, sha256: profile.sha256 }, rows: rows.slice(1) };
+}
+
+function worker(installation, profile, temp, command, args) {
+  const { home, scratch, runtime, env } = workerEnvAndRuntime(installation, temp);
+  const executable = buildWorker(installation, temp, env, home);
+  const stdout = run(runtime, [
+    executable, installation.entry, profile.mvid, command, installation.resources, scratch, ...args,
+  ], { env, cwd: home });
+  return parseAssemblyRows(stdout, profile);
+}
+
+const DAEMON_IDLE_MS = Number(process.env.ZEE_ASSEMBLY_DAEMON_IDLE_MS || 90_000);
+const daemons = new Map();
+let exitHookRegistered = false;
+
+function stopDaemonEntry(key, entry) {
+  if (!entry) return Promise.resolve();
+  daemons.delete(key);
+  if (entry.idleTimer) clearTimeout(entry.idleTimer);
+  const { child, temp } = entry;
+  return new Promise(resolveStop => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      try { rmSync(temp, { force: true, recursive: true }); } catch {}
+      resolveStop();
+    };
+    if (!child || child.exitCode !== null || child.killed) {
+      finish();
+      return;
+    }
+    const timer = setTimeout(() => {
+      try { child.kill('SIGKILL'); } catch {}
+      finish();
+    }, 1500);
+    child.once('exit', () => { clearTimeout(timer); finish(); });
+    try {
+      child.stdin.write('quit\n');
+      child.stdin.end();
+    } catch {
+      try { child.kill('SIGTERM'); } catch {}
+    }
+  });
+}
+
+export async function closeAssemblyDaemons() {
+  const entries = [...daemons.entries()];
+  await Promise.all(entries.map(([k, entry]) => stopDaemonEntry(k, entry)));
+}
+
+async function getDaemon(installation, profile) {
+  if (!exitHookRegistered) {
+    exitHookRegistered = true;
+    process.once('exit', () => {
+      for (const [, entry] of daemons) {
+        try { if (entry.child.exitCode === null) entry.child.kill('SIGTERM'); } catch {}
+        try { rmSync(entry.temp, { force: true, recursive: true }); } catch {}
+      }
+      daemons.clear();
+    });
+  }
+  const key = `${installation.version}:${installation.entry}:${profile.sha256}`;
+  const existing = daemons.get(key);
+  if (existing && !existing.closed && existing.child.exitCode === null) {
+    await existing.ready;
+    return existing;
+  }
+  const temp = mkdtempSync(join(tmpdir(), 'zee-rp-daemon-'));
+  const { home, scratch, runtime, env } = workerEnvAndRuntime(installation, temp);
+  const executable = buildWorker(installation, temp, env, home);
+  const child = spawn(runtime, [
+    executable, installation.entry, profile.mvid, 'daemon', installation.resources, scratch,
+  ], { env, cwd: home, stdio: ['pipe', 'pipe', 'pipe'] });
+  child.unref?.();
+
+  let buffer = '';
+  let stderr = '';
+  let waiter = null;
+  let collected = [];
+  let identity = null;
+  const entry = {
+    key, temp, child, closed: false, idleTimer: null,
+    queue: Promise.resolve(),
+    refreshIdle() {
+      if (entry.idleTimer) clearTimeout(entry.idleTimer);
+      entry.idleTimer = setTimeout(() => { void stopDaemonEntry(key, entry); }, DAEMON_IDLE_MS);
+      entry.idleTimer.unref?.();
+    },
+    call(op, args) {
+      entry.queue = entry.queue.then(() => new Promise((resolveCall, rejectCall) => {
+        if (entry.closed || child.exitCode !== null) {
+          rejectCall(code('E_ASSEMBLY_PROCESS', 'Assembly daemon exited unexpectedly.'));
+          return;
+        }
+        entry.refreshIdle();
+        collected = [];
+        const timer = setTimeout(() => {
+          waiter = null;
+          void stopDaemonEntry(key, entry);
+          rejectCall(code('E_ASSEMBLY_PROCESS', `Assembly daemon timeout in ${op}`));
+        }, 120_000);
+        timer.unref?.();
+        waiter = {
+          onRow(row) {
+            if (row.kind === 'done') {
+              clearTimeout(timer);
+              waiter = null;
+              if (row.values[0] !== 'ok') {
+                rejectCall(code('E_ASSEMBLY_PROCESS', row.values[1] || `Daemon ${op} failed`));
+              } else {
+                resolveCall({ identity, rows: collected });
+              }
+            } else {
+              collected.push(row);
+            }
+          },
+          onError(err) {
+            clearTimeout(timer);
+            waiter = null;
+            rejectCall(err);
+          },
+        };
+        const line = [op, ...args.map(a => Buffer.from(String(a), 'utf8').toString('base64'))].join('\t') + '\n';
+        child.stdin.write(line);
+      }));
+      return entry.queue;
+    },
+  };
+
+  entry.ready = new Promise((resolveReady, rejectReady) => {
+    const bootTimer = setTimeout(() => {
+      void stopDaemonEntry(key, entry);
+      rejectReady(code('E_ASSEMBLY_PROCESS', `Assembly daemon boot timed out: ${stderr.trim()}`));
+    }, 120_000);
+    bootTimer.unref?.();
+    let bootIdentity = null;
+    waiter = {
+      onRow(row) {
+        if (row.kind === 'identity') {
+          const [build, mvid, architecture, clr] = row.values;
+          if (build !== profile.build || mvid !== profile.mvid || architecture !== profile.workerArch) {
+            clearTimeout(bootTimer);
+            waiter = null;
+            rejectReady(code('E_ASSEMBLY_IDENTITY', 'The native worker did not confirm the selected build and process architecture.'));
+            return;
+          }
+          bootIdentity = { build, mvid, architecture, clr, sha256: profile.sha256 };
+        } else if (row.kind === 'ready') {
+          clearTimeout(bootTimer);
+          waiter = null;
+          if (!bootIdentity) {
+            rejectReady(code('E_ASSEMBLY_IDENTITY', 'Missing daemon identity banner.'));
+            return;
+          }
+          identity = bootIdentity;
+          entry.refreshIdle();
+          resolveReady(entry);
+        }
+      },
+      onError(err) {
+        clearTimeout(bootTimer);
+        waiter = null;
+        rejectReady(err);
+      },
+    };
+  });
+
+  child.stderr.on('data', chunk => { stderr += String(chunk); });
+  child.stdout.on('data', chunk => {
+    buffer += String(chunk);
+    let nl;
+    while ((nl = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, nl).replace(/\r$/, '');
+      buffer = buffer.slice(nl + 1);
+      if (!line.startsWith('zee-assembly:')) continue;
+      const [kind, ...rawVals] = line.slice('zee-assembly:'.length).split('\t');
+      const row = { kind, values: rawVals.map(v => Buffer.from(v, 'base64').toString('utf8')) };
+      waiter?.onRow(row);
+    }
+  });
+  child.on('exit', (exitCode, signal) => {
+    entry.closed = true;
+    if (entry.idleTimer) clearTimeout(entry.idleTimer);
+    if (daemons.get(key) === entry) daemons.delete(key);
+    try { rmSync(temp, { force: true, recursive: true }); } catch {}
+    waiter?.onError(code('E_ASSEMBLY_PROCESS', `Assembly daemon exited (${signal ?? exitCode}): ${stderr.trim()}`));
+  });
+  child.on('error', err => {
+    entry.closed = true;
+    waiter?.onError(code('E_ASSEMBLY_PROCESS', err.message));
+  });
+
+  daemons.set(key, entry);
+  try {
+    await entry.ready;
+    return entry;
+  } catch (err) {
+    await stopDaemonEntry(key, entry);
+    throw err;
+  }
+}
+
+export async function runAssemblyBridgeAsync({ version, app, command, args = [] }) {
+  if (!['export', 'inspect', 'create'].includes(command)) {
+    return runAssemblyBridge({ version, app, command, args });
+  }
+  const arity = operations[command];
+  if (!Object.hasOwn(operations, command) || ![arity].flat().includes(args.length)) {
+    throw code('E_ASSEMBLY_ARGUMENT', `Unsupported operation or arguments: ${command}`);
+  }
+  const installation = identify(version, locateInstallation(version, app));
+  const profile = requireProfile(installation);
+  const runOp = async (opName, opArgs) => {
+    let lastErr;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const d = await getDaemon(installation, profile);
+        return await d.call(opName, opArgs);
+      } catch (err) {
+        lastErr = err;
+        if (attempt === 0 && err.code === 'E_ASSEMBLY_PROCESS') continue;
+        throw err;
+      }
+    }
+    throw lastErr;
+  };
+  const temp = mkdtempSync(join(tmpdir(), 'zee-rp-assembly-stage-'));
+  try {
+    if (command === 'create') {
+      const [output, length] = args;
+      const target = targetPath(output, installation);
+      if (extname(target).toLowerCase() !== '.rp') throw code('E_ASSEMBLY_OUTPUT', 'Use an .rp output filename.');
+      const staged = join(temp, 'created.rp');
+      const result = await runOp('create', length === undefined ? [staged] : [staged, maxLength(length)]);
+      const counts = checkRp(staged, version);
+      copyFileSync(staged, target, constants.COPYFILE_EXCL);
+      return { ...result, output: target, counts };
+    }
+    assertNotProtected(args[0]);
+    const input = realpathSync(args[0]);
+    const inputVersion = detectFileVersion(readFileSync(input));
+    if (inputVersion !== version) {
+      throw code('E_ASSEMBLY_INPUT_VERSION', `Use RP${inputVersion} for this input, selected RP${version}.`);
+    }
+    if (command === 'inspect') {
+      return await runOp('inspect', [input]);
+    }
+    const target = targetPath(args[1], installation);
+    const staged = join(temp, 'html');
+    const result = await runOp('export', [input, staged]);
+    for (const file of ['start.html', 'data/document.js']) {
+      if (!lstatSync(join(staged, file)).isFile()) {
+        throw code('E_ASSEMBLY_EXPORT', `Missing Axure HTML output: ${file}`);
+      }
+    }
+    publishDirectory(staged, target);
+    return { ...result, output: target, entry: join(target, 'start.html'), generatorSettings: 'fresh-defaults' };
+  } finally {
+    rmSync(temp, { force: true, recursive: true });
+  }
 }
 
 function targetPath(path, installation) {

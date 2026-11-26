@@ -141,6 +141,20 @@ def _normalize_lifted_expr(val_str, name_to_logical):
     inner = s[2:-2].strip()
     if re.search(r"\b(?:Target)?Item\.[A-Za-z_]", inner) or re.search(r"\brpv\d+\b", inner):
         return None, f"Row-scoped or unresolved runtime expression cannot be lifted outside its Repeater scope: {val_str}"
+    # Unwrap mechanical coercions emitted by native-runtime-value.mjs so lifted RP/1 re-compiles cleanly.
+    inner = re.sub(
+        r"\(\(\s*((?:IsOver|IsNotOver)\([^()]+\))\s*\)\.toString\(\)\.toLowerCase\(\)\s*==\s*['\"]true['\"]\)",
+        r"\1",
+        inner,
+    )
+    inner = re.sub(r"\bIsOver\s*\(", "isOver(", inner)
+    inner = re.sub(r"\bIsNotOver\s*\(", "isNotOver(", inner)
+    for _ in range(3):
+        next_inner = re.sub(r"\(\(\s*([^()]+?)\s*\)\s*\*\s*1\)", r"\1", inner)
+        next_inner = re.sub(r"\(\(\s*([^()]+?)\s*\)\.toString\(\)\)", r"\1", next_inner)
+        if next_inner == inner:
+            break
+        inner = next_inner
     def _repl_widget(m):
         w_native = m.group(1)
         if w_native in name_to_logical:
@@ -208,14 +222,46 @@ def _lift_human_action_ex(act, name_to_logical, page_name_to_slug=None):
             return {"type": "set-text", "target": target_id, "text": raw_txt}, None
         return None, f"Unrecognized set-text syntax: {human}"
 
-    if atype in ("set-panel-state", "setPanelState", "move") and "rp1" in act:
+    if atype in ("set-panel-state", "setPanelState", "move", "set-position") and "rp1" in act:
         params = act["rp1"]
         if params is None:
             return None, f"Unsupported native options for {atype}: {human}"
         target = name_to_logical.get(params["target"])
         if not target:
             return None, f"Missing or ambiguous native action target: {params['target']}"
-        return {**params, "target": target}, None
+        lifted_params = {**params, "target": target}
+        def _lift_scalar_or_expr(raw_val):
+            if isinstance(raw_val, str) and raw_val.strip().startswith("[[") and raw_val.strip().endswith("]]"):
+                norm_expr, err = _normalize_lifted_expr(raw_val, name_to_logical)
+                if err:
+                    return None, err
+                if re.fullmatch(r"=-?\d+", norm_expr):
+                    return int(norm_expr[1:]), None
+                if re.fullmatch(r"=-?\d+\.\d+", norm_expr):
+                    return float(norm_expr[1:]), None
+                return norm_expr, None
+            return raw_val, None
+        for axis in ("x", "y"):
+            if axis in lifted_params:
+                v, err = _lift_scalar_or_expr(lifted_params[axis])
+                if err:
+                    return None, err
+                lifted_params[axis] = v
+        if isinstance(lifted_params.get("bounds"), dict):
+            new_bounds = {}
+            for side, spec in lifted_params["bounds"].items():
+                if isinstance(spec, dict) and "value" in spec:
+                    v, err = _lift_scalar_or_expr(spec["value"])
+                    if err:
+                        return None, err
+                    new_bounds[side] = {**spec, "value": v}
+                else:
+                    v, err = _lift_scalar_or_expr(spec)
+                    if err:
+                        return None, err
+                    new_bounds[side] = v
+            lifted_params["bounds"] = new_bounds
+        return lifted_params, None
 
     if atype in ("set-panel-state", "setPanelState"):
         m = (

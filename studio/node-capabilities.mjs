@@ -299,7 +299,10 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
     consumes(['icon'], 'studio/web/src/render.mjs:renderIconSvg', '按已知图标名绘制；原生是否可编辑由逐节点导出报告决定', true);
   }
   if (type === 'input') {
-    consumes(['placeholder', 'value', 'disabled', 'selected', 'selectionGroup', 'multiline'], 'studio/runtime.mjs:setInput + studio/web/src/render.mjs:buildNodeElementHtml', '输入控件显示、多行文本域与运行态文本', true);
+    consumes(['placeholder', 'value', 'disabled', 'selected', 'selectionGroup', 'multiline', 'maxLength'], 'studio/runtime.mjs:setInput + studio/web/src/render.mjs:buildNodeElementHtml', '输入控件显示、输入长度上限、多行文本域与运行态文本', true);
+    if (field === 'maxLength') {
+      result.surfaces.native = fact('implemented', '导出为 Axure 原生 TextBox.MaxLength (DOA 0x05) 并在运行态与浏览器一致截断', 'studio/export-rp.mjs:resolvedTreeToRp1Node');
+    }
     if (field === 'multiline') {
       result.surfaces.native = fact('partial', '导出为同尺寸原生可编辑 TextBox，并在兼容报告中披露多行退化边界', 'studio/export-rp.mjs:resolvedTreeToRp1Node');
     }

@@ -184,4 +184,33 @@ def spatial_and_bounded_motion():
     assert rt.widgets[n('overlap_status')]['text'] == '已重叠'
 check('spatial accessors, bounded drag, tolerance snap and isOver runtime', spatial_and_bounded_motion)
 
+def macro_carousel_slider_captcha_runtime():
+    from rp_dsl import dsl_to_spec
+    from rp_language import ReferenceRuntime, compile_language
+    dsl = "\n".join([
+        'rp/1 target=9 name="宏运行时验证" domain=web theme=enterprise-light',
+        'page #home name="首页" canvas=[440,600]',
+        '  box #root [440x600] layout=stack fill=#FFFFFF',
+        '    carousel #hero_banner [400x150] x=20 y=20 slides=["s1","s2","s3"] interval=2000',
+        '    slider-captcha #captcha [360x240] x=20 y=220 targetX=200 tolerance=2',
+    ])
+    rt = ReferenceRuntime(compile_language(dsl_to_spec(dsl)))
+    n = rt.resolve_trigger_name
+    assert rt.panels[n('hero_banner_panel')]['current'] == 's1'
+    rt.advance(2000)
+    assert rt.panels[n('hero_banner_panel')]['current'] == 's2'
+    rt.trigger('hero_banner_panel', 'swipeleft')
+    assert rt.panels[n('hero_banner_panel')]['current'] == 's3'
+    rt.trigger('captcha_thumb', 'drag', dx=500, dy=0)
+    assert rt.eval_expr({'kind': 'widget', 'name': n('captcha_thumb'), 'accessor': 'right', 'valueType': 'number'}) == 380
+    rt.trigger('captcha_thumb', 'dragdrop')
+    assert rt.widgets[n('captcha_status')]['text'] == '验证失败'
+    assert rt.eval_expr({'kind': 'widget', 'name': n('captcha_thumb'), 'accessor': 'x', 'valueType': 'number'}) == 20
+    # captcha container x=20, targetX=200 => target x=220; test dx=199 => snaps within tolerance=2 to 220
+    rt.trigger('captcha_thumb', 'drag', dx=199, dy=0)
+    rt.trigger('captcha_thumb', 'dragdrop')
+    assert rt.widgets[n('captcha_status')]['text'] == '验证成功'
+    assert rt.eval_expr({'kind': 'widget', 'name': n('captcha_piece'), 'accessor': 'x', 'valueType': 'number'}) == 220
+check('carousel and slider-captcha macros run end-to-end in reference runtime', macro_carousel_slider_captcha_runtime)
+
 print(json.dumps({'ok':True,'checks':checks}))

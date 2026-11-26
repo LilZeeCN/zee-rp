@@ -991,6 +991,88 @@ class LanguageContract(unittest.TestCase):
         bad["pages"][0]["root"]["children"][2]["onClick"] = [{"type": "move", "target": "receipt", "mode": "location", "x": 10, "bounds": {}}]
         self.reject(bad, "E_ACTION")
 
+    def test_indented_dsl_macros_verify_and_decompile_spatial(self):
+        from rp_dsl import dsl_to_spec, spec_to_dsl
+        from rp_decompile import _normalize_lifted_expr, _lift_human_action_ex
+        # 1) Indented zero-JSON events, carousel + slider-captcha macros, and top-level verify:
+        dsl_text = "\n".join([
+            'rp/1 target=9 name="宏与缩进DSL测试" domain=web theme=enterprise-light',
+            'page #home name="首页" canvas=[440,600]',
+            '  box #root [440x600] layout=stack fill=#FFFFFF',
+            '    carousel #auto_banner [400x160] x=20 y=20 slides=["s1","s2","s3"] interval=2500 indicator=true',
+            '    slider-captcha #puzzle [360x240] x=20 y=210 targetX=200 tolerance=2',
+            '    button #btn_pos x=20 y=460 w=120 h=36 text="检测"',
+            '      +onClick:',
+            '        if isOver(@puzzle_piece, @puzzle_target):',
+            '          set puzzle_status = "已到位"',
+            '        else:',
+            '          move puzzle_piece to x=20 y=256 duration=0',
+            'verify:',
+            '  expect #auto_banner_panel panelState=s1',
+            '  drag #puzzle_thumb dx=200 dy=0',
+            '  expect #puzzle_status text="验证成功"',
+        ])
+        parsed = dsl_to_spec(dsl_text)
+        self.assertEqual(len(parsed.get("verify", [])), 3)
+        roundtrip_dsl = spec_to_dsl(parsed)
+        self.assertIn("verify:", roundtrip_dsl)
+        reparsed = dsl_to_spec(roundtrip_dsl)
+        self.assertEqual(reparsed["verify"], parsed["verify"])
+        lowered, ir = compile_language(parsed)
+        self.assertEqual(ir["irVersion"], 2)
+        self.assertTrue(len(lowered["pages"][0].get("interactions", [])) >= 1)
+
+        # Negative validation for carousel macro missing or single slide
+        bad_dsl = '\n'.join([
+            'rp/1 target=9 name="坏轮播"',
+            'page #home name="首页"',
+            '  box #root [400x300] layout=stack',
+            '    carousel #c1 [300x120] interval=2000',
+        ])
+        self.reject(dsl_to_spec(bad_dsl), "E_TYPE")
+        bad_dsl2 = '\n'.join([
+            'rp/1 target=9 name="单张轮播"',
+            'page #home name="首页"',
+            '  box #root [400x300] layout=stack',
+            '    carousel #c1 [300x120] slides=["only_one"]',
+        ])
+        self.reject(dsl_to_spec(bad_dsl2), "E_PROPERTY_REQUIRED")
+
+        # 2) Decompile lifting: unwrap coercions & lift bounded move + axis expressions
+        name_map = {"thumb-aaaa1111": "thumb", "track-bbbb2222": "track", "banner-cccc3333": "banner", "slot-dddd4444": "slot"}
+        norm_expr, err = _normalize_lifted_expr(
+            "[[((IsOver(@thumb-aaaa1111, @slot-dddd4444)).toString().toLowerCase()=='true')]]",
+            name_map,
+        )
+        self.assertIsNone(err)
+        self.assertEqual(norm_expr, "=isOver(@thumb, @slot)")
+        lifted_move, merr = _lift_human_action_ex({
+            "type": "move",
+            "human": "跟随水平拖动 thumb-aaaa1111（0ms，有边界限制）",
+            "rp1": {
+                "type": "move",
+                "target": "thumb-aaaa1111",
+                "mode": "drag-x",
+                "bounds": {
+                    "left": "[[((@track-bbbb2222.left)*1)]]",
+                    "right": "[[((@track-bbbb2222.right)*1)]]",
+                },
+            },
+        }, name_map)
+        self.assertIsNone(merr)
+        self.assertEqual(lifted_move["target"], "thumb")
+        self.assertEqual(lifted_move["bounds"]["left"], "=@track.left")
+        self.assertEqual(lifted_move["bounds"]["right"], "=@track.right")
+
+        lifted_loc, lerr = _lift_human_action_ex({
+            "type": "set-position",
+            "human": "移动到 thumb-aaaa1111 x=[[@slot-dddd4444.x]] y=200（0ms）",
+            "rp1": {"type": "move", "target": "thumb-aaaa1111", "mode": "location", "x": "[[((@slot-dddd4444.x)*1)]]", "y": 200},
+        }, name_map)
+        self.assertIsNone(lerr)
+        self.assertEqual(lifted_loc["x"], "=@slot.x")
+        self.assertEqual(lifted_loc["y"], 200)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

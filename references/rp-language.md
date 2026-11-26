@@ -415,3 +415,29 @@ CLI `proto.mjs check` 的成功与失败诊断均为 stdout 上的单个 JSON；
 2026-10-24 复测补丁：`fontSize`（含 `size`/`font` 简写和 spans 字号）必须满足 `0 < fontSize <= 72`，上限取自渲染器字号令牌表；超限报 `E_SIZE`。`letterSpacing` 必须非负。所有容器的 `after` 都先检查兄弟引用，不存在或指向自身报 `E_REFERENCE`；有效约束在非 stack 容器中仍由布局审计提示不生效。残缺表达式在源码末尾统一报告 `Unexpected end of expression`。
 
 2026-10-28 更新：当前普通文字与spans字号上限已统一为120；label/paragraph/button/badge支持fontFamily，导出保留实际字体。此前2026-10-24记录中的72是历史上限。
+
+## 零 JSON 缩进事件语法、交互模式宏与内置 `verify:`（2026-11）
+
+- **零 JSON 缩进式事件/条件块（`.rp1`）**：
+  节点和页面支持以缩进事件头（`+onLoad:`、`+onClick:`、`+onDrag:`、`+onDragDrop:`、`+onSwipeLeft:`、`+onSwipeRight:`、`+onChange:`、`+onInput:`、`+onSelect:` 等，不再强依赖单行 `+onDrag [{...}]` JSON）书写行为：
+  ```text
+  dynamic-panel #thumb [60x44] x=40 y=310
+    +onDrag:
+      move thumb drag-x within track
+      move piece drag-x bounds={"left":"=@track.left","right":"=@track.right"}
+    +onDragDrop:
+      if @piece.x >= @target.x - 2 && @piece.x <= @target.x + 2:
+        move piece to x=@target.x duration=0
+        set status = "验证成功"
+      else:
+        move thumb locationBeforeDrag duration=0
+        set status = "验证失败"
+  ```
+  动作短语句支持 `set <widgetId> = expr`、`set $var = expr`、`setPanelState <panelId> to <state>|next|previous|current`、`move <widgetId> to x=... y=... | drag-x within <container> | delta x=... y=... | locationBeforeDrag | withThis`、`show|hide|toggle|enable|disable|focus <id>`、`wait 300`、`goto <page_id>`。
+- **一等交互模式宏（`carousel` / `slider-captcha`）**：
+  - `carousel #banner [400x160] slides=["s1","s2","s3"] interval=3000 indicator=true`：自动展开 `#banner_panel`（带各页状态的 `dynamic-panel`）、左右滑动切页与续播定时器、`#banner_indicator` 状态同步（`=@banner_panel.state`）及页面级 `+onLoad` 自动启动轮播；
+  - `slider-captcha #captcha [360x240] targetX=200 tolerance=2`：自动展开背景框 `#captcha_scene`、缺口槽 `#captcha_target`、拼图块 `#captcha_piece`、轨道 `#captcha_track`、滑块 `#captcha_thumb` 与状态文本 `#captcha_status`（含 `BoundaryDirectionLiteral` 钳位、容差吸附与松手回位逻辑）。
+- **源码同文件 `verify:` 验收块**：
+  `.rp1` 顶层支持 `verify:` 缩进块（如 `expect #banner panelState=s1`、`swipe #banner left distance=160`、`wait 3100`、`drag #thumb dx=179 dy=0`、`click #btn`、`expect #status text="验证成功"`），`rp_dsl.py` 自动无损往返并于 `generate_prototype({ verify: true })` / `verify_prototype` 时自动执行行为验收。
+- **全量 `.rp → .rp1` 逆编译（`decompile` / `lift`）**：
+  `rp-read.mjs` 解码 `BoundaryCondition`（`Axure:Expr:BoundaryDirectionLiteral`）及 7 种 `move` 模式为结构化 `rp1` 字段；`rp_decompile.py` 剥离原生表达式机械类型转换（如 `IsOver(...)` → `isOver(...)`、`((@w.x)*1)` → `@w.x`）并重新映射逻辑 ID，可直接使用 `proto.mjs check` 编译回 `.rp`。

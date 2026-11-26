@@ -1,12 +1,23 @@
 rp/1 target=9 name="同步轮播与有界滑块拼图验证" domain=web theme=enterprise-light
 page #demo name="轮播与滑块验证" canvas=[440,620]
-  +onLoad [{"type":"set-panel-state","target":"banner","mode":"next","loop":true,"repeatInterval":3000,"repeatSkipFirst":true,"enterAnimation":"slideLeft","enterDuration":120}]
+  +onLoad:
+    panel banner next loop=true repeatInterval=3000 repeatSkipFirst=true enterAnimation=slideLeft enterDuration=120
   box #root [440x620] layout=stack fill=#F8FAFC
     label #title [360x28] x=40 y=16 "动态面板轮播 + 有界滑块拼图" fontSize=16 fontWeight=700 color=#0F172A
     dynamic-panel #banner [360x160] x=40 y=52
-      +onSwipeLeft [{"type":"set-panel-state","target":"banner","mode":"next","loop":true,"repeatInterval":3000,"repeatSkipFirst":false,"enterAnimation":"slideLeft","enterDuration":120}]
-      +onSwipeRight [{"type":"set-panel-state","target":"banner","mode":"previous","loop":true,"repeatInterval":3000,"repeatSkipFirst":false,"enterAnimation":"slideRight","enterDuration":120}]
-      +onStateChange {"cases":[{"when":"=@banner.state == 's1'","actions":[{"type":"set-panel-state","target":"indicator","state":"s1"}]},{"when":"=@banner.state == 's2'","actions":[{"type":"set-panel-state","target":"indicator","state":"s2"}]},{"when":"=@banner.state == 's3'","actions":[{"type":"set-panel-state","target":"indicator","state":"s3"}]},{"else":true,"actions":[{"type":"set-panel-state","target":"indicator","state":"s4"}]}]}
+      +onSwipeLeft:
+        panel banner next loop=true repeatInterval=3000 repeatSkipFirst=false enterAnimation=slideLeft enterDuration=120
+      +onSwipeRight:
+        panel banner previous loop=true repeatInterval=3000 repeatSkipFirst=false enterAnimation=slideRight enterDuration=120
+      +onStateChange:
+        if @banner.state == 's1':
+          panel indicator s1
+        elif @banner.state == 's2':
+          panel indicator s2
+        elif @banner.state == 's3':
+          panel indicator s3
+        else:
+          panel indicator s4
       :state s1
         box #c1 [360x160] layout=stack fill=#DBEAFE radius=12
           label #l1 [320x36] x=20 y=62 "幻灯片 1 / 4 · 向左滑动或等待 3 秒自动切换" color=#1E3A8A align=center
@@ -43,12 +54,46 @@ page #demo name="轮播与滑块验证" canvas=[440,620]
     box #track [360x44] x=40 y=424 layout=stack fill=#CBD5E1 stroke=#94A3B8 radius=22
       label #track_hint [260x24] x=70 y=10 "向右拖动滑块对齐目标（±2px 自动吸附）" fontSize=12 color=#475569
     dynamic-panel #thumb [60x44] x=40 y=424
-      +onDrag [{"type":"move","target":"thumb","mode":"drag-x","bounds":{"within":"track"}},{"type":"move","target":"piece","mode":"location","x":"=@thumb.x","duration":0}]
-      +onDragDrop {"cases":[{"when":"=@piece.x >= @target.x - 2 && @piece.x <= @target.x + 2","actions":[{"type":"move","target":"piece","mode":"location","x":"=@target.x","duration":0},{"type":"move","target":"thumb","mode":"location","x":"=@target.x","duration":0},{"type":"set-text","target":"captcha_status","text":"验证成功"}]},{"else":true,"actions":[{"type":"move","target":"thumb","mode":"locationBeforeDrag","duration":0},{"type":"move","target":"piece","mode":"location","x":40,"duration":0},{"type":"set-text","target":"captcha_status","text":"验证失败"}]}]}
+      +onDrag:
+        move thumb drag-x within track
+        move piece to x=@thumb.x duration=0
+      +onDragDrop:
+        if @piece.x >= @target.x - 2 && @piece.x <= @target.x + 2:
+          move piece to x=@target.x duration=0
+          move thumb to x=@target.x duration=0
+          set captcha_status = "验证成功"
+        else:
+          move thumb locationBeforeDrag duration=0
+          move piece to x=40 duration=0
+          set captcha_status = "验证失败"
       :state ready
         box #thumb_box [60x44] layout=stack fill=#4F46E5 radius=22
           label #thumb_lbl [60x44] x=0 y=11 ">>>" fontSize=14 fontWeight=700 color=#FFFFFF align=center
     label #captcha_status [220x28] x=40 y=486 "待验证" fontSize=14 fontWeight=600 color=#0F172A
     button #check_overlap [130x32] x=270 y=484 "检查重叠"
-      +onClick {"cases":[{"when":"=isOver(@piece, @target)","actions":[{"type":"set-text","target":"overlap_status","text":"已重叠"}]},{"else":true,"actions":[{"type":"set-text","target":"overlap_status","text":"未重叠"}]}]}
+      +onClick:
+        if isOver(@piece, @target):
+          set overlap_status = "已重叠"
+        else:
+          set overlap_status = "未重叠"
     label #overlap_status [130x24] x=270 y=522 "未重叠" fontSize=12 color=#64748B
+verify:
+  expect banner panelState=s1
+  expect indicator panelState=s1
+  swipe banner left distance=160 panelState=s2
+  expect indicator panelState=s2
+  expect banner_state text="当前幻灯片：s2"
+  advanceTime 3300
+  expect banner panelState=s3
+  expect indicator panelState=s3
+  drag thumb dx=500 dy=60
+  expect captcha_status text="验证失败"
+  expect thumb x=40 tolerance=2
+  expect piece x=40 tolerance=2
+  click check_overlap
+  expect overlap_status text="未重叠"
+  drag thumb dx=179 dy=0
+  expect captcha_status text="验证成功"
+  expect piece x=220 tolerance=2
+  click check_overlap
+  expect overlap_status text="已重叠"

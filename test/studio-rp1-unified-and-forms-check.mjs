@@ -462,3 +462,117 @@ column #checkout_form [420xhug] x=24 y=24 gap=12 padding=16
     }
   });
 });
+
+test('B5.4 Studio 3-way parity for input.maxLength, spatial accessors, panel state, isOver, and bounded move', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'studio-spatial-parity-'));
+  try {
+    const doc = normalizeStudioDocument({
+      domain: 'web',
+      variables: { hit: { type: 'text', value: 'init' } },
+      pages: [
+        {
+          id: 'home',
+          name: 'Home',
+          root: {
+            id: 'root',
+            type: 'box',
+            x: 0,
+            y: 0,
+            w: 500,
+            h: 400,
+            layout: 'free',
+            children: [
+              { id: 'pin_box', type: 'input', x: 20, y: 20, w: 180, h: 40, maxLength: 5, value: '12345678', placeholder: 'PIN' },
+              { id: 'track', type: 'box', x: 20, y: 90, w: 300, h: 40, fill: '#CBD5E1' },
+              { id: 'slot', type: 'box', x: 220, y: 90, w: 60, h: 40, fill: '#10B981' },
+              {
+                id: 'thumb',
+                type: 'dynamic-panel',
+                x: 20,
+                y: 90,
+                w: 60,
+                h: 40,
+                activeState: 's1',
+                states: [
+                  { id: 's1', root: { id: 'k1', type: 'box', w: 60, h: 40, fill: '#4F46E5' } },
+                  { id: 's2', root: { id: 'k2', type: 'box', w: 60, h: 40, fill: '#16A34A' } },
+                ],
+                on: {
+                  drag: [{ type: 'move', target: 'thumb', mode: 'drag-x', bounds: { within: 'track' } }],
+                  dragDrop: {
+                    cases: [
+                      {
+                        when: '=isOver(@thumb, @slot)',
+                        actions: [
+                          { type: 'set-text', target: 'pos_lbl', text: '=@thumb.x' },
+                          { type: 'set-panel-state', target: 'thumb', state: 's2' },
+                          { type: 'set-variable', variable: 'hit', value: '=@thumb.state' },
+                        ],
+                      },
+                      {
+                        else: true,
+                        actions: [
+                          { type: 'set-text', target: 'pos_lbl', text: '=@thumb.x' },
+                          { type: 'set-panel-state', target: 'thumb', state: 's1' },
+                          { type: 'set-variable', variable: 'hit', value: 'miss' },
+                        ],
+                      },
+                    ],
+                  },
+                },
+              },
+              { id: 'pos_lbl', type: 'label', x: 20, y: 150, w: 120, h: 24, text: '=@thumb.x' },
+            ],
+          },
+        },
+      ],
+    });
+
+    const rt = new StudioRuntimeSession(doc, { projectDir: dir });
+    // Initial input value clamped to maxLength=5
+    assert.equal(rt.getWidgetText('pin_box'), '12345');
+    rt.setInput('pin_box', 'abcdefg');
+    assert.equal(rt.getWidgetText('pin_box'), 'abcde');
+    const sim = rt.runScenario([
+      // Drag past track right edge (track.right = 320, thumb.w = 60 => max x = 260)
+      { action: 'drag', target: 'thumb', dx: 500, dy: 40, expect: { position: { thumb: { x: 260, y: 90 } }, text: { pos_lbl: '260' }, variables: { hit: 's2' }, panelState: { thumb: 's2' } } },
+    ]);
+    assert.equal(sim.ok, true, JSON.stringify(sim));
+
+    // Surface 2: Standalone HTML/CSS/JS export
+    const codeDir = join(dir, 'code-out');
+    const codeExport = await exportStudioDocumentToCode(doc, { projectDir: dir, outDir: codeDir, registerExport: false });
+    assert.equal(codeExport.ok, true, JSON.stringify(codeExport));
+    const html = readFileSync(join(codeDir, 'index.html'), 'utf8');
+    assert.match(html, /data-node-id="pin_box"[^>]*maxlength="5"/);
+    const appJs = readFileSync(join(codeDir, 'app.js'), 'utf8');
+    const sandbox = {
+      window: {},
+      document: { getElementById: () => null, querySelector: () => null, querySelectorAll: () => [], addEventListener: () => {} },
+      structuredClone,
+    };
+    vm.runInNewContext(appJs, sandbox);
+    const app = sandbox.window.__STUDIO_EXPORT_APP__;
+    assert.equal(app.getWidgetText('pin_box'), '12345');
+    app.setInput('pin_box', 'xyz9876');
+    assert.equal(app.getWidgetText('pin_box'), 'xyz98');
+    const codeSim = app.runScenario([
+      { action: 'drag', target: 'thumb', dx: 500, dy: 40, expect: { position: { thumb: { x: 260, y: 90 } }, text: { pos_lbl: '260' }, variables: { hit: 's2' }, panelState: { thumb: 's2' } } },
+    ]);
+    assert.equal(codeSim.ok, true, JSON.stringify(codeSim));
+
+    // Surface 3: Native RP9 export keeps TextBox.maxLength and threeZeros
+    await t.test('Native RP9 export preserves TextBox.maxLength and BoundaryCondition', { skip: nativeTemplateSkipReason() }, async () => {
+      const outRp = join(dir, 'spatial-parity.rp');
+      const rpExport = await exportStudioDocumentToRp(doc, { projectDir: dir, outRpPath: outRp, registerExport: false });
+      assert.equal(rpExport.ok, true, JSON.stringify(rpExport));
+      assert.equal(rpExport.report.summary.threeZerosPassed, true, JSON.stringify(rpExport.report));
+      const rpParsed = readRp(readFileSync(outRp));
+      const widgets = rpParsed.pages[0].widgets || [];
+      const tb = widgets.find(w => w.type === 'TextBox' && w.name.includes('pin_box'));
+      assert.equal(tb?.maxLength, 5);
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

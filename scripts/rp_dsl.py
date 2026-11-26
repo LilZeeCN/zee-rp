@@ -178,7 +178,7 @@ def spec_to_dsl(spec):
     if not isinstance(spec, dict) or spec.get("language") != "rp/1":
         raise LanguageError("E_LANGUAGE", "/language", "Expected language 'rp/1'")
     lines = []
-    header_skip = {"language", "palette", "models", "datasets", "variables", "computed", "components", "masters", "adaptiveViews", "product", "tabBar", "pages"}
+    header_skip = {"language", "palette", "models", "datasets", "variables", "computed", "components", "masters", "adaptiveViews", "product", "tabBar", "pages", "verify"}
     hdr_kvs = _fmt_kv_pairs(spec, skip=header_skip)
     lines.append(f"rp/1 {hdr_kvs}".rstrip())
 
@@ -302,6 +302,11 @@ def spec_to_dsl(spec):
                     lines.append(f"  :bind {_fmt_kv_pairs(b)}")
             if isinstance(page.get("root"), dict):
                 _emit_node(page["root"], 1, lines)
+
+    if "verify" in spec and isinstance(spec["verify"], list):
+        lines.append("verify:")
+        for step in spec["verify"]:
+            lines.append(f"  - {json.dumps(step, ensure_ascii=False, separators=(',', ':'))}")
 
     return "\n".join(lines) + "\n"
 
@@ -442,6 +447,204 @@ def _parse_item_line(tail, line_no):
     return out
 
 
+_VERIFY_EXPECT_KEYS = {
+    "text", "value", "visible", "enabled", "checked", "panelState",
+    "width", "height", "x", "y", "left", "right", "top", "bottom",
+    "dx", "dy", "tolerance", "page", "variable", "equals",
+}
+
+
+def _norm_expr_val(v_raw, line_no=1):
+    s = v_raw.strip()
+    if (s.startswith('"') and s.endswith('"')) or (s.startswith("'") and s.endswith("'")):
+        if s.startswith("'"):
+            return s[1:-1]
+        return _parse_value(s, line_no)
+    parsed = _parse_value(s, line_no)
+    if not isinstance(parsed, str):
+        return parsed
+    if parsed.startswith(("=", "[[")):
+        return parsed
+    if re.search(r"(@|\$|var\.|widget\.|item\.|isOver\(|isNotOver\(|==|!=|>=|<=|&&|\|\||[+\-*/])", parsed):
+        return "=" + parsed
+    return parsed
+
+
+def _parse_action_stmt(line, line_no):
+    s = line.strip()
+    if s.startswith("- "):
+        s = s[2:].strip()
+    if s.startswith("{"):
+        return _parse_value(s, line_no)
+    tok, pos = _scan_token(s, 0, line_no)
+    if tok == "move":
+        t_tok, pos = _scan_token(s, pos, line_no)
+        if not t_tok:
+            raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"move requires target at line {line_no}"), line_no, 1)
+        m_tok, pos = _scan_token(s, pos, line_no)
+        if m_tok == "to":
+            mode = "location"
+        elif m_tok == "by":
+            mode = "delta"
+        elif m_tok in ("drag", "drag-x", "drag-y", "locationBeforeDrag", "location", "delta", "withThis"):
+            mode = m_tok
+        else:
+            raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"Invalid move mode '{m_tok}' at line {line_no}"), line_no, 1)
+        act = {"type": "move", "target": t_tok.lstrip("@#"), "mode": mode}
+        bounds = {}
+        while pos < len(s):
+            ntok, pos = _scan_token(s, pos, line_no)
+            if ntok is None:
+                break
+            if ntok == "within":
+                wref, pos = _scan_token(s, pos, line_no)
+                if not wref:
+                    raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"within requires widget id at line {line_no}"), line_no, 1)
+                bounds["within"] = wref.lstrip("@#")
+            elif ntok in ("left", "right", "top", "bottom"):
+                op_tok, pos = _scan_token(s, pos, line_no)
+                if op_tok not in (">", "<", ">=", "<="):
+                    raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"Expected bound comparator after {ntok} at line {line_no}"), line_no, 1)
+                val_tok, pos = _scan_token(s, pos, line_no)
+                if val_tok is None:
+                    raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"Missing bound value at line {line_no}"), line_no, 1)
+                bounds[ntok] = {"op": op_tok, "value": _norm_expr_val(val_tok, line_no)}
+            elif "=" in ntok and not ntok.startswith(('"', "{", "[")):
+                k, v_raw = ntok.split("=", 1)
+                if k == "bounds":
+                    act["bounds"] = _parse_value(v_raw, line_no)
+                elif k in ("x", "y"):
+                    act[k] = _norm_expr_val(v_raw, line_no)
+                else:
+                    act[k] = _parse_value(v_raw, line_no)
+            else:
+                raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"Unexpected token '{ntok}' in move statement at line {line_no}"), line_no, 1)
+        if bounds:
+            act["bounds"] = bounds
+        return act
+    if tok == "set":
+        rest = s[pos:].strip()
+        eq_idx = rest.find("=")
+        if eq_idx <= 0:
+            raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"Expected 'set <target> = <value>' at line {line_no}"), line_no, 1)
+        lhs = rest[:eq_idx].strip()
+        rhs_raw = rest[eq_idx + 1:].strip()
+        return {"set": {lhs: _norm_expr_val(rhs_raw, line_no)}}
+    if tok in ("panel", "set-panel-state"):
+        t_tok, pos = _scan_token(s, pos, line_no)
+        st_tok, pos = _scan_token(s, pos, line_no)
+        if not t_tok or not st_tok:
+            raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"{tok} requires target and state/mode at line {line_no}"), line_no, 1)
+        act = {"type": "set-panel-state", "target": t_tok.lstrip("@#")}
+        if st_tok in ("next", "previous", "current"):
+            act["mode"] = st_tok
+        else:
+            act["state"] = st_tok
+        act.update(_parse_kv_tail(s, pos, line_no))
+        return act
+    if tok in ("show", "hide", "toggle", "enable", "disable", "focus"):
+        t_tok, _ = _scan_token(s, pos, line_no)
+        if not t_tok:
+            raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"{tok} requires target at line {line_no}"), line_no, 1)
+        return {"type": tok, "target": t_tok.lstrip("@#")}
+    if tok in ("goto", "link", "navigate"):
+        p_tok, _ = _scan_token(s, pos, line_no)
+        if not p_tok:
+            raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"{tok} requires page id at line {line_no}"), line_no, 1)
+        return {"type": "link", "page": p_tok.lstrip("#")}
+    if tok == "wait":
+        ms_tok, _ = _scan_token(s, pos, line_no)
+        ms_clean = str(ms_tok or "0").rstrip("ms")
+        return {"type": "wait", "ms": int(ms_clean)}
+    if tok == "set-size":
+        t_tok, pos = _scan_token(s, pos, line_no)
+        kvs = _parse_kv_tail(s, pos, line_no)
+        if "w" in kvs and "width" not in kvs:
+            kvs["width"] = kvs.pop("w")
+        if "h" in kvs and "height" not in kvs:
+            kvs["height"] = kvs.pop("h")
+        for axis in ("width", "height"):
+            if isinstance(kvs.get(axis), str):
+                kvs[axis] = _norm_expr_val(kvs[axis], line_no)
+        return {"type": "set-size", "target": t_tok.lstrip("@#"), **kvs}
+    return s
+
+
+def _parse_event_block(raw_lines, idx, parent_indent, ev_ptr, span_map):
+    n_lines = len(raw_lines)
+    cases = []
+    actions = []
+    while idx < n_lines and raw_lines[idx][1] > parent_indent:
+        lno, ind, cnt = raw_lines[idx]
+        if cnt.startswith(("if ", "elif ", "else if ")):
+            cond_raw = cnt[3:].strip() if cnt.startswith("if ") else (cnt[5:].strip() if cnt.startswith("elif ") else cnt[8:].strip())
+            cond_val = cond_raw if cond_raw.startswith(("=", "[[")) else f"={cond_raw}"
+            span_map[f"{ev_ptr}/cases/{len(cases)}"] = {"line": lno, "column": ind + 1}
+            idx += 1
+            branch_actions = []
+            while idx < n_lines and raw_lines[idx][1] > ind:
+                a_lno, _, a_cnt = raw_lines[idx]
+                branch_actions.append(_parse_action_stmt(a_cnt, a_lno))
+                idx += 1
+            cases.append({"when": cond_val, "actions": branch_actions})
+        elif cnt == "else":
+            span_map[f"{ev_ptr}/cases/{len(cases)}"] = {"line": lno, "column": ind + 1}
+            idx += 1
+            branch_actions = []
+            while idx < n_lines and raw_lines[idx][1] > ind:
+                a_lno, _, a_cnt = raw_lines[idx]
+                branch_actions.append(_parse_action_stmt(a_cnt, a_lno))
+                idx += 1
+            cases.append({"else": True, "actions": branch_actions})
+        else:
+            if cases:
+                raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ev_ptr, f"Action statement after if/else must be indented inside a branch at line {lno}"), lno, ind + 1)
+            actions.append(_parse_action_stmt(cnt, lno))
+            idx += 1
+    return ({"cases": cases} if cases else actions), idx
+
+
+def _parse_verify_step(line, line_no):
+    s = line.strip()
+    if s.startswith("- "):
+        s = s[2:].strip()
+    if s.startswith("{"):
+        return _parse_value(s, line_no)
+    tok, pos = _scan_token(s, 0, line_no)
+    step = {"action": tok}
+    if tok in ("wait", "advanceTime"):
+        ms_tok, pos = _scan_token(s, pos, line_no)
+        step["ms"] = int(str(ms_tok).rstrip("ms"))
+    elif tok == "navigate":
+        p_tok, pos = _scan_token(s, pos, line_no)
+        step["page"] = p_tok.lstrip("#")
+    else:
+        t_tok, pos = _scan_token(s, pos, line_no)
+        if t_tok:
+            step["target"] = t_tok.lstrip("@#")
+        if tok == "swipe":
+            d_tok, pos = _scan_token(s, pos, line_no)
+            if d_tok in ("left", "right", "up", "down"):
+                step["direction"] = d_tok
+            else:
+                raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/verify", f"Expected swipe direction at line {line_no}"), line_no, 1)
+        elif tok == "fill":
+            v_tok, pos = _scan_token(s, pos, line_no)
+            if v_tok is not None and "=" not in v_tok:
+                step["value"] = str(_parse_value(v_tok, line_no))
+    kvs = _parse_kv_tail(s, pos, line_no)
+    exp = dict(kvs.pop("expect", {})) if isinstance(kvs.get("expect"), dict) else {}
+    step_own = {"drag": {"dx", "dy", "steps", "stepDelayMs"}, "swipe": {"distance", "direction", "steps"}, "fill": {"value"}}.get(tok, set())
+    for k, v in kvs.items():
+        if tok == "expect" or (k in _VERIFY_EXPECT_KEYS and k not in step_own):
+            exp[k] = v
+        else:
+            step[k] = v
+    if exp:
+        step["expect"] = exp
+    return step
+
+
 def _parse_node_block(raw_lines, idx, base_indent, ptr_prefix, span_map):
     line_no, indent, content = raw_lines[idx]
     span_map[ptr_prefix] = {"line": line_no, "column": indent + 1}
@@ -531,29 +734,49 @@ def _parse_node_block(raw_lines, idx, base_indent, ptr_prefix, span_map):
             if "=" in rest and not rest.split("=", 1)[0].strip().startswith(('"', "{", "[")) and " " not in rest.split("=", 1)[0].strip():
                 ev_name, ev_raw = rest.split("=", 1)
                 ev_name = ev_name.strip()
-                ev_val = _parse_value(ev_raw.strip(), c_line_no)
+                if not ev_raw.strip() and idx + 1 < n_lines and raw_lines[idx + 1][1] > c_indent:
+                    idx += 1
+                    ev_val, idx = _parse_event_block(raw_lines, idx, c_indent, f"{ptr_prefix}/on/{ev_name}", span_map)
+                else:
+                    ev_val = _parse_value(ev_raw.strip(), c_line_no)
+                    idx += 1
             else:
                 ev_name, val_pos = _scan_token(rest, 0, c_line_no)
-                ev_val = _parse_value(rest[val_pos:], c_line_no)
+                tail = rest[val_pos:].strip()
+                if not tail and idx + 1 < n_lines and raw_lines[idx + 1][1] > c_indent:
+                    idx += 1
+                    ev_val, idx = _parse_event_block(raw_lines, idx, c_indent, f"{ptr_prefix}/on/{ev_name}", span_map)
+                else:
+                    ev_val = _parse_value(tail, c_line_no)
+                    idx += 1
             node.setdefault("on", {})[ev_name] = ev_val
             span_map[f"{ptr_prefix}/on/{ev_name}"] = {"line": c_line_no, "column": c_indent + 1}
-            idx += 1
         elif c_content.startswith("+"):
             rest = c_content[1:].strip()
             if "=" in rest and not rest.split("=", 1)[0].strip().startswith(('"', "{", "[")) and " " not in rest.split("=", 1)[0].strip():
                 ev_sh, ev_raw = rest.split("=", 1)
                 ev_sh = ev_sh.strip()
-                ev_parsed = _parse_value(ev_raw.strip(), c_line_no)
+                if not ev_raw.strip() and idx + 1 < n_lines and raw_lines[idx + 1][1] > c_indent:
+                    idx += 1
+                    ev_parsed, idx = _parse_event_block(raw_lines, idx, c_indent, f"{ptr_prefix}/{ev_sh}", span_map)
+                else:
+                    ev_parsed = _parse_value(ev_raw.strip(), c_line_no)
+                    idx += 1
             else:
                 ev_sh, val_pos = _scan_token(rest, 0, c_line_no)
-                ev_parsed = _parse_value(rest[val_pos:], c_line_no)
+                tail = rest[val_pos:].strip()
+                if not tail and idx + 1 < n_lines and raw_lines[idx + 1][1] > c_indent:
+                    idx += 1
+                    ev_parsed, idx = _parse_event_block(raw_lines, idx, c_indent, f"{ptr_prefix}/{ev_sh}", span_map)
+                else:
+                    ev_parsed = _parse_value(tail, c_line_no)
+                    idx += 1
             if ev_sh in ("click", "change", "focus", "blur", "load", "statechange", "mouseover", "mouseout", "selectedchange", "selectionchange"):
                 node.setdefault("on", {})[ev_sh] = ev_parsed
                 span_map[f"{ptr_prefix}/on/{ev_sh}"] = {"line": c_line_no, "column": c_indent + 1}
             else:
                 node[ev_sh] = ev_parsed
                 span_map[f"{ptr_prefix}/{ev_sh}"] = {"line": c_line_no, "column": c_indent + 1}
-            idx += 1
         elif c_content.startswith((":col ", ":field ", ":item ", "item ", "- ")):
             tag, val_pos = _scan_token(c_content, 0, c_line_no)
             tag_clean = "item" if tag in ("item", "-") else tag[1:]
@@ -928,18 +1151,32 @@ def dsl_to_spec(dsl_text, return_spans=False):
             idx += 1
             while idx < n and raw_lines[idx][1] > indent:
                 c_lno, c_ind, c_cnt = raw_lines[idx]
-                if c_cnt.startswith("+onLoad ") or c_cnt.startswith("+onLoad="):
+                if c_cnt == "+onLoad" and idx + 1 < n and raw_lines[idx + 1][1] > indent:
+                    idx += 1
+                    page_obj["onLoad"], idx = _parse_event_block(raw_lines, idx, c_ind, f"{p_ptr}/onLoad", span_map)
+                elif c_cnt.startswith("+onLoad ") or c_cnt.startswith("+onLoad="):
                     page_obj["onLoad"] = _parse_value(c_cnt[8:].strip(), c_lno)
                     idx += 1
                 elif c_cnt.startswith("+on."):
                     rest = c_cnt[4:].strip()
                     if "=" in rest and not rest.split("=", 1)[0].strip().startswith(('"', "{", "[")) and " " not in rest.split("=", 1)[0].strip():
                         ev_name, ev_raw = rest.split("=", 1)
-                        page_obj.setdefault("on", {})[ev_name.strip()] = _parse_value(ev_raw.strip(), c_lno)
+                        ev_name = ev_name.strip()
+                        if not ev_raw.strip() and idx + 1 < n and raw_lines[idx + 1][1] > c_ind:
+                            idx += 1
+                            page_obj.setdefault("on", {})[ev_name], idx = _parse_event_block(raw_lines, idx, c_ind, f"{p_ptr}/on/{ev_name}", span_map)
+                        else:
+                            page_obj.setdefault("on", {})[ev_name] = _parse_value(ev_raw.strip(), c_lno)
+                            idx += 1
                     else:
                         ev_name, vpos = _scan_token(rest, 0, c_lno)
-                        page_obj.setdefault("on", {})[ev_name] = _parse_value(rest[vpos:], c_lno)
-                    idx += 1
+                        tail = rest[vpos:].strip()
+                        if not tail and idx + 1 < n and raw_lines[idx + 1][1] > c_ind:
+                            idx += 1
+                            page_obj.setdefault("on", {})[ev_name], idx = _parse_event_block(raw_lines, idx, c_ind, f"{p_ptr}/on/{ev_name}", span_map)
+                        else:
+                            page_obj.setdefault("on", {})[ev_name] = _parse_value(tail, c_lno)
+                            idx += 1
                 elif c_cnt.startswith(":bind "):
                     page_obj.setdefault("bindings", []).append(_parse_kv_tail(c_cnt, 6, c_lno))
                     idx += 1
@@ -966,6 +1203,15 @@ def dsl_to_spec(dsl_text, return_spans=False):
             if isinstance(page_obj.get("root"), dict):
                 page_obj["root"].pop("_auto_page_root", None)
             pages_arr.append(page_obj)
+        elif tok == "verify":
+            v_arr = spec.setdefault("verify", [])
+            span_map["/verify"] = {"line": lno, "column": indent + 1}
+            idx += 1
+            while idx < n and raw_lines[idx][1] > indent:
+                v_lno, v_ind, v_cnt = raw_lines[idx]
+                span_map[f"/verify/{len(v_arr)}"] = {"line": v_lno, "column": v_ind + 1}
+                v_arr.append(_parse_verify_step(v_cnt, v_lno))
+                idx += 1
         else:
             hint_map = {"colors": "palette", "color": "palette", "theme": "palette", "vars": "var", "variables": "var", "pages": "page", "components": "component"}
             suggestion_msg = f" (did you mean '{hint_map[tok]}'?)" if tok in hint_map else ""
@@ -1001,6 +1247,8 @@ def _dsl_line_anchor(stripped):
         return ("component", parts[1].split("(", 1)[0])
     if head == "page" and len(parts) >= 2:
         return ("page", parts[1].lstrip("#"))
+    if head == "verify":
+        return ("verify",)
     for tok in parts[1:]:
         if tok.startswith("#") and "=" not in tok and len(tok) > 1:
             return ("node", tok[1:])

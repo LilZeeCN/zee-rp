@@ -7,7 +7,7 @@ import math
 import re
 import string
 from .core import BOUND_OPS, BOUND_SIDES, DRAG_MODES, MOVE_EASINGS, MOVE_MODES, PANEL_ANIMATIONS, PANEL_GESTURES, PANEL_MODES, WIDGET_GEOM_ACCESSORS
-from .core import ACTION_PROPS, BOX_ALIGN_ALIASES, BOX_TEXT_CONTAINER_KEYS, BOX_TEXT_STYLE_KEYS, CARD_CONTENT_KEYS, CHECK_KINDS, COLOR_TOKENS, DEVICE_CANVAS_PRESETS, EVENTS, EVENT_SHORTHANDS, FORM_KINDS, GEOMETRY, INLINE_EXPR_HINT_RE, JUSTIFY_ALIASES, LanguageError, MACRO_ITEM_PROPS, MACRO_PROPS, MACRO_SLOTS, NODE_PROPS, NODE_SOURCE_ALIASES, OPTION_KINDS, SCALARS, SHORTHAND_NODE_KINDS, STATE_STYLE_KEYS, TEXT_ALIGN_ALIASES, THEMES, _estimate_visual_px, _resolve_pointer, are_when_asts_mutually_exclusive, expand_data_table_macro, expand_detail_card_macro, expand_form_card_macro, expand_kv_list_macro, expand_list_item_macro, expand_master_detail_macro, expand_nav_bar_macro, expand_phone_shell_macro, expand_progress_bar_macro, expand_searchable_list_macro, expand_stat_row_macro, expand_tab_bar_macro, expand_wizard_card_macro, fail, fields, ident, normalize_color_token, normalize_font_weight, normalize_panel_state_dict, normalize_panel_states_in_tree, parse_domain_type, parse_font_shorthand, parse_inline_expr, parse_template_string, ptr, sanitize_dingbats, validate_device, validate_font_size, validate_source_tree, validate_statecharts
+from .core import ACTION_PROPS, BOX_ALIGN_ALIASES, BOX_TEXT_CONTAINER_KEYS, BOX_TEXT_STYLE_KEYS, CARD_CONTENT_KEYS, CHECK_KINDS, COLOR_TOKENS, DEVICE_CANVAS_PRESETS, EVENTS, EVENT_SHORTHANDS, FORM_KINDS, GEOMETRY, INLINE_EXPR_HINT_RE, JUSTIFY_ALIASES, LanguageError, MACRO_ITEM_PROPS, MACRO_PROPS, MACRO_SLOTS, NODE_PROPS, NODE_SOURCE_ALIASES, OPTION_KINDS, SCALARS, SHORTHAND_NODE_KINDS, STATE_STYLE_KEYS, TEXT_ALIGN_ALIASES, THEMES, _estimate_visual_px, _resolve_pointer, are_when_asts_mutually_exclusive, expand_carousel_macro, expand_data_table_macro, expand_detail_card_macro, expand_form_card_macro, expand_kv_list_macro, expand_list_item_macro, expand_master_detail_macro, expand_nav_bar_macro, expand_phone_shell_macro, expand_progress_bar_macro, expand_searchable_list_macro, expand_slider_captcha_macro, expand_stat_row_macro, expand_tab_bar_macro, expand_wizard_card_macro, fail, fields, ident, normalize_color_token, normalize_font_weight, normalize_panel_state_dict, normalize_panel_states_in_tree, parse_domain_type, parse_font_shorthand, parse_inline_expr, parse_template_string, ptr, sanitize_dingbats, validate_device, validate_font_size, validate_source_tree, validate_statecharts
 
 class Frontend:
     def __init__(self, spec):
@@ -42,6 +42,7 @@ class Frontend:
         self.declarative_rules = {}
         self.compiled_selection_views = []
         self.page_master_placements = {}
+        self.carousel_autoloads = []
         self.desugar_spec()
 
     def _compile_declarative_rule_cases(self, rule_id, rule_obj, extra_actions=None):
@@ -798,7 +799,7 @@ class Frontend:
                 continue
             for idx, entry in enumerate(entries):
                 ep = ptr(ptr(path, array_key), idx)
-                if array_key in ("filters", "items", "tabs") and isinstance(entry, str) and kind in ("searchable-list", "tab-bar"):
+                if (array_key in ("filters", "items", "tabs") and isinstance(entry, str) and kind in ("searchable-list", "tab-bar")) or (array_key == "slides" and isinstance(entry, str) and kind == "carousel"):
                     continue
                 fields(entry, allowed, ep)
                 for w_prop in ("fontWeight", "headerFontWeight"):
@@ -1218,6 +1219,28 @@ class Frontend:
                 source = expand_progress_bar_macro(
                     source, path, self.variables or (self.spec.get("variables") if isinstance(self.spec, dict) else None),
                     bindings=self.progress_bindings, scope=scope)
+            elif kind == "carousel":
+                interval = source.get("interval", source.get("repeatInterval", 3000))
+                anim = source.get("animation", "slideLeft")
+                dur = source.get("duration", 120)
+                cid = source.get("id")
+                source = expand_carousel_macro(source, path)
+                if interval and interval > 0:
+                    self.carousel_autoloads.append({
+                        "pageId": scope.split("/")[0],
+                        "scope": scope,
+                        "path": path,
+                        "action": {
+                            "type": "set-panel-state",
+                            "target": f"{cid}_panel",
+                            "mode": "next",
+                            "loop": True,
+                            "repeatInterval": int(interval),
+                            "repeatSkipFirst": True,
+                            "enterAnimation": anim,
+                            "enterDuration": dur,
+                        },
+                    })
             else:
                 source = {
                     "data-table": expand_data_table_macro,
@@ -1230,6 +1253,7 @@ class Frontend:
                     "phone-shell": expand_phone_shell_macro,
                     "stat-row": expand_stat_row_macro,
                     "list-item": expand_list_item_macro,
+                    "slider-captcha": expand_slider_captcha_macro,
                 }[kind](source, path)
             for key in {"on", "name", "when", "visible", "hidden", "adaptive", "_master_instance", "_master_slot"} | set(EVENT_SHORTHANDS):
                 if key in original:
@@ -3616,7 +3640,18 @@ class Frontend:
     def _compile(self):
         fields(self.spec, {"$schema", "language", "target", "name", "theme", "palette", "tokens", "domain", "device", "shell", "static", "strictAudit", "devMode",
                            "product", "models", "datasets", "variables", "computed", "statecharts", "transactions", "invariants", "components",
-                           "views", "rules", "masters", "adaptiveViews", "tabBar", "pages"}, "")
+                           "views", "rules", "masters", "adaptiveViews", "tabBar", "pages", "verify"}, "")
+        if "verify" in self.spec:
+            vsteps = self.spec["verify"]
+            if not isinstance(vsteps, list):
+                fail("E_TYPE", "/verify", "verify must be an array of browser verification steps")
+            allowed_verify_actions = {"click", "fill", "drag", "swipe", "wait", "advanceTime", "navigate", "expect"}
+            for vi, vst in enumerate(vsteps):
+                vp = ptr("/verify", vi)
+                if not isinstance(vst, dict):
+                    fail("E_OBJECT", vp, "verify step must be an object")
+                if vst.get("action") not in allowed_verify_actions:
+                    fail("E_PROPERTY", ptr(vp, "action"), f"verify action must be one of {sorted(allowed_verify_actions)}")
         if "$schema" in self.spec: self.typecheck(self.spec["$schema"], "text", "/$schema")
         if self.spec.get("language") != "rp/1":
             fail("E_LANGUAGE", "/language", "Expected language: rp/1")
@@ -3878,6 +3913,16 @@ class Frontend:
                         "actions": [{"type": "set-text", "target": name,
                                      "text": str(row[field]) if not isinstance(row[field], bool) else str(row[field]).lower()}
                                     for name, field in resolved]})
+            for c_auto in self.carousel_autoloads:
+                if c_auto["pageId"] != pid:
+                    continue
+                self.current_trigger_name = "page"
+                self.current_trigger_id = None
+                ev_list = self.events({"load": [copy.deepcopy(c_auto["action"])]}, c_auto["scope"], c_auto["path"], page=True)
+                for c_item in ev_list[0]["cases"]:
+                    c_item["description"] = f"RP/1 carousel autoload {c_auto['action']['target']}"
+                    c_item["isNewIfGroup"] = True
+                    load_cases.append(c_item)
             # Binding cases are independent `if`s. Distinct variables may match together.
             if load_cases:
                 load = next((event for event in page_events if event["event"] == "OnLoad"), None)

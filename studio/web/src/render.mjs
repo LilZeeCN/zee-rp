@@ -153,12 +153,13 @@ export function buildNodeElementHtml(n, pageId, childrenHtml = '', parent = null
   }
 
   if (n.type === 'input') {
+    const maxLenAttr = Number.isInteger(n.maxLength) && n.maxLength >= 0 ? ` maxlength="${n.maxLength}"` : '';
     if (state.mode === 'interact') {
       const val = state.runtimeState?.inputs?.[n.scopedId] ?? n.text ?? '';
       if (n.multiline) {
-        return `<textarea ${commonAttrs} placeholder="${escapeHtml(n.placeholder || '')}" ${n.disabled ? 'disabled ' : ''}style="${style('padding:8px 12px;resize:none;font:inherit')}" data-runtime-input="${escapeHtml(n.scopedId)}">${escapeHtml(val)}</textarea>`;
+        return `<textarea ${commonAttrs}${maxLenAttr} placeholder="${escapeHtml(n.placeholder || '')}" ${n.disabled ? 'disabled ' : ''}style="${style('padding:8px 12px;resize:none;font:inherit')}" data-runtime-input="${escapeHtml(n.scopedId)}">${escapeHtml(val)}</textarea>`;
       }
-      return `<input ${commonAttrs} value="${escapeHtml(val)}" placeholder="${escapeHtml(n.placeholder || '')}" ${n.disabled ? 'disabled ' : ''}style="${style('padding:0 12px')}" data-runtime-input="${escapeHtml(n.scopedId)}" />`;
+      return `<input ${commonAttrs}${maxLenAttr} value="${escapeHtml(val)}" placeholder="${escapeHtml(n.placeholder || '')}" ${n.disabled ? 'disabled ' : ''}style="${style('padding:0 12px')}" data-runtime-input="${escapeHtml(n.scopedId)}" />`;
     }
     const disp = n.text || n.placeholder || '';
     const isPlaceholder = !n.text && n.placeholder;

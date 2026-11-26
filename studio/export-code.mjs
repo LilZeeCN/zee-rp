@@ -10,7 +10,7 @@ import { computeDependencyClosure } from './project-bundle.mjs';
 
 export const CODE_EXPORTER_VERSION = '1.0.0';
 
-const SUPPORTED_EVENTS = new Set(['click', 'input', 'change']);
+const SUPPORTED_EVENTS = new Set(['click', 'input', 'change', 'dragStart', 'drag', 'dragDrop']);
 const SUPPORTED_ACTION_TYPES = new Set([
   'link',
   'navigate',
@@ -24,6 +24,7 @@ const SUPPORTED_ACTION_TYPES = new Set([
   'set-check',
   'set-selected',
   'set-option',
+  'move',
   'dataset-select',
   'dataset-toggle-select',
   'dataset-add',
@@ -262,7 +263,8 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
     ...(!n.truncated && n.spans?.length ? { spans: n.spans.map(span => ({ text: span.text, css: textSpanCss(span, n.fontStackCss) })) } : {}),
     rawText: n.rawText ?? n.text ?? '',
     placeholder: n.placeholder || '',
-    value: n.value ?? '',
+    value: n.value ?? n.text ?? '',
+    ...(Number.isInteger(n.maxLength) && n.maxLength >= 0 ? { maxLength: n.maxLength } : {}),
     multiline: Boolean(n.multiline),
     disabled: Boolean(n.disabled),
     ...(['checkbox', 'radio'].includes(n.type) ? { checked: Boolean(n.checked) } : {}),
@@ -415,10 +417,11 @@ function renderStaticInitialNodeHtml(n) {
       n.multiline ? 'padding:8px 12px;resize:none' : 'padding:0 12px'
     );
     const disAttr = n.disabled ? ' disabled' : '';
+    const maxLenAttr = Number.isInteger(n.maxLength) && n.maxLength >= 0 ? ` maxlength="${n.maxLength}"` : '';
     if (n.multiline) {
-      return `<textarea class="export-node export-node-input" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="input"${roleAttr}${unsupAttr}${disAttr} placeholder="${escapeHtml(n.placeholder || '')}" style="${escapeHtml(styleParts.join(';'))}">${escapeHtml(n.value || n.text || '')}</textarea>`;
+      return `<textarea class="export-node export-node-input" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="input"${roleAttr}${unsupAttr}${disAttr}${maxLenAttr} placeholder="${escapeHtml(n.placeholder || '')}" style="${escapeHtml(styleParts.join(';'))}">${escapeHtml(n.value || n.text || '')}</textarea>`;
     }
-    return `<input class="export-node export-node-input" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="input"${roleAttr}${unsupAttr}${disAttr} type="text" value="${escapeHtml(n.value || n.text || '')}" placeholder="${escapeHtml(n.placeholder || '')}" style="${escapeHtml(styleParts.join(';'))}" />`;
+    return `<input class="export-node export-node-input" data-node-id="${escapeHtml(n.id)}" data-scoped-id="${escapeHtml(n.scopedId)}" data-node-type="input"${roleAttr}${unsupAttr}${disAttr}${maxLenAttr} type="text" value="${escapeHtml(n.value || n.text || '')}" placeholder="${escapeHtml(n.placeholder || '')}" style="${escapeHtml(styleParts.join(';'))}" />`;
   }
 
   if (n.type === 'checkbox' || n.type === 'radio') {
@@ -689,6 +692,8 @@ function buildAppJs(bundlePayload) {
       this.textOverrides = {};
       this.textFormulas = {};
       this.panelStates = {};
+      this.widgetPositions = {};
+      this.dragStartPositions = {};
       this.datasets = {};
       this.datasetFilters = {};
       this.datasetSorts = {};
@@ -737,7 +742,8 @@ function buildAppJs(bundlePayload) {
             this.visibility[n.scopedId] = false;
           }
           if (n.type === 'input') {
-            const val = n.value !== undefined && n.value !== '' ? String(n.value) : '';
+            const raw = (n.value !== undefined && n.value !== '') ? String(n.value) : String(n.rawText ?? n.text ?? '');
+            const val = Number.isInteger(n.maxLength) && n.maxLength >= 0 ? raw.slice(0, n.maxLength) : raw;
             this.inputs[n.scopedId] = val;
           }
           if (n.type === 'checkbox' || n.type === 'radio') {
@@ -868,6 +874,9 @@ function buildAppJs(bundlePayload) {
       const node = this.findNodeInPage(pageId, widgetId, { scopePrefix });
       if (!node) return false;
       const scoped = node.scopedId;
+      if (prop === 'state') {
+        return this.panelStates[scoped] || node.activeStateId || node.states?.[0]?.id || '';
+      }
       if (prop === 'checked') {
         return scoped in this.checked ? Boolean(this.checked[scoped]) : Boolean(node.checked);
       }
@@ -885,11 +894,25 @@ function buildAppJs(bundlePayload) {
       return false;
     }
 
+    getWidgetRect(widgetId, { pageId = this.currentPageId, scopePrefix = this.interactionScope } = {}) {
+      const node = this.findNodeInPage(pageId, widgetId, { scopePrefix });
+      if (!node) return null;
+      const scoped = node.scopedId;
+      const pos = this.widgetPositions?.[scoped];
+      const x = pos ? Number(pos.x) : Number(node.x ?? 0);
+      const y = pos ? Number(pos.y) : Number(node.y ?? 0);
+      const w = Number(node.w ?? 0);
+      const h = Number(node.h ?? 0);
+      return { x, y, left: x, top: y, right: x + w, bottom: y + h, width: w, height: h, scopedId: scoped, pageId: node.pageId };
+    }
+
     evaluateExpression(expr, itemRow = null, context = {}) {
+      const ctx = context && typeof context === 'object' ? context : {};
       return evaluatePrototypeExpression(expr, {
         variables: this.variables,
-        getWidgetText: target => this.getWidgetText(target, context),
-        getWidgetState: (target, prop) => this.getWidgetState(target, prop, context),
+        getWidgetText: target => this.getWidgetText(target, ctx),
+        getWidgetState: (target, prop) => this.getWidgetState(target, prop, ctx),
+        getWidgetRect: target => this.getWidgetRect(target, ctx),
         resolveDatasetPath: (name, prop) => this.resolveDatasetPath(name, prop),
         itemRow,
       });
@@ -1096,8 +1119,12 @@ function buildAppJs(bundlePayload) {
         this.render();
         return this.getState();
       }
-      this.inputs[stripped] = String(value);
-      this.trace.push({ step: this.trace.length + 1, type: 'input', pageId: this.currentPageId, targetId: stripped, value: String(value) });
+      const rawStr = String(value);
+      const nextVal = Number.isInteger(node.maxLength) && node.maxLength >= 0
+        ? rawStr.slice(0, node.maxLength)
+        : rawStr;
+      this.inputs[stripped] = nextVal;
+      this.trace.push({ step: this.trace.length + 1, type: 'input', pageId: this.currentPageId, targetId: stripped, value: nextVal });
       this.render();
       return this.getState();
     }
@@ -1136,6 +1163,92 @@ function buildAppJs(bundlePayload) {
       return this.getState();
     }
 
+    moveWidget(targetId, action = {}, executed = null, { evaluate = v => this.evaluateExpression(v), rowContext = null } = {}) {
+      const rect = this.getWidgetRect(targetId);
+      if (!rect) throw new Error('未找到移动目标: ' + targetId);
+      const scoped = rect.scopedId;
+      if (!(scoped in this.dragStartPositions)) {
+        this.dragStartPositions[scoped] = { x: rect.x, y: rect.y };
+      }
+      const mode = action.mode || (action.x !== undefined || action.y !== undefined ? 'location' : 'delta');
+      let nextX = rect.x;
+      let nextY = rect.y;
+      if (mode === 'locationBeforeDrag') {
+        const origin = this.dragStartPositions[scoped];
+        if (origin) { nextX = origin.x; nextY = origin.y; }
+      } else if (mode === 'location') {
+        if (action.x !== undefined) nextX = Number(evaluate(action.x)) || 0;
+        if (action.y !== undefined) nextY = Number(evaluate(action.y)) || 0;
+      } else {
+        const dx = mode === 'drag-y' ? 0 : Number(evaluate(action.x ?? rowContext?.dragDx ?? 0)) || 0;
+        const dy = mode === 'drag-x' ? 0 : Number(evaluate(action.y ?? rowContext?.dragDy ?? 0)) || 0;
+        nextX = rect.x + dx;
+        nextY = rect.y + dy;
+      }
+      const clampSide = (side, op, lim) => {
+        if (!Number.isFinite(lim)) return;
+        if (side === 'left' && (op === '>=' || op === '>')) nextX = Math.max(nextX, lim);
+        else if (side === 'right' && (op === '<=' || op === '<')) nextX = Math.min(nextX, lim - rect.width);
+        else if (side === 'top' && (op === '>=' || op === '>')) nextY = Math.max(nextY, lim);
+        else if (side === 'bottom' && (op === '<=' || op === '<')) nextY = Math.min(nextY, lim - rect.height);
+      };
+      const bounds = action.bounds;
+      if (Array.isArray(bounds)) {
+        for (const cl of bounds) {
+          if (!cl || !cl.side) continue;
+          clampSide(cl.side, cl.op || ({ left: '>=', right: '<=', top: '>=', bottom: '<=' }[cl.side]), Number(evaluate(cl.value)));
+        }
+      } else if (bounds && typeof bounds === 'object') {
+        if (bounds.within) {
+          const wRect = this.getWidgetRect(bounds.within);
+          if (wRect) {
+            if (mode !== 'drag-y') nextX = Math.max(wRect.left, Math.min(wRect.right - rect.width, nextX));
+            if (mode !== 'drag-x') nextY = Math.max(wRect.top, Math.min(wRect.bottom - rect.height, nextY));
+          }
+        }
+        const defOps = { left: '>=', right: '<=', top: '>=', bottom: '<=' };
+        for (const side of ['left', 'right', 'top', 'bottom']) {
+          if (bounds[side] === undefined) continue;
+          const spec = bounds[side];
+          if (spec && typeof spec === 'object' && 'value' in spec) {
+            clampSide(side, spec.op || defOps[side], Number(evaluate(spec.value)));
+          } else {
+            clampSide(side, defOps[side], Number(evaluate(spec)));
+          }
+        }
+      }
+      this.widgetPositions[scoped] = { x: nextX, y: nextY };
+      if (executed) executed.push({ action: 'move', target: scoped, mode, x: nextX, y: nextY });
+      return { x: nextX, y: nextY };
+    }
+
+    drag(targetId, { dx = 0, dy = 0 } = {}) {
+      const node = this.findNodeInPage(this.currentPageId, targetId);
+      if (!node) throw new Error('未找到拖动目标: ' + targetId);
+      if (!this.isNodeVisible(targetId)) throw new Error('拖动目标当前不可见: ' + targetId);
+      const startRect = this.getWidgetRect(node.scopedId);
+      if (startRect) this.dragStartPositions[node.scopedId] = { x: startRect.x, y: startRect.y };
+      const executed = [];
+      const isDisabled = Boolean(node.disabled) || ['disabled', 'loading'].includes(node.state);
+      if (!isDisabled) {
+        const before = this.interactionScope;
+        this.interactionScope = this.nodeScope(node);
+        const runEv = (evName, rowContext = null) => {
+          const spec = node.on?.[evName];
+          if (spec) executePrototypeInteraction(this, spec, executed, { declaredVariables: this.bundle.variables, rowContext });
+        };
+        try {
+          runEv('dragStart');
+          runEv('drag', { dragDx: dx, dragDy: dy });
+          runEv('dragDrop');
+        } finally {
+          this.interactionScope = before;
+        }
+      }
+      this.trace.push({ step: this.trace.length + 1, type: 'drag', pageId: this.currentPageId, targetId: node.scopedId, dx, dy, executed });
+      this.render();
+      return this.getState();
+    }
     _setNodeVisibility(targetId, vis) {
       this.visibility[this.targetKey(targetId)] = vis;
     }
@@ -1277,6 +1390,8 @@ function buildAppJs(bundlePayload) {
           this.setInput(step.target || step.id || step.fill, step.value ?? step.text ?? '');
         } else if (step.action === 'click' || step.click) {
           this.click(step.target || step.click || step.id);
+        } else if (step.action === 'drag') {
+          this.drag(step.target || step.id, { dx: step.dx ?? 0, dy: step.dy ?? 0 });
         } else if (step.action === 'dataset') {
           this._executeDatasetAction(step, []);
           this.render();
@@ -1357,6 +1472,16 @@ function buildAppJs(bundlePayload) {
                 if (String(first[fk] ?? '') !== String(fv)) {
                   failures.push('Expected datasetFirstRow[' + ds + '].' + fk + '=' + fv + ', got ' + first[fk]);
                 }
+              }
+            }
+          }
+          if (step.expect.position) {
+            for (const [nodeId, expPos] of Object.entries(step.expect.position)) {
+              const rect = this.getWidgetRect(nodeId);
+              const tol = Number(expPos?.tolerance ?? 1);
+              const axes = ['x', 'y', 'left', 'right', 'top', 'bottom'].filter(k => typeof expPos?.[k] === 'number');
+              if (!rect || !axes.length || !axes.every(k => Math.abs(rect[k] - expPos[k]) <= tol)) {
+                failures.push('Expected position[' + nodeId + ']=' + JSON.stringify(expPos) + ', got ' + JSON.stringify(rect));
               }
             }
           }
@@ -1584,8 +1709,9 @@ function buildAppJs(bundlePayload) {
         el.setAttribute('aria-disabled', 'true');
       }
 
-      el.style.left = n.x + 'px';
-      el.style.top = n.y + 'px';
+      const moved = this.widgetPositions?.[n.scopedId];
+      el.style.left = (moved ? moved.x : n.x) + 'px';
+      el.style.top = (moved ? moved.y : n.y) + 'px';
       el.style.width = n.w + 'px';
       el.style.height = n.h + 'px';
       el.style.zIndex = String(n.renderOrder || 1);
@@ -1651,6 +1777,7 @@ function buildAppJs(bundlePayload) {
         const val = this.inputs[n.scopedId] ?? n.value ?? '';
         el.value = val;
         el.placeholder = n.placeholder || '';
+        if (Number.isInteger(n.maxLength) && n.maxLength >= 0) el.maxLength = n.maxLength;
         el.style.color = n.color || '#1E293B';
         el.style.fontSize = (n.fontSize || 14) + 'px';
         el.style.fontFamily = (n.fontFamily || 'PingFang SC') + ', sans-serif';

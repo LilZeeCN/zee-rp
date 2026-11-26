@@ -21,6 +21,7 @@ node tools/native-assembly/bridge.mjs export 11 /path/to/new-form.rp /path/to/ne
 - `pair` 将同一个原生文本框对象分两次保存。命令用 zee-rp 解码两份页面记录，报告控件字段变化和原生类型标签。
 - `inspect` 通过 Axure 只读加载文件，列出页面、顶层元件位置和尺寸，以及原生 TextBox 的 `MaxLength`。`compare` 再把页面名、顶层控件名和边界与 zee-rp 读回值对账。
 - `export` 以新建的默认 HTML 生成器配置生成完整本地播放器目录，输入与宿主的文件主版本必须相同。保存于 RP 中的自定义导出配置仍应通过 Axure 编辑器使用。可经 HTTP 打开输出目录下的 `start.html`。
+- **`Worker.exe` 编译缓存与常驻 `daemon` 模式**：`bridge.mjs` 按宿主程序集路径与 `Worker.cs` SHA-256 指纹将已编译的 `Worker.exe` 缓存在持久化缓存目录，跳过重复 `dotnet build`；`bridge.mjs daemon <version>`（及 `runAssemblyBridgeAsync` 线程池）维持长生命周期宿主进程并按请求包 `NSAutoreleasePool`，复用已有 Axure 程序集加载态将连续多次官方 HTML 导出延迟压缩至百毫秒级，进程退出前自动优雅关闭。
 - 路径必须指向已存在的父目录，输出文件或目录使用新名称。Windows 适配可发现安装及枚举文件，程序集调用等待 Windows 版本的独立验证。
 
 既有 RP/1、Studio 和 MCP 通过原有模板选择接入。以下示例用新建的 RP9 空白工程编译 RP/1。
