@@ -1188,6 +1188,22 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
     w: Math.round(node._w ?? node.w ?? 100),
     h: Math.round(node._h ?? node.h ?? 40),
   };
+  if (
+    out.type === 'label'
+    && (node.w === 'hug' || node.w === undefined)
+    && !node.wrap
+    && (node._textMetrics?.lineCount ?? 1) <= 1
+    && typeof node._w === 'number'
+    && node._w > 0
+  ) {
+    const hugWidthBuffer = Math.min(12, Math.max(4, Math.ceil((Number(node.fontSize) || 14) * 0.35)));
+    out.w = Math.round(node._w) + hugWidthBuffer;
+    const align = node.align || node._inheritedAlign;
+    if (!omitRootXY && typeof out.x === 'number') {
+      if (align === 'center') out.x = Math.max(0, out.x - Math.floor(hugWidthBuffer / 2));
+      else if (align === 'right') out.x = Math.max(0, out.x - hugWidthBuffer);
+    }
+  }
   // Initially hidden nodes must stay hidden in Axure; show/hide actions reveal them at runtime.
   if (node.visible === false || node.hidden === true) out.visible = false;
   if (node.type === 'spacer') { out.fill = '#FFFFFF00'; out.stroke = '#FFFFFF00'; }

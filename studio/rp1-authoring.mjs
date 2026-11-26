@@ -503,6 +503,12 @@ export function prepareRp1Commands({ doc, source, pageId, parentId = null, mode,
       || /[\s/:]/.test(node.id)
       || (!autoStateRoot && !record.autoDecorId && (!originalSpan || parsed.explicit[String(originalSpan.line)] !== node.id))
     ) {
+      if (pointer === ROOT_POINTER && !originalSpan) {
+        fail('E_RP1_EXPLICIT_ID', 'RP/1 片段必须由单个带显式 #id 的根容器包裹（多个同级节点请放进同一根容器，或改用 studio_command 批量更新现有节点）；每个创作节点都需要写 #id', {
+          ...locate(pointer),
+          suggestion: '若需批量修改页面已有多个节点，可直接调用 studio_command(commands:[{type:"setProperties",...}])，无需再包一层根容器',
+        });
+      }
       fail('E_RP1_EXPLICIT_ID', '每个创作节点都需要显式稳定 ID；请写 #id，并用单个显式根容器组织片段', { nodeId: node.id, ...locate(pointer) });
     }
     if (ids.has(node.id)) fail('E_RP1_DUPLICATE_ID', `片段中重复逻辑 ID ${node.id}，不会自动改名`, { nodeId: node.id, ...locate(pointer) });

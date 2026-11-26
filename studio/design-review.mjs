@@ -218,9 +218,24 @@ export async function reviewDesign(studio, { pageId, baseRevision, reviewId = nu
   const docPage = (studio.store.doc.pages || []).find(p => p.id === pageId) || null;
   const nativeReadiness = summarizeNativeReadiness(page, docPage);
   const interactionDiagnostics = lintDocumentInteractions(studio.store.doc, { includeCompleteness: true, pageId });
+  const hardErrorFindings = findings.filter(f => f.severity === 'error');
+  const l1Blocking = metrics.l1?.blocking || [];
+  const l1BlockingKeys = l1Blocking.map(b => b.check);
+  const extraL1Blocking = l1Blocking.filter(b => !hardErrorFindings.some(f =>
+    f.check === b.check
+    || (b.check === 'containment' && ['W_OUTSIDE_SCREEN', 'W_TEXT_OVERFLOW'].includes(f.code))
+    || (b.check === 'contrast' && ['W_CONTRAST_LOW', 'W_CONTRAST_UNKNOWN'].includes(f.code))
+  ));
   const review = { schemaVersion: 2, documentId: studio.store.doc.documentId, board: page.board, nodeSnapshots: reviewNodeSnapshots(page), reviewId: id, pageId, revision: baseRevision, contentHash: shot.contentHash, screenshot,
     status: 'awaiting-visual-review', userAccepted: false, findings:findings.map(finding=>({...finding,location:locateDiagnostic({doc:studio.store.doc,scene:studio.scene,pageId,nodeIds:finding.nodeIds||[finding.nodeId||finding.scopedId].filter(Boolean),field:finding.field,code:finding.code,limit:1})})), checkList,
-    assessment: { blockingCount: findings.filter(f => f.severity === 'error').length, advisoryCount: findings.filter(f => f.severity !== 'error').length, note: '硬问题与风格建议分别记录；unknown 不计为通过。' },
+    assessment: {
+      blockingCount: hardErrorFindings.length,
+      advisoryCount: findings.filter(f => f.severity !== 'error').length,
+      l1BlockingCount: l1Blocking.length,
+      l1BlockingKeys,
+      totalBlockingCount: hardErrorFindings.length + extraL1Blocking.length,
+      note: 'blockingCount 为硬视觉错误数，l1BlockingCount 为 L1 设计度量阻塞数（含字阶/视觉主次/栅格等），totalBlockingCount 为合并去重阻塞总数；两者均为 0 才算 L1 全通过。',
+    },
     nativeReadiness,
     interactionDiagnostics,
     designMetrics: metrics,

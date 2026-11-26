@@ -16,6 +16,56 @@ import { SAFE_NODE_CACHE_COMMANDS, INTERACTION_MUTATING_COMMANDS, NON_STRUCTURAL
 import { cmdError, defineRecordEntry, stackUnplacedChildDiagnostics, validateInteractionAssignments } from './helpers.mjs';
 import { applySingleCommand } from './apply.mjs';
 
+function boardOverflowDiagnostics(resolvedScene, affectedPageIds = null) {
+  const out = [];
+  if (!resolvedScene?.pages?.length) return out;
+  const pageFilter = Array.isArray(affectedPageIds) && affectedPageIds.length > 0 ? new Set(affectedPageIds) : null;
+  for (const page of resolvedScene.pages) {
+    if (pageFilter && !pageFilter.has(page.id)) continue;
+    const boardW = Number(page.board?.screenW || 0);
+    const boardH = Number(page.board?.screenH || 0);
+    if (boardW <= 0 || boardH <= 0) continue;
+    const scrollableScopedIds = new Set();
+    const byScoped = new Map();
+    for (const n of page.nodes || []) byScoped.set(n.scopedId, n);
+    for (const n of page.nodes || []) {
+      const parentScroll = n.parentScopedId && scrollableScopedIds.has(n.parentScopedId);
+      const selfScroll = Boolean(n.scroll && n.scroll !== 'none') || n.overflow === 'scroll' || n.overflow === 'auto';
+      if (parentScroll || selfScroll) scrollableScopedIds.add(n.scopedId);
+      if (parentScroll) continue;
+      if (!n.visible || n.depth === 0 || n.type === 'phone-shell' || n.repeaterTemplateOwner) continue;
+      const sx = Number(n.x || 0);
+      const sy = Number(n.y || 0);
+      const sw = Number(n.w || 0);
+      const sh = Number(n.h || 0);
+      if (sw <= 0 || sh <= 0) continue;
+      const overLeft = sx < -0.5 ? Math.abs(sx) : 0;
+      const overTop = sy < -0.5 ? Math.abs(sy) : 0;
+      const overRight = sx + sw > boardW + 0.5 ? sx + sw - boardW : 0;
+      const overBottom = sy + sh > boardH + 0.5 ? sy + sh - boardH : 0;
+      const maxOver = Math.max(overLeft, overTop, overRight, overBottom);
+      if (maxOver <= 0) continue;
+      const sides = [];
+      if (overLeft > 0) sides.push(`left+${Math.round(overLeft)}`);
+      if (overTop > 0) sides.push(`top+${Math.round(overTop)}`);
+      if (overRight > 0) sides.push(`right+${Math.round(overRight)}`);
+      if (overBottom > 0) sides.push(`bottom+${Math.round(overBottom)}`);
+      out.push({
+        code: 'W_BOARD_OVERFLOW',
+        severity: 'warning',
+        pageId: page.id,
+        nodeId: n.id,
+        scopedId: n.scopedId || `${page.id}/${n.id}`,
+        overflowPx: Math.round(maxOver),
+        bounds: { x: Math.round(sx), y: Math.round(sy), w: Math.round(sw), h: Math.round(sh) },
+        board: { w: boardW, h: boardH },
+        message: `可见节点 "${n.id}" 超出画板边界 (${sides.join('/')}px)`,
+      });
+    }
+  }
+  return out;
+}
+
 function prepareLocalEdit(doc, commands, pageId) {
   if (commands.length !== 1) return null;
   const command = commands[0];
@@ -372,9 +422,14 @@ export class StudioDocumentStore {
 
     // 影响计算此刻尚未写入 this.doc(workingDoc 原子性未破坏);若病态输入使其抛错,
     // 必须转成干净信封而不是让裸 RangeError/TypeError 穿透 applyTransaction(M-SWEEP 姊妹防护)。
-    let stackUnplaced, impactReport;
+    let stackUnplaced, layoutExtra, impactReport;
     try {
       stackUnplaced = stackUnplacedChildDiagnostics(resolvedCommands, request.pageId);
+      layoutExtra = [
+        ...stackUnplaced,
+        ...boardOverflowDiagnostics(resolvedScene, request.pageId ? [request.pageId] : null),
+        ...(resolvedScene?.layoutDiagnostics || []),
+      ];
       impactReport = computeCommandImpactAndDiff({
         beforeDoc,
         afterDoc: workingDoc,
@@ -383,7 +438,7 @@ export class StudioDocumentStore {
         commands: resolvedCommands,
         directAffectedIds: [...allAffected],
         contractEvolutionResults,
-        extraDiagnostics: stackUnplaced,
+        extraDiagnostics: layoutExtra,
       });
     } catch (err) {
       return {
@@ -402,7 +457,7 @@ export class StudioDocumentStore {
 
     // 文字截断/溢出风险来自场景级 clipDiagnostics；并入事务 diagnostics，让摘要与明细可定位（T-A-3）。
     const txDiagnostics = [
-      ...structuredClone(stackUnplaced),
+      ...structuredClone(layoutExtra),
       ...structuredClone(workingDoc.diagnostics || []),
       ...(resolvedScene?.clipDiagnostics || []).map(d => ({
         severity: d.severity || 'warning',

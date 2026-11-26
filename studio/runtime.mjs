@@ -6,7 +6,7 @@ import { lintDocumentInteractions } from './interaction-lint.mjs';
 export const SCENARIO_STEP_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
-    action: { type: 'string', enum: ['navigate', 'input', 'click', 'drag', 'swipe', 'advanceTime', 'dataset', 'expect', 'assert'] },
+    action: { type: 'string', enum: ['navigate', 'input', 'click', 'drag', 'swipe', 'advanceTime', 'dataset', 'expect', 'assert'], description: '操作或断言类型；expect 与 assert 语义完全等价（纯断言步骤，必须提供 expect 对象）；click/input 等动作步骤也可直接附带 expect 边操作边断言' },
     target: { type: 'string' }, id: { type: 'string' }, page: { type: 'string' },
     goto: { type: 'string' }, fill: { type: 'string' }, click: { type: 'string' },
     value: {}, text: { type: 'string' },
@@ -246,6 +246,35 @@ export class StudioRuntimeSession {
 
   findNodeInPage(pageId, targetId) {
     return this.findNodeEntry(pageId, targetId)?.node || null;
+  }
+
+  _missingTargetHint(targetId, pageId = this.currentPageId) {
+    const pg = (this.docSnapshot.pages || []).find(p => p.id === pageId);
+    const allIds = [];
+    const walk = (n) => {
+      if (!n || typeof n !== 'object') return;
+      if (n.id) allIds.push(n.id);
+      for (const ch of n.children || []) walk(ch);
+      for (const st of n.states || []) if (st?.root) walk(st.root);
+    };
+    if (pg?.root) walk(pg.root);
+    const needle = String(targetId || '').toLowerCase();
+    const parts = needle.split(/[-_/:\s]+/).filter(Boolean);
+    const suggestions = allIds
+      .filter(id => id !== targetId)
+      .map(id => {
+        const lower = id.toLowerCase();
+        let score = 0;
+        if (lower.includes(needle) || needle.includes(lower)) score += 3;
+        if (lower.startsWith(needle.slice(0, 3)) || needle.startsWith(lower.slice(0, 3))) score += 1;
+        for (const part of parts) if (part.length >= 2 && lower.includes(part)) score += 2;
+        return { id, score };
+      })
+      .filter(item => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .map(item => item.id);
+    return `当前页面 "${pageId}" 中不存在节点 "${targetId}"${suggestions.length ? `；相近 ID：${suggestions.join(', ')}` : '；请用 studio_inspect(view:"nodes") 确认节点 ID'}`;
   }
 
   targetKey(targetId, pageId = this.currentPageId) {
@@ -1131,22 +1160,41 @@ export class StudioRuntimeSession {
               ? actual.includes(String(needle))
               : actual === String(expectedText);
             const targetNode = passed ? null : this.findNodeInPage(this.currentPageId, nodeId);
-            const hint = !passed && targetNode && ['box', 'card', 'phone-shell', 'dynamic-panel'].includes(targetNode.type) && !actual
-              ? '容器节点不聚合子节点文本；请改为断言内部 label/paragraph/button 的 ID'
-              : undefined;
+            const hint = !passed && !targetNode
+              ? this._missingTargetHint(nodeId)
+              : !passed && targetNode && ['box', 'card', 'phone-shell', 'dynamic-panel'].includes(targetNode.type) && !actual
+                ? '容器节点不聚合子节点文本；请改为断言内部 label/paragraph/button 的 ID'
+                : undefined;
             assertions.push({ type: 'text', target: nodeId, expected: expectedText, actual, passed, ...(hint ? { hint } : {}) });
           }
         }
         if (exp.visible) {
           for (const [nodeId, expectedVis] of Object.entries(exp.visible)) {
+            const targetNode = this.findNodeInPage(this.currentPageId, nodeId);
             const actual = this.isNodeVisible(nodeId);
-            assertions.push({ type: 'visible', target: nodeId, expected: Boolean(expectedVis), actual, passed: actual === Boolean(expectedVis) });
+            const passed = actual === Boolean(expectedVis);
+            const hint = !targetNode && !passed ? this._missingTargetHint(nodeId) : undefined;
+            if (!targetNode && passed) {
+              const warn = {
+                code: 'W_ASSERT_UNKNOWN_TARGET',
+                severity: 'warning',
+                stepIndex: i + 1,
+                pageId: this.currentPageId,
+                targetNodeId: nodeId,
+                message: this._missingTargetHint(nodeId),
+              };
+              stepWarnings.push(warn);
+              runtimeWarnings.push(warn);
+            }
+            assertions.push({ type: 'visible', target: nodeId, expected: Boolean(expectedVis), actual, passed, ...(hint ? { hint } : {}) });
           }
         }
         if (exp.checked) {
           for (const [nodeId, expectedChk] of Object.entries(exp.checked)) {
             const actual = Boolean(this.getWidgetState(nodeId, 'checked'));
-            assertions.push({ type: 'checked', target: nodeId, expected: Boolean(expectedChk), actual, passed: actual === Boolean(expectedChk) });
+            const passed = actual === Boolean(expectedChk);
+            const hint = !passed && !this.findNodeInPage(this.currentPageId, nodeId) ? this._missingTargetHint(nodeId) : undefined;
+            assertions.push({ type: 'checked', target: nodeId, expected: Boolean(expectedChk), actual, passed, ...(hint ? { hint } : {}) });
           }
         }
         if (exp.selected) {
@@ -1157,7 +1205,8 @@ export class StudioRuntimeSession {
               : Array.isArray(expectedSel)
                 ? JSON.stringify(actual) === JSON.stringify(expectedSel)
                 : String(actual) === String(expectedSel);
-            assertions.push({ type: 'selected', target: nodeId, expected: expectedSel, actual, passed });
+            const hint = !passed && !this.findNodeInPage(this.currentPageId, nodeId) ? this._missingTargetHint(nodeId) : undefined;
+            assertions.push({ type: 'selected', target: nodeId, expected: expectedSel, actual, passed, ...(hint ? { hint } : {}) });
           }
         }
         if (exp.datasetCount) {

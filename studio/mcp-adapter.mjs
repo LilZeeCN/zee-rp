@@ -831,7 +831,40 @@ export const studioHandlers = {
       steps: args.steps || [],
     });
     const executionLayer = args.hitTest ? 'studio-semantic+real-browser-pointer' : 'studio-semantic';
-    if (args.verbose || !result.finalState) return { ...result, executionLayer };
+    if (args.verbose && result.finalState) {
+      const fullPayload = { ...result, executionLayer };
+      if (Buffer.byteLength(JSON.stringify(fullPayload), 'utf8') > 45000 && fullPayload.finalState?.activePageScene?.nodes) {
+        const compactNodes = fullPayload.finalState.activePageScene.nodes.map(n => ({
+          id: n.id,
+          scopedId: n.scopedId,
+          type: n.type,
+          visible: n.visible,
+          text: n.text,
+          x: n.x,
+          y: n.y,
+          w: n.w,
+          h: n.h,
+          ...(n.activeStateId ? { activeStateId: n.activeStateId } : {}),
+        }));
+        return {
+          ...fullPayload,
+          finalState: {
+            ...fullPayload.finalState,
+            activePageScene: {
+              ...fullPayload.finalState.activePageScene,
+              nodes: compactNodes,
+            },
+          },
+          detail: {
+            view: 'verbose-bounded',
+            truncatedVerboseScene: true,
+            note: '已按 45KB 预算精简 activePageScene 绘制字段，保留完整断言、变量、显隐、轨迹与几何。',
+          },
+        };
+      }
+      return fullPayload;
+    }
+    if (!result.finalState) return { ...result, executionLayer };
     const { activePageScene, trace, ...state } = result.finalState;
     return { ...result, executionLayer, finalState: state, detail: { view: 'summary', next: 'verbose:true读取完整场景和动作轨迹；默认保留每步断言与最终变量、面板、显隐状态。' } };
   },
@@ -1219,7 +1252,7 @@ export const studioTools = [
   },
   {
     name: 'studio_scenario',
-    description: '在隔离的交互运行态会话（StudioRuntimeSession）中执行业务交互剧本并断言变量、面板状态、文本、显隐与数据集，不污染设计态文档。expect.text 支持精确全文或 {includes:"子串"}（兼容 {contains:"子串"}），且仅读取文本节点自身文字，容器不聚合子节点文字。默认走语义执行层，不做遮挡/hitTest校验：click只要求目标在当前运行态可见，通过≠真实可点。hitTest:true 先用真实浏览器指针重放校验每个点击/输入与跨页跳转（支持宽屏桌面画板自动避让编辑器浮层、click 触发 link 跨页与显式 navigate 步骤；遮挡/命中按真实DOM结论），被遮挡返回E_SCENARIO_OCCLUDED（含nodeId/occludedBy遮挡者/stepIndex，语义层不执行该步）；真实浏览器不可用返回E_SCENARIO_HITTEST_UNAVAILABLE（不静默降级）；含dataset等浏览器层无法重放的步骤返回E_SCENARIO_HITTEST_UNSUPPORTED。步骤示例：{action:"click",target:"reveal",expect:{visible:{answer:true},text:{feedback:{includes:"再练"}}}}；未知步骤或零断言会拒绝。acceptance:true 改为执行12个语义验收模板（faultInjection:true 跑故障注入对照）；无操作脚本或不支持的断言返回unsupported，不记为通过。',
+    description: '在隔离的交互运行态会话（StudioRuntimeSession）中执行业务交互剧本并断言变量、面板状态、文本、显隐与数据集，不污染设计态文档。action:"expect" 与 action:"assert" 语义完全等价（均需传 expect 对象）；click/input 等步骤也可直接带 expect。expect.text 支持精确全文或 {includes:"子串"}（兼容 {contains:"子串"}），且仅读取文本节点自身文字，容器不聚合子节点文字；写错不存在的 nodeId 会附带相近 ID 提示或 W_ASSERT_UNKNOWN_TARGET 告警。默认走语义执行层，不做遮挡/hitTest校验：click只要求目标在当前运行态可见，通过≠真实可点。hitTest:true 先用真实浏览器指针重放校验每个点击/输入与跨页跳转（支持宽屏桌面画板自动避让编辑器浮层、click 触发 link 跨页与显式 navigate 步骤；遮挡/命中按真实DOM结论），被遮挡返回E_SCENARIO_OCCLUDED（含nodeId/occludedBy遮挡者/stepIndex，语义层不执行该步）；真实浏览器不可用返回E_SCENARIO_HITTEST_UNAVAILABLE（不静默降级）；含dataset等浏览器层无法重放的步骤返回E_SCENARIO_HITTEST_UNSUPPORTED。步骤示例：{action:"click",target:"reveal",expect:{visible:{answer:true},text:{feedback:{includes:"再练"}}}}；未知步骤或零断言会拒绝。acceptance:true 改为执行12个语义验收模板（faultInjection:true 跑故障注入对照）；无操作脚本或不支持的断言返回unsupported，不记为通过。',
     inputSchema: {
       type: 'object',
       properties: {

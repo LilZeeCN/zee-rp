@@ -847,6 +847,7 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
     delayedFamilies: [],
     diagnostics: [],
     clipDiagnostics: [],
+    layoutDiagnostics: [],
   };
   const seenFontDiag = new Set();
   let activeSliceMeta = null;
@@ -1015,6 +1016,7 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
             requestedFamilies: new Set(),
             delayedFamilies: [],
             clipDiagnostics: [],
+            layoutDiagnostics: [],
           };
           const prevMeta = activeSliceMeta;
           activeSliceMeta = sliceMeta;
@@ -1307,6 +1309,10 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
     return Number(node.flex) || (node.w === 'fill' ? 1 : 0);
   }
 
+  function colFlex(node) {
+    return Number(node.flex) || (node.h === 'fill' ? 1 : 0);
+  }
+
   function rowWidths(children, width, gap) {
     const fixed = children.reduce((sum, child) => sum + (rowFlex(child) ? 0 : child._mw), 0);
     const flex = children.reduce((sum, child) => sum + rowFlex(child), 0);
@@ -1317,6 +1323,9 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
     if (node._reusedSlice) {
       if (node._reusedSlice.clipDiagnostics?.length) {
         fontReport.clipDiagnostics.push(...node._reusedSlice.clipDiagnostics);
+      }
+      if (node._reusedSlice.layoutDiagnostics?.length) {
+        fontReport.layoutDiagnostics.push(...node._reusedSlice.layoutDiagnostics);
       }
       return;
     }
@@ -1366,6 +1375,27 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
         }
       }
       node._h = Math.round(h);
+      if (
+        ['label', 'paragraph', 'button', 'input', 'badge'].includes(node.type)
+        && typeof node.lineHeight === 'number'
+        && (node.h === 'hug' || node.h === undefined || node.h === null)
+        && node._textMetrics
+        && node._h > node._textMetrics.measuredH
+      ) {
+        const lhDiag = {
+          code: 'W_LINE_HEIGHT_FLOOR',
+          severity: 'info',
+          pageId,
+          nodeId: node.id,
+          scopedId: `${pageId}/${node.id}`,
+          requestedLineHeight: Number(node.lineHeight),
+          resolvedHeight: node._h,
+          measuredHeight: node._textMetrics.measuredH,
+          message: `节点 "${node.id}" 显式 lineHeight=${node.lineHeight} 小于字形上下延高度，hug 行盒已自动扩高至 ${node._h}px（如需精确高度请设固定 h 或增大 lineHeight）`,
+        };
+        fontReport.layoutDiagnostics.push(lhDiag);
+        if (activeSliceMeta) activeSliceMeta.layoutDiagnostics.push(lhDiag);
+      }
 
       const pad = parsePadding(node.padding);
       const innerX = node._x + pad[3];
@@ -1385,9 +1415,9 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
 
       if (Array.isArray(node.children) && node.children.length > 0) {
         if (mode === 'column') {
-          const fixedTotalH = node.children.reduce((acc, c) => acc + (c.flex ? 0 : c._mh), 0);
+          const fixedTotalH = node.children.reduce((acc, c) => acc + (colFlex(c) > 0 ? 0 : c._mh), 0);
           const totalGap = Math.max(0, node.children.length - 1) * gap;
-          const totalFlex = node.children.reduce((acc, c) => acc + (Number(c.flex) || 0), 0);
+          const totalFlex = node.children.reduce((acc, c) => acc + colFlex(c), 0);
           const remH = Math.max(0, innerH - fixedTotalH - totalGap);
 
           let curY = innerY;
@@ -1402,7 +1432,8 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
 
           for (const ch of node.children) {
             const chW = ch.w === 'fill' || node.align === 'stretch' ? innerW : ch._mw;
-            const chH = ch.flex ? Math.round((remH * Number(ch.flex)) / totalFlex) : ch.h === 'fill' ? innerH : ch._mh;
+            const chFlex = colFlex(ch);
+            const chH = chFlex > 0 ? Math.round((remH * chFlex) / totalFlex) : ch._mh;
             let chX = innerX;
             if (node.align === 'center' && chW < innerW) chX = innerX + Math.round((innerW - chW) / 2);
             else if (node.align === 'end' && chW < innerW) chX = innerX + (innerW - chW);
@@ -1589,6 +1620,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
   const nodesByScopedId = {};
   const allFontDiagnostics = [];
   const allClipDiagnostics = [];
+  const allLayoutDiagnostics = [];
 
   const globalContextKey = JSON.stringify({
     domain: doc.domain,
@@ -1620,6 +1652,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
     if (cachedPage) {
       allFontDiagnostics.push(...cachedPage.fontReport.diagnostics);
       allClipDiagnostics.push(...(cachedPage.fontReport.clipDiagnostics || []));
+      allLayoutDiagnostics.push(...(cachedPage.fontReport.layoutDiagnostics || []));
       for (let i = 0; i < cachedPage.nodes.length; i++) {
         const rn = cachedPage.nodes[i];
         nodesByScopedId[rn.scopedId] = rn;
@@ -1655,6 +1688,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
     });
     allFontDiagnostics.push(...fontReport.diagnostics);
     allClipDiagnostics.push(...(fontReport.clipDiagnostics || []));
+    allLayoutDiagnostics.push(...(fontReport.layoutDiagnostics || []));
 
     const flatNodes = [];
     const nextChildSlices = canSlice ? new Map() : null;
@@ -1928,6 +1962,8 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
             const slice = ch._reusedSlice;
             fontReport.clipDiagnostics.push(...slice.rowClipDiagnostics);
             allClipDiagnostics.push(...slice.rowClipDiagnostics);
+            fontReport.layoutDiagnostics.push(...(slice.rowLayoutDiagnostics || []));
+            allLayoutDiagnostics.push(...(slice.rowLayoutDiagnostics || []));
             const startOrder = destination.length + 1;
             if (startOrder === slice.startRenderOrder) {
               for (let i = 0; i < slice.resolvedNodes.length; i++) {
@@ -1954,6 +1990,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
             const startIdx = destination.length;
             const startOrder = startIdx + 1;
             const beforeRowClips = fontReport.clipDiagnostics.length;
+            const beforeRowLayouts = fontReport.layoutDiagnostics.length;
             collectResolved(ch, scopePrefix, offsetX, offsetY, depth + 1, nextClip, isVisible, n, panelOwnerId, scopedId, destination, register);
             const resolvedNodes = destination.slice(startIdx);
             const newSlice = {
@@ -1964,7 +2001,9 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
               requestedFamilies: ch._sliceMeta ? [...ch._sliceMeta.requestedFamilies] : [],
               delayedFamilies: ch._sliceMeta ? ch._sliceMeta.delayedFamilies : [],
               clipDiagnostics: ch._sliceMeta ? ch._sliceMeta.clipDiagnostics : [],
+              layoutDiagnostics: ch._sliceMeta ? ch._sliceMeta.layoutDiagnostics : [],
               rowClipDiagnostics: fontReport.clipDiagnostics.slice(beforeRowClips),
+              rowLayoutDiagnostics: fontReport.layoutDiagnostics.slice(beforeRowLayouts),
             };
             ch._reusedSlice = newSlice;
             nextChildSlices.set(ch.id, newSlice);
@@ -2023,6 +2062,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
         delayedFamilies: fontReport.delayedFamilies,
         diagnostics: fontReport.diagnostics,
         clipDiagnostics: fontReport.clipDiagnostics,
+        layoutDiagnostics: fontReport.layoutDiagnostics,
       },
     };
     Object.defineProperty(pageObj, 'rootTree', { value: tree, enumerable: false, configurable: true });
@@ -2045,6 +2085,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
     pages,
     fontDiagnostics: allFontDiagnostics,
     clipDiagnostics: allClipDiagnostics,
+    layoutDiagnostics: allLayoutDiagnostics,
     assetDiagnostics: doc._diagnosticsCurrent ? (doc.diagnostics || []) : currentDocumentDiagnostics(doc),
     typographyStats: getTypographyCacheStats(),
   };

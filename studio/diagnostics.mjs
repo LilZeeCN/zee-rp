@@ -22,12 +22,18 @@ export function locateDiagnostic({doc,scene,pageId=null,nodeIds=[],field=null,co
   }
   return {binding,targets,total:ids.length,returned:targets.length,complete:targets.length===ids.length,unresolved,
     ...(ids.length>limit?{omittedNodeIds:ids.slice(limit)}:{}),
-    ...(ids.length?{next:{tool:'studio_inspect',arguments:{...(pageId?{pageId}:{}),nodeIds:ids.slice(0,32),fields:['target','bounds','controls']},note:'按binding确认版本；使用target中的源宏参数/实例覆盖，不把截图坐标写回。'}}:{reason:'此问题针对整个页面，没有虚构可编辑节点'})};
+    ...(targets.length
+      ? {next:{tool:'studio_inspect',arguments:{...(pageId?{pageId}:{}),nodeIds:targets.map(t=>t.scopedId||t.id).slice(0,32),fields:['target','bounds','controls']},note:'按binding确认版本；使用target中的源宏参数/实例覆盖，不把截图坐标写回。'}}
+      : ids.length
+        ? {reason:'错误指向的节点 ID 不在当前画布中（可能尚未写入或为合成根节点 ID）；请修正源片段中的显式 #id，或调用 studio_inspect(view:"nodes") 查看当前页面真实节点。'}
+        : {reason:'此问题针对整个页面，没有虚构可编辑节点'})};
 }
 
 export function errorDiagnostic(error,studio){
   return {code:error.code||'E_INTERNAL_ERROR',message:error.message,
     ...locateDiagnostic({doc:studio.store.doc,scene:studio.scene,nodeIds:error.nodeId?[error.nodeId]:[],field:error.field,code:error.code}),
+    ...(error.suggestion?{suggestion:error.suggestion}:{}),
+    ...(error.hint?{hint:error.hint}:{}),
     ...(error.sourceSpan?{sourceSpan:error.sourceSpan}:{}),...(error.line?{line:error.line,column:error.column}:{}),
     stage:error.stage||'command-or-render',
   };

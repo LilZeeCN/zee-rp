@@ -677,6 +677,8 @@ export function computeCommandImpactAndDiff({
     W_BUTTON_NO_INTERACTION: count => `发现 ${count} 个可见按钮未绑定任何交互 (W_BUTTON_NO_INTERACTION)`,
     W_UNREACHABLE_HIDDEN_LAYER: count => `发现 ${count} 个隐藏节点无任何 show/toggle 指向 (W_UNREACHABLE_HIDDEN_LAYER)`,
     E_TEXT_CLIP: count => `发现文字截断/溢出风险 ${count} 处`,
+    W_BOARD_OVERFLOW: count => `发现 ${count} 个可见节点超出画板边界 (W_BOARD_OVERFLOW)`,
+    W_LINE_HEIGHT_FLOOR: count => `发现 ${count} 个文本节点因字形上下延自动扩高行盒 (W_LINE_HEIGHT_FLOOR)`,
     E_STALE_OVERRIDE: count => `发现失效组件覆盖 (E_STALE_OVERRIDE) ${count} 处`,
     E_MISSING_ASSET: count => `发现缺失资源 ${count} 处`,
   };

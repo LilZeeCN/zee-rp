@@ -529,3 +529,118 @@ test('Blind-test consensus fixes: column/row aliases, contains/hints, single-els
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('Wave 2 blind-test friction closure: column h:fill flex, overflow/lineHeight diags, review l1BlockingCount, rp1 no-fake-next, scenario missing hints, native hug width buffer', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-blind-w2-'));
+  try {
+    const projectDir = join(dir, 'proj');
+    const opened = await studioHandlers.studio_open_project({ projectDir, platform: 'mobile' });
+    assert.equal(opened.ok, true, JSON.stringify(opened));
+
+    // 1. column h:"fill" takes remaining height (not full innerH), W_LINE_HEIGHT_FLOOR fires on tight explicit lineHeight, W_BOARD_OVERFLOW fires on flow overflow
+    const tx1 = await studioHandlers.studio_command({
+      projectDir,
+      pageId: 'home',
+      baseRevision: 1,
+      idempotencyKey: 'w2-layout-1',
+      commands: [
+        {
+          type: 'addNode',
+          parentId: 'home_screen',
+          node: {
+            id: 'col_wrap',
+            type: 'column',
+            w: 'fill',
+            h: 300,
+            gap: 10,
+            padding: 10,
+            children: [
+              { id: 'top_hdr', type: 'box', w: 'fill', h: 40, fill: '#F1F5F9' },
+              { id: 'mid_fill', type: 'box', w: 'fill', h: 'fill', fill: '#E2E8F0', children: [{ id: 'phonetic_hug', type: 'label', w: 'hug', h: 'hug', text: '/ˌkaʊntərˌrevəˈluːʃəneri/', fontSize: 16, lineHeight: 14, color: '#0F172A' }] },
+              { id: 'bot_ftr', type: 'box', w: 'fill', h: 50, fill: '#CBD5E1' },
+            ],
+          },
+        },
+        {
+          type: 'addNode',
+          parentId: 'home_screen',
+          node: { id: 'tall_push', type: 'box', w: 200, h: 900, fill: '#DBEAFE' },
+        },
+      ],
+    });
+    assert.equal(tx1.ok, true, JSON.stringify(tx1));
+    const insp1 = await studioHandlers.studio_inspect({
+      projectDir,
+      pageId: 'home',
+      view: 'nodes',
+      nodeIds: ['mid_fill', 'phonetic_hug'],
+      fields: ['id', 'bounds'],
+    });
+    assert.equal(insp1.ok, true, JSON.stringify(insp1));
+    const midFill = insp1.nodes.find(n => n.id === 'mid_fill');
+    assert.equal(midFill.bounds.h, 170, `column h:fill must take remaining height 300 - 20(pad) - 40 - 50 - 20(gaps) = 170, got ${midFill.bounds.h}`);
+    assert(tx1.diagnostics.some(d => d.code === 'W_LINE_HEIGHT_FLOOR' && d.nodeId === 'phonetic_hug'), 'tight explicit lineHeight must emit W_LINE_HEIGHT_FLOOR');
+    assert(tx1.diagnostics.some(d => d.code === 'W_BOARD_OVERFLOW' && d.nodeId === 'tall_push'), 'visible flow overflow must emit W_BOARD_OVERFLOW');
+    assert.match(tx1.humanReadableSummary?.diagnosticsSummary || '', /W_BOARD_OVERFLOW/);
+
+    // Shrink tall_push back inside board so review can run cleanly
+    const tx2 = await studioHandlers.studio_command({
+      projectDir,
+      pageId: 'home',
+      baseRevision: tx1.appliedRevision,
+      idempotencyKey: 'w2-shrink-tall',
+      commands: [{ type: 'setProperties', nodeId: 'tall_push', properties: { h: 40 } }],
+    });
+    assert.equal(tx2.ok, true, JSON.stringify(tx2));
+
+    // 2. E_RP1_EXPLICIT_ID multi-root failure does NOT tell AI to studio_inspect nonexistent synthetic root
+    const rp1ErrRes = await studioHandlers.studio_command({
+      projectDir,
+      pageId: 'home',
+      baseRevision: tx2.appliedRevision,
+      idempotencyKey: 'w2-rp1-multiroot',
+      sourceMode: 'insert',
+      rp1: 'label #orphan_a "A"\nlabel #orphan_b "B"',
+    }).catch(err => err.diagnostic || err);
+    assert.equal(rp1ErrRes.code, 'E_RP1_EXPLICIT_ID', JSON.stringify(rp1ErrRes));
+    assert.equal(rp1ErrRes.next, undefined, `must not emit fake studio_inspect next: ${JSON.stringify(rp1ErrRes)}`);
+
+    // 3. Scenario missing target ID gives similarity hint on fail and W_ASSERT_UNKNOWN_TARGET on false-visible pass
+    const scMissFail = await studioHandlers.studio_scenario({
+      projectDir,
+      startPageId: 'home',
+      steps: [{ action: 'expect', expect: { text: { phonetic_hug_typo: 'nope' } } }],
+    });
+    assert.equal(scMissFail.ok, false);
+    assert.match(scMissFail.stepResults[0].assertions[0].hint || '', /不存在节点.*phonetic_hug/);
+
+    const scMissVis = await studioHandlers.studio_scenario({
+      projectDir,
+      startPageId: 'home',
+      steps: [{ action: 'expect', expect: { visible: { ghost_typo: false } } }],
+    });
+    assert.equal(scMissVis.ok, true);
+    assert((scMissVis.warnings || []).some(w => w.code === 'W_ASSERT_UNKNOWN_TARGET' && w.targetNodeId === 'ghost_typo'));
+
+    // 4. review exposes l1BlockingCount & totalBlockingCount alongside visual blockingCount
+    if (!chromeSkipReason()) {
+      const rev = await studioHandlers.studio_design({ projectDir, pageId: 'home', action: 'review' });
+      assert.equal(rev.ok, true, JSON.stringify(rev));
+      assert.equal(typeof rev.assessment.l1BlockingCount, 'number');
+      assert.equal(typeof rev.assessment.totalBlockingCount, 'number');
+      assert(Array.isArray(rev.assessment.l1BlockingKeys));
+      assert(rev.assessment.totalBlockingCount >= rev.assessment.blockingCount);
+    }
+
+    // 5. Native RP1 export adds safety width buffer (>=4px) to single-line hug label
+    const rp1Exp = await studioHandlers.studio_export({ projectDir, format: 'rp1' });
+    assert.equal(rp1Exp.ok, true, JSON.stringify(rp1Exp));
+    const hugInScene = insp1.nodes.find(n => n.id === 'phonetic_hug');
+    const rp1Match = (rp1Exp.rp1Text || '').match(/label #phonetic_hug[^\n]*\[(\d+)x\d+\]/);
+    assert(rp1Match, `phonetic_hug should exist in exported rp1: ${rp1Exp.rp1Text}`);
+    assert(Number(rp1Match[1]) >= hugInScene.bounds.w + 4, `exported hug label w=${rp1Match[1]} should include >=4px buffer over scene w=${hugInScene.bounds.w}`);
+  } finally {
+    await closeInProcessStudioServer();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
