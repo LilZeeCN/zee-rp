@@ -21,7 +21,7 @@ import { expandSpec, pasteAxvg } from './axvg.mjs';
 import { createBlankProject } from './create-blank-project.mjs';
 import { writeNativeScene } from './native-scene.mjs';
 import { mergePages } from './merge-pages.mjs';
-import { authoringTools, recipeSource, runWorkflow, pythonEnvironment } from './authoring-workflow.mjs';
+import { authoringTools, recipes, recipeSource, runWorkflow, pythonEnvironment } from './authoring-workflow.mjs';
 import { reviewImageStructure } from './image-structure.mjs';
 import { studioTools } from '../studio/mcp-adapter.mjs';
 
@@ -1319,6 +1319,7 @@ export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sour
     })();
     const summary = { source: resolvedSourceFile ?? source, baseline: outputBaseline, verification,
       nextActions: [
+        { tool: 'export_prototype', arguments: { rp: output } },
         { tool: 'revise_prototype', source: resolvedSourceFile ?? source, rp: output },
         { tool: 'gui_roundtrip', source: output, output: nextGuiOutput, preview: true },
       ] };
@@ -2403,7 +2404,7 @@ export const sessionTools = [
     name: 'generate_prototype',
     description: '一次生成完整单页/多页原生 RP9 原型：spec 直接传 RP/1 结构化页面（或 .rp1/.json 文件路径）、共享 theme/palette/components、variables 与交互，自动编译、装配和检查跨页引用及事件覆盖，并记录 <output>.baseline.json 共同基线；无需装配脚本。若提供 baseRp 且检测到原生已改稿，自动按 prefer 执行三方合并或冲突保护。output 为 .rp 路径（相对路径基于 AXURE_WRITE_ROOT 或当前工作目录解析）。',
     inputSchema: { type: 'object', properties: {
-      recipe: { type: 'string', enum: ['mobile-cards', 'list-detail', 'step-form'], description: '从完整范例直接生成；与 spec/source 二选一。成功后在 .rp 旁保留独立 .rp1 源码。' },
+      recipe: { type: 'string', enum: recipes.map(recipe => recipe.id), description: '从完整范例直接生成；与 spec/source 二选一。成功后在 .rp 旁保留独立 .rp1 源码。' },
       spec: { description: 'RP/1 内联对象或 .rp1/.json 文件路径。文件输入优先使用 source；二者互斥。', oneOf: [
         { type: 'string', minLength: 1 }, { type: 'object', properties: {
         language: { type: 'string', enum: ['rp/1', 'RP/1'] }, target: { type: 'integer', enum: [9] },
@@ -2418,6 +2419,7 @@ export const sessionTools = [
       sourcePath: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件绝对路径（同 source）。' },
       output: { type: 'string', minLength: 1, description: '输出 .rp 路径（相对路径基于 AXURE_WRITE_ROOT 或当前工作目录解析；传 "auto" 时按源码/范例名自动生成不重名 .rp 路径）。' },
       async: { type: 'boolean', description: 'true 时立即返回生成任务句柄，用 jobs_get(id) 查询最终结果；适合超过客户端超时的大原型。仅 stdio MCP 服务入口支持。' },
+      includeImage: { type: 'boolean', description: '同步生成时传 true，返回供模型直接查看的 PNG 页面总览（最多 1 MiB）。默认只返回文件路径；与 async:true 互斥。' },
       strictAudit: { type: 'boolean', description: 'true 时额外要求美学审计通过；结构检查始终执行。' },
       autoHeal: { type: 'boolean', description: '默认 false，与 CLI 一致。true 时尝试布局自愈；完整重验后回退引入新错误的变更，审计记录接受与回退详情。' },
       variants: { type: 'array', maxItems: 4, description: '可选：一次额外编译多个主题/色板变体并返回对比拼图（每项为主题名字符串或 {id, name, theme, palette, tokens}）。', items: { oneOf: [{ type: 'string', minLength: 1 }, { type: 'object' }] } },
@@ -2428,7 +2430,18 @@ export const sessionTools = [
       prefer: { type: 'string', enum: ['fail', 'source', 'native'], description: '当 baseRp 有原生改稿且出现同属性冲突时的策略，默认 fail。' },
       resolutions: { type: 'object', description: '可选：按冲突键（logicalId:prop 或 pointer:prop）指定 source/native/{value}。' },
     }, required: ['output'], additionalProperties: false },
-    handler: generatePrototype,
+    handler: ({ includeImage, ...input }) => {
+      const result = generatePrototype(input);
+      if (!includeImage || result.status !== 'completed') return result;
+      const path = result.contactSheet;
+      try {
+        if (path && lstatSync(path).size <= 1024 * 1024) {
+          const data = readFileSync(path).toString('base64');
+          return { ...result, previewImage: 'attached', mcpImages: [{ mimeType: 'image/png', data }] };
+        }
+      } catch { /* Keep the .rp, report, and preview paths available. */ }
+      return { ...result, previewImage: 'use-preview-paths' };
+    },
   },
   {
     name: 'sync_prototype',

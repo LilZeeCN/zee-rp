@@ -5,7 +5,7 @@ import {
   constants, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync,
   readdirSync, realpathSync, rmSync, writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, delimiter, dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertNotProtected, assertWritable } from '../../scripts/engine.mjs';
@@ -27,6 +27,10 @@ const profiles = {
   },
 };
 const code = (name, message) => Object.assign(new Error(message), { code: name });
+const dotnet = process.env.ZEE_DOTNET || (process.platform === 'darwin' && [
+  ...(process.env.PATH ?? '').split(delimiter).filter(Boolean).map(dir => join(dir, 'dotnet')),
+  '/opt/homebrew/bin/dotnet', '/usr/local/share/dotnet/dotnet', join(homedir(), '.dotnet/dotnet'),
+].find(existsSync)) || 'dotnet';
 const sha256 = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 export function locateInstallation(version, app = versionSpec(version).appPath, platform = process.platform) {
@@ -105,7 +109,7 @@ function run(command, args, options = {}) {
 }
 
 function buildWorker(installation, temp, env, cwd) {
-  const sdk = run('dotnet', ['--list-sdks'], { env, cwd }).trim().split(/\r?\n/)
+  const sdk = run(dotnet, ['--list-sdks'], { env, cwd }).trim().split(/\r?\n/)
     .map(line => /^(\d+(?:\.\d+){2}[^ ]*) \[(.+)\]$/.exec(line)).filter(Boolean).at(-1);
   if (!sdk) throw code('E_ASSEMBLY_RUNTIME', 'The bridge requires a local .NET SDK to compile its worker.');
   const csc = join(sdk[2], sdk[1], 'Roslyn', 'bincore', 'csc.dll');
@@ -120,7 +124,7 @@ function buildWorker(installation, temp, env, cwd) {
     references = ['System.Private.CoreLib', 'System.Runtime', 'System.Console', 'System.Linq',
       'System.Collections', 'System.Runtime.InteropServices', 'System.IO.FileSystem', 'System.Runtime.Extensions']
       .map(name => join(installation.managed, `${name}.dll`));
-    const runtime = run('dotnet', ['--list-runtimes'], { env, cwd })
+    const runtime = run(dotnet, ['--list-runtimes'], { env, cwd })
       .trim().split(/\r?\n/).map(line => /^Microsoft\.AspNetCore\.App (\d+\.\d+\.\d+) /.exec(line))
       .filter(match => match && Number(match[1].split('.')[0]) >= 8).at(-1)?.[1];
     if (!runtime) {
@@ -131,7 +135,7 @@ function buildWorker(installation, temp, env, cwd) {
       framework: { name: 'Microsoft.AspNetCore.App', version: runtime },
     } }));
   }
-  run('dotnet', [csc, '-nologo', '-noconfig', '-nostdlib',
+  run(dotnet, [csc, '-nologo', '-noconfig', '-nostdlib',
     ...references.map(path => `-r:${path}`), `-out:${executable}`,
     fileURLToPath(new URL('Worker.cs', import.meta.url)),
   ], { env, cwd });
@@ -151,7 +155,7 @@ function worker(installation, profile, temp, command, args) {
   };
   const executable = buildWorker(installation, temp, env, home);
   const mono = installation.mono;
-  const runtime = mono ? join(mono, 'bin', 'mono-sgen') : 'dotnet';
+  const runtime = mono ? join(mono, 'bin', 'mono-sgen') : dotnet;
   env.DYLD_LIBRARY_PATH = [installation.managed, mono && join(mono, 'lib')].filter(Boolean).join(delimiter);
   if (mono) {
     env.MONO_PATH = installation.managed;

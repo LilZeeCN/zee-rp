@@ -1,5 +1,14 @@
 # 一次 MCP 调用生成完整原型
 
+## 从 RP/1 到官方 HTML
+
+1. 调用 `prototype_recipe({recipe:"native-gestures", includeSource:true})`，查看可直接生成的轮播、滑动、拖动和输入长度范例，以及 RP/1 源码。
+2. 执行范例回包里的 `generate` 调用。成品是可编辑的 `.rp`。同步调用传 `includeImage:true` 可直接取得页面总览图片。回包的 `nextActions` 给出可直接执行的官方 HTML 导出参数。
+3. 调用 `export_prototype({rp:"/path/to/design.rp"})`，或用 `output` 指定新目录。相对路径可用 `cwd` 解析。省略 `output` 会在原型旁创建 `design-html`，保留原 RP 和已有输出。
+4. 通过本地 HTTP 打开返回的 `entry`（`start.html`），验证用户要求的交互。导出回包分别标记 HTML 导出、浏览器加载与行为验收。
+
+导出按文件头选择本机 Axure RP9 或 RP11，使用官方生成器的默认发布设置。已验证的宿主组合见[程序集研究](../docs/native-assembly-research.md)。定制发布配置继续走 Axure 编辑器。有安装或版本问题时，`runtime_info().host.officialHtml` 返回平台和发现到的安装，实际启动由导出时验证。
+
 创作入口、完整范例、改稿闭环和诊断见 [authoring-workflow.md](authoring-workflow.md)。
 `generate_prototype` 默认 `compact:true`，返回源码、成品、页面预览、验证状态和完整报告路径；
 需要旧版详细字段时显式传 `compact:false`。`recipe` 与 `spec/source` 二选一。

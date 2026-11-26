@@ -6,7 +6,7 @@
 
 ## 1. 内置范例起步（可选）
 
-调用 `prototype_recipe({})` 可查看 3 套内置多页范例（`mobile-cards`、`list-detail`、`step-form`）及内联 `cheatsheet`：
+调用 `prototype_recipe({})` 可查看 4 套内置范例（`mobile-cards`、`list-detail`、`step-form`、`native-gestures`）及内联 `cheatsheet`：
 
 ```json
 {"recipe": "mobile-cards", "output": "study.rp", "strictAudit": true}

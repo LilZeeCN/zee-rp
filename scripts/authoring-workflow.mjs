@@ -1,24 +1,35 @@
-import { spawnSync } from 'node:child_process';
+import { execFile, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { constants, copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, constants, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, extname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { assertNotProtected, assertWritable, defaultWriteRoot } from './engine.mjs';
 import { pythonInvocation } from './python.mjs';
-import { appExists, templateCandidates } from './version.mjs';
+import { appExists, supportedVersions, templateCandidates, tryDetectFileVersion } from './version.mjs';
 import { previewPrototype } from './preview-runtime.mjs';
 import { reviewImageStructure } from './image-structure.mjs';
 import { listImplementationFiles } from '../studio/source-fingerprint.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RECIPE_DIR = join(ROOT, 'examples/authoring');
+const ASSEMBLY_BRIDGE = 'tools/native-assembly/bridge.mjs';
+const ASSEMBLY_WORKER = 'tools/native-assembly/Worker.cs';
+const invoke = promisify(execFile);
+
+export const mcpInstructions = [
+  'Create an editable Axure .rp from RP/1 with generate_prototype. Use prototype_recipe for runnable examples, includeImage:true for direct visual review, and diagnose_prototype to repair source errors. For a free canvas project use studio_describe(topic="workflow") before writing.',
+  'Use revise_prototype to edit an existing RP/1 project with its .rp; preserve the shared baseline for native edits.',
+  'Use export_prototype for official Axure HTML from an existing .rp, then verify the requested behavior in a real browser. Use gui_roundtrip when evidence must include editor open/save/reopen. Report structure, HTML export and browser behavior as separate results.',
+].join(' ');
 const digest = value => createHash('sha256').update(value).digest('hex');
 const fileHash = path => { assertNotProtected(path); return digest(readFileSync(path)); };
 const startedAt = new Date().toISOString();
 export const packageVersion = JSON.parse(readFileSync(join(ROOT, 'package.json'))).version;
 function implementation() {
   const sourceDirs = ['scripts', 'bin', 'studio', 'examples/authoring'];
-  const files = ['package.json', 'references/rp-language.schema.json', ...sourceDirs.flatMap(listImplementationFiles)];
+  const files = ['package.json', 'references/rp-language.schema.json', ...sourceDirs.flatMap(listImplementationFiles),
+    ...[ASSEMBLY_BRIDGE, ASSEMBLY_WORKER, 'examples/rp-language/native-gestures.rp1'].filter(path => existsSync(join(ROOT, path)))];
   const packsRoot = join(ROOT, 'examples/studio/reference-packs');
   if (existsSync(packsRoot)) for (const name of readdirSync(packsRoot)) {
     for (const file of ['manifest.json','source.json']) {
@@ -41,6 +52,9 @@ export const recipes = [
   { id: 'step-form', name: '分步表单', file: 'step-form.rp1', pages: ['form', 'result'],
     scenario: '空输入提示 → 填写 → 下一步 → 返回保留输入 → 提交结果 → 重置',
     customize: ['应用标题：/name', '主题色：/palette/brand', '表单字段：form 页面逻辑 ID'] },
+  { id: 'native-gestures', name: '原生轮播、手势与输入长度', file: '../rp-language/native-gestures.rp1', pages: ['demo'],
+    scenario: '轮播启动、停止、重启 → 左右滑动 → 双轴拖动与松手复位 → 输入长度上限',
+    customize: ['面板的切态与 repeatInterval', 'onSwipeLeft / onSwipeRight', '拖动 axis 与 onDragDrop 复位', '文本框 maxLength'] },
 ];
 
 export function recipeSource(id) {
@@ -100,7 +114,7 @@ export function recipeCatalog({ recipe, includeSource = false } = {}) {
   workflow: ['选范例或提交 RP/1 源码（善用 [fillxhug]、stat-row、list-item、card 简写与顶层 tab-bar）',
     '调用 generate_prototype 一次生成并直接查看 contactSheet / statesSheet 拼图',
     '使用 revise_prototype 按逻辑 ID 改属性或增删改节点（支持直接传 .rp1 片段）',
-    '诊断后验证实际 Axure 预览'], guide: join(ROOT, 'references/authoring-workflow.md') };
+    '需要官方 HTML 时，把生成结果的 output 作为 export_prototype.rp；用真实浏览器验收交互'], guide: join(ROOT, 'references/authoring-workflow.md') };
 }
 
 export function runWorkflow(command, source, extra = {}) {
@@ -127,7 +141,13 @@ export function runtimeInfo(toolList) {
     toolCount: toolList.length, toolSchemaHash: digest(JSON.stringify(toolList)),
     python: pythonEnvironment(),
     host: { platform: process.platform, node: process.version, nativeTarget: 9,
-      axureInstalled: appExists(9), blankTemplate: templateCandidates(9).find(c => existsSync(c.path))?.path ?? null },
+      axureInstalled: appExists(9), blankTemplate: templateCandidates(9).find(c => existsSync(c.path))?.path ?? null,
+      officialHtml: {
+        tool: 'export_prototype',
+        platformSupported: process.platform === 'darwin' && process.arch === 'arm64',
+        discoveredVersions: supportedVersions().filter(appExists),
+        generatorSettings: 'fresh-defaults',
+      } },
     nextAction: changedFiles.length ? '磁盘实现已变化，请重新连接 MCP 以加载一致版本；Python 子进程每次读取磁盘实现。'
       : '当前服务与磁盘指纹一致（含编译器与 Studio 服务/前端）。若客户端缺少工具，重新连接以刷新工具清单。' };
 }
@@ -273,6 +293,60 @@ export function revisePrototype(input, { generate, sync }) {
   }
 }
 
+async function exportPrototype({ rp, output, cwd, projectDir }) {
+  const workDir = resolve(cwd ?? projectDir ?? defaultWriteRoot());
+  const source = resolve(workDir, rp);
+  let rpVersion;
+  let stage = 'input';
+  try {
+    assertNotProtected(source);
+    if (extname(source).toLowerCase() !== '.rp') {
+      throw Object.assign(new Error('rp 需要指向已存在的 Axure .rp 文件。'), { code: 'E_HTML_RP' });
+    }
+    const fd = openSync(source, constants.O_RDONLY | constants.O_NONBLOCK);
+    try {
+      const header = Buffer.alloc(8);
+      if (fstatSync(fd).isFile() && readSync(fd, header, 0, header.length, 0) === header.length) {
+        rpVersion = tryDetectFileVersion(header);
+      }
+    } finally {
+      closeSync(fd);
+    }
+    if (!rpVersion) {
+      throw Object.assign(new Error('无法识别 RP9 或 RP11 的文件头。'), { code: 'E_HTML_RP' });
+    }
+    stage = 'output';
+    const target = output === undefined ? source.slice(0, -3) + '-html' : resolve(workDir, output);
+    assertWritable(target);
+    if (!existsSync(dirname(target))) {
+      throw Object.assign(new Error('输出目录的父目录必须先存在。'), { code: 'E_HTML_OUTPUT_PARENT' });
+    }
+    if (lstatSync(target, { throwIfNoEntry: false })) {
+      throw Object.assign(new Error('输出路径已存在。'), { code: 'E_HTML_OUTPUT_EXISTS' });
+    }
+    stage = 'assembly';
+    const { stdout } = await invoke(process.execPath, [join(ROOT, ASSEMBLY_BRIDGE), 'export', String(rpVersion), source, target]);
+    const { output: htmlDir, entry, identity, generatorSettings } = JSON.parse(stdout);
+    return {
+      status: 'completed', rp: source, rpVersion, output: htmlDir, entry, axureBuild: identity.build, generatorSettings,
+      verification: { officialHtmlExported: true, browserLoaded: false, behaviorVerified: false },
+      nextAction: '通过本地 HTTP 服务打开输出目录中的 start.html，再按原型需求验证浏览器交互。',
+    };
+  } catch (error) {
+    let nativeError;
+    if (error.stderr) {
+      try { nativeError = JSON.parse(error.stderr.trim()); } catch { /* Keep the original error. */ }
+    }
+    const code = nativeError?.code ?? (typeof error.code === 'string' && error.code.startsWith('E_HTML_')
+      ? error.code : { input: 'E_HTML_RP', output: 'E_HTML_OUTPUT', assembly: 'E_HTML_EXPORT' }[stage]);
+    const nextAction = stage === 'input' ? '使用 generate_prototype 返回的 output，或指定一份可读取的 RP9/RP11 .rp。'
+      : stage === 'output' || code === 'E_ASSEMBLY_OUTPUT' ? '为 output 指定一个父目录已存在、尚未创建的输出目录。'
+      : '用 runtime_info 查看宿主，检查对应 Axure 安装、已验证构建和本机 .NET。';
+    return { status: 'failed', stage, ...(rpVersion ? { rpVersion } : {}),
+      diagnostics: [{ code, message: (nativeError?.message ?? error.message).slice(0, 1400), nextAction }] };
+  }
+}
+
 const sourceSchema = { oneOf: [{ type: 'string', minLength: 1 }, { type: 'object' }], description: 'RP/1 源码 .rp1/.json 路径或 JSON 对象。' };
 export function authoringTools({ generate, sync, listTools }) {
   return [
@@ -280,7 +354,15 @@ export function authoringTools({ generate, sync, listTools }) {
       inputSchema: { type: 'object', properties: { spec: { oneOf: [{ type: 'string', minLength: 1 }, { type: 'object' }] },
         limit: { type: 'integer', minimum: 1, maximum: 100 } }, required: ['spec'], additionalProperties: false },
       handler: reviewImageStructure, readOnly: true },
-    { name: 'preview_prototype', description: '在已有 ego lite 任务空间中验证真实 Axure 预览。按逻辑 ID 点击、输入并断言文字/变量/面板状态，返回实际状态、源码位置及报告截图。需要先运行 gui_roundtrip(preview:true) 或发布 HTML；不接管用户空间，不把模拟当原生证据。',
+    { name: 'export_prototype', description: '将现有 RP9 或 RP11 .rp 导出为 Axure 官方 HTML（含 start.html 和资源），无需打开编辑器。自动按文件版本调用本机 Axure 程序集，使用出厂发布设置。适合交付浏览器原型或为验收准备 HTML。',
+      inputSchema: { type: 'object', properties: {
+        rp: { type: 'string', minLength: 1, description: '现有 .rp 路径，例如 generate_prototype 返回的 output。' },
+        output: { type: 'string', minLength: 1, description: '新的 HTML 输出目录。省略则使用 .rp 旁的 <文件名>-html。' },
+        cwd: { type: 'string', minLength: 1, description: '可选工作目录，用于解析相对路径。' },
+        projectDir: { type: 'string', minLength: 1, description: 'cwd 的别名。' },
+      }, required: ['rp'], additionalProperties: false },
+      handler: exportPrototype, readOnly: false },
+    { name: 'preview_prototype', description: '在已有 ego lite 任务空间中验证真实 Axure 预览。按逻辑 ID 点击、输入并断言文字/变量/面板状态，返回实际状态、源码位置及报告截图。用 export_prototype 准备官方 HTML 地址，或先运行 gui_roundtrip(preview:true)；不接管用户空间，不把模拟当原生证据。',
       inputSchema: { type: 'object', properties: {
         source: { type: 'string', minLength: 1 }, output: { type: 'string', minLength: 1 },
         spaceId: { type: 'integer', minimum: 1 }, pageLabel: { type: 'string' }, url: { type: 'string', minLength: 1 },
@@ -294,7 +376,7 @@ export function authoringTools({ generate, sync, listTools }) {
         }, required: ['action'], additionalProperties: false } },
       }, required: ['source', 'output', 'spaceId', 'steps'], additionalProperties: false },
       handler: input => previewPrototype(input, runWorkflow), readOnly: false },
-    { name: 'prototype_recipe', description: '查看三套完整创作范例、RP/1 零算高语法速查表（cheatsheet/tokens/gotchas）、推荐修改入口和可直接调用的生成参数；不写文件。',
+    { name: 'prototype_recipe', description: '查看完整 RP/1 创作范例（含原生轮播、左右滑动、拖动与输入长度）、RP/1 零算高语法速查表（cheatsheet/tokens/gotchas）、推荐修改入口和可直接调用的生成参数；不写文件。',
       inputSchema: { type: 'object', properties: { recipe: { type: 'string', enum: recipes.map(r => r.id) }, includeSource: { type: 'boolean' } }, additionalProperties: false },
       handler: recipeCatalog, readOnly: true },
     { name: 'diagnose_prototype', description: '只读诊断 RP/1；收集独立节点错误并给出页面/元件/字段、源码行列、当前值及可审查补丁。依赖检查未完成时明确标记；不自动改源码。',
@@ -303,7 +385,7 @@ export function authoringTools({ generate, sync, listTools }) {
     { name: 'explain_binding', description: '解释 RP/1 文字或进度条绑定的完整表达式、依赖、初始值、实际编译出的刷新事件和显示精度。静态编译关系，不冒充原生运行观测。重名用 page/id 或源码指针。',
       inputSchema: { type: 'object', properties: { source: sourceSchema, target: { type: 'string', minLength: 1 } }, required: ['source', 'target'], additionalProperties: false },
       handler: ({ source, target }) => runWorkflow('binding', source, { target }), readOnly: true },
-    { name: 'runtime_info', description: '读取活动 MCP 版本、启动实现指纹、磁盘差异、工具清单指纹及 RP9 模板可用性；判断是否需要重新连接服务。',
+    { name: 'runtime_info', description: '读取活动 MCP 版本、启动实现指纹、磁盘差异、工具清单指纹、RP9 模板与官方 HTML 导出的宿主发现结果；判断是否需要重新连接服务。',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false }, handler: () => runtimeInfo(listTools()), readOnly: true },
     { name: 'revise_prototype', description: '一次完成最小源码改稿、原生漂移检查、三方合并、原型生成和共同基线。支持逻辑 ID + property、结构节点增删改（add-node/remove-node/replace-node，value 支持直接传 .rp1 片段或 JSON）或 JSON Pointer 操作；output 省略或传 "auto" 时自动递增生成 -v2.rp；保留输入，输出新的源码与 .rp。冲突默认拒绝，dryRun 只返回影响。',
       inputSchema: { type: 'object', properties: {

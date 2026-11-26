@@ -30,6 +30,7 @@
 
 | 17 | 原生文本框输入上限缺少消费契约 | RP9/RP11 桥接的两份对照样本已证实 `MaxLength` 为 `0x05`，且官方播放器按值截断。将同一属性接通 RP/1、Studio、读回和同步，并比较真实键入。 | `docs/native-assembly-research.md` | **partial**。RP/1 作者、参考模拟、读回和官方浏览器已贯通。Studio 文本框属性仍待覆盖。 |
 | 18 | 面板定时和原型手势跨出口不一致 | RP9 官方播放器通过开始、停止、重启、左右滑动、双轴拖动和松手回位。扩展 RP/1 和 Studio 时对同一用例验证状态轨迹、边界配置与中断。 | `docs/native-assembly-research.md` | **partial**。RP/1 作者、参考模拟、读回和原厂播放器已验；Studio 原型运行态、拖动边界和容差待覆盖。 |
+| 19 | 官方 HTML 缺少日常 MCP 入口 | AI 通过工具发现 RP/1 可运行范例，生成 RP9 并导出官方 HTML。RP9 与 RP11 均用真实浏览器验收，原文件哈希保持一致。 | `references/mcp-prototype.md` | **closed（macOS 已验证构建）**：真实 stdio 与 Playwright 通过。定制 HTML 配置、Windows 程序集调用和独立模型盲测各有独立验收边界。 |
 
 ## 已关闭(近期)
 

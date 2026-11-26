@@ -53,7 +53,7 @@ try {
   });
   await check('recipe discovery provides three complete scenarios without expanding source by default', async () => {
     const found = await request('prototype_recipe', {});
-    assert.equal(found.recipes.length, 3);
+    assert.equal(found.recipes.length, 4);
     assert(found.recipes.every(r => existsSync(r.source) && r.scenario && r.customize.length));
     assert(!JSON.stringify(found).includes('sourceText'));
   });

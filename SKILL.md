@@ -7,6 +7,10 @@ description: Reconstruct screenshots as editable Axure layouts, compile RP/1 spe
 
 完整 RP/1 与 Studio 画布均支持原生表单与交互样式（2026-11-12 本机开发快照）：`radio` / `checkbox` / `combobox`（别名 `select` / `droplist`）/ `listbox` / `textarea`（及 `input multiline=true`；浏览器与代码出口渲染多行 `<textarea>`，导出 `.rp` 时映射为原生可编辑 `TextBox` 并在兼容报告记录 `input.multiline`），支持勾选、互斥组、选项初值、原生取值和重置；完整 RP/1 还支持 `styles={"hover":{...},"selected":{...},"disabled":{...},"focused":{...}}` 写入原生状态样式。动作支持 `set-check`、普通元件 `set-selected`、下拉/列表 `set-option`（均支持 `"toggle"`），详情与完整四页例子见 [原生表单](references/native-forms.md)。
 
+## MCP 创作与交付
+
+用 `prototype_recipe` 找可执行的范例。同步生成时传 `includeImage:true`，可在 MCP 回包中直接检查页面总览。交付浏览器原型时沿 `nextActions` 调用 `export_prototype`，再打开官方播放器验证关键交互。轮播、左右滑动、拖动复位和输入上限可从 `native-gestures` 范例起步。见 [MCP 工作流](references/mcp-prototype.md)。
+
 ## Studio 新作品：先设计，再看图改稿
 
 新稿可用 `studio_stage({stage:"planning",intent,platform,target:{pageId},brief})` 一次取得版本绑定目标、适合任务的完整参考和下一步；局部改字使用 `stage:"edit"` 与版本绑定的明确目标。设计决定通过普通命令 `recordDesignDecision` 与改稿一起持久化，保留反馈来源及过期/冲突状态。详见 [阶段创作与设计决定](docs/studio-stages.md)。

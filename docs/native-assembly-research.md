@@ -32,7 +32,7 @@ REA 的两个 PE 元数据结果均报告 Module/Assembly 表有额外行及 GUI
 4. 原生 HTML 出口先只读加载输入，随后调用 RP9 的 `IFrW.pFr1` 或 RP11 的 `SiGn.WiGF` 处理全部页面。使用该生成器内部的本地发布管线写入页面、样式、资源和播放器，在启动浏览器之前结束。Playwright 独立通过本地 HTTP 打开 `start.html`。
 5. 配置范围为默认 HTML 生成器设置。文档内已有自定义字体映射、页筛选或发布配置的保真另需验证。生成器专有资源仍从本机安装读取，仓库只保存桥接源码、说明和检查脚本。
 
-桥接入口在 [tools/native-assembly](../tools/native-assembly/README.md)。新建的 RP9 空白文档可作为 `AXURE_BLANK_TEMPLATE_RP9`，由既有编译器、Studio 出口和 MCP 入口使用各自原有的解析链。本轮使用原有 RP/1 生成入口和真实 stdio MCP 验证了模板接入。Studio 继续走原有原生出口契约，专项验证覆盖现有 Studio 的原生导出和命令契约。该分支的程序集出口仍是源码级实验入口。
+桥接入口在 [tools/native-assembly](../tools/native-assembly/README.md)。新建的 RP9 空白文档可作为 `AXURE_BLANK_TEMPLATE_RP9`，由既有编译器、Studio 出口和 MCP 入口使用各自原有的解析链。本轮使用原有 RP/1 生成入口和真实 stdio MCP 验证了模板接入。Studio 继续走原有原生出口契约，专项验证覆盖现有 Studio 的原生导出和命令契约。程序集对象研究保留源码工具，官方 HTML 出口也可通过 MCP 的 `export_prototype` 调用。
 
 ## 原生真值与版本差异
 

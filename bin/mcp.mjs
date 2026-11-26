@@ -1,6 +1,6 @@
 import { listMcpTools, callCommandTool, jobTools, validateInput } from '../scripts/mcp-tools.mjs';
 import { JobManager } from '../scripts/jobs.mjs';
-import { packageVersion } from '../scripts/authoring-workflow.mjs';
+import { mcpInstructions, packageVersion } from '../scripts/authoring-workflow.mjs';
 
 try {
   const [{ Server }, { StdioServerTransport }, { ListToolsRequestSchema, CallToolRequestSchema }] = await Promise.all([
@@ -8,7 +8,7 @@ try {
     import('@modelcontextprotocol/sdk/server/stdio.js'),
     import('@modelcontextprotocol/sdk/types.js')
   ]);
-  const server = new Server({ name: 'zee-rp', version: packageVersion }, { capabilities: { tools: {} } });
+  const server = new Server({ name: 'zee-rp', version: packageVersion }, { capabilities: { tools: {} }, instructions: mcpInstructions });
   const jobs = new JobManager();
   server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [...listMcpTools(), ...jobTools] }));
   server.setRequestHandler(CallToolRequestSchema, async request => {
@@ -16,6 +16,9 @@ try {
       const name = request.params.name, input = request.params.arguments ?? {};
       if (['generate_prototype', 'revise_prototype'].includes(name) && input.async === true) {
         validateInput(listMcpTools().find(t => t.name === name).inputSchema, input);
+        if (name === 'generate_prototype' && input.includeImage) {
+          throw Object.assign(new Error('includeImage:true 需要同步生成，请省略 async 或通过任务结果读取预览路径。'), { code: 'E_PREVIEW_IMAGE_ASYNC' });
+        }
         const value = name === 'revise_prototype' ? jobs.startRevision(input) : jobs.startGeneration(input);
         return { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value, isError: false };
       }

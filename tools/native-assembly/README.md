@@ -1,6 +1,6 @@
 # Native Assembly Bridge
 
-用于本机 Axure 的实验工具。按原生文件版本选择本机安装和独立子进程。支持 Apple Silicon 上已辨识的 RP9 9.0.0.3754 和 RP11 11.0.0.4137。默认从 `/Applications` 发现，`AXURE_APP_RP9` 和 `AXURE_APP_RP11` 可指定其他路径。需要本机 .NET SDK。RP9 使用安装包里的 Intel Mono，经 Rosetta 运行。RP11 使用 ARM64 .NET 与 ASP.NET Core 共享运行时，本轮验收版本为 10.0.9。
+用于本机 Axure 的实验工具。按原生文件版本选择本机安装和独立子进程。支持 Apple Silicon 上已辨识的 RP9 9.0.0.3754 和 RP11 11.0.0.4137。默认从 `/Applications` 发现，`AXURE_APP_RP9` 和 `AXURE_APP_RP11` 可指定其他路径。需要本机 .NET SDK。通过 `ZEE_DOTNET` 可指定非默认的 dotnet 可执行文件。RP9 使用安装包里的 Intel Mono，经 Rosetta 运行。RP11 使用 ARM64 .NET 与 ASP.NET Core 共享运行时，本轮验收版本为 10.0.9。
 
 以下命令从 zee-rp 源码根目录执行。
 
@@ -31,7 +31,7 @@ AXURE_BLANK_TEMPLATE_RP9=/path/to/new-blank.rp \
   --out-dir /path/to/compile-output --out-rp /path/to/list-detail.rp
 ```
 
-RP11 模板对应 `AXURE_BLANK_TEMPLATE_RP11`，具体 RP/1 规格仍需服从现有原生编译器支持的目标版本。程序集 API 和 HTML 导出随源码和源码发布包交付，入口独立于 npm/MCP 工具面。
+RP11 模板对应 `AXURE_BLANK_TEMPLATE_RP11`，具体 RP/1 规格仍需服从现有原生编译器支持的目标版本。程序集研究命令随源码和源码发布包交付。官方 HTML 导出可从 npm 包的 MCP 工具 `export_prototype` 调用。
 
 ## 回归
 
