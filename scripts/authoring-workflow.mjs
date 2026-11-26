@@ -409,6 +409,7 @@ export async function exportPrototype({ rp, output, cwd, projectDir }) {
     });
     return {
       status: 'completed', rp: source, rpVersion, output: htmlDir, entry, axureBuild: identity.build, generatorSettings,
+      officialHtmlSource: 'exported', officialHtmlReady: true,
       verification: { officialHtmlExported: true, browserLoaded: false, behaviorVerified: false },
       nextAction: '可用 verify_prototype(html=output, steps=[...]) 在无头 Chrome 中直接验证点击、滑动、拖动与状态/坐标断言，或打开输出目录中的 start.html 人工查看。',
     };
@@ -441,7 +442,7 @@ export function authoringTools({ generate, sync, listTools }) {
     { name: 'verify_prototype', description: '零外部依赖（复用内置无头 Chrome CDP 与本地环回 HTTP）验证原型交互行为：支持 click / fill / drag / swipe / wait / advanceTime(虚拟时钟秒推定时器) / navigate / expect 与双引擎（auto 有本机 Axure 时自动导出官方 HTML、无 Axure 平台/环境自动降级或显式 engine="studio-html" 走 Studio 离线 HTML）；steps 同时原生兼容 studio_scenario 剧本格式（无需重写即可跨引擎复用），可选 frame:"artboard" 裁剪主画板截出干净截图与 storyboard 拼图。',
       inputSchema: { type: 'object', properties: {
         rp: { type: 'string', minLength: 1, description: '现有 .rp 路径；若未传 html 将自动导出官方 HTML 或（无 Axure 时）Studio HTML。' },
-        html: { type: 'string', minLength: 1, description: '已导出的官方 HTML 目录（含 start.html）或 Studio 导出 HTML 目录（含 index.html）。' },
+        html: { type: 'string', minLength: 1, description: '已导出的官方 HTML 目录（含 start.html）或 Studio 导出 HTML 目录（含 index.html）。复用官方产物时，officialHtmlSource 为 provided，officialHtmlReady 表示官方 HTML 文件可用，verification.browserLoaded 单独报告稳定载入。' },
         engine: { type: 'string', enum: ['auto', 'official', 'studio-html'], description: '验证引擎：auto（默认，有本机 Axure 走官方导出，否则自动切 Studio 离线 HTML）、official（仅官方导出）、studio-html（直接走 Studio 离线 HTML，秒级运行且跨平台可用）。' },
         frame: { type: 'string', enum: ['viewport', 'artboard'], description: '截图取景模式：viewport（默认，按视口整帧截取）或 artboard（自动裁剪至页面主画板/内容包围盒，避开 Axure 播放器工具栏与外框干扰）。' },
         source: { type: 'string', minLength: 1, description: '可选 RP/1 源码路径；省略时自动读取 .rp.baseline.json 或按页面 [data-label] 匹配（若含 verify: 块且未传 steps 时自动载入）。' },

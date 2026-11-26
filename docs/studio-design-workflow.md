@@ -72,6 +72,8 @@
 
 `findings` 包含文字裁切、越界、缺图和衍生图底色过期等机器结果，不覆盖审美、所有视觉重叠或业务正确性。装饰性背景可延伸到安全区；正文、导航和操作从60px以下开始。不要把状态栏误当页面正文。
 
+`findings[].blocksL1` 对应 `assessment.l1BlockingKeys`，按该字段识别需要处理的 L1 项。视觉主次发现中的 `attribution.topThree` 给出有效面积、字号和明暗权重，`reasons` 给出原因、节点和改法。文字的有效高度最多取实测内容高度。运行态 `W_RUNTIME_TEXT_CLIP` 可用 `contentBox`、`textBox` 和 `overflowLines` 定位具体行与越界方向。
+
 `studio_screenshot` 默认也直接返回图片。截图附有版本、内容哈希、渲染器版本与图片 SHA。需要纯文本元数据时可设 `includeImage:false`；HTTP/CLI 的普通截图路径保持兼容。
 
 ## 4. 验收

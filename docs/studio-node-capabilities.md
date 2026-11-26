@@ -24,6 +24,8 @@ node bin/axure.mjs studio describe --topic node --name repeater --fields rows,te
 
 ## 共享排版与真实字体
 
+Studio 的 `label`、`paragraph`、`badge`、`button` 使用 `textAlign` 对齐普通文字与行内富文本。RP9 保留左、中、右对齐，`start/end` 分别转成左、右，其余 CSS 对齐值回退左对齐。单行标签、按钮与徽标在内容盒内垂直居中，换行标签和段落从顶部排版。单独创作完整 RP/1 时使用 `align` 声明水平对齐。
+
 `fontSize:"$display"` 引用 `doc.tokens.display` 的标量数值。可先用 `setToken`（`category:"size",name:"display",value:40`）或 `setTokens` 声明；RP/1片段可直接写 `fontSize=$display gap=$space padding=["$space",12]`，复用同一事务和解算。修改共享值会重新度量和绘制所有引用者，源引用保留，显式数值覆盖不受影响。`gap/padding` 同样支持非负数值引用，padding数组可逐项引用。缺失、非数值或越界的引用报 `E_NUMERIC_TOKEN`，整笔事务不写入。此处只支持标量名称，不把数组字号表、别名链或表达式当作数值令牌。
 
 工程 catalog 指定 `source:"project",path:"fonts/deep/custom.ttf"` 时，画布实际加载 FontFace，macOS 服务度量使用同一字体文件；同名字体跨工程切换按工程身份失效缓存。未找到或损坏的字体明确回退并报告。工程包和离线代码包携带被引用的字体、保留子目录，截图确认等待字体加载结果；字体声明本身不是加载证据。独立真字体、改字/预览、删除旧目录后新进程导入和离线代码包均有样本。原生 `.rp` 只保存字体族名，不嵌入字体文件；报告注明需要宿主安装，不能据此宣称 Axure 实际字形已验证。其他系统的工程字体精确度量仍未验证。

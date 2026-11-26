@@ -9,6 +9,8 @@
 
 导出按文件头选择本机 Axure RP9 或 RP11，使用官方生成器的默认发布设置。已验证的宿主组合见[程序集研究](../docs/native-assembly-research.md)。定制发布配置继续走 Axure 编辑器。有安装或版本问题时，`runtime_info().host.officialHtml` 返回平台和发现到的安装，实际启动由导出时验证。
 
+官方 HTML 回包中的 `officialHtmlSource` 为 `exported` 或 `provided`，`officialHtmlReady` 表示官方 HTML 入口已可用。`verification.officialHtmlExported` 仍表示本次调用执行了导出，`verification.browserLoaded` 表示浏览器完成稳定取样。首帧与分镜共用同一稳定状态。开场断言期间出现显隐、文本、变量或几何漂移时返回 `E_VERIFY_INITIAL_DRIFT`。
+
 创作入口、完整范例、改稿闭环和诊断见 [authoring-workflow.md](authoring-workflow.md)。
 `generate_prototype` 默认 `compact:true`，返回源码、成品、页面预览、验证状态和完整报告路径；
 需要旧版详细字段时显式传 `compact:false`。`recipe` 与 `spec/source` 二选一。

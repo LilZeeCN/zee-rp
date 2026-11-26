@@ -425,17 +425,23 @@ function visualHierarchy(scenePage, nodes, byId) {
   const masses = blocks.map(node => {
     const hasText = Boolean(realText(node.text));
     const contentH = Number(node.contentH) || 0;
+    const boxH = Number.isFinite(node.h) ? node.h : 0;
     // 文字块的视觉重量应由"实际文字高度"决定，不是外框高度：
     // 否则把 24px 标题的框撑到 232px 就能刷出更高的主次比。
-    let effectiveH = Number.isFinite(node.h) ? node.h : 0;
-    if (hasText && contentH > 0) effectiveH = Math.min(effectiveH, contentH);
+    const effectiveH = hasText && contentH > 0 ? Math.min(boxH, contentH) : boxH;
     const area = Math.max(1, (node.w || 0) * effectiveH);
     const luma = parseBackgroundLuma(node);
     const contrast = luma !== null && pageBg !== null ? Math.abs(luma - pageBg) : 0.25;
     // 文字块按字号加权：纯文字 hero 不该因为"没图"就永远拿不到主次比。
-    const textWeight = hasText ? 1 + Math.min(2.2, (Number(node.fontSize) || 14) / 24) : 1;
+    const fontSize = hasText ? Number(node.fontSize) || 14 : null;
+    const textWeight = hasText ? 1 + Math.min(2.2, fontSize / 24) : 1;
     const mediaWeight = node.src ? 1.15 : 1;
-    return { id: node.id, mass: area * (0.6 + contrast * 2.4) * textWeight * mediaWeight };
+    const contrastWeight = 0.6 + contrast * 2.4;
+    return {
+      id: node.id, mass: area * contrastWeight * textWeight * mediaWeight,
+      factors: { area, boxH, contentH: contentH || null, effectiveH, heightCapped: effectiveH < boxH,
+        fontSize, textWeight, contrastWeight, mediaWeight },
+    };
   }).sort((a, b) => b.mass - a.mass);
   const top = masses[0];
   const second = masses[1];
@@ -459,13 +465,41 @@ function visualHierarchy(scenePage, nodes, byId) {
   const pageArea = (scenePage.board?.screenW || 0) * (scenePage.board?.screenH || 0);
   const dominantShare = pageArea && dominantNode ? ((dominantNode.w || 0) * (dominantNode.h || 0)) / pageArea : 0;
   const dominantIsText = typeof dominantNode?.text === 'string' && dominantNode.text.trim();
+  const overDominant = ratio > 8 && (Boolean(dominantIsText) || dominantShare > 0.8);
+  const flat = third.mass >= top.mass * 0.85;
+  const reasons = [];
+  if (ratio < 2.2) reasons.push({
+    code: 'low-dominance', nodeIds: [top.id, second.id],
+    detail: `${top.id} 对 ${second.id} 的主次比只有 ${ratio}×`,
+    fix: '提高主块字号或有效内容面积，或减弱次块面积与明度反差。',
+  });
+  if (flat) reasons.push({
+    code: 'flat-top-three', nodeIds: [top.id, second.id, third.id],
+    detail: '第三块的重量达到主块的 85%，前三块过于接近',
+    fix: '保留一个视觉主角，收紧其余块的面积或降低对比。',
+  });
+  if (overDominant) reasons.push({
+    code: 'over-dominance', nodeIds: [top.id, second.id],
+    detail: dominantIsText ? '文字主块超过次块 8 倍' : '主块超过次块 8 倍，且占画板超过 80%',
+    fix: '缩小主块有效面积或字号，为次级内容留出可读空间。',
+  });
+  if (stretchedText.length) reasons.push({
+    code: 'stretched-text', nodeIds: stretchedText.map(node => node.id),
+    detail: `${stretchedText.length} 个文字框被撑高（${stretchedText.slice(0, 2).map(t => `${t.id} 框高 ${t.boxH} vs 文字 ${t.contentH}`).join('，')}）`,
+    fix: '按文字内容收紧文本框，用父容器间距安排留白。框高超过文字高度的部分不增加权重。',
+  });
+  const stretchedIds = new Set(stretchedText.map(node => node.id));
   return {
     dominantId: top.id,
     dominanceRatio: ratio,
-    overDominant: ratio > 8 && (Boolean(dominantIsText) || dominantShare > 0.8),
-    topThree: masses.slice(0, 3).map(m => ({ id: m.id, mass: Math.round(m.mass) })),
-    flat: third.mass >= top.mass * 0.85,
+    overDominant,
+    topThree: masses.slice(0, 3).map(({ id, mass, factors }) => ({
+      id, mass: Math.round(mass),
+      factors: { ...factors, stretchedText: stretchedIds.has(id) },
+    })),
+    flat,
     stretchedText,
+    reasons,
   };
 }
 
@@ -1087,14 +1121,15 @@ export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc =
   if (!hierarchy) {
     add('visual-hierarchy', false, '可见内容块不足 3 个——无法判断主次，按未评估处理', { notAssessable: true });
   } else {
-    add('visual-hierarchy',
-      hierarchy.dominanceRatio >= 2.2 && !hierarchy.flat && !hierarchy.overDominant
-        && (hierarchy.stretchedText || []).length === 0,
+    add('visual-hierarchy', hierarchy.reasons.length === 0,
       `主次比 ${hierarchy.dominanceRatio}×（门槛 2.2×${hierarchy.overDominant ? '，上限 8×' : ''}）`
-        + `${hierarchy.flat ? '；前三块质量接近，视线没有落点' : ''}`
-        + `${hierarchy.overDominant ? '；主块过大，其余内容沦为注脚——这不是主次，是失衡' : ''}`
-        + `${(hierarchy.stretchedText || []).length ? `；${hierarchy.stretchedText.length} 个文字框被撑高（${hierarchy.stretchedText.slice(0, 2).map(t => `${t.id} 框高 ${t.boxH} vs 文字 ${t.contentH}`).join('，')}）——撑高不等于更重要` : ''}`
-        + `；前三块：${hierarchy.topThree.map(t => `${t.id}=${t.mass}`).join(', ')}`);
+        + hierarchy.reasons.map(reason => `；${reason.detail}。${reason.fix}`).join('')
+        + `；前三块：${hierarchy.topThree.map(({ id, mass, factors }) =>
+          `${id}=${mass}（有效面积 ${Math.round(factors.area)}px²`
+          + (factors.fontSize === null ? '' : `，字号 ${factors.fontSize}px×权重 ${factors.textWeight.toFixed(2)}`)
+          + `，明暗权重 ${factors.contrastWeight.toFixed(2)}`
+          + (factors.heightCapped ? `，高度按 ${Math.round(factors.effectiveH)}px 计` : '')
+          + (factors.stretchedText ? '，框高异常' : '') + '）').join('，')}`);
   }
 
   // 固定清单对账：清单里有、checks 里没有的，一律补成显式 not-assessable。

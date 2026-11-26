@@ -4,13 +4,17 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runDoctor } from '../scripts/doctor.mjs';
 import { authoringTools, verifyOfficialPreview } from '../scripts/authoring-workflow.mjs';
 import { sessionTools } from '../scripts/mcp-tools.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 import { launchChrome, findChromeExecutable } from '../studio/cdp.mjs';
 import { closeInProcessStudioServer, studioHandlers } from '../studio/mcp-adapter.mjs';
+import { field, parsePayload } from '../scripts/parse-payload.mjs';
+import { readRecords } from '../scripts/rp-records.mjs';
+import { pythonInvocation } from '../scripts/python.mjs';
+import { closeAssemblyDaemons } from '../tools/native-assembly/bridge.mjs';
 import { nativeTemplateSkipReason } from './host-capabilities.mjs';
 
 function chromeSkipReason() {
@@ -30,6 +34,186 @@ const authoringToolMap = Object.fromEntries(
     listTools: () => [],
   }).map(t => [t.name, t.handler])
 );
+
+test('parallel official replays capture the initialized first frame and guard leading assertions', { skip: chromeSkipReason() }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-official-first-frame-'));
+  try {
+    writeFileSync(join(dir, 'start.html'), `<!doctype html>
+      <style>
+        body { margin: 0 } #base { width: 320px; height: 240px; background: white }
+        [data-label] { position: absolute; inset: 0 auto auto 0; width: 320px; height: 240px }
+        #answer { background: rgb(255, 0, 0) }
+      </style>
+      <div id="base"><div data-label="word" id="word">abandon</div><div data-label="answer" id="answer">answer</div></div>
+      <script>
+        const runtime = {
+          pageData: { page: { name: 'Recall' } },
+          globalVariableProvider: { getDefinedVariables: () => [] },
+          adaptive: { loadFinished() { document.getElementById('answer').style.display = 'none'; } },
+        };
+        window.$axure = { internal: cb => cb(runtime) };
+        window.addEventListener('load', () => setTimeout(() => runtime.adaptive.loadFinished(), 600));
+        if (location.hash) window.addEventListener('load', () => {
+          runtime.adaptive.loadFinished();
+          // Drift after a quiet first capture, while the leading assertion is polling.
+          setTimeout(() => { document.getElementById('word').textContent = 'meticulous'; }, 750);
+        });
+      </script>`);
+    const base = { html: dir, engine: 'official', frame: 'artboard', viewport: { width: 320, height: 240, dpr: 1 } };
+    const steps = [{ action: 'expect', expect: { text: { word: 'abandon' }, visible: { answer: false } } }];
+    const results = await Promise.all([1, 2].map(i => mcpToolMap.verify_prototype({
+      ...base, steps, storyboard: join(dir, `first-${i}.png`), includeStoryboard: true,
+    })));
+    for (const result of results) {
+      assert.equal(result.status, 'completed', JSON.stringify(result.diagnostics));
+      assert.equal(result.initial.widgets.find(w => w.name === 'answer').visible, false, 'initial DOM and expect must agree');
+      assert.equal(result.officialHtmlSource, 'provided');
+      assert.equal(result.officialHtmlReady, true);
+      assert.deepEqual(result.verification, {
+        officialHtmlExported: false,
+        browserLoaded: true, behaviorVerified: true,
+      });
+      assert.equal(result.storyboardImage, 'attached');
+      const pixel = pythonInvocation(['-c', 'from PIL import Image; import sys; print(Image.open(sys.argv[1]).getpixel((180,100)))', result.storyboard]);
+      const firstPixel = execFileSync(pixel.command, pixel.args, { encoding: 'utf8' });
+      assert.equal(firstPixel.trim(), '(255, 255, 255)', 'the initial frame must exclude the red answer overlay');
+    }
+
+    const drift = await mcpToolMap.verify_prototype({
+      ...base, page: 'drift', steps: [{ action: 'expect', expect: { text: { word: 'meticulous' } } }],
+      storyboard: join(dir, 'drift.png'), timeoutMs: 2500,
+    });
+    assert.equal(drift.status, 'failed');
+    assert.equal(drift.diagnostics[0].code, 'E_VERIFY_INITIAL_DRIFT');
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('Studio and RP9 preserve plain and rich text alignment', { skip: chromeSkipReason() || nativeTemplateSkipReason() }, async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-text-alignment-'));
+  let browser;
+  try {
+    const variants = [
+      ['label', 'center', false], ['label', 'right', true],
+      ['paragraph', 'center', false], ['paragraph', 'right', true],
+      ['badge', 'right', false], ['badge', 'left', true],
+    ].map(([type, textAlign, rich], index) => ({
+      id: `alignment_${index}`, type, textAlign, ...(rich ? { spans: [{ text: 'Two', fontWeight: 700 }, { text: ' runs' }] } : { text: 'Plain text' }),
+      x: 20 + (index % 2) * 252, y: 24 + Math.floor(index / 2) * 76, w: 220, h: 60, fontFamily: 'Arial', fontSize: 16,
+    }));
+    const projectDir = join(dir, 'project');
+    const opened = await studioHandlers.studio_open_project({ projectDir, domain: 'web', port: 0 });
+    const written = await studioHandlers.studio_command({
+      projectDir, baseRevision: opened.appliedRevision, idempotencyKey: 'alignment',
+      commands: [
+        { type: 'renamePage', pageId: 'home', name: 'alignment' },
+        { type: 'resizeArtboard', pageId: 'home', w: 544, h: 320 },
+        ...variants.map(node => ({ type: 'addNode', pageId: 'home', node })),
+        { type: 'addNode', pageId: 'home', node: { id: 'answer', type: 'label', text: 'hidden answer', visible: false, x: 20, y: 270, w: 220, h: 36 } },
+      ],
+    });
+    assert.equal(written.ok, true, JSON.stringify(written.diagnostics));
+    for (const type of ['label', 'paragraph', 'badge']) {
+      const info = await studioHandlers.studio_describe({ topic: 'node', name: type, fields: ['textAlign'] });
+      const surfaces = info.capabilities[0].surfaces;
+      assert.equal(surfaces.native.status, 'implemented');
+      assert.match(surfaces.native.reason, /left \/ center \/ right.*spans/);
+      assert.equal(surfaces['full-rp1'].status, 'unsupported');
+      assert.match(surfaces['full-rp1'].reason, /align:"left"/);
+    }
+    const rp = join(dir, 'alignment.rp');
+    const saved = await studioHandlers.studio_export({ projectDir, format: 'rp', outRpPath: rp });
+    assert.equal(saved.ok, true, JSON.stringify(saved.diagnostics));
+    assert.equal(saved.threeZerosPassed, true);
+    const records = new Map(readRecords(readFileSync(rp)).filter(record => record.className === 'Axure:Page')
+      .map(record => [record.index, parsePayload(record)]));
+    const nativeNames = {};
+    for (const node of variants) {
+      const symbol = saved.buildResult.sourceMap.find(s => s.id === `home/${node.id}`);
+      const [{ record, id }] = symbol.native;
+      nativeNames[node.id] = symbol.display;
+      const graph = records.get(record);
+      const widget = graph.objects.get(id);
+      const style = graph.objects.get(field(widget.body, 'MyStyle').value);
+      const props = field(style.body, 'PropList').items;
+      const prop = key => field(props.find(p => (field(p, 'DOAName').value & 0x0fffffff) === key), 'Value').value;
+      assert.equal(prop(9), { left: 0, center: 1, right: 2 }[node.textAlign], `${node.id} horizontal`);
+      assert.equal(prop(10), node.type === 'paragraph' ? 0 : 1, `${node.id} vertical`);
+    }
+
+    const offline = join(dir, 'offline');
+    const code = await studioHandlers.studio_export({ projectDir, format: 'code', outDir: offline });
+    assert.equal(code.ok, true);
+    browser = await launchChrome({ headless: true, width: 1140, height: 800 });
+    const studio = await browser.openPage(opened.url);
+    await studio.waitForFunction('!!document.querySelector(\'[data-node-id="alignment_5"]\')');
+    const standalone = await browser.openPage(pathToFileURL(join(offline, 'index.html')).href);
+    await standalone.waitForFunction('!!document.querySelector(\'[data-node-id="alignment_5"]\')');
+    const checkBrowserAlignment = async (page, nodes, attribute) => {
+      const actual = await page.evaluate(`(${function measureAlignment(ids, key) {
+        return ids.map(id => {
+          const el = document.querySelector(`[${key}="${CSS.escape(id)}"]`);
+          const range = document.createRange();
+          const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          const rects = [];
+          for (let text = walker.nextNode(); text; text = walker.nextNode()) {
+            if (!text.data.trim()) continue;
+            range.selectNodeContents(text);
+            rects.push(...[...range.getClientRects()].filter(rect => rect.width && rect.height));
+          }
+          const ink = {
+            left: Math.min(...rects.map(rect => rect.left)), right: Math.max(...rects.map(rect => rect.right)),
+            top: Math.min(...rects.map(rect => rect.top)), bottom: Math.max(...rects.map(rect => rect.bottom)),
+          };
+          const box = el.getBoundingClientRect();
+          return [ink.left - box.left, box.right - ink.right, ink.top - box.top, box.bottom - ink.bottom];
+        });
+      }.toString()})(${JSON.stringify(nodes)}, ${JSON.stringify(attribute)})`);
+      for (const [i, node] of variants.entries()) {
+        const [left, right, top, bottom] = actual[i];
+        if (node.textAlign === 'center') assert.ok(Math.abs(left - right) < 5, `${attribute} ${node.id}: ${actual[i]}`);
+        else assert.ok((node.textAlign === 'right' ? left - right : right - left) > 70, `${attribute} ${node.id}: ${actual[i]}`);
+        if (node.type === 'paragraph') assert.ok(bottom - top > 18, `${attribute} ${node.id}: ${actual[i]}`);
+        else assert.ok(Math.abs(top - bottom) < 9, `${attribute} ${node.id}: ${actual[i]}`);
+      }
+    };
+    await checkBrowserAlignment(studio, variants.map(node => node.id), 'data-node-id');
+    await checkBrowserAlignment(standalone, variants.map(node => node.id), 'data-node-id');
+
+    const info = await authoringToolMap.runtime_info({ projectDir });
+    if (!info.host?.axureInstalled || !info.host?.officialHtml.platformSupported) {
+      await t.test('official RP9 browser replay', { skip: '需要可用的 macOS Axure RP9 官方导出宿主' }, () => {});
+      return;
+    }
+    const exported = await authoringToolMap.export_prototype({ rp, output: join(dir, 'official') });
+    assert.equal(exported.status, 'completed', JSON.stringify(exported.diagnostics));
+    assert.equal(exported.officialHtmlSource, 'exported');
+    assert.equal(exported.officialHtmlReady, true);
+    const official = await browser.openPage(pathToFileURL(join(exported.output, 'alignment.html')).href);
+    await official.waitForFunction(`!!document.querySelector('[data-label="${nativeNames.alignment_5}"]')`);
+    await checkBrowserAlignment(official, variants.map(node => nativeNames[node.id]), 'data-label');
+    const sharedSteps = [{ action: 'expect', expect: { visible: { answer: false }, text: { alignment_0: 'Plain text', alignment_1: 'Two runs' } } }];
+    const [provided, generated] = await Promise.all([
+      mcpToolMap.verify_prototype({ rp, html: exported.output, engine: 'official', frame: 'artboard', steps: sharedSteps, includeStoryboard: true }),
+      mcpToolMap.verify_prototype({ rp, cwd: dir, engine: 'official', frame: 'artboard', steps: sharedSteps, includeStoryboard: true }),
+    ]);
+    for (const [result, source] of [[provided, 'provided'], [generated, 'exported']]) {
+      assert.equal(result.status, 'completed', JSON.stringify(result.diagnostics));
+      assert.equal(result.officialHtmlSource, source);
+      assert.equal(result.officialHtmlReady, true);
+      assert.equal(result.verification.officialHtmlExported, source === 'exported');
+      const answer = saved.buildResult.sourceMap.find(s => s.id === 'home/answer');
+      assert.equal(result.initial.widgets.find(widget => widget.name === answer.display).visible, false);
+      assert.equal(result.storyboardImage, 'attached');
+    }
+  } finally {
+    await browser?.close();
+    await closeAssemblyDaemons();
+    await closeInProcessStudioServer();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('Studio inline rp1 <-> export format:rp1 roundtrip works offline', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'zee-studio-rp1-rt-'));
@@ -68,6 +252,51 @@ test('Studio inline rp1 <-> export format:rp1 roundtrip works offline', async ()
 
     const diag = authoringToolMap.diagnose_prototype({ rp1: exported.rp1Text });
     assert.equal(diag.ok, true, JSON.stringify(diag));
+  } finally {
+    await closeInProcessStudioServer();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('L1 review flags exactly its blocking checks and explains the visual hierarchy weights', { skip: chromeSkipReason() }, async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-l1-attribution-'));
+  try {
+    const opened = await studioHandlers.studio_open_project({ projectDir: dir, domain: 'web', port: 0 });
+    const tx = await studioHandlers.studio_command({
+      projectDir: dir, baseRevision: opened.appliedRevision, idempotencyKey: 'hierarchy-blocking',
+      commands: [
+        ...[0, 1, 2].map(i => ({ type: 'addNode', pageId: 'home', node: {
+          type: 'label', id: `text_${i}`, text: 'Equal emphasis', fontSize: 20, x: 40 + i * 184, y: 48,
+          w: 160, h: i === 0 ? 112 : 32, color: '#152839',
+        } })),
+        ...Array.from({ length: 26 }, (_, i) => ({ type: 'addNode', pageId: 'home', node: {
+          type: 'box', id: `outside_${i}`, x: 2000 + i * 8, y: 48, w: 4, h: 4, fill: '#000000',
+        } })),
+      ],
+    });
+    assert.equal(tx.ok, true, JSON.stringify(tx.diagnostics));
+    const review = await studioHandlers.studio_design({ action: 'review', projectDir: dir, pageId: 'home', baseRevision: tx.appliedRevision, verbose: true });
+    assert.equal(review.ok, true, JSON.stringify(review.diagnostics));
+    assert.deepEqual([...new Set(review.findings.filter(f => f.blocksL1).map(f => f.check))].sort(),
+      [...review.assessment.l1BlockingKeys].sort());
+    const finding = review.findings.find(f => f.check === 'visual-hierarchy');
+    assert.equal(finding.blocksL1, true);
+    assert.match(finding.detail, /有效面积.*字号.*框高异常/);
+    const hierarchy = review.designMetrics.metrics.visualHierarchy;
+    assert.deepEqual(finding.attribution, hierarchy);
+    const stretched = hierarchy.topThree.find(item => item.id === 'text_0').factors;
+    assert.equal(stretched.stretchedText, true);
+    assert.equal(stretched.heightCapped, true);
+    assert.equal(stretched.fontSize, 20);
+    assert.equal(stretched.area, 160 * stretched.effectiveH);
+    assert(stretched.effectiveH < stretched.boxH);
+    assert(hierarchy.reasons.some(reason => reason.code === 'stretched-text' && reason.fix.includes('父容器间距')));
+    assert(hierarchy.reasons.some(reason => reason.code === 'low-dominance' && reason.nodeIds.length === 2));
+    const summary = await studioHandlers.studio_design({ action: 'review', projectDir: dir, pageId: 'home', baseRevision: tx.appliedRevision });
+    assert(summary.detail.findingCount > summary.detail.returnedFindings);
+    assert.equal(summary.findings.length, 24);
+    assert.deepEqual([...new Set(summary.findings.filter(f => f.blocksL1).map(f => f.check))].sort(),
+      [...review.assessment.l1BlockingKeys].sort());
   } finally {
     await closeInProcessStudioServer();
     rmSync(dir, { recursive: true, force: true });
@@ -713,6 +942,18 @@ test('v10 parity upgrades: runtime DOM text clip audit, shared Studio scenario s
     assert.equal(partialHelp.partial, true);
     assert.equal(partialHelp.contracts.length, 1);
     assert.equal(partialHelp.missing[0].requested, 'updatePage');
+    const mixed = await studioHandlers.studio_describe({
+      topic: 'command', names: ['interaction.set', 'variable.add', 'addNode'], partial: true,
+    });
+    assert.equal(mixed.ok, true);
+    assert.deepEqual(mixed.contracts.map(c => c.name), ['addNode']);
+    assert.deepEqual(mixed.missing.map(m => [m.requested, m.suggestions[0]]), [
+      ['interaction.set', 'setInteraction'], ['variable.add', 'setVariable'],
+    ]);
+    const aliases = await studioHandlers.studio_describe({
+      topic: 'command', names: ['token.set', 'page.add', 'node/add', 'interaction/set'], partial: true,
+    });
+    assert.deepEqual(aliases.missing.map(m => m.suggestions[0]), ['setTokens', 'addPage', 'addNode', 'setInteraction']);
 
     // 2. Runtime DOM text clipping audit catches multi-state text clip on narrow label and passes after widening
     const tx1 = await studioHandlers.studio_command({
@@ -729,6 +970,12 @@ test('v10 parity upgrades: runtime DOM text clip audit, shared Studio scenario s
         {
           type: 'addNode',
           parentId: 'home_screen',
+          node: { id: 'example', type: 'paragraph', x: 24, y: 284, w: 300, h: 32, fontSize: 16, lineHeight: 24, visible: false,
+            spans: [{ text: 'First row fits\n' }, { text: 'The second row exceeds the box.', fontWeight: 700 }] },
+        },
+        {
+          type: 'addNode',
+          parentId: 'home_screen',
           node: {
             id: 'next_btn',
             type: 'button',
@@ -737,7 +984,7 @@ test('v10 parity upgrades: runtime DOM text clip audit, shared Studio scenario s
             w: 160,
             h: 48,
             text: '下一词',
-            on: { click: [{ type: 'set-text', target: 'word', text: 'counterrevolutionary' }] },
+            on: { click: [{ type: 'set-text', target: 'word', text: 'counterrevolutionary' }, { type: 'show', target: 'example' }] },
           },
         },
       ],
@@ -758,7 +1005,15 @@ test('v10 parity upgrades: runtime DOM text clip audit, shared Studio scenario s
       });
       assert.equal(scenWarn.ok, true, JSON.stringify(scenWarn));
       assert((scenWarn.runtimeLayoutAudit?.issueCount ?? 0) > 0, 'narrow word box must trigger runtimeLayoutAudit warning');
-      assert(scenWarn.runtimeLayoutAudit.issues.some(i => i.code === 'W_RUNTIME_TEXT_CLIP' && i.nodeId === 'word'));
+      const wordClip = scenWarn.runtimeLayoutAudit.issues.find(i => i.code === 'W_RUNTIME_TEXT_CLIP' && i.nodeId === 'word');
+      assert.equal(wordClip.direction, 'horizontal');
+      assert.equal(wordClip.overflowLines[0].line, 1);
+      assert.equal(wordClip.overflowLines[0].text, 'counterrevolutionary');
+      assert(wordClip.textBox.right > wordClip.contentBox.right);
+      const exampleClip = scenWarn.runtimeLayoutAudit.issues.find(i => i.code === 'W_RUNTIME_TEXT_CLIP' && i.nodeId === 'example');
+      assert.equal(exampleClip.direction, 'vertical');
+      assert.deepEqual(exampleClip.overflowLines.map(({ line, text }) => [line, text]), [[2, 'The second row exceeds the box.']]);
+      assert(exampleClip.overflowLines[0].bounds.bottom > exampleClip.contentBox.bottom);
 
       const scenBlocked = await studioHandlers.studio_scenario({
         projectDir,
@@ -776,7 +1031,10 @@ test('v10 parity upgrades: runtime DOM text clip audit, shared Studio scenario s
         pageId: 'home',
         baseRevision: tx1.appliedRevision,
         idempotencyKey: 'v10-widen-word',
-        commands: [{ type: 'setProperties', nodeId: 'word', properties: { w: 354, fontSize: 28 } }],
+        commands: [
+          { type: 'setProperties', nodeId: 'word', properties: { w: 354, fontSize: 28 } },
+          { type: 'setProperties', nodeId: 'example', properties: { h: 72 } },
+        ],
       });
       assert.equal(tx2.ok, true, JSON.stringify(tx2));
 

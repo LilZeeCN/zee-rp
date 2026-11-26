@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertNotProtected, EXPORTER_VERSION, nodeEvents, sha256,canonicalJson } from './document.mjs';
-import { exportCssPlan, parseCssBorderShorthand, resolveShadowCss } from './visual-style.mjs';
+import { exportCssPlan, parseCssBorderShorthand, resolveShadowCss, textLayout } from './visual-style.mjs';
 import { rasterizeStudioPaint } from './css-raster.mjs';
 import { resolveColorValue, resolveDocumentScene } from './scene-resolver.mjs';
 import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
@@ -414,13 +414,33 @@ export function findRpWidgetByNodeId(widgets, nodeId) {
   return primary || bg || null;
 }
 
-function patchAndVerifyRpTypography(absOutRp, scene) {
+function patchAndVerifyRpTypography(absOutRp, scene, sourceMap) {
   let buf = readFileSync(absOutRp);
   const rpInitial = readRp(buf, { path: absOutRp });
-  const recordsByIndex = new Map(readRecords(buf).map(r => [r.index, r]));
   const targetsByRecord = new Map();
+  const symbolById = new Map(sourceMap.map(symbol => [symbol.id, symbol]));
+  const addTarget = (record, id, props) => {
+    if (!targetsByRecord.has(record)) targetsByRecord.set(record, new Map());
+    const items = targetsByRecord.get(record);
+    items.set(id, { ...items.get(id), ...props });
+  };
+  const collectAlignment = (node, scope) => {
+    const scopedId = `${scope}/${node.id}`;
+    if (['label', 'paragraph', 'button', 'badge'].includes(node.type)) {
+      const verticalAlignment = textLayout(node).verticalAlign === 'middle' ? 1 : 0;
+      for (const { record, id } of symbolById.get(scopedId)?.native || []) {
+        addTarget(record, id, { verticalAlignment });
+      }
+    }
+    for (const child of node.children || []) collectAlignment(child, scope);
+    for (const state of node.states || []) {
+      if (state.root) collectAlignment(state.root, `${scopedId}/${state.id}`);
+    }
+    if (node.template) collectAlignment(node.template, `${scopedId}/template`);
+  };
 
   for (const pgScene of scene.pages) {
+    collectAlignment(pgScene.rootTree, pgScene.id);
     const rpPage =
       (rpInitial.pages || []).find(p => p.name === pgScene.name || p.id === pgScene.id) ||
       rpInitial.pages[scene.pages.indexOf(pgScene)];
@@ -435,8 +455,7 @@ function patchAndVerifyRpTypography(absOutRp, scene) {
         (rpPage.widgets || []).find(w => !bgRe.test(w.name) && (w.name === resNode.id || primaryRe.test(w.name) || w.name?.endsWith(`-${resNode.id}`))) ||
         null;
       if (!textWidget) continue;
-      if (!targetsByRecord.has(rpPage.record)) targetsByRecord.set(rpPage.record, []);
-      targetsByRecord.get(rpPage.record).push({ pgScene, resNode, widgetId: textWidget.id });
+      addTarget(rpPage.record, textWidget.id, { pgScene, resNode });
     }
   }
 
@@ -459,9 +478,23 @@ function patchAndVerifyRpTypography(absOutRp, scene) {
     });
 
     let modified = false;
-    for (const { resNode, widgetId } of items) {
+    for (const [widgetId, { resNode, verticalAlignment }] of items) {
       const widget = graph.objects.get(Number(widgetId));
       if (!widget?.body) continue;
+      const nativeStyle = graph.objects.get(field(widget.body, 'MyStyle')?.value);
+      const propList = field(nativeStyle?.body ?? {}, 'PropList');
+      const putStyle = (name, value) => {
+        if (!propList?.items) return;
+        const entry = mapEntry({ DOAName: { tag: 5, value: 0xc0000000 + name }, Value: value });
+        const oldIdx = propList.items.findIndex(pr => (field(pr, 'DOAName')?.value & 0x0fffffff) === name);
+        if (oldIdx < 0) propList.items.push(entry);
+        else propList.items[oldIdx] = entry;
+        modified = true;
+      };
+      if (verticalAlignment !== undefined && field(widget.body, 'RichTextBlock')) {
+        putStyle(10, { tag: 5, value: verticalAlignment });
+      }
+      if (!resNode) continue;
       const targetFont = resNode.fontFamily || 'PingFang SC';
       let block = field(widget.body, 'RichTextBlock');
       if (block?.tag === 3) block = graph.objects.get(block.value)?.body;
@@ -479,18 +512,7 @@ function patchAndVerifyRpTypography(absOutRp, scene) {
           }
         }
       }
-      const nativeStyle = graph.objects.get(field(widget.body, 'MyStyle')?.value);
-      const propList = field(nativeStyle?.body ?? {}, 'PropList');
-      if (propList?.items) {
-        const entry = mapEntry({
-          DOAName: { tag: 5, value: 0xc0000001 },
-          Value: intern(targetFont),
-        });
-        const oldIdx = propList.items.findIndex(pr => (field(pr, 'DOAName')?.value & 0x0fffffff) === 1);
-        if (oldIdx < 0) propList.items.push(entry);
-        else propList.items[oldIdx] = entry;
-        modified = true;
-      }
+      putStyle(1, intern(targetFont));
     }
 
     if (modified) {
@@ -509,7 +531,8 @@ function patchAndVerifyRpTypography(absOutRp, scene) {
     const record = finalRecords.get(recIdx);
     if (!record) continue;
     const graph = parsePayload(record);
-    for (const { pgScene, resNode, widgetId } of items) {
+    for (const [widgetId, { pgScene, resNode }] of items) {
+      if (!resNode) continue;
       const widget = graph.objects.get(Number(widgetId));
       let block = field(widget?.body ?? {}, 'RichTextBlock');
       if (block?.tag === 3) block = graph.objects.get(block.value)?.body;
@@ -566,6 +589,11 @@ function patchAndVerifyRpTypography(absOutRp, scene) {
   };
 }
 
+function nativeTextAlign(node) {
+  const { textAlign } = textLayout(node);
+  return ['center', 'right'].includes(textAlign) ? textAlign : 'left';
+}
+
 function buildRichTextSpecFromNode(node, paletteColors = {}) {
   const defaultStyle = {};
   const baseFont = node._resolvedFontFamily || node.fontFamily || 'PingFang SC';
@@ -601,8 +629,7 @@ function buildRichTextSpecFromNode(node, paletteColors = {}) {
     defaultStyle.characterSpacing = Number(node.letterSpacing);
   }
 
-  const rawAlign = node.textAlign || node.align || node._inheritedAlign;
-  const paragraphAlign = ['left', 'center', 'right'].includes(rawAlign) ? rawAlign : undefined;
+  const paragraphAlign = nativeTextAlign(node);
   const lineSpacing = Number.isFinite(Number(node.lineHeight)) && Number(node.lineHeight) > 0
     ? Number(node.lineHeight)
     : undefined;
@@ -1198,7 +1225,7 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
   ) {
     const hugWidthBuffer = Math.min(12, Math.max(4, Math.ceil((Number(node.fontSize) || 14) * 0.35)));
     out.w = Math.round(node._w) + hugWidthBuffer;
-    const align = node.align || node._inheritedAlign;
+    const align = nativeTextAlign(node);
     if (!omitRootXY && typeof out.x === 'number') {
       if (align === 'center') out.x = Math.max(0, out.x - Math.floor(hugWidthBuffer / 2));
       else if (align === 'right') out.x = Math.max(0, out.x - hugWidthBuffer);
@@ -1412,9 +1439,8 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
 
     if (node.fontSize !== undefined) out.fontSize = Number(node.fontSize);
     if (node.fontWeight !== undefined) out.fontWeight = Number(node.fontWeight);
-    if (node.align || node._inheritedAlign) out.align = node.align || node._inheritedAlign;
-
     if (['label', 'paragraph', 'button', 'badge'].includes(out.type)) {
+      out.align = nativeTextAlign(node);
       if (node.letterSpacing !== undefined) out.letterSpacing = Number(node.letterSpacing);
       if (node.italic) out.italic = true;
       if (node.underline) out.underline = true;
@@ -1425,7 +1451,7 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
       if (out.type === 'paragraph' && typeof node.textPaddingX === 'number' && out.padding === undefined) {
         out.padding = Number(node.textPaddingX);
       }
-    }
+    } else if (node.align || node._inheritedAlign) out.align = node.align || node._inheritedAlign;
     if (['label', 'paragraph'].includes(out.type) && node.lineHeight !== undefined) {
       out.lineHeight = Number(node.lineHeight);
     }
@@ -1681,7 +1707,7 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
     const buildRes = buildInteractiveRp(planPath, absOutRp, { sourcePath });
 
     // Patch native AxRun.Family, multi-run RichTextBlock spans, and vector ControlPoints
-    const typographyAlignment = patchAndVerifyRpTypography(absOutRp, scene);
+    const typographyAlignment = patchAndVerifyRpTypography(absOutRp, scene, buildRes.sourceMap);
     const richTextAlignment = patchAndVerifyRpRichTextSpans(absOutRp, exportPages, buildRes, cleanPalette);
     const vectorAlignment = patchAndVerifyRpVectors(absOutRp, scene);
     // Typography & vector patching are part of generation, not a later native user edit.

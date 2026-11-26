@@ -34,6 +34,7 @@
 
 ## 已关闭(近期)
 
+- T01 复盘的六项摩擦已补回归。官方首帧与开场断言共用稳定状态，官方 HTML 来源单独报告。RP9 原生文字对齐和运行态裁切定位有真实浏览器对照。命令批量建议与 L1 阻塞、主次归因可从公开工具回包核对。原 T01 官方 HTML 三条剧本并行重放通过，覆盖 184 项检查。
 - ~~28 个 MCP 工具面混乱~~ → 2026-11-08 收敛为 13 个(本文件建立的同轮)。
 - ~~命令注册表无一致性门禁~~ → `test:studio-parity`;~~分层无强制~~ → `test:layers`(2026-11-08)。
 - ~~原型污染面(setTokens/setVariable/datasetOp/createComponent/upsert-component 用户可控键)~~ → defineRecordEntry 防御 + M-SWEEP 固化(2026-11-08)。

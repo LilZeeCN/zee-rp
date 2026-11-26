@@ -126,6 +126,34 @@ function buildStoryboardPng(frames, outPngPath = null) {
 
 const sha = value => createHash('sha256').update(value).digest('hex');
 
+// Install before navigating, including in the player's content iframe. The
+// Axure data API exists before the player sends finishInit. RP's adaptive
+// loadFinished runs after visibility setup and dispatch of OnPageLoad.
+function installAxureStartupProbe() {
+  const startup = window.__zeeAxureStartup = { waiting: false, revision: 0 };
+  const hook = () => {
+    const adaptive = window.$axure?.internal?.(api => api.adaptive);
+    const loadFinished = adaptive?.loadFinished;
+    if (typeof loadFinished !== 'function' || startup.hooked) return;
+    startup.hooked = true;
+    startup.waiting = true;
+    adaptive.loadFinished = function (...args) {
+      const result = Reflect.apply(loadFinished, this, args);
+      startup.waiting = false;
+      return result;
+    };
+  };
+  document.addEventListener('readystatechange', hook);
+  document.addEventListener('load', event => {
+    if (event.target.tagName === 'SCRIPT') hook();
+  }, true);
+  new MutationObserver(records => {
+    if (records.some(record => (record.target.parentElement?.closest('#base') || record.target.id === 'base'))) {
+      startup.revision++;
+    }
+  }).observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+}
+
 const MIME_TYPES = {
   '.html': 'text/html; charset=utf-8',
   '.js': 'text/javascript; charset=utf-8',
@@ -145,7 +173,7 @@ const MIME_TYPES = {
 
 // Serialized into the real browser. Only reads Axure state and installs bounded
 // passive listeners; never evaluates source expressions or writes test values.
-export function observeAxure({ names = [], variables = [] } = {}) {
+export function observeAxure({ names = [], variables = [], waitForInitialization = false } = {}) {
   const windows = [window];
   const wantFilter = Array.isArray(names) && names.length > 0;
   for (let i = 0; i < windows.length && i < 20; i++) {
@@ -155,6 +183,10 @@ export function observeAxure({ names = [], variables = [] } = {}) {
         const ax = w.$axure.internal(api => api);
         if (ax.pageData?.page && ax.globalVariableProvider) {
           const d = w.document;
+          const startup = w.__zeeAxureStartup;
+          if (waitForInitialization && (d.readyState !== 'complete' || startup?.waiting || d.fonts?.status === 'loading')) {
+            return { ready: false, reason: '正在等待 Axure 内容页及初始显隐完成。' };
+          }
           if (!w.__zeeRpPreviewProbe) {
             const probe = w.__zeeRpPreviewProbe = { events: [], errors: [] };
             const add = (list, value) => { list.push(value); if (list.length > 50) list.shift(); };
@@ -248,6 +280,7 @@ export function observeAxure({ names = [], variables = [] } = {}) {
             page: ax.pageData.page.name,
             url: w.location.href,
             animating,
+            ...(waitForInitialization ? { startupRevision: startup?.revision ?? 0 } : {}),
             widgets,
             variables: values,
             events: [...w.__zeeRpPreviewProbe.events],
@@ -259,6 +292,36 @@ export function observeAxure({ names = [], variables = [] } = {}) {
     } catch {}
   }
   return { ready: false, reason: '当前页面尚未加载可读取的 Axure 原生运行时。' };
+}
+
+function initialStateKey(observation) {
+  return JSON.stringify([observation.page, observation.url, observation.variables, observation.widgets]);
+}
+
+async function captureStableAxureInitial(observe, capture, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  const key = observation => JSON.stringify([observation.startupRevision, initialStateKey(observation)]);
+  let lastKey = null;
+  let stableSince = 0;
+  let observation;
+  do {
+    observation = await observe();
+    const currentKey = observation.ready && !observation.animating ? key(observation) : null;
+    if (currentKey !== lastKey) {
+      lastKey = currentKey;
+      stableSince = Date.now();
+    } else if (currentKey !== null && Date.now() - stableSince >= 100) {
+      if (!capture) return { observation };
+      const png = await capture();
+      observation = await observe();
+      if (observation.ready && !observation.animating && key(observation) === currentKey) return { observation, png };
+      lastKey = null;
+    }
+    await new Promise(resolve => setTimeout(resolve, 35));
+  } while (Date.now() < deadline);
+  throw Object.assign(new Error('Axure 初始显隐未在超时前稳定，无法采集一致的首帧。'), {
+    code: 'E_VERIFY_INITIAL_UNSTABLE', actual: observation,
+  });
 }
 
 export function resolvePreviewSymbol(map, target) {
@@ -680,6 +743,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
           status: 'failed',
           engine: 'official',
           evidence: 'axure-official-html-cdp',
+          officialHtmlReady: false,
           verification: { officialHtmlExported: false, browserLoaded: false, behaviorVerified: false },
           diagnostics: exp.diagnostics,
         };
@@ -699,7 +763,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
   const variables = [...new Set([...(map?.variables ?? []), ...steps.flatMap(s => s.expect?.variable ? [s.expect.variable] : [])])];
 
   const observeExpr = activeEngine === 'official'
-    ? `(${observeAxure.toString()})(${JSON.stringify({ names, variables })})`
+    ? `(${observeAxure.toString()})(${JSON.stringify({ names, variables, waitForInitialization: true })})`
     : `(() => window.__STUDIO_EXPORT_APP__ ? window.__STUDIO_EXPORT_APP__.observeForVerify() : { ready: false })()`;
   const entryHtmlFile = activeEngine === 'official' ? 'start.html' : 'index.html';
   const server = startStaticServer(activeHtmlDir, entryHtmlFile);
@@ -711,6 +775,10 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
     engine: activeEngine,
     frame: frameMode,
     evidence: activeEngine === 'official' ? 'axure-official-html-cdp' : 'studio-html-cdp',
+    ...(activeEngine === 'official' ? {
+      officialHtmlSource: officialHtmlExported ? 'exported' : 'provided',
+      officialHtmlReady: true,
+    } : {}),
     verification: activeEngine === 'official'
       ? { officialHtmlExported, browserLoaded: false, behaviorVerified: false }
       : { officialHtmlExported: false, studioHtmlExported, browserLoaded: false, behaviorVerified: false },
@@ -745,17 +813,19 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
     }
 
     browser = await launchChrome({ headless: true, width: vp.width, height: vp.height, dpr: vp.dpr });
-    if (useVirtualClock) {
+    if (useVirtualClock || activeEngine === 'official') {
       page = await browser.openPage('about:blank');
-      await page.send('Page.enable');
-      await page.send('Page.addScriptToEvaluateOnNewDocument', { source: VIRTUAL_CLOCK_SHIM });
+      if (activeEngine === 'official') {
+        await page.send('Page.addScriptToEvaluateOnNewDocument', { source: `(${installAxureStartupProbe.toString()})()` });
+      }
+      if (useVirtualClock) await page.send('Page.addScriptToEvaluateOnNewDocument', { source: VIRTUAL_CLOCK_SHIM });
       await page.navigate(startUrl, timeoutMs);
     } else {
       page = await browser.openPage(startUrl);
     }
 
     const observe = () => page.evaluate(observeExpr);
-    await page.waitForFunction(`(() => { const r = ${observeExpr}; return Boolean(r && r.ready); })()`, { timeoutMs, pollMs: 50 });
+    const waitForRuntime = () => page.waitForFunction(`(() => { const r = ${observeExpr}; return Boolean(r && r.ready); })()`, { timeoutMs, pollMs: 50 });
     const settle = async (waitMs = Math.min(timeoutMs, 2500)) => {
       const deadline = Date.now() + waitMs;
       while (Date.now() < deadline) {
@@ -766,15 +836,34 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       return observe();
     };
 
-    let before = await settle();
+    const captureInitial = wantStoryboard
+      ? () => captureFramedScreenshot(page, { frame: frameMode, activeEngine, canvasW, canvasH, vp })
+      : null;
+    let before;
+    let initialKey = null;
+    if (activeEngine === 'official') {
+      const initial = await captureStableAxureInitial(observe, captureInitial, timeoutMs);
+      before = initial.observation;
+      initialKey = initialStateKey(before);
+      if (initial.png) storyboardFrames.push({ label: '#0 Initial', png: initial.png, failed: false });
+    } else {
+      await waitForRuntime();
+      before = await settle();
+      if (captureInitial) storyboardFrames.push({ label: '#0 Initial', png: await captureInitial(), failed: false });
+    }
     result.verification.browserLoaded = true;
     result.initial = before;
-    if (wantStoryboard) {
-      storyboardFrames.push({ label: '#0 Initial', png: await captureFramedScreenshot(page, { frame: frameMode, activeEngine, canvasW, canvasH, vp }), failed: false });
-    }
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
+      if (step.action !== 'expect') initialKey = null;
+      const checkInitialState = current => {
+        if (initialKey !== null && initialStateKey(current) !== initialKey) {
+          throw Object.assign(new Error('首屏断言期间 Axure 状态发生变化，已停止重放以保留首帧与断言的一致性。'), {
+            code: 'E_VERIFY_INITIAL_DRIFT', stepIndex: i, actual: current,
+          });
+        }
+      };
       let symbol = null;
       if (step.target) {
         try { symbol = map ? resolvePreviewSymbol(map, step.target) : null; }
@@ -894,7 +983,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
         } else {
           await page.navigate(`${baseUrl}#p=${encodeURIComponent(targetPageName)}`, timeoutMs);
         }
-        await page.waitForFunction(`(() => { const r = ${observeExpr}; return Boolean(r && r.ready); })()`, { timeoutMs, pollMs: 50 });
+        await waitForRuntime();
       } else if (step.action !== 'expect') {
         throw Object.assign(new Error(`未知验收步骤动作 "${step.action}"`), { code: 'E_VERIFY_INPUT', stepIndex: i });
       }
@@ -908,6 +997,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
           await new Promise(r => setTimeout(r, 50));
           continue;
         }
+        checkInitialState(current);
         const match = step.target
           ? findWidgetMatch(current, symbol, step.target, { allowHidden, rowIndex: step.rowIndex ?? 0 })
           : { widget: null };
@@ -919,6 +1009,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       if (!current.ready || current.animating) {
         current = await observe();
       }
+      checkInitialState(current);
       const finalMatch = step.target
         ? findWidgetMatch(current, symbol, step.target, { allowHidden, rowIndex: step.rowIndex ?? 0 })
         : { widget: null };

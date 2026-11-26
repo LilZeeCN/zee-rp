@@ -1,7 +1,7 @@
 import { BoundedCache } from './bounded-cache.mjs';
 import {applyRepeaterView,bindRepeaterTemplate,repeaterDatasetName,repeaterRows} from './repeater-view.mjs';
 import { DEVICE_PRESETS, RENDERER_VERSION, currentDocumentDiagnostics, getCachedNodeCanonical, nodeEvents } from './document.mjs';
-import { normalizeVisualCss, resolveShadowCss } from './visual-style.mjs';
+import { normalizeVisualCss, resolveShadowCss, textLayout } from './visual-style.mjs';
 import {
   measureLineWidthExact,
   wrapTextLinesExact,
@@ -1777,7 +1777,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
         equalHeight: Boolean(n.equalHeight),
         align: n.align || 'start',
         justify: n.justify || 'start',
-        textAlign: n.textAlign || n.align || n._inheritedAlign || (n.type === 'button' ? 'center' : 'left'),
+        textAlign: textLayout(n).textAlign,
         fill: n._resolvedFill,
         rawFill: n.fill ?? null,
         stroke: n._booleanResult && !n._resolvedStroke && !n._resolvedFill ? n._resolvedColor : n._resolvedStroke,

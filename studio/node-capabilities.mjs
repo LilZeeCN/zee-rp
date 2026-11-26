@@ -471,6 +471,15 @@ export function nodePropertyCapability(type, field, options = {}) {
   if (RP1_SOURCE_PROPERTY_CONDITIONS[type]?.[field]) {
     result.surfaces['full-rp1'] = fact('partial', RP1_SOURCE_PROPERTY_CONDITIONS[type][field], 'references/rp-language.schema.json:x-source-property-conditions');
   }
+  if (field === 'textAlign' && ['label', 'paragraph', 'badge', 'button'].includes(type)) {
+    result.surfaces.native = fact('implemented',
+      'Studio 导出 RP9 保留 left / center / right（start / end 分别归一为 left / right），包括纯文字与 spans 的段落对齐。其他 CSS 对齐值回退 left。单行文字与按钮、徽标垂直居中，换行标签与段落顶对齐。',
+      'studio/export-rp.mjs:resolvedTreeToRp1Node');
+    result.surfaces['full-rp1'] = {
+      ...fact('unsupported', `完整 RP/1 的 ${type} 使用 align:"left" | "center" | "right" 声明水平对齐；textAlign 是 Studio 属性。align 不控制垂直位置。`, 'references/rp-language.schema.json:x-source-properties-by-type'),
+      verification: 'source-contract',
+    };
+  }
   return result;
 }
 

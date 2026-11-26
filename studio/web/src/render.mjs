@@ -1,4 +1,4 @@
-import { textSpanCss, visualCss } from '/visual-style.mjs';
+import { textLayout, textSpanCss, visualCss } from '/visual-style.mjs';
 import { resolveBooleanGroupPath } from '/vector-paths.mjs';
 import { escapeHtml, renderIconSvg } from './ui.mjs';
 import { applyCanvasTransform, fitWorkspace as fitViewport, getActivePageScene, nodeViewportBounds, revealActiveArtboard as revealArtboard, updateZoomLabel, workspaceBounds } from './view.mjs';
@@ -239,15 +239,13 @@ export function buildNodeElementHtml(n, pageId, childrenHtml = '', parent = null
   }
 
   if (n.type === 'button' || n.type === 'label' || n.type === 'paragraph' || n.type === 'badge') {
-    const isSingle = (n.lines?.length || 1) <= 1 && n.type !== 'paragraph' && n.wrap !== true;
+    const { wrap, verticalAlign } = textLayout(n);
     const padCss = (n.padX || n.padY) ? `padding:${Math.round((n.padY || 0) / 2)}px ${Math.round((n.padX || 0) / 2)}px;` : '';
-    const flexAlign = (n.type === 'button' || n.type === 'badge')
-      ? `display:flex;align-items:center;justify-content:center;white-space:nowrap;${padCss}`
-      : isSingle
-        ? `display:flex;align-items:center;justify-content:${n.textAlign === 'center' ? 'center' : n.textAlign === 'right' ? 'flex-end' : 'flex-start'};white-space:nowrap;${padCss}`
-        : `display:block;white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word;${padCss}`;
+    // Keep styled spans in the same inline line box as plain text.
+    const flow = wrap ? 'white-space:pre-wrap;overflow-wrap:break-word;word-break:break-word' : 'white-space:pre';
+    const align = verticalAlign === 'middle' ? 'align-content:safe center' : 'align-content:start';
     const typoAttrs = `data-line-count="${n.lineCount ?? n.lines?.length ?? 1}" data-first-baseline="${n.firstBaselineOffset ?? ''}" data-last-baseline="${n.lastBaselineOffset ?? ''}" data-resolved-font="${escapeHtml(n.fontFamily || 'PingFang SC')}"`;
-    return `<div ${commonAttrs} ${typoAttrs} style="${style(flexAlign)}">${renderTextContentHtml(n)}${childrenHtml}</div>`;
+    return `<div ${commonAttrs} ${typoAttrs} style="${style(`display:block;${flow};${align};${padCss}`)}">${renderTextContentHtml(n)}${childrenHtml}</div>`;
   }
 
   return `<div ${commonAttrs} style="${style()}">${childrenHtml}</div>`;

@@ -801,8 +801,16 @@ export const studioHandlers = {
       const result = await callServerJson(baseUrl, '/api/design/review', 'POST', request);
       if (verbose || !result.ok) return result;
       const { nodeSnapshots, designMetrics, ...compact } = result;
-      return { ...compact, findings: (result.findings || []).slice(0, 24),
-        detail: { view: 'summary', findingCount: result.findings?.length || 0, returnedFindings: Math.min(24, result.findings?.length || 0),
+      const allFindings = result.findings || [];
+      const chosen = new Set((result.assessment?.l1BlockingKeys || [])
+        .map(key => allFindings.find(finding => finding.blocksL1 && finding.check === key)).filter(Boolean));
+      for (const finding of allFindings) {
+        if (chosen.size >= 24) break;
+        chosen.add(finding);
+      }
+      const findings = allFindings.filter(finding => chosen.has(finding));
+      return { ...compact, findings,
+        detail: { view: 'summary', findingCount: allFindings.length, returnedFindings: findings.length,
           reportPath: result.reportPath || null,
           next: 'verbose:true读取完整指标和节点快照；图片和具体问题默认保留。' } };
     }

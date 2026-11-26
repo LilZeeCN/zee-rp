@@ -176,16 +176,17 @@ export async function reviewDesign(studio, { pageId, baseRevision, reviewId = nu
   // 越界以度量层为唯一来源，避免两套阈值（0.5px vs 1px）打出相反结论。
   for (const item of metrics.metrics.containment?.outside || []) {
     const sides = Object.entries(item.over).filter(([, value]) => value > 0).map(([key, value]) => `${key}+${Math.round(value)}`);
-    findings.push({ code: 'W_OUTSIDE_SCREEN', severity: 'error', nodeId: item.id, detail: `越出画板 ${sides.join('/')}px` });
+    findings.push({ code: 'W_OUTSIDE_SCREEN', severity: 'error', check: 'containment', nodeId: item.id, detail: `越出画板 ${sides.join('/')}px` });
   }
   for (const item of metrics.metrics.containment?.textOverflow || []) {
-    findings.push({ code: 'W_TEXT_OVERFLOW', severity: 'error', nodeId: item.id, parentId: item.parentId });
+    findings.push({ code: 'W_TEXT_OVERFLOW', severity: 'error', check: 'containment', nodeId: item.id, parentId: item.parentId });
   }
   // 对比度：红在哪一处必须点得开，不能只说"N 处"。
   for (const item of metrics.metrics?.contrast?.worst || []) {
     findings.push({
       code: 'W_CONTRAST_LOW',
       severity: 'error',
+      check: 'contrast',
       nodeId: item.id,
       detail: `对比度 ${item.ratio}:1，低于 ${item.required}:1`,
     });
@@ -194,6 +195,7 @@ export async function reviewDesign(studio, { pageId, baseRevision, reviewId = nu
     findings.push({
       code: 'W_CONTRAST_UNKNOWN',
       severity: 'error',
+      check: 'contrast',
       nodeId,
       detail: `文字像素无法确认：${metrics.metrics.contrast.unknownReasons?.find(r => r.id === nodeId)?.reason || '底色不可解析'}，需要进一步检查可读性`,
     });
@@ -201,8 +203,15 @@ export async function reviewDesign(studio, { pageId, baseRevision, reviewId = nu
 
   for (const check of metrics.checks.filter(c => !c.ok)) {
     // 越界已经用 W_OUTSIDE_SCREEN / W_TEXT_OVERFLOW 逐条报过，不再重复一条聚合项。
-    if (check.key === 'containment' || check.key === 'contrast') continue;
-    findings.push({ code: 'W_DESIGN_METRIC', severity: ['content-presence', 'tap-target', 'empty-state-coverage'].includes(check.key) ? 'error' : 'warning', check: check.key, detail: check.detail });
+    if (['containment', 'contrast'].includes(check.key) && findings.some(f => f.check === check.key)) continue;
+    const hierarchy = check.key === 'visual-hierarchy' ? metrics.metrics.visualHierarchy : null;
+    findings.push({
+      code: 'W_DESIGN_METRIC', severity: ['content-presence', 'tap-target', 'empty-state-coverage'].includes(check.key) ? 'error' : 'warning',
+      check: check.key, detail: check.detail,
+      ...(hierarchy ? { attribution: hierarchy, nodeIds: [...new Set([
+        ...hierarchy.topThree.map(item => item.id), ...hierarchy.reasons.flatMap(reason => reason.nodeIds),
+      ])] } : {}),
+    });
   }
   for (const warning of metrics.warnings || []) {
     findings.push({ code: 'W_DESIGN_ADVISORY', severity: 'warning', check: warning.check, detail: warning.detail });
@@ -211,6 +220,7 @@ export async function reviewDesign(studio, { pageId, baseRevision, reviewId = nu
     findings.push({
       code: 'W_ANTI_SLOP',
       severity: 'warning',
+      ...(v.severity !== 'warn' ? { check: 'anti-slop' } : {}),
       rule: v.rule, message: v.message, fix: v.fix, nodeIds: v.nodeIds,
     });
   }
@@ -221,11 +231,11 @@ export async function reviewDesign(studio, { pageId, baseRevision, reviewId = nu
   const hardErrorFindings = findings.filter(f => f.severity === 'error');
   const l1Blocking = metrics.l1?.blocking || [];
   const l1BlockingKeys = l1Blocking.map(b => b.check);
-  const extraL1Blocking = l1Blocking.filter(b => !hardErrorFindings.some(f =>
-    f.check === b.check
-    || (b.check === 'containment' && ['W_OUTSIDE_SCREEN', 'W_TEXT_OVERFLOW'].includes(f.code))
-    || (b.check === 'contrast' && ['W_CONTRAST_LOW', 'W_CONTRAST_UNKNOWN'].includes(f.code))
-  ));
+  const l1KeySet = new Set(l1BlockingKeys);
+  for (const finding of findings) {
+    if (finding.code !== 'W_DESIGN_ADVISORY' && l1KeySet.has(finding.check)) finding.blocksL1 = true;
+  }
+  const extraL1Blocking = l1Blocking.filter(b => !hardErrorFindings.some(f => f.check === b.check));
   const review = { schemaVersion: 2, documentId: studio.store.doc.documentId, board: page.board, nodeSnapshots: reviewNodeSnapshots(page), reviewId: id, pageId, revision: baseRevision, contentHash: shot.contentHash, screenshot,
     status: 'awaiting-visual-review', userAccepted: false, findings:findings.map(finding=>({...finding,location:locateDiagnostic({doc:studio.store.doc,scene:studio.scene,pageId,nodeIds:finding.nodeIds||[finding.nodeId||finding.scopedId].filter(Boolean),field:finding.field,code:finding.code,limit:1})})), checkList,
     assessment: {
@@ -234,7 +244,7 @@ export async function reviewDesign(studio, { pageId, baseRevision, reviewId = nu
       l1BlockingCount: l1Blocking.length,
       l1BlockingKeys,
       totalBlockingCount: hardErrorFindings.length + extraL1Blocking.length,
-      note: 'blockingCount 为硬视觉错误数，l1BlockingCount 为 L1 设计度量阻塞数（含字阶/视觉主次/栅格等），totalBlockingCount 为合并去重阻塞总数；两者均为 0 才算 L1 全通过。',
+      note: 'blockingCount 为硬视觉错误数，l1BlockingCount 为 L1 阻塞项数。findings 的 blocksL1 标记对应 l1BlockingKeys；severity 与既有计数口径保持兼容。totalBlockingCount 为合并去重阻塞总数。',
     },
     nativeReadiness,
     interactionDiagnostics,

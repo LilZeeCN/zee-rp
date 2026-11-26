@@ -144,6 +144,15 @@ export function parseCssBorderShorthand(val) {
   };
 }
 
+export function textLayout(node) {
+  const control = node.type === 'button' || node.type === 'badge';
+  const align = node.textAlign || node.align || node._inheritedAlign || (control ? 'center' : 'left');
+  const textAlign = align === 'start' ? 'left' : align === 'end' ? 'right' : align;
+  const multiLine = (node.lineCount ?? node._textMetrics?.lineCount ?? 1) > 1;
+  const wrap = node.type === 'paragraph' || (!control && (node.wrap === true || multiLine));
+  return { textAlign, verticalAlign: wrap ? 'top' : 'middle', wrap };
+}
+
 export function textSpanCss(span, fontStack = 'sans-serif') {
   const css = {};
   if (span.fontFamily) css['font-family'] = `${JSON.stringify(span.fontFamily)}, ${fontStack}`;

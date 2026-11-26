@@ -60,20 +60,41 @@ const COMMAND_DESCRIBE_ALIASES = {
   'dataset-op': 'datasetOp',
 };
 
+const commandTokens = name => name.replace(/([a-z\d])([A-Z])/g, '$1 $2').toLowerCase()
+  .split(/[.\-_/\s]+/).filter(Boolean);
+const preferredDomainCommands = {
+  'interaction:set': ['setInteraction'],
+  'interaction:add': ['setInteraction'],
+  'interaction:delete': ['removeInteraction'],
+  'variable:add': ['setVariable'],
+  'variable:set': ['setVariable'],
+  'token:add': ['setTokens', 'setToken'],
+  'token:set': ['setTokens', 'setToken'],
+  'page:add': ['addPage'],
+  'node:add': ['addNode'],
+  'node:set': ['setProperties', 'editNodes'],
+};
+
 function suggestCommandNames(requested, limit = 4) {
   const all = Object.keys(COMMAND_CONTRACTS);
   const raw = String(requested || '').trim();
   if (!raw) return all.slice(0, limit);
-  const tokens = raw.replace(/([a-z])([A-Z])/g, '$1 $2').toLowerCase().split(/[-_\s]+/).filter(t => t.length >= 2);
+  const tokens = commandTokens(raw);
+  const domain = tokens.find(word => /^(interactions?|variables?|tokens?|pages?|nodes?)$/.test(word))?.replace(/s$/, '');
+  const verb = tokens.find(word => /^(add|create|insert|set|update|edit|delete|remove)$/.test(word));
+  const operation = { create: 'add', insert: 'add', update: 'set', edit: 'set', remove: 'delete' }[verb] || verb;
+  const preferred = preferredDomainCommands[`${domain}:${operation}`] || [];
   const lower = raw.toLowerCase();
   return all
     .map(cmd => {
       const cmdLower = cmd.toLowerCase();
-      let score = 0;
+      const preferredPosition = preferred.indexOf(cmd);
+      const parts = commandTokens(cmd);
+      let score = preferredPosition >= 0 ? 30 - 5 * preferredPosition : 0;
       if (cmdLower.includes(lower) || lower.includes(cmdLower)) score += 5;
       if (cmdLower.startsWith(lower.slice(0, 4))) score += 2;
       for (const tok of tokens) {
-        if (cmdLower.includes(tok)) score += 3;
+        if (parts.includes(tok)) score += 3;
       }
       if (lower.includes('page') && cmdLower.includes('page')) score += 2;
       if (lower.includes('node') && cmdLower.includes('node')) score += 2;

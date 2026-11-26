@@ -3,7 +3,7 @@ import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path
 import { sha256 } from './document.mjs';
 import { resolveDocumentScene } from './scene-resolver.mjs';
 import { evaluatePrototypeExpression, executePrototypeInteraction } from './prototype-runtime.mjs';
-import { textSpanCss, visualCss } from './visual-style.mjs';
+import { textLayout, textSpanCss, visualCss } from './visual-style.mjs';
 import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
 import { locateDiagnostic } from './diagnostics.mjs';
 import { computeDependencyClosure } from './project-bundle.mjs';
@@ -305,9 +305,7 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
     strikethrough: Boolean(n.strikethrough),
     lineHeight: n.lineHeight || Math.round((n.fontSize || 14) * 1.4),
     letterSpacing: n.letterSpacing || 0,
-    textAlign: n.textAlign || 'left',
-    verticalAlign: n.verticalAlign || 'top',
-    wrap: n.wrap !== false,
+    ...textLayout(n),
     padX: n.padX ?? 0,
     padY: n.padY ?? 0,
     textPaddingX: n.textPaddingX ?? null,
@@ -513,8 +511,8 @@ function renderStaticInitialNodeHtml(n) {
     );
     if (n.letterSpacing) styleParts.push(`letter-spacing:${n.letterSpacing}px`);
     if (n.padX || n.padY) styleParts.push(`padding:${Math.round((n.padY || 0) / 2)}px ${Math.round((n.padX || 0) / 2)}px`);
-    if (n.type === 'button' || n.textAlign === 'center') {
-      styleParts.push('display:' + (n.visible ? 'flex' : 'none'), 'align-items:center', `justify-content:${n.textAlign === 'center' ? 'center' : n.textAlign === 'right' ? 'flex-end' : 'flex-start'}`);
+    if (['label', 'paragraph', 'button', 'badge'].includes(n.type)) {
+      styleParts.push(`white-space:${n.wrap ? 'pre-wrap' : 'pre'}`, `align-content:${n.verticalAlign === 'middle' ? 'safe center' : 'start'}`);
     }
   }
   const tag = n.type === 'button' && (n.hasSupportedInteraction || !n.unsupportedInteractions?.length) ? 'button' : 'div';
@@ -1977,7 +1975,7 @@ function buildAppJs(bundlePayload) {
       el.style.width = n.w + 'px';
       el.style.height = n.h + 'px';
       el.style.zIndex = String(n.renderOrder || 1);
-      el.style.display = vis ? (n.type === 'button' || n.textAlign === 'center' || isCheckOrRadio || n.type === 'listbox' ? 'flex' : 'block') : 'none';
+      el.style.display = vis ? (isCheckOrRadio || n.type === 'listbox' ? 'flex' : 'block') : 'none';
 
       const isSelectedVisual = (n.scopedId in this.selectedNodes ? this.selectedNodes[n.scopedId] : n.selected) && ['label', 'paragraph', 'button', 'badge'].includes(n.type);
       if (isSelectedVisual && !n.fill) el.style.background = '#DCEFE6';
@@ -2169,9 +2167,9 @@ function buildAppJs(bundlePayload) {
           el.style.textAlign = n.textAlign || 'left';
           if (n.letterSpacing) el.style.letterSpacing = n.letterSpacing + 'px';
           if (n.padX || n.padY) el.style.padding = Math.round((n.padY || 0) / 2) + 'px ' + Math.round((n.padX || 0) / 2) + 'px';
-          if (n.type === 'button' || n.textAlign === 'center') {
-            el.style.alignItems = 'center';
-            el.style.justifyContent = n.textAlign === 'center' ? 'center' : n.textAlign === 'right' ? 'flex-end' : 'flex-start';
+          if (['label', 'paragraph', 'button', 'badge'].includes(n.type)) {
+            el.style.whiteSpace = n.wrap ? 'pre-wrap' : 'pre';
+            el.style.alignContent = n.verticalAlign === 'middle' ? 'safe center' : 'start';
           }
           if (displayText === n.text && n.spans?.length) {
             for (const span of n.spans) {

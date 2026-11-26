@@ -189,6 +189,108 @@ export function countScenarioAssertions(steps = []) {
     + Object.keys(step.expect?.panelState || {}).length + Object.keys(step.expect?.datasetCount || {}).length + Object.keys(step.expect?.datasetFirstRow || {}).length, 0);
 }
 
+// Serialized into Chrome. Range geometry is in viewport CSS pixels, including
+// the canvas transform, so the content box and ink use the same coordinates.
+function measureTextClip(el, rect, style) {
+  const scaleX = el.offsetWidth ? rect.width / el.offsetWidth : 1;
+  const scaleY = el.offsetHeight ? rect.height / el.offsetHeight : 1;
+  const inset = side => (parseFloat(style['border' + side + 'Width']) || 0) + (parseFloat(style['padding' + side]) || 0);
+  const contentBox = {
+    left: rect.left + inset('Left') * scaleX, right: rect.right - inset('Right') * scaleX,
+    top: rect.top + inset('Top') * scaleY, bottom: rect.bottom - inset('Bottom') * scaleY,
+  };
+  const sides = box => ({
+    left: Math.max(0, (contentBox.left - box.left) / scaleX),
+    right: Math.max(0, (box.right - contentBox.right) / scaleX),
+    top: Math.max(0, (contentBox.top - box.top) / scaleY),
+    bottom: Math.max(0, (box.bottom - contentBox.bottom) / scaleY),
+  });
+  const round = n => Math.round(n * 100) / 100;
+  const rounded = values => Object.fromEntries(Object.entries(values).map(([key, value]) => [key, round(value)]));
+  const union = (a, b) => a ? ({
+    left: Math.min(a.left, b.left), top: Math.min(a.top, b.top),
+    right: Math.max(a.right, b.right), bottom: Math.max(a.bottom, b.bottom),
+  }) : { left: b.left, top: b.top, right: b.right, bottom: b.bottom };
+  const scrollX = Math.max(0, el.scrollWidth - el.clientWidth);
+  const scrollY = Math.max(0, el.scrollHeight - el.clientHeight);
+  const range = document.createRange();
+  const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  const fragments = [];
+  let bounds = null;
+  for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+    if (!node.length) continue;
+    range.selectNodeContents(node);
+    const boxes = [...range.getClientRects()].filter(box => box.width > 0 && box.height > 0);
+    if (!boxes.length) continue;
+    for (const box of boxes) bounds = union(bounds, box);
+    fragments.push({ node, boxes });
+  }
+  const over = bounds ? sides(bounds) : { left: 0, right: 0, top: 0, bottom: 0 };
+  const wOverflow = Math.max(scrollX, over.left, over.right);
+  const hOverflow = Math.max(scrollY, over.top, over.bottom);
+  if (Math.max(wOverflow, hOverflow) <= 2) return null;
+
+  // One text node can wrap across several visual rows. Split only the
+  // overflowing widget, using Range and a binary search for wrap boundaries.
+  const lines = [];
+  for (const { node, boxes } of fragments) {
+    let start = 0;
+    const rectsThrough = end => {
+      range.setStart(node, start);
+      range.setEnd(node, end);
+      return [...range.getClientRects()].filter(box => box.width > 0 && box.height > 0);
+    };
+    while (start < node.length) {
+      const rest = start === 0 ? boxes : rectsThrough(node.length);
+      if (!rest.length) break;
+      const row = rest[0];
+      const onRow = box => Math.abs(box.top - row.top) < 1;
+      let end = node.length;
+      if (!rest.every(onRow)) {
+        let low = start + 1;
+        let high = end;
+        while (low < high) {
+          const mid = Math.floor((low + high + 1) / 2);
+          if (rectsThrough(mid).every(onRow)) low = mid;
+          else high = mid - 1;
+        }
+        end = low;
+      }
+      const box = rest.filter(onRow).reduce(union, null);
+      const center = (box.top + box.bottom) / 2;
+      // Rich text runs with different fonts/sizes still belong to one row
+      // when their vertical centers are within the same line box.
+      const last = lines.at(-1);
+      if (last && Math.abs(center - last.center) < Math.max(2, Math.min(box.bottom - box.top, last.bounds.bottom - last.bounds.top) / 2)) {
+        last.bounds = union(last.bounds, box);
+        last.text += node.data.slice(start, end);
+      } else {
+        lines.push({ center, bounds: box, text: node.data.slice(start, end) });
+      }
+      start = end;
+    }
+  }
+  lines.sort((a, b) => a.center - b.center);
+  const overflowLines = lines.flatMap((line, index) => {
+    const overflow = sides(line.bounds);
+    if (Math.max(...Object.values(overflow)) <= 2) return [];
+    return [{ line: index + 1, text: line.text.trim().slice(0, 160), bounds: rounded(line.bounds), overflow: rounded(overflow) }];
+  });
+  return {
+    direction: wOverflow >= hOverflow ? 'horizontal' : 'vertical',
+    overflowPx: Math.round(Math.max(wOverflow, hOverflow)),
+    actualSize: { w: Math.round(rect.width), h: Math.round(rect.height) },
+    requiredSize: {
+      w: Math.round(rect.width + Math.max(scrollX * scaleX, (over.left + over.right) * scaleX)),
+      h: Math.round(rect.height + Math.max(scrollY * scaleY, (over.top + over.bottom) * scaleY)),
+    },
+    contentBox: rounded(contentBox),
+    textBox: bounds ? rounded(bounds) : null,
+    overflowLines: overflowLines.slice(0, 6),
+    overflowLineCount: overflowLines.length,
+  };
+}
+
 // Reads only the real renderer/runtime. Expected values are never injected.
 export async function runInteractionSteps(page, doc, steps, { layer, url = null, startPageId = null } = {}) {
   if (!Array.isArray(steps) || !steps.length) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_ACTIONS_REQUIRED', reason: '场景尚未提供可重放的用户操作，不能将静态渲染或结构检查记为通过' };
@@ -223,6 +325,7 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
       const scrollScopes = new Set();
       const layoutIssues = [];
       const widgets = [];
+      const checkTextClip = ${measureTextClip.toString()};
       for (const el of allEls) {
         const rect = el.getBoundingClientRect();
         const cs = getComputedStyle(el);
@@ -242,41 +345,19 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
         });
         if (!visible) continue;
         if (['label', 'paragraph', 'button', 'badge'].includes(nodeType) && (el.innerText || '').trim()) {
-          const hScrollOver = el.scrollWidth - el.clientWidth;
-          const vScrollOver = el.scrollHeight - el.clientHeight;
-          let hRangeOver = 0;
-          let vRangeOver = 0;
-          let reqW = el.scrollWidth;
-          let reqH = el.scrollHeight;
-          try {
-            const range = document.createRange();
-            range.selectNodeContents(el);
-            const rRect = range.getBoundingClientRect();
-            hRangeOver = rRect.right - rect.right;
-            vRangeOver = rRect.bottom - rect.bottom;
-            reqW = Math.max(reqW, rRect.width || 0);
-            reqH = Math.max(reqH, rRect.height || 0);
-          } catch {}
-          const horizOver = Math.max(hScrollOver, hRangeOver);
-          const vertOver = Math.max(vScrollOver, vRangeOver);
-          if (horizOver > 2 || vertOver > 2) {
-            const dir = horizOver >= vertOver ? 'horizontal' : 'vertical';
-            const px = Math.round(Math.max(horizOver, vertOver));
-            const aw = Math.round(rect.width);
-            const ah = Math.round(rect.height);
-            const rw = Math.round(Math.max(rect.width, reqW));
-            const rh = Math.round(Math.max(rect.height, reqH));
+          const clip = checkTextClip(el, rect, cs);
+          if (clip) {
+            const { direction, overflowPx, actualSize, requiredSize, overflowLines } = clip;
+            const line = overflowLines[0];
             layoutIssues.push({
               code: 'W_RUNTIME_TEXT_CLIP',
               nodeId,
               scopedId,
               nodeType,
               text: (el.innerText || '').trim().slice(0, 80),
-              direction: dir,
-              overflowPx: px,
-              actualSize: { w: aw, h: ah },
-              requiredSize: { w: rw, h: rh },
-              message: '运行态文本节点 "' + nodeId + '" 发生' + (dir === 'horizontal' ? '水平' : '垂直') + '裁切（超出 ' + px + 'px，容器 ' + aw + '×' + ah + '，实需 ' + rw + '×' + rh + '）',
+              ...clip,
+              message: '运行态文本节点 "' + nodeId + '" 发生' + (direction === 'horizontal' ? '水平' : '垂直') + '裁切（超出 ' + overflowPx + 'px，容器 ' + actualSize.w + '×' + actualSize.h + '，实需 ' + requiredSize.w + '×' + requiredSize.h + '）'
+                + (line ? '；第 ' + line.line + ' 行「' + line.text + '」' : ''),
             });
           }
         }
