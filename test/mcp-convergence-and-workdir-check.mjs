@@ -212,9 +212,12 @@ test('Local working directory allows free read/write even when legacy AXURE_WRIT
       assert.match(symlinkProt.content[0].text, /受保护/);
 
       // 5c) System directory & skill install root write block
+      const sysForbiddenTarget = process.platform === 'win32'
+        ? join(process.env.SystemRoot || 'C:\\Windows', 'forbidden-zee.rp')
+        : '/System/forbidden-zee.rp';
       const sysBlocked = await client.callTool({
         name: 'rp_command',
-        arguments: { action: 'run', command: 'create-blank-project', args: ['/System/forbidden-zee.rp'] },
+        arguments: { action: 'run', command: 'create-blank-project', args: [sysForbiddenTarget] },
       });
       assert.ok(sysBlocked.isError);
       assert.match(sysBlocked.content[0].text, /系统目录|禁止/);

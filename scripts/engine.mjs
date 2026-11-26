@@ -18,8 +18,33 @@ import { getCommand, listCommands } from './registry.mjs';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
 const SKILL_ROOT = resolve(SCRIPTS_DIR, '..');
-const SYSTEM_FORBIDDEN_DIRS = ['/System', '/usr', '/bin', '/sbin', '/etc', '/private/etc', '/dev', '/proc', '/sys'];
+const SYSTEM_FORBIDDEN_DIRS_POSIX = ['/System', '/usr', '/bin', '/sbin', '/etc', '/private/etc', '/dev', '/proc', '/sys'];
 const SKILL_FORBIDDEN_SUBDIRS = ['bin', 'scripts', 'studio', 'tools', 'assets', 'examples', '.git', '.github', 'node_modules'];
+
+function systemForbiddenDirs() {
+  if (process.platform !== 'win32') return SYSTEM_FORBIDDEN_DIRS_POSIX;
+  const raw = [
+    process.env.SystemRoot,
+    process.env.windir,
+    process.env.ProgramFiles,
+    process.env['ProgramFiles(x86)'],
+    process.env.ProgramW6432,
+    'C:\\Windows',
+    'C:\\Program Files',
+    'C:\\Program Files (x86)',
+  ].filter(dir => typeof dir === 'string' && dir.trim());
+  const seen = new Set();
+  const resolved = [];
+  for (const dir of raw) {
+    const abs = physResolve(dir, false);
+    const key = fold(abs);
+    if (!seen.has(key)) {
+      seen.add(key);
+      resolved.push(abs);
+    }
+  }
+  return resolved;
+}
 
 // Windows 用 ';'，避免盘符里的 ':' 被当作分隔符。
 const splitPathList = value => (value ?? '').split(delimiter).filter(Boolean);
@@ -127,7 +152,7 @@ export function resolveWorkDir(explicitDir) {
   }
   const skillBase = physResolve(SKILL_ROOT, false);
   const cwdBase = physResolve(cwd, false);
-  if (cwd === '/' || fold(cwdBase) === fold(skillBase)) {
+  if (cwd === '/' || fold(cwd) === fold(parse(cwd).root) || fold(cwdBase) === fold(skillBase)) {
     const firstRoot = splitPathList(process.env.AXURE_WRITE_ROOT)[0];
     if (firstRoot) return resolve(firstRoot);
   }
@@ -140,12 +165,18 @@ export function assertWritable(path) {
   assertNotProtected(path);
   if (typeof path !== 'string' || path.length === 0) return;
   const abs = physResolve(path);
-  if (abs === '/' || SYSTEM_FORBIDDEN_DIRS.some(sysDir => fold(abs) === fold(sysDir) || fold(abs).startsWith(`${fold(sysDir)}${sep}`))) {
+  const isFsRoot = abs === '/' || fold(abs) === fold(parse(abs).root);
+  const inSystemForbidden = systemForbiddenDirs().some(sysDir => {
+    const foldedSys = fold(sysDir);
+    const prefix = foldedSys.endsWith(sep) ? foldedSys : `${foldedSys}${sep}`;
+    return fold(abs) === foldedSys || fold(abs).startsWith(prefix);
+  });
+  if (isFsRoot || inSystemForbidden) {
     throw new Error(`拒绝执行：禁止写入操作系统受保护目录（${abs}）`);
   }
   const skillBase = physResolve(SKILL_ROOT, false);
   const inSkillProtectedSubdir = SKILL_FORBIDDEN_SUBDIRS.some(sub => {
-    const target = `${skillBase}${sep}${sub}`;
+    const target = join(skillBase, sub);
     return fold(abs) === fold(target) || fold(abs).startsWith(`${fold(target)}${sep}`);
   });
   if (fold(abs) === fold(skillBase) || fold(dirname(abs)) === fold(skillBase) || inSkillProtectedSubdir) {

@@ -133,7 +133,10 @@ try {
     delete process.env.AXURE_STRICT_WRITE_ROOT;
     assertWritable(join(work, 'allowed.json'));
     assertWritable(join(tmpdir(), 'zee-rp-outside.json'));
-    assert.throws(() => assertWritable('/System/bad.rp'), /操作系统受保护目录/);
+    const sysBad = process.platform === 'win32'
+      ? join(process.env.SystemRoot || 'C:\\Windows', 'bad.rp')
+      : '/System/bad.rp';
+    assert.throws(() => assertWritable(sysBad), /操作系统受保护目录/);
     assert.throws(() => assertWritable(join(root, 'bad.rp')), /技能安装目录/);
     process.env.AXURE_STRICT_WRITE_ROOT = '1';
     assert.throws(() => assertWritable(join(tmpdir(), 'zee-rp-outside.json')), /AXURE_WRITE_ROOT/);
