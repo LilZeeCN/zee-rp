@@ -87,6 +87,18 @@ export function buildFixPlan(scenePage, metrics, doc = null) {
       notes.push({ nodeId, reason: `由宏或组件托管（${node.controlledByMacro || node.component || '受控节点'}），跳过直接写虚拟子节点` });
       continue;
     }
+    const parentNode = node.parentId ? byId.get(node.parentId) : null;
+    const parentLayout = parentNode?.layout || (parentNode?.type === 'phone-shell' ? 'column' : 'stack');
+    if (parentNode && ['column', 'row', 'grid'].includes(parentLayout)) {
+      const flowKeys = ['x', 'y', 'w', 'h'].filter(k => props[k] !== undefined);
+      if (flowKeys.length) {
+        notes.push({
+          nodeId,
+          reason: `父容器 "${parentNode.id}" 为 ${parentLayout} 流式布局，坐标由父容器决定，请改调父容器 padding/gap 或自身宽高/lineHeight（${flowKeys.map(k => `${k}=${node[k]}→${props[k]}`).join('，')}）`,
+        });
+      }
+      continue;
+    }
     // 只修 x/y（位置）。宽高改动会牵动兄弟布局，风险高于收益，放进 notes 让人决定。
     // 命令层写的是**局部坐标**（相对父容器）。scene 的 x/y 是页面绝对坐标，
     // 直接写回会被父容器 padding 再加一次（实测 73 → 104，位移 31px）。

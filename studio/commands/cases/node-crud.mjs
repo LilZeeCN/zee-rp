@@ -46,6 +46,7 @@ export const handlers = {
       const normalizeAliases = n => {
         if (!n || typeof n !== 'object') return;
         if (n.type === 'svg' || n.type === 'sparkline') n.type = 'path';
+        else if (['column', 'row', 'stack', 'grid'].includes(n.type)) { if (!n.layout) n.layout = n.type; n.type = 'box'; }
         else if (n.type === 'panel') n.type = 'dynamic-panel';
         else if (n.type === 'select' || n.type === 'droplist') n.type = 'combobox';
         else if (n.type === 'textarea') { n.type = 'input'; if (n.multiline === undefined) n.multiline = true; }
@@ -164,9 +165,21 @@ export const handlers = {
       }
       if (!parent || !CONTAINER_TYPES.includes(parent.type) || parent.locked) throw cmdError('E_INVALID_PARENT', `粘贴目标需要未锁定的普通源容器；可容纳子节点的类型：${CONTAINER_TYPES.join(', ')}`, { commandIndex: cmdIdx, field: 'parentId', extra: { parentType: parent?.type ?? null, parentLocked: parent?.locked ?? null, candidates: CONTAINER_TYPES } });
       const cloned = materializeNodeSnapshots({ doc, nodes: cmd.nodes, sourcePageId: cmd.sourcePageId, pageId, offset: cmd.offset });
+      const normalizePasteAliases = n => {
+        if (!n || typeof n !== 'object') return;
+        if (n.type === 'svg' || n.type === 'sparkline') n.type = 'path';
+        else if (['column', 'row', 'stack', 'grid'].includes(n.type)) { if (!n.layout) n.layout = n.type; n.type = 'box'; }
+        else if (n.type === 'panel') n.type = 'dynamic-panel';
+        else if (n.type === 'select' || n.type === 'droplist') n.type = 'combobox';
+        else if (n.type === 'textarea') { n.type = 'input'; if (n.multiline === undefined) n.multiline = true; }
+        for (const ch of n.children || []) normalizePasteAliases(ch);
+        for (const st of n.states || []) if (st?.root) normalizePasteAliases(st.root);
+        if (n.template) normalizePasteAliases(n.template);
+      };
       parent.children = parent.children || [];
       if (Number.isInteger(position)) position = Math.max(0, Math.min(position, parent.children.length));
       for (const node of cloned) {
+        normalizePasteAliases(node);
         if (!VALID_NODE_TYPES.has(node.type)) throw cmdError('E_NODE_TYPE', `未知的粘贴节点类型 ${node.type}；可用类型：${[...VALID_NODE_TYPES].join(', ')}`, { commandIndex: cmdIdx, field: 'node.type', extra: { candidates: [...VALID_NODE_TYPES].sort() } });
         parent.children.splice(Number.isInteger(position) ? position++ : parent.children.length, 0, node);
         affectedIds.push(`${pageId}/${node.id}`);

@@ -54,7 +54,7 @@ export async function previewCandidates(studio, { pageId, baseRevision, candidat
   if (baseRevision !== studio.store.appliedRevision) fail('E_STALE_EXPLORATION', '探索必须基于当前 baseRevision');
   if (!studio.scene.pages.some(p => p.id === pageId)) fail('E_PAGE_NOT_FOUND', `页面不存在：${pageId}`);
   if (!Array.isArray(candidates) || candidates.length < 1 || candidates.length > 4) fail('E_CANDIDATES', 'candidates 需要1–4个由 AI 编写的候选');
-  if (!Array.isArray(states) || states.length > 3) fail('E_EXPLORATION_STATES', '最多选择3个要实际验证和截图的状态');
+  if (!Array.isArray(states) || states.length > 6) fail('E_EXPLORATION_STATES', '最多选择6个要实际验证和截图的状态');
   const stateIds = new Set();
   for (const state of states) {
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(state?.id || '') || stateIds.has(state.id)) fail('E_EXPLORATION_STATES', '状态需要唯一安全 id');
@@ -63,9 +63,10 @@ export async function previewCandidates(studio, { pageId, baseRevision, candidat
     if (!Array.isArray(state.steps) || !state.steps.length) fail('E_SCENARIO_ACTIONS_REQUIRED', `状态 ${state.id} 尚未提供可重放的用户操作；请补充 click/input/fill/expect 步骤`);
     if (!countScenarioAssertions(state.steps)) fail('E_SCENARIO_ASSERTIONS_REQUIRED', `状态 ${state.id} 没有任何断言，不能认证为通过；请为 expect 增加页面、变量、可见文字、面板状态或数据集断言`);
   }
+  const allowEmptyCommands = states.length > 0;
   const ids = new Set();
   for (const candidate of candidates) {
-    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(candidate.id || '') || ids.has(candidate.id) || !Array.isArray(candidate.commands) || !candidate.commands.length) fail('E_CANDIDATES', '候选需要唯一安全 id 和非空 commands');
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(candidate.id || '') || ids.has(candidate.id) || !Array.isArray(candidate.commands) || (!allowEmptyCommands && !candidate.commands.length)) fail('E_CANDIDATES', '候选需要唯一安全 id 和非空 commands');
     ids.add(candidate.id);
     if(candidate.designIntent !== undefined){
       const intent=candidate.designIntent;
@@ -80,7 +81,9 @@ export async function previewCandidates(studio, { pageId, baseRevision, candidat
   for (const candidate of candidates) {
     const store = new StudioDocumentStore(source);
     await studio.operationProgress?.('rendering-candidate',{candidateId:candidate.id});
-    const applied = store.applyTransaction({ baseRevision, idempotencyKey: `candidate-${candidate.id}`, pageId, commands: candidate.commands });
+    const applied = candidate.commands.length
+      ? store.applyTransaction({ baseRevision, idempotencyKey: `candidate-${candidate.id}`, pageId, commands: candidate.commands })
+      : { ok: true, transitiveImpact: { affectedPageIds: [] } };
     const result = { id: candidate.id, label: candidate.label || candidate.id, ...(candidate.designIntent?{designIntent:{...structuredClone(candidate.designIntent),source:'caller-provided',userAccepted:false}}:{}),status: 'rejected', frames: [] };
     results.push(result);
     if (!applied.ok) { result.error = { code: applied.code, message: applied.message }; continue; }
@@ -111,11 +114,11 @@ export async function previewCandidates(studio, { pageId, baseRevision, candidat
         const browser = await runInteractionSteps(page, sandbox.store.doc, state.steps, { layer: 'browser', startPageId: pageId });
         if (!browser.passed) { writeFileSync(join(projectDir, `state-${index}-browser.json`), JSON.stringify(browser)); result.frames.push({ id: state.id, status: 'failed', layer: 'browser', code: browser.code, detailsPath: join(projectDir, `state-${index}-browser.json`) }); verified = false; continue; }
         const shot = await runtimeScreenshot(page, join(projectDir, `state-${index}.png`));
-        result.frames.push({ id: state.id, status: 'passed', ...shot, assertionCount: browser.assertionCount, verification: 'real-browser-pointer' });
+        result.frames.push({ id: state.id, ...(state.label ? { label: state.label } : {}), status: 'passed', ...shot, assertionCount: browser.assertionCount, verification: 'real-browser-pointer' });
       }
       result.projectDir = projectDir;
       result.status = verified ? 'rendered' : 'failed';
-      if (verified && !result.findings.hard.length) result.applyWith = { baseRevision, idempotencyKey: `apply-${explorationId}-${candidate.id}`, pageId, commands: candidate.commands };
+      if (verified && !result.findings.hard.length && candidate.commands.length) result.applyWith = { baseRevision, idempotencyKey: `apply-${explorationId}-${candidate.id}`, pageId, commands: candidate.commands };
       const frames = result.frames.filter(f => f.path);
       if (frames.length) columns.push({ label: result.label, frames: result.frames });
     } catch (error) { result.error = { code: error.code || 'E_CANDIDATE_RENDER', message: error.message }; result.status = 'failed'; }

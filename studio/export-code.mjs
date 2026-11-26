@@ -1641,9 +1641,10 @@ function buildAppJs(bundlePayload) {
           if (step.expect.text) {
             for (const [nodeId, expText] of Object.entries(step.expect.text)) {
               const actualText = this.getWidgetText(nodeId);
-              if (expText && typeof expText === 'object' && 'includes' in expText) {
-                if (!actualText.includes(String(expText.includes))) {
-                  failures.push('Expected text[' + nodeId + '] to include "' + expText.includes + '", got "' + actualText + '"');
+              const needle = expText && typeof expText === 'object' ? (expText.includes ?? expText.contains) : null;
+              if (needle !== null && needle !== undefined) {
+                if (!actualText.includes(String(needle))) {
+                  failures.push('Expected text[' + nodeId + '] to include "' + needle + '", got "' + actualText + '"');
                 }
               } else if (String(actualText) !== String(expText)) {
                 failures.push('Expected text[' + nodeId + ']="' + expText + '", got "' + actualText + '"');

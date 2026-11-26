@@ -365,7 +365,7 @@ function rejectNode(node) {
 }
 
 function requireSession() {
-  if (!session) throw new Error('没有活动会话：先调用 axure_open <path.rp>；或继续用命令工具的显式路径模式');
+  if (!session) throw new Error('没有活动会话：先调用 axure_open <path.rp>，或改用显式路径模式。提示：若你在编辑 Studio 画布工程，请直接用 studio_command / studio_inspect（无需 axure_open）。');
   // 缓存命中也必须检查当前磁盘路径，防止链文件被换成受保护目标的链接。
   for (const node of session.chain) assertNotProtected(node);
   return session;
@@ -2814,7 +2814,7 @@ function sessionSnapshotPayload() {
     return {
       active: false,
       file: null,
-      hint: '没有活动会话；调用 axure_open 开启，或使用 rp_inspect / rp_patch / rp_command 的显式路径模式。',
+      hint: '没有活动会话；调用 axure_open 开启，或使用 rp_inspect / rp_patch / rp_command 的显式路径模式；若在编辑 Studio 画布请用 studio_command / studio_inspect。',
     };
   }
   const state = refreshState(requireSession());

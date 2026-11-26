@@ -477,6 +477,10 @@ export function applyNodePosition(doc, entry, command, sceneOptions = {}) {
 export function validateAuthoredTree(node, cmdIdx, {historical=false}={}) {
   if (!node || typeof node !== 'object' || Array.isArray(node)) throw cmdError('E_INVALID_NODE', '节点需要对象', {commandIndex:cmdIdx});
   if (node.type === 'svg' || node.type === 'sparkline') node.type = 'path';
+  else if (['column', 'row', 'stack', 'grid'].includes(node.type)) { if (!node.layout) node.layout = node.type; node.type = 'box'; }
+  else if (node.type === 'panel') node.type = 'dynamic-panel';
+  else if (node.type === 'select' || node.type === 'droplist') node.type = 'combobox';
+  else if (node.type === 'textarea') { node.type = 'input'; if (node.multiline === undefined) node.multiline = true; }
   if (node.type !== undefined && !VALID_NODE_TYPES.has(node.type)) throw cmdError('E_NODE_TYPE', `未知节点类型 ${node.type}；可用类型：${[...VALID_NODE_TYPES].join(', ')}`, {commandIndex:cmdIdx,nodeId:node.id,extra:{candidates:[...VALID_NODE_TYPES].sort()}});
   validatePropertiesObject(Object.fromEntries(Object.entries(node).filter(([key]) => !['type','id','sourcePointer'].includes(key))),node.id,cmdIdx,{creation:true,historical});
   if (node.type === 'path' && (node.content !== undefined || node.points !== undefined)) {

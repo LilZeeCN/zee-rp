@@ -21,7 +21,7 @@ export const SCENARIO_STEP_SCHEMA = {
     expect: { type: 'object', minProperties: 1, additionalProperties: false, properties: {
       page: { type: 'string' },
       visible: { type: 'object', minProperties: 1, additionalProperties: { type: 'boolean' } },
-      text: { type: 'object', minProperties: 1 }, variables: { type: 'object', minProperties: 1 },
+      text: { type: 'object', minProperties: 1, description: '文本断言 { nodeId: "精确全文" | { includes: "子串" } | { contains: "子串" } }；仅读取文本节点自身文字，容器不聚合子节点文字' }, variables: { type: 'object', minProperties: 1 },
       panelState: { type: 'object', minProperties: 1, additionalProperties: { type: 'string' } },
       checked: { type: 'object', minProperties: 1, additionalProperties: { type: 'boolean' } },
       selected: { type: 'object', minProperties: 1 },
@@ -1010,6 +1010,16 @@ export class StudioRuntimeSession {
           if (!value || typeof value !== 'object' || Array.isArray(value) || !Object.keys(value).length) return invalid(i, `expect.${key} 必须是非空对象`);
           if (key === 'visible' && Object.values(value).some(v => typeof v !== 'boolean')) return invalid(i, 'visible 的期望值必须为 true/false');
           if (key === 'checked' && Object.values(value).some(v => typeof v !== 'boolean')) return invalid(i, 'checked 的期望值必须为 true/false');
+          if (key === 'text') {
+            for (const [tId, expVal] of Object.entries(value)) {
+              if (expVal !== null && typeof expVal === 'object') {
+                const ks = Object.keys(expVal);
+                if (Array.isArray(expVal) || ks.length !== 1 || !['includes', 'contains'].includes(ks[0]) || typeof expVal[ks[0]] !== 'string') {
+                  return invalid(i, `expect.text.${tId} 对象写法仅支持 { includes: "子串" } 或 { contains: "子串" }`);
+                }
+              }
+            }
+          }
           assertionCount += Object.keys(value).length;
         }
       }
@@ -1116,10 +1126,15 @@ export class StudioRuntimeSession {
         if (exp.text) {
           for (const [nodeId, expectedText] of Object.entries(exp.text)) {
             const actual = this.getWidgetText(nodeId);
-            const passed = typeof expectedText === 'object' && expectedText.includes
-              ? actual.includes(expectedText.includes)
+            const needle = expectedText && typeof expectedText === 'object' ? (expectedText.includes ?? expectedText.contains) : null;
+            const passed = needle !== null && needle !== undefined
+              ? actual.includes(String(needle))
               : actual === String(expectedText);
-            assertions.push({ type: 'text', target: nodeId, expected: expectedText, actual, passed });
+            const targetNode = passed ? null : this.findNodeInPage(this.currentPageId, nodeId);
+            const hint = !passed && targetNode && ['box', 'card', 'phone-shell', 'dynamic-panel'].includes(targetNode.type) && !actual
+              ? '容器节点不聚合子节点文本；请改为断言内部 label/paragraph/button 的 ID'
+              : undefined;
+            assertions.push({ type: 'text', target: nodeId, expected: expectedText, actual, passed, ...(hint ? { hint } : {}) });
           }
         }
         if (exp.visible) {

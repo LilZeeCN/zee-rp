@@ -422,8 +422,10 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
         }
         for (const [name, value] of Object.entries(step.expect?.text || {})) {
           const widget = actual.widgets?.find(w => (!native ? matchBrowserWidget(w, name, actual.page) : w.name === name.replace(/:/g, '/').split('/').at(-1)) && w.visible);
-          const substring = value !== null && typeof value === 'object' && typeof value.includes === 'string';
-          if (!widget || !(substring ? widget.text.includes(value.includes) : widget.text.trim() === String(value))) failures.push(`text:${name}`);
+          const needle = value !== null && typeof value === 'object'
+            ? (typeof value.includes === 'string' ? value.includes : typeof value.contains === 'string' ? value.contains : null)
+            : null;
+          if (!widget || !(needle !== null ? widget.text.includes(needle) : widget.text.trim() === String(value))) failures.push(`text:${name}`);
         }
         if (!native) {
           for (const [name, value] of Object.entries(step.expect?.checked || {})) {

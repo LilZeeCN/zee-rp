@@ -478,8 +478,9 @@ export function nodeCapabilitySummary(type, { node = null, target = null, source
   const fields = [
     ...geometry.slice(0, 5),
     'opacity',
-    ...(textTypes.has(type) ? ['text', 'fontSize', 'fontFamily', 'color'] : []),
-    ...(['box', 'card', 'phone-shell'].includes(type) ? ['layout', 'padding', 'gap'] : []),
+    ...(textTypes.has(type) ? ['text', 'fontSize', 'fontFamily', 'fontWeight', 'lineHeight', 'textAlign', 'wrap', 'color'] : []),
+    ...(type === 'button' ? ['fill', 'stroke', 'radius', 'variant', 'on'] : []),
+    ...(['box', 'card', 'phone-shell'].includes(type) ? ['layout', 'padding', 'gap', 'align', 'justify', 'fill', 'stroke', 'radius', 'visible'] : []),
     ...(type === 'card' ? ['title', 'body', 'titleFontSize'] : []),
     ...(type === 'list-item' ? ['title', 'subtitle', 'rightBadge'] : []),
     ...(type === 'stat-row' ? ['items', 'valueFontSize'] : []),

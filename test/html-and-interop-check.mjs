@@ -402,3 +402,130 @@ test('generate_from_image supports autoFix:true + emitRp1 + studio-html Chrome v
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('Blind-test consensus fixes: column/row aliases, contains/hints, single-else flatten, 402 grid & flow fix_plan, rp_patch hint', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-blind-fixes-'));
+  try {
+    const opened = await studioHandlers.studio_open_project({
+      projectDir: join(dir, 'proj'),
+      domain: 'mobile',
+      port: 0,
+    });
+    assert.ok(opened.ok);
+    const rev1 = opened.appliedRevision;
+
+    // 1. addNode accepts column / row aliases and normalizes to box + layout
+    // 2. flow children in column + full 402 board width exempt from grid offenders + fix_plan skips flow y
+    // 3. single-else branch works in studio_scenario AND flattens cleanly when exporting .rp
+    const cmdRes = await studioHandlers.studio_command({
+      projectDir: join(dir, 'proj'),
+      baseRevision: rev1,
+      idempotencyKey: 'blind-fix-1',
+      commands: [
+        {
+          type: 'addNode',
+          pageId: 'home',
+          node: {
+            id: 'col_wrap',
+            type: 'column',
+            w: 402,
+            h: 320,
+            padding: [16, 16, 16, 16],
+            gap: 12,
+            children: [
+              { id: 'box_holder', type: 'row', w: 370, h: 48, children: [{ id: 'inner_lbl', type: 'label', text: '内部标签', w: 120, h: 24 }] },
+              {
+                id: 'single_else_btn',
+                type: 'button',
+                text: '点我再练',
+                w: 160,
+                h: 44,
+                on: {
+                  click: {
+                    cases: [
+                      { else: true, actions: [{ type: 'set-text', target: 'feedback_lbl', text: '再练一次' }] },
+                    ],
+                  },
+                },
+              },
+              { id: 'feedback_lbl', type: 'label', text: '初始反馈', w: 200, h: 24 },
+            ],
+          },
+        },
+      ],
+    });
+    assert.equal(cmdRes.ok, true, JSON.stringify(cmdRes));
+
+    // Confirm 402 width did not produce an offender on col_wrap, and flow child doesn't emit bogus y patch
+    const metrics = await studioHandlers.studio_design({ projectDir: join(dir, 'proj'), pageId: 'home', action: 'metrics', pixelTruth: false });
+    assert.ok(!metrics.metrics.gridAlignment.offenders.some(o => o.id === 'col_wrap' && o.prop === 'w'));
+    const fixPlan = await studioHandlers.studio_design({ projectDir: join(dir, 'proj'), pageId: 'home', action: 'fix_plan' });
+    assert.ok(!fixPlan.commands.some(c => c.nodeId === 'box_holder' && c.properties?.y !== undefined));
+
+    // Scenario: { contains } works cleanly
+    const scenOk = await studioHandlers.studio_scenario({
+      projectDir: join(dir, 'proj'),
+      startPageId: 'home',
+      steps: [
+        { action: 'click', target: 'single_else_btn', expect: { text: { feedback_lbl: { contains: '再练' } } } },
+      ],
+    });
+    assert.equal(scenOk.ok, true, JSON.stringify(scenOk));
+
+    // Unknown object operator in expect.text rejects loudly instead of silent false
+    const scenBadOp = await studioHandlers.studio_scenario({
+      projectDir: join(dir, 'proj'),
+      startPageId: 'home',
+      steps: [{ action: 'expect', expect: { text: { feedback_lbl: { matchRegex: '再练' } } } }],
+    });
+    assert.equal(scenBadOp.ok, false);
+    assert.equal(scenBadOp.code, 'E_SCENARIO_STEP');
+
+    // Container text assertion failure emits helpful container hint
+    const scenBox = await studioHandlers.studio_scenario({
+      projectDir: join(dir, 'proj'),
+      startPageId: 'home',
+      steps: [{ action: 'expect', expect: { text: { box_holder: '内部标签' } } }],
+    });
+    assert.equal(scenBox.ok, false);
+    assert.match(scenBox.stepResults[0].assertions[0].hint || '', /容器节点不聚合子节点文本/);
+
+    // rp_patch without active session includes Studio redirect hint
+    assert.throws(
+      () => mcpToolMap.rp_patch({ edits: [{ selector: { id: 'x' } }] }),
+      err => /studio_command/.test(err.message)
+    );
+
+    // single-else export to native .rp compiles without "else must end a conditional chain"
+    if (!nativeTemplateSkipReason()) {
+      const rpOut = await studioHandlers.studio_export({
+        projectDir: join(dir, 'proj'),
+        format: 'rp',
+        outRpPath: join(dir, 'single-else.rp'),
+      });
+      assert.equal(rpOut.ok, true, JSON.stringify(rpOut));
+    }
+
+    // explore states-only (4 states + label, without candidates) renders real Chrome states cleanly
+    if (!chromeSkipReason()) {
+      const expStates = await studioHandlers.studio_design({
+        projectDir: join(dir, 'proj'),
+        pageId: 'home',
+        action: 'explore',
+        states: [
+          { id: 's1', label: '初始状态', steps: [{ action: 'expect', expect: { text: { feedback_lbl: { contains: '初始' } } } }] },
+          { id: 's2', label: '点击后1', steps: [{ action: 'click', target: 'single_else_btn', expect: { text: { feedback_lbl: { contains: '再练' } } } }] },
+          { id: 's3', label: '点击后2', steps: [{ action: 'click', target: 'single_else_btn', expect: { text: { feedback_lbl: '再练一次' } } }] },
+          { id: 's4', label: '包含别名', steps: [{ action: 'expect', expect: { text: { inner_lbl: { includes: '内部' } } } }] },
+        ],
+      });
+      assert.equal(expStates.ok, true, JSON.stringify(expStates));
+      assert.equal(expStates.candidates.length, 1);
+      assert.equal(expStates.candidates[0].frames.length, 4);
+      assert.equal(expStates.candidates[0].frames[0].label, '初始状态');
+    }
+  } finally {
+    await closeInProcessStudioServer();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

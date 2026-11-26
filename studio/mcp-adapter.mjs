@@ -637,8 +637,21 @@ export const studioHandlers = {
         includeImage: args.includeImage,
       }, { runWorkflow, exportHtml: exportPrototype });
       const { mcpImages: verifyImgs, ...bvSummary } = bv;
+      const compactExp = args.verbose
+        ? expRes
+        : {
+          ...expRes,
+          ...(expRes.compatibilityReport && typeof expRes.compatibilityReport === 'object'
+            ? {
+              compatibilityReport: {
+                ...Object.fromEntries(Object.entries(expRes.compatibilityReport).filter(([k]) => !['nodes', 'items'].includes(k))),
+                truncatedDetails: true,
+              },
+            }
+            : {}),
+        };
       return {
-        ...expRes,
+        ...compactExp,
         status: bv.status === 'completed' ? 'completed' : 'failed',
         ok: Boolean(expRes.ok && bv.status === 'completed'),
         behaviorVerification: bvSummary,
@@ -758,12 +771,23 @@ export const studioHandlers = {
       });
     }
     if (action === 'explore') {
+      const wantStatesOnly = !args.candidates && Array.isArray(args.states) && args.states.length > 0;
+      let resolvedBaseRev = args.baseRevision;
+      if (wantStatesOnly && resolvedBaseRev === undefined) {
+        const ctx = await callServerJson(baseUrl, '/api/context', 'GET', null, { readOnly: true });
+        resolvedBaseRev = ctx?.appliedRevision ?? ctx?.doc?.revision ?? 1;
+      }
+      const candidatesPayload = args.candidates
+        ? { candidates: args.candidates, baseRevision: args.baseRevision, states: args.states || [], preserve: args.preserve || {} }
+        : wantStatesOnly
+          ? { candidates: [{ id: 'current', label: '当前设计多态预演', commands: [] }], baseRevision: resolvedBaseRev, states: args.states, preserve: args.preserve || {} }
+          : {};
       return callServerJson(baseUrl, '/api/design/explore', 'POST', {
         pageId: args.pageId || null,
         axes: args.axes || null,
         limit: args.limit || null,
-        ...(args.candidates ? { candidates: args.candidates, baseRevision: args.baseRevision, states: args.states || [], preserve: args.preserve || {} } : {}),
-        ...(args.async !== undefined ? { async: args.async, requestKey: args.requestKey, baseRevision: args.baseRevision } : {}),
+        ...candidatesPayload,
+        ...(args.async !== undefined ? { async: args.async, requestKey: args.requestKey, baseRevision: resolvedBaseRev } : {}),
       });
     }
     if (action === 'review') {
@@ -971,7 +995,7 @@ export const studioTools = [
   {
     name: 'studio_describe', readOnly: true,
     description: '按需发现AI创作流程、RP/1、命令schema与craft指导。topic:command用name或names;fields/operation/surface仅用于topic:node。节点用name+fields查询；源码许可与真实生效验证分开登记。无需打开工程。',
-    inputSchema: { type: 'object', properties: { topic: { type: 'string', enum: ['workflow', 'rp1', 'command', 'node', 'design', 'craft'] }, name: { type: 'string' }, names: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' } }, fields: { type: 'array', minItems: 1, maxItems: 16, items: { type: 'string', minLength: 1 } }, operation: { enum: ['create', 'edit'] }, surface: { enum: ['canvas', 'runtime', 'native', 'full-rp1'] }, intent: { type: 'string', enum: ['editorial', 'task', 'learning'] }, platform: { type: 'string', enum: ['mobile', 'web'] }, guideId: { type: 'string' } }, additionalProperties: false },
+    inputSchema: { type: 'object', properties: { topic: { type: 'string', enum: ['workflow', 'rp1', 'command', 'node', 'design', 'craft'] }, name: { type: 'string' }, names: { type: 'array', minItems: 1, maxItems: 8, items: { type: 'string' } }, fields: { type: 'array', minItems: 1, maxItems: 16, items: { type: 'string', minLength: 1 }, description: '仅用于 topic:"node"：指定要查询的属性名' }, operation: { enum: ['create', 'edit'], description: '仅用于 topic:"node"' }, surface: { enum: ['canvas', 'runtime', 'native', 'full-rp1'], description: '仅用于 topic:"node"' }, intent: { type: 'string', enum: ['editorial', 'task', 'learning'] }, platform: { type: 'string', enum: ['mobile', 'web'] }, guideId: { type: 'string' } }, additionalProperties: false },
     handler: studioHandlers.studio_describe,
   },
   {
@@ -1168,9 +1192,9 @@ export const studioTools = [
           id: { type: 'string', pattern: '^[a-zA-Z0-9_-]{1,64}$' }, label: { type: 'string' }, commands: { type: 'array', minItems: 1, items: { type: 'object' } },
           designIntent: { type: 'object', additionalProperties: false, required: ['reason', 'tradeoff', 'axes'], properties: { reason: { type: 'string', minLength: 1, maxLength: 1000 }, tradeoff: { type: 'string', minLength: 1, maxLength: 1000 }, axes: { type: 'array', minItems: 1, maxItems: 6, uniqueItems: true, items: { enum: ['structure', 'reading-order', 'typography', 'density', 'imagery', 'interaction'] } } } },
         } }, description: 'explore' },
-        states: { type: 'array', maxItems: 3, items: { type: 'object', additionalProperties: false, required: ['id', 'steps'], properties: {
-          id: { type: 'string', pattern: '^[a-zA-Z0-9_-]{1,64}$' }, steps: { type: 'array', minItems: 1, items: BROWSER_SCENARIO_STEP_SCHEMA },
-        } }, description: 'explore' },
+        states: { type: 'array', maxItems: 6, items: { type: 'object', additionalProperties: false, required: ['id', 'steps'], properties: {
+          id: { type: 'string', pattern: '^[a-zA-Z0-9_-]{1,64}$' }, label: { type: 'string', maxLength: 120 }, steps: { type: 'array', minItems: 1, items: BROWSER_SCENARIO_STEP_SCHEMA },
+        } }, description: 'explore：最多 6 项；可不传 candidates 单独传入，自动基于当前版本跑多态真机截图而不触发参数变体' },
         preserve: { type: 'object', additionalProperties: false, properties: { content: { type: 'boolean' }, interactions: { type: 'boolean' } }, description: 'explore' },
         axes: {
           type: 'object',
@@ -1195,7 +1219,7 @@ export const studioTools = [
   },
   {
     name: 'studio_scenario',
-    description: '在隔离的交互运行态会话（StudioRuntimeSession）中执行业务交互剧本并断言变量、面板状态、文本、显隐与数据集，不污染设计态文档。默认走语义执行层，不做遮挡/hitTest校验：click只要求目标在当前运行态可见，通过≠真实可点。hitTest:true 先用真实浏览器指针重放校验每个点击/输入与跨页跳转（支持宽屏桌面画板自动避让编辑器浮层、click 触发 link 跨页与显式 navigate 步骤；遮挡/命中按真实DOM结论），被遮挡返回E_SCENARIO_OCCLUDED（含nodeId/occludedBy遮挡者/stepIndex，语义层不执行该步）；真实浏览器不可用返回E_SCENARIO_HITTEST_UNAVAILABLE（不静默降级）；含dataset等浏览器层无法重放的步骤返回E_SCENARIO_HITTEST_UNSUPPORTED。步骤示例：{action:"click",target:"reveal",expect:{visible:{answer:true}}}；未知步骤或零断言会拒绝。acceptance:true 改为执行12个语义验收模板（faultInjection:true 跑故障注入对照）；无操作脚本或不支持的断言返回unsupported，不记为通过。',
+    description: '在隔离的交互运行态会话（StudioRuntimeSession）中执行业务交互剧本并断言变量、面板状态、文本、显隐与数据集，不污染设计态文档。expect.text 支持精确全文或 {includes:"子串"}（兼容 {contains:"子串"}），且仅读取文本节点自身文字，容器不聚合子节点文字。默认走语义执行层，不做遮挡/hitTest校验：click只要求目标在当前运行态可见，通过≠真实可点。hitTest:true 先用真实浏览器指针重放校验每个点击/输入与跨页跳转（支持宽屏桌面画板自动避让编辑器浮层、click 触发 link 跨页与显式 navigate 步骤；遮挡/命中按真实DOM结论），被遮挡返回E_SCENARIO_OCCLUDED（含nodeId/occludedBy遮挡者/stepIndex，语义层不执行该步）；真实浏览器不可用返回E_SCENARIO_HITTEST_UNAVAILABLE（不静默降级）；含dataset等浏览器层无法重放的步骤返回E_SCENARIO_HITTEST_UNSUPPORTED。步骤示例：{action:"click",target:"reveal",expect:{visible:{answer:true},text:{feedback:{includes:"再练"}}}}；未知步骤或零断言会拒绝。acceptance:true 改为执行12个语义验收模板（faultInjection:true 跑故障注入对照）；无操作脚本或不支持的断言返回unsupported，不记为通过。',
     inputSchema: {
       type: 'object',
       properties: {

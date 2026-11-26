@@ -308,9 +308,11 @@ function gridAlignment(nodes, grid = 4, board = null) {
     if (!node.parentId) continue;
     if (pageArea && (node.w || 0) * (node.h || 0) >= pageArea * 0.9) continue;
     const geometric = GEOMETRY_TYPES.has(node.type) || (node.childrenIds || []).length > 0;
+    const isBoardSpan = (key, val) => (key === 'w' && board?.screenW && Math.abs(val - board.screenW) < 0.5)
+      || (key === 'h' && board?.screenH && Math.abs(val - board.screenH) < 0.5);
     const pushValue = value => { if (Number.isFinite(value) && value >= grid) values.push(value); };
     for (const key of ['x', 'y']) pushValue(node[key]);
-    if (geometric) for (const key of ['w', 'h']) pushValue(node[key]);
+    if (geometric) for (const key of ['w', 'h']) if (!isBoardSpan(key, node[key])) pushValue(node[key]);
     if (Array.isArray(node.padding)) values.push(...node.padding.filter(v => Number.isFinite(v) && v >= grid));
     if (Number.isFinite(node.gap) && node.gap >= grid) values.push(node.gap);
     for (const key of ['x', 'y', 'w', 'h']) {
@@ -318,6 +320,7 @@ function gridAlignment(nodes, grid = 4, board = null) {
       if (!Number.isFinite(value) || value <= 0) continue;
       // 1–3px 的发丝线/分隔线是刻意的，不能被"建议改成 0px"。
       if (value < grid) continue;
+      if (isBoardSpan(key, value)) continue;
       if (Math.abs(value / grid - Math.round(value / grid)) < 0.01) continue;
       const nearest = Math.max(grid, Math.round(value / grid) * grid);
       offenders.push({ id: node.id, prop: key, value: Math.round(value * 100) / 100, nearest });
@@ -1025,6 +1028,12 @@ export function computeDesignMetrics(scenePage, { thresholds = THRESHOLDS, doc =
   }
 
   const contrastWarnings = [...whitespaceWarnings];
+  if (contrast.source === 'pixel' && contrast.failing > 0) {
+    contrastWarnings.push({
+      check: 'contrast',
+      detail: '像素级字形对比度受细笔画抗锯齿影响；若已使用深色仍不达标，调大字号（如 12→14/16px）或加粗（fontWeight）通常比继续压深颜色更有效。',
+    });
+  }
   const budgetLines = [];
   if (exportBudget.rasterized) {
     budgetLines.push(`${exportBudget.rasterized} 个元素的效果会以栅格装饰层进入 .rp（文字仍可编辑）`);

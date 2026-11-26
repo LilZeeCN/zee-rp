@@ -273,7 +273,11 @@ function normalizeExportEventSpec(evSpec, exportCtx = null) {
         };
       })
       .filter(Boolean);
-    return cases.length > 0 ? { ...structuredClone(evSpec), cases } : null;
+    if (!cases.length) return null;
+    if (cases.length === 1 && (cases[0].else === true || (!cases[0].when && !cases[0].if))) {
+      return cases[0].actions;
+    }
+    return { ...structuredClone(evSpec), cases };
   }
   if (evSpec.type) {
     const single = normalizeSingleExportAction(evSpec, exportCtx);
