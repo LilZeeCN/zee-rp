@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { sha256 } from './document.mjs';
+import { buildNodeIndex, sha256 } from './document.mjs';
 import { reviewNodeSnapshots, compareReviews } from './review-comparison.mjs';
 import { summarizeMetrics } from './design-metrics.mjs';
 import {locateDiagnostic} from './diagnostics.mjs';
@@ -88,16 +88,59 @@ function summarizeNativeReadiness(page, docPage = null) {
 
 const checkList = ['主任务和主操作是否足够明确', '图像主体、图文比例和留白是否服务内容', '标题、正文、辅助信息的层级是否清楚', '空态、错误态、长文本及连续操作是否可用', '与所选参考相比，哪些决定需要改，为什么'];
 export async function reviewDesign(studio, { pageId, baseRevision, reviewId = null, observations = null, compareWithReviewId = null } = {}) {
-  if (baseRevision !== studio.store.appliedRevision) throw Object.assign(new Error('画布已变化，请使用当前版本重新截图评审'), { code: 'E_STALE_REVIEW' });
+  const dir = join(studio.projectDir, 'design-reviews'); mkdirSync(dir, { recursive: true });
+  let existingReview = null;
+  if (reviewId) {
+    if (!/^[a-f0-9-]{36}$/.test(reviewId) || !existsSync(join(dir, `${reviewId}.json`))) {
+      throw Object.assign(new Error('评审记录不存在'), { code: 'E_REVIEW_NOT_FOUND' });
+    }
+    existingReview = JSON.parse(readFileSync(join(dir, `${reviewId}.json`)));
+  }
+  const effectivePageId = pageId || existingReview?.pageId || studio.store.doc.pages?.[0]?.id || studio.scene.pages?.[0]?.id;
+  const effectiveBaseRevision = (baseRevision === undefined || baseRevision === null)
+    ? studio.store.appliedRevision
+    : baseRevision;
+  pageId = effectivePageId;
+  baseRevision = effectiveBaseRevision;
+  if (baseRevision !== studio.store.appliedRevision) {
+    throw Object.assign(
+      new Error(`画布已变化（当前 appliedRevision=${studio.store.appliedRevision}，请求 baseRevision=${baseRevision}），请使用当前版本重新截图评审`),
+      {
+        code: 'E_STALE_REVIEW',
+        currentRevision: studio.store.appliedRevision,
+        requestedBaseRevision: baseRevision,
+        renderedRevision: studio.renderedRevision,
+      }
+    );
+  }
   const page = studio.scene.pages.find(p => p.id === pageId);
   if (!page) throw Object.assign(new Error(`页面不存在：${pageId}`), { code: 'E_PAGE_NOT_FOUND' });
-  const dir = join(studio.projectDir, 'design-reviews'); mkdirSync(dir, { recursive: true });
   if (reviewId) {
-    if (!/^[a-f0-9-]{36}$/.test(reviewId) || !existsSync(join(dir, `${reviewId}.json`))) throw Object.assign(new Error('评审记录不存在'), { code: 'E_REVIEW_NOT_FOUND' });
-    const review = JSON.parse(readFileSync(join(dir, `${reviewId}.json`)));
+    const review = existingReview;
     if (review.contentHash !== studio.store.doc.contentHash || review.pageId !== pageId) throw Object.assign(new Error('记录对应其他画布版本或页面，请重新截图'), { code: 'E_STALE_REVIEW' });
-    const ids = new Set(page.nodes.map(n => n.id));
-    if (!Array.isArray(observations) || !observations.length || observations.some(o => !o || Object.keys(o).some(key=>!['nodeIds','issue','consequence','decision','preserve'].includes(key)) || typeof o.issue !== 'string' || !o.issue.trim() || o.issue.length>4000 || ['consequence','decision','preserve'].some(key=>o[key]!==undefined&&(typeof o[key]!=='string'||o[key].length>4000)) || !Array.isArray(o.nodeIds) || o.nodeIds.some(id => !ids.has(id)))) {
+    const ids = new Set();
+    const registerRef = (bareId, scopedId) => {
+      if (bareId) {
+        ids.add(bareId);
+        ids.add(`${pageId}/${bareId}`);
+      }
+      if (scopedId) {
+        const normScoped = String(scopedId).replace(/:/g, '/');
+        ids.add(scopedId);
+        ids.add(normScoped);
+      }
+    };
+    for (const n of page.nodes) registerRef(n.id, n.scopedId);
+    const docIdx = buildNodeIndex(studio.store.doc);
+    for (const entry of new Set(docIdx.byScopedId.values())) {
+      if (entry.pageId === pageId) registerRef(entry.id, entry.scopedId);
+    }
+    const isValidObsNodeRef = rawRef => {
+      if (typeof rawRef !== 'string' || !rawRef) return false;
+      const normRef = rawRef.replace(/^@/, '').replace(/:/g, '/');
+      return ids.has(rawRef) || ids.has(normRef);
+    };
+    if (!Array.isArray(observations) || !observations.length || observations.some(o => !o || Object.keys(o).some(key=>!['nodeIds','issue','consequence','decision','preserve'].includes(key)) || typeof o.issue !== 'string' || !o.issue.trim() || o.issue.length>4000 || ['consequence','decision','preserve'].some(key=>o[key]!==undefined&&(typeof o[key]!=='string'||o[key].length>4000)) || !Array.isArray(o.nodeIds) || o.nodeIds.some(id => !isValidObsNodeRef(id)))) {
       throw Object.assign(new Error('每条 observations 需要具体 issue 和有效 nodeIds（全页问题可为空数组）'), { code: 'E_REVIEW_OBSERVATIONS' });
     }
     const recorded = { ...review, status: 'agent-reviewed', observations, userAccepted: false };
@@ -175,7 +218,7 @@ export async function reviewDesign(studio, { pageId, baseRevision, reviewId = nu
   const docPage = (studio.store.doc.pages || []).find(p => p.id === pageId) || null;
   const nativeReadiness = summarizeNativeReadiness(page, docPage);
   const interactionDiagnostics = lintDocumentInteractions(studio.store.doc, { includeCompleteness: true, pageId });
-  const review = { schemaVersion: 2, board: page.board, nodeSnapshots: reviewNodeSnapshots(page), reviewId: id, pageId, revision: baseRevision, contentHash: shot.contentHash, screenshot,
+  const review = { schemaVersion: 2, documentId: studio.store.doc.documentId, board: page.board, nodeSnapshots: reviewNodeSnapshots(page), reviewId: id, pageId, revision: baseRevision, contentHash: shot.contentHash, screenshot,
     status: 'awaiting-visual-review', userAccepted: false, findings:findings.map(finding=>({...finding,location:locateDiagnostic({doc:studio.store.doc,scene:studio.scene,pageId,nodeIds:finding.nodeIds||[finding.nodeId||finding.scopedId].filter(Boolean),field:finding.field,code:finding.code,limit:1})})), checkList,
     assessment: { blockingCount: findings.filter(f => f.severity === 'error').length, advisoryCount: findings.filter(f => f.severity !== 'error').length, note: '硬问题与风格建议分别记录；unknown 不计为通过。' },
     nativeReadiness,

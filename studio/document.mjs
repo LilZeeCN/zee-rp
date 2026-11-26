@@ -944,24 +944,71 @@ export function buildNodeIndex(doc) {
     byName,
     resolve(target, preferredPageId = null) {
       if (!target) return null;
-      if (byScopedId.has(target)) return byScopedId.get(target);
-      // Check pageId/nodeId shorthand
-      if (target.includes('/')) {
-        const parts = target.split('/');
+      const raw = String(target).replace(/^@/, '');
+      const norm = raw.replace(/:/g, '/');
+      if (byScopedId.has(raw)) return byScopedId.get(raw);
+      if (byScopedId.has(norm)) return byScopedId.get(norm);
+      if (preferredPageId && byScopedId.has(`${preferredPageId}/${norm}`)) {
+        return byScopedId.get(`${preferredPageId}/${norm}`);
+      }
+      // 支持动态面板状态容器引用：panelId:stateId / panelId/stateId / pageId/panelId:stateId / pageId/panelId/stateId
+      if (norm.includes('/')) {
+        const lastSlash = norm.lastIndexOf('/');
+        const panelPrefix = norm.slice(0, lastSlash);
+        const statePart = norm.slice(lastSlash + 1);
+        let panelEntry = byScopedId.get(panelPrefix)
+          || (preferredPageId ? byScopedId.get(`${preferredPageId}/${panelPrefix}`) : null);
+        if (!panelEntry) {
+          const panelIdCands = byId.get(panelPrefix) || [];
+          if (panelIdCands.length === 1 && (!preferredPageId || panelIdCands[0].pageId === preferredPageId)) {
+            panelEntry = panelIdCands[0];
+          } else if (panelIdCands.length > 1 && preferredPageId) {
+            const onPg = panelIdCands.filter(c => c.pageId === preferredPageId);
+            panelEntry = onPg.find(c => c.activeInPanel) || onPg[0] || null;
+          } else if (panelPrefix.includes('/')) {
+            const [pSeg, ...restSegs] = panelPrefix.split('/');
+            const pTail = restSegs.join('/');
+            for (const [k, v] of byScopedId.entries()) {
+              if (v.pageId === pSeg && (v.id === pTail || k.endsWith('/' + pTail))) {
+                panelEntry = v;
+                if (v.activeInPanel) break;
+              }
+            }
+          }
+        }
+        if (panelEntry?.node?.type === 'dynamic-panel' && Array.isArray(panelEntry.node.states)) {
+          const st = panelEntry.node.states.find(s => s.id === statePart || s.name === statePart);
+          if (st?.root?.id) {
+            const stRootEntry = byScopedId.get(`${panelEntry.scopedId}/${st.id}/${st.root.id}`);
+            if (stRootEntry) return stRootEntry;
+          }
+        }
+      }
+      // Check pageId/nodeId or relativeScope/nodeId shorthand
+      if (norm.includes('/')) {
+        const parts = norm.split('/');
         const pagePart = parts[0];
         const nodePart = parts.slice(1).join('/');
         const matches = [];
         for (const [k, v] of byScopedId.entries()) {
-          if (k === target || (v.pageId === pagePart && (v.id === nodePart || k.endsWith('/' + nodePart)))) {
+          if (k === norm || (v.pageId === pagePart && (v.id === nodePart || k.endsWith('/' + nodePart)))) {
             matches.push(v);
           }
         }
+        if (matches.length === 0 && preferredPageId) {
+          for (const [k, v] of byScopedId.entries()) {
+            if (v.pageId === preferredPageId && k.endsWith('/' + norm)) {
+              matches.push(v);
+            }
+          }
+        }
         if (matches.length > 0) {
-          const activeHit = matches.find(m => m.activeInPanel);
-          return activeHit || matches[0];
+          const uniqueMatches = [...new Set(matches)];
+          const activeHit = uniqueMatches.find(m => m.activeInPanel);
+          return activeHit || uniqueMatches[0];
         }
       }
-      const idCandidates = byId.get(target) || [];
+      const idCandidates = byId.get(norm) || [];
       if (idCandidates.length === 1) {
         const only = idCandidates[0];
         // A command with an explicit page is a scoped edit. Never let an

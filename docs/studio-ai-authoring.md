@@ -102,7 +102,7 @@ Studio 原生出口会把跨页 `set-text`（普通 label / paragraph / button /
 
 关键改稿后调用 `studio_design(action:review)` 并实际查看图片，记录具体节点与问题；前后对照用 `compareWithReviewId`。候选探索使用现有 `candidates/states`，从信息结构、字形、素材与主次关系提出不同方向；不能只用颜色数量表示设计多样性。
 
-至少验证初始态、操作后的反馈、长内容与返回；运行 `studio_scenario` 的 `action/expect`，返回明确的 `executionLayer:studio-semantic`；这是隔离语义执行，且默认语义层不做遮挡/hitTest 校验——通过 ≠ 真实可点。需要遮挡/命中结论时：`hitTest:true` 先用真实浏览器指针重放校验每个点击目标，被遮挡返回 `E_SCENARIO_OCCLUDED`（含 nodeId/occludedBy 遮挡者/stepIndex，语义层不执行该步），浏览器不可用返回 `E_SCENARIO_HITTEST_UNAVAILABLE`（不静默降级），含 navigate/dataset 等浏览器层无法重放的步骤返回 `E_SCENARIO_HITTEST_UNSUPPORTED`；多状态联系图仍用 `studio_design(action:explore)` 的 states（真实浏览器指针）。未知断言与零断言不能算成功。最后 `studio_export(format:rp)` 检查可编辑节点、交互及装饰降级；结构检查、Axure加载、预览、GUI编辑分别记录。
+至少验证初始态、操作后的反馈、长内容与返回；运行 `studio_scenario` 的 `action/expect`，返回明确的 `executionLayer:studio-semantic`；这是隔离语义执行，且默认语义层不做遮挡/hitTest 校验——通过 ≠ 真实可点。需要遮挡/命中结论时：`hitTest:true` 先用真实浏览器指针重放校验每个点击目标（支持跨页 `click` → `link`/`navigate` 跳转与显式 `navigate` 步），被遮挡返回 `E_SCENARIO_OCCLUDED`（含 nodeId/occludedBy 遮挡者/stepIndex，语义层不执行该步），浏览器不可用返回 `E_SCENARIO_HITTEST_UNAVAILABLE`（不静默降级），含 `dataset` 等浏览器层无法重放的数据集步骤返回 `E_SCENARIO_HITTEST_UNSUPPORTED`；无副作用多状态面板预览可直接用 `studio_screenshot({panelStates:{panelId:"stateId"}})`，多构图联系图用 `studio_design(action:explore)` 的 states（真实浏览器指针）。未知断言与零断言不能算成功。最后 `studio_export(format:rp)` 检查可编辑节点、交互及装饰降级；结构检查、Axure加载、预览、GUI编辑分别记录。
 
 ## 失败与恢复
 
@@ -115,7 +115,7 @@ Studio 原生出口会把跨页 `set-text`（普通 label / paragraph / button /
 
 节点片段支持可选的内联 `vars:` / `tokens:` 头部、显式根容器、`panel` / `dynamic-panel`（含 `:state` 与 `tabs=[...]` 自动分段切换）、`repeater`（含 `:template` 与 `data=` 数据集绑定）、一等公民原生表单控件（`checkbox`、`radio`、`combobox`/`select`、`listbox`、`textarea`/`input multiline=true`）及全部内置宏（`card`、`stat-row`、`list-item`、`progress-bar`、`nav-bar`、`tab-bar`）；纯装饰节点 `divider` / `spacer` 可省略 `#id`。不支持任意完整语言运算 AST、非 click 事件或 `open-link` 等浏览器受限动作；这些情况明确报错，走现有完整 RP/1 流程。不能从画布的受限入口推导任意原生工程都能无损双向回写。
 
-当前公开 MCP 工具数为 72，其中 13 个 `studio_*` 动词化工具。已有 MCP 进程和已运行 Studio 不自动热更新；用 `runtime_info` 核对运行/磁盘指纹，实际操作本轮参数需要新 stdio 连接与新服务。没有重启已有用户工程，没有公开发布。
+当前公开 MCP 工具数为 30（其中 13 个 `studio_*` 动词化工具、10 个 RP/1 创作/导出/Chrome验证与诊断工具、5 个原生 `.rp` 工具、2 个队列与 GUI 往返工具）。已有 MCP 进程和已运行 Studio 不自动热更新；用 `runtime_info` 核对运行/磁盘指纹，实际操作本轮参数需要新 stdio 连接与新服务。没有重启已有用户工程，没有公开发布。
 
 ## 本轮试用反馈修复
 

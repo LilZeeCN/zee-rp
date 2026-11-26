@@ -133,12 +133,21 @@ for (const rel of ['scripts/registry.mjs', 'scripts/engine.mjs', 'bin/axure.mjs'
   ok('安全 输入源=受保护成品 被拒', r.status !== 0 && err.includes('受保护'), `exit=${r.status} stderr=${err.trim().slice(0, 120)}`);
 }
 {
-  // 白名单根 = <WORK>/wr；输出到 <WORK>/other/ 必须在 spawn 前被引擎拒绝（文件不得落盘）
+  // 默认放开本地工作目录正例：仅设 AXURE_WRITE_ROOT、未开启 AXURE_STRICT_WRITE_ROOT=1 时，其它合法本地目录正常可写。
   const env = { ...baseEnv, AXURE_WRITE_ROOT: join(WORK, 'wr') };
+  mkdirSync(join(WORK, 'other'), { recursive: true });
+  const target = join(WORK, 'other', 'free-default.rp');
+  const r = execNode(BIN, ['create-blank-project', target], { env });
+  ok('默认模式 即使存在 AXURE_WRITE_ROOT 本地其它工作目录仍正常可写', r.status === 0 && existsSync(target),
+    `exit=${r.status} ${r.stderr.toString().trim().slice(0, 120)}`);
+}
+{
+  // 显式开启严格沙箱（AXURE_STRICT_WRITE_ROOT=1）：白名单根 = <WORK>/wr；输出到 <WORK>/other/ 必须在 spawn 前被引擎拒绝（文件不得落盘）
+  const env = { ...baseEnv, AXURE_WRITE_ROOT: join(WORK, 'wr'), AXURE_STRICT_WRITE_ROOT: '1' };
   const target = join(WORK, 'other', 'na.rp');
   const r = execNode(BIN, ['create-blank-project', target], { env });
   const err = r.stderr.toString();
-  ok('安全 白名单外输出 被拒且未落盘', r.status !== 0 && err.includes('AXURE_WRITE_ROOT') && !existsSync(target),
+  ok('严格模式 白名单外输出 被拒且未落盘', r.status !== 0 && err.includes('AXURE_WRITE_ROOT') && !existsSync(target),
     `exit=${r.status} stderr=${err.trim().slice(0, 120)}`);
 }
 {
@@ -178,8 +187,8 @@ for (const rel of ['scripts/registry.mjs', 'scripts/engine.mjs', 'bin/axure.mjs'
     `exit=${r.status} ${r.stderr.toString().trim().slice(0, 120)}`);
 }
 {
-  // 白名单定位回归②：duplicate-page --index 源在根内、输出在根外。修复前 exit 0 且产物泄漏到白名单外。
-  const env = { ...baseEnv, AXURE_WRITE_ROOT: join(WORK, 'wr') };
+  // 白名单定位回归②：duplicate-page --index 源在根内、输出在根外（严格模式）。
+  const env = { ...baseEnv, AXURE_WRITE_ROOT: join(WORK, 'wr'), AXURE_STRICT_WRITE_ROOT: '1' };
   const target = join(WORK, 'other', 'dp-leak.rp');
   const r = execNode(BIN, ['duplicate-page', '--index', join(WORK, 'wr', 'ok.rp'), target, '4', 'Leak Page'], { env });
   const err = r.stderr.toString();
@@ -188,8 +197,8 @@ for (const rel of ['scripts/registry.mjs', 'scripts/engine.mjs', 'bin/axure.mjs'
 }
 {
   // 白名单定位回归③：axvg build 省略 -o 时脚本写 spec 同名默认输出（axvg.mjs:360-361），
-  // 根外 spec 的默认输出必须被拒（修复前 exit 0 且产物落在白名单外）。
-  const env = { ...baseEnv, AXURE_WRITE_ROOT: join(WORK, 'wr') };
+  // 严格模式下根外 spec 的默认输出必须被拒。
+  const env = { ...baseEnv, AXURE_WRITE_ROOT: join(WORK, 'wr'), AXURE_STRICT_WRITE_ROOT: '1' };
   copyFileSync(ASSET_SPEC, join(WORK, 'dash.spec.json'));
   const r = execNode(BIN, ['axvg', 'build', join(WORK, 'dash.spec.json')], { env });
   const err = r.stderr.toString();

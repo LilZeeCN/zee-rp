@@ -13,7 +13,7 @@
 `generate_prototype` 默认 `compact:true`，返回源码、成品、页面预览、验证状态和完整报告路径；
 需要旧版详细字段时显式传 `compact:false`。`recipe` 与 `spec/source` 二选一。
 `autoHeal` 默认 `false`，与 CLI 一致；显式 `true` 会将候选修复完整重编译、重跑门禁，并在新增错误时回退整批修复。精简响应含回退标志与计数，完整报告含每项属性变化和原因。
-文件输入推荐 `source:"/absolute/source.rp1"`；`spec` 接受内联对象、JSON 对象文本和文件路径。`sync_prototype.spec`、`diagnose_prototype.source`、`explain_binding.source`、`review_image_structure.spec` 也接受对象与 JSON 对象文本。
+文件输入推荐 `source:"/absolute/source.rp1"`；`spec` 接受内联对象、JSON 对象文本和文件路径。`sync_prototype.spec` 与 `diagnose_prototype`（`source` / `spec`）也接受对象、文件路径与 JSON 对象文本。
 
 ## 大原型：先取任务句柄
 
@@ -21,13 +21,13 @@
 {"source":"/absolute/source.rp1","output":"/absolute/prototype.rp","strictAudit":true,"async":true}
 ```
 
-在 stdio MCP 中调用 `generate_prototype` 或 `revise_prototype` 并传 `async:true`，立即返回 `id/type/status`（改稿的 type 为 `revise-prototype`，可同时使用 `dryRun:true`）。用 `jobs_get({id})` 查询：
+在 stdio MCP 中调用 `generate_prototype` 或 `revise_prototype` 并传 `async:true`，立即返回 `id/type/status`（改稿的 type 为 `revise-prototype`，可同时使用 `dryRun:true`）。用 `jobs({action:"get", id})` 查询：
 `queued → running → completed/failed/cancelled`；最终生成响应在 `result` 内，包含成品、基线、报告或结构化诊断。
-`jobs_cancel({id})` 可取消，已经写出的文件保留，取消不代表撤销已发布的文件。
+`jobs({action:"cancel", id})` 可取消，已经写出的文件保留，取消不代表撤销已发布的文件。
 输入文件在排队期间变化会返回 `E_STALE_JOB_INPUT`。保持 MCP 连接；当前任务句柄保存在服务进程内，服务关闭后失效。
 异步生成复用现有任务管理器，不需要新服务。默认仍同步；CLI 和直接库调用使用同步生成。
 
-成功改稿将预览、IR、审计和 `revision-report.json` 发布到 `<output>.assets/`；响应和基线中的路径随之更新，`.revision-*` 中间目录自动删除。原文件始终保留。`read_interactions` 默认按 20 个交互拥有者分页，接近 20KB 时缩小本页条数，继续使用返回的 `nextOffset`；支持 `widget` 逻辑 ID、原生名称或对象 ID 过滤，完整事件树保留在对应拥有者内。
+成功改稿将预览、IR、审计和 `revision-report.json` 发布到 `<output>.assets/`；响应和基线中的路径随之更新，`.revision-*` 中间目录自动删除。原文件始终保留。`rp_inspect({view:"interactions"})` 默认按 20 个交互拥有者分页，接近 20KB 时缩小本页条数，继续使用返回的 `nextOffset`；支持 `widget` 逻辑 ID、原生名称或对象 ID 过滤，完整事件树保留在对应拥有者内。
 
 分页统一读取 `items`：按页面事件 → 顶层元件 → 嵌套元件（含面板/行模板）排列，并包含共享母版定义。`offset` 表示跳过多少个拥有者，`returned` 表示实际返回多少个；`items[].kind` 为 `page` 或 `widget`，各项均含完整 `interactions`。`pages[].pageInteractions`、`pages[].widgets` 和 `contained` 保留为分类视图，其中 `contained` 只列嵌套元件。首页 `contained:[]` 时，交互可能在页面事件和顶层按钮中；以 `items` 和 `returned` 判断本页内容。到末尾 `items:[]`、`returned:0`、`nextOffset:null`。
 
@@ -76,7 +76,7 @@
 
 默认成功响应包含 `status:"completed"`、成品 SHA-256、源码与基线、页面信息、`previews`、布局摘要、分层验证及完整 `report` 路径。`compact:false` 才展开结构、事件覆盖、状态预览和 `artifacts` 明细；默认精简响应不包含这些展开字段。完整报告保留 IR、计划和映射路径，按需读取。
 
-生成不替换当前编辑会话。接着调用 `axure_open({path: output})`，即可使用 `locate`、`inspect`、`edit_text`、`rename_widget`、`verify` 和 `axure_save`（`target.name` 既支持原生显示名，也支持直接传 RP/1 逻辑 `id` 如 `"subtitle"`）。交付只报告已执行的验证；`verification` 中 Axure 打开、GUI 编辑、保存重开和预览初始均为 `false`，需要实际验证后另行记录。
+生成不替换当前编辑会话。接着调用 `axure_open({path: output})`，即可使用 `rp_inspect`、`rp_patch`、`rp_command` 和 `axure_save`（`target.name` 既支持原生显示名，也支持直接传 RP/1 逻辑 `id` 如 `"subtitle"`）。交付只报告已执行的验证；`verification` 中 Axure 打开、GUI 编辑、保存重开和预览初始均为 `false`，需要实际验证后另行记录。
 
 结构检查始终执行；`strictAudit: true` 额外要求美学审计通过（当字号或间距触发软警告时，审计信息会直接列出具体违规元件名、当前数值与允许令牌表）。默认返回美学建议，但不因建议而阻止结构健康的产物。移动端页面（`domain: "mobile"`、`mobile-*` 主题、带 `PhoneShell`/灵动岛/状态栏组件或竖屏手机画布 `w <= 500 && h >= 750`）自动按移动端留白区间（`12%–82%`）进行美学审计。
 
@@ -92,7 +92,7 @@
 
 ## 源码 ↔ 原生改稿三方一致性同步（`sync_prototype`）
 
-每次 `generate_prototype`（支持传 `spec` 对象或 `source: "/绝对路径/xxx.rp1"`）都会在 `<output>.baseline.json` 中记录源码指纹、原生 `.rp` 指纹、共同基线及 `logicalId <-> record+id` 映射。当用户在 MCP（`edit_text`/`rename_widget`/`set_widget_geometry`/`set_widget_style`）或 Axure GUI 中改过 `.rp` 后，通过 `sync_prototype` 保持三方一致：
+每次 `generate_prototype`（支持传 `spec` 对象或 `source: "/绝对路径/xxx.rp1"`）都会在 `<output>.baseline.json` 中记录源码指纹、原生 `.rp` 指纹、共同基线及 `logicalId <-> record+id` 映射。当用户在 MCP（`rp_patch` / `rp_command`）或 Axure GUI 中改过 `.rp` 后，通过 `sync_prototype` 保持三方一致：
 
 1. **检查漂移状态（`mode: "status"`）**：
    ```json
@@ -140,8 +140,8 @@
 
 ## 只读直查、GUI 往返与浏览器预览提示
 
-- `verify`、`locate`、`inspect`、`read_interactions` 既可在 `axure_open` 活动会话中无参调用，也支持直接传入 `path: "/绝对路径/xxx.rp"` 进行零副本只读检查（不生成 `.work-N.rp`，不改变当前活动会话）。
-- `verify({ path, deep: true })` 默认只将**同一页面内**的重名元件列入 `duplicates`，多页共用组件（如顶栏、`PhoneShell`）产生的跨页同名元件汇总在 `duplicateSummary` 中（如需展开全部跨页同名项，可传 `includeCrossPageDuplicates: true`）。
+- `rp_inspect`（`view:"verify"|"locate"|"widget"|"interactions"|"styles"|"overview"|"state"`）既可在 `axure_open` 活动会话中不传 `path` 调用，也支持直接传入 `path: "/绝对路径/xxx.rp"` 进行零副本只读检查（不生成 `.work-N.rp`，不改变当前活动会话）。
+- `rp_inspect({ view: "verify", path, deep: true })` 默认只将**同一页面内**的重名元件列入 `duplicates`，多页共用组件（如顶栏、`PhoneShell`）产生的跨页同名元件汇总在 `duplicateSummary` 中（如需展开全部跨页同名项，可传 `includeCrossPageDuplicates: true`）。
 - `gui_roundtrip` 支持可选参数 `preview: true`，在完成 Axure 保存、关闭、重开后自动触发原生菜单「发布 -> 预览（Publish -> Preview）」，并返回 `outputSha256`。
 - **浏览器自动化（`huashu-chrome` / Playwright）点击提示**：Axure RP 9 导出的 HTML 预览中，矩形按钮（VectorShape）渲染为外层 `<div id="uXX" class="ax_default shape">` 与内层文字 `<div id="uXX_text"><p><span>按钮文字</span></p></div>`。若通过无障碍快照拿到静态文本节点，请在触发点击时点外层 `.ax_default` 容器（或 `el.closest('.ax_default')?.click()`），以确保稳定触发绑定在元件上的 Axure `OnClick` 事件。
 
@@ -149,8 +149,8 @@
 
 ## Profile 分级裁剪、零落盘批交互与一站式 Chrome 验收
 
-- **`--profile` 工具面收敛**：启动 MCP 服务支持 `node bin/mcp.mjs --profile=<full|core|author|studio>`（或 `ZEE_MCP_PROFILE` 环境变量）。`core` 仅暴露 15 个常用闭环工具（工具 Schema 字符数压缩至约 40KB），`author` 在 `core` 基础上追加 13 个 `studio_*` 动词，`studio` 暴露 `runtime_info` / `verify_prototype` / `export_prototype` + `studio_*`，默认 `full` 保留全量 74 个工具；`runtime_info()` 返回 `mcpProfile`、`toolCount` 与 `schemaChars`。
-- **一站式 `generate_prototype({ verify: true })` 与虚拟时钟 / 故事板**：`generate_prototype` 可直接传 `verify: true`（可选 `verifySteps`、`verifyViewport`、`virtualClock: true`、`includeStoryboard: true`），生成 `.rp` 后自动复用 `.rp` 中的顶层 `verify:` 步骤在无头 Chrome 完成行为验收并返回多步骤横向拼接的 `storyboard.png` 图像附件。`verify_prototype` 支持 `virtualClock: true`（在页面脚本加载前拦截 `>= 200ms` 定时器，配合 `wait` 步瞬时推进长轮播周期）与 `storyboard` / `includeStoryboard: true`。
-- **批量交互 + 基线逻辑 ID 解析 + 一键清理保存**：`add_interaction` 支持传 `items: [{ target, event, actions }, ...]` 在单个工作节点内一次追加多组事件，并通过 `--baseline`（或自动探测旁路 `<source>.baseline.json`）将 RP/1 逻辑 ID（如 `thumb`、`check_overlap`）解析为原生控件名；`axure_save({ as, cleanup: true })` 在另存终稿后自动清理同一链条产生的 `.work-N.rp` 临时中间文件。
+- **`--profile` 工具面收敛**：启动 MCP 服务支持 `node bin/mcp.mjs --profile=<full|core|author|studio>`（或 `ZEE_MCP_PROFILE` 环境变量）。`core` 仅暴露 16 个常用核心闭环工具（工具 Schema 字符数压缩至约 40KB），`studio` 暴露 `runtime_info` / `verify_prototype` / `export_prototype` / `gui_roundtrip` + 13 个 `studio_*`，`author` 含创作 + 13 个 `studio_*`（26 个工具），默认 `full` 暴露收敛后的全部 30 个工具；`runtime_info()` 返回 `mcpProfile`、`toolCount` 与 `schemaChars`。
+- **一站式 `generate_prototype({ verify: true })` 与虚拟时钟 / 故事板**：`generate_prototype` 可直接传 `verify: true`（可选 `verifySteps`、`verifyViewport`、`virtualClock: true`、`includeStoryboard: true`），生成 `.rp` 后自动复用 `.rp` 中的顶层 `verify:` 步骤在无头 Chrome 完成行为验收并返回多步骤横向拼接的 `storyboard.png` 图像附件。`verify_prototype` 支持 `virtualClock: true`（在页面脚本加载前拦截 `>= 200ms` 定时器，配合 `wait` / `advanceTime` 步瞬时推进长轮播周期）与 `storyboard` / `includeStoryboard: true`。
+- **批量交互 + 基线逻辑 ID 解析 + 一键清理保存**：`rp_command({ action: "run", command: "add-interaction", params: { items: [{ target, event, actions }, ...] } })` 在单个工作节点内一次追加多组事件，并自动通过旁路 `.baseline.json` 将 RP/1 逻辑 ID（如 `thumb`、`check_overlap`）解析为原生控件名；`axure_save({ as, cleanup: true })` 在另存终稿后自动清理同一链条产生的 `.work-N.rp` 临时中间文件。
 
-测试：`npm run test:mcp-generate`、`npm run test:mcp-verify`、`npm run test:sync`、`node test/rp1-sync-b-check.mjs`、`node test/image-mcp-c-check.mjs`、`node test/zhixu-d-check.mjs`。
+测试：`npm run test:mcp-generate`、`npm run test:mcp-verify`、`npm run test:sync`、`npm run test:20261114`。

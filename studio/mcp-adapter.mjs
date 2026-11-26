@@ -17,6 +17,7 @@ import {
 
 /** projectDir(绝对路径) -> { kind: 'local', studio } | { kind: 'remote', url } */
 const inProcessServers = new Map();
+let lastActiveProjectDir = null;
 
 function instanceRecordFor(projectDir) {
   if (!projectDir) return null;
@@ -50,11 +51,20 @@ async function probeInstance(record, expectedProjectDir = null) {
 async function resolveServerUrl({ url = null, port = null, projectDir = null } = {}) {
   if (url) return url.replace(/\/$/, '');
   if (port) return `http://127.0.0.1:${port}`;
-  if (projectDir) {
-    const known = inProcessServers.get(resolve(projectDir));
-    if (known?.kind === 'local' && known.studio.server?.listening && known.studio.projectDir === resolve(projectDir)) return known.studio.url;
-    const record = instanceRecordFor(projectDir) || (known?.kind === 'remote' ? known : null);
-    if (await probeInstance(record, projectDir)) return record.url.replace(/\/$/, '');
+  const targetDir = projectDir ? resolve(projectDir) : lastActiveProjectDir;
+  if (projectDir) lastActiveProjectDir = targetDir;
+  if (targetDir) {
+    const known = inProcessServers.get(targetDir);
+    if (known?.kind === 'local' && known.studio.server?.listening && known.studio.projectDir === targetDir) return known.studio.url;
+    const record = instanceRecordFor(targetDir) || (known?.kind === 'remote' ? known : null);
+    if (await probeInstance(record, targetDir)) return record.url.replace(/\/$/, '');
+    if (projectDir) {
+      // 显式指定了 projectDir 但未找到运行实例，不回退到其他工程实例
+      throw Object.assign(new Error(`未找到工程 "${targetDir}" 的运行中 Studio 服务实例，请先调用 studio_open_project 启动`), {
+        code: 'E_NO_STUDIO_INSTANCE',
+        projectDir: targetDir,
+      });
+    }
   }
   if (inProcessServers.size === 1 && !projectDir) {
     const only = [...inProcessServers.values()][0];
@@ -348,6 +358,7 @@ export const studioHandlers = {
       throw Object.assign(new Error('port 需为 0（由系统分配空闲端口）或 1024–65535'), { code: 'E_INVALID_PORT', requestedPort: port });
     }
     const absDir = resolve(projectDir);
+    lastActiveProjectDir = absDir;
     const respond = (body, extra = {}) => {
       const diskFingerprint = studioSourceFingerprint();
       const sourceFingerprint = body.sourceFingerprint ?? null;
@@ -508,6 +519,7 @@ export const studioHandlers = {
       revision: args.revision,
       pageId: args.pageId || null,
       nodeId: args.nodeId || null,
+      panelStates: args.panelStates || null,
       outPath: args.outPath || null,
       includeImage: args.includeImage !== false,
       timeoutMs: args.timeoutMs ?? 5000,
@@ -890,7 +902,7 @@ export const studioTools = [
   },
   {
     name: 'studio_screenshot', readOnly: true,
-    description: '严格等待指定 revision 在真实浏览器完成布局、字体与图片渲染后截取画板或节点 PNG,返回 revision、contentHash 与文件 SHA-256。"先 inspect 拿数字、再 screenshot 看像素"是标准验证流程。',
+    description: '严格等待指定 revision 在真实浏览器完成布局、字体与图片渲染后截取画板或节点 PNG,返回 revision、contentHash 与文件 SHA-256。可选传 panelStates:{"panelId":"stateId"} 无副作用临时切换动态面板状态做多态视觉走查（不改源文档、不推进 revision）。"先 inspect 拿数字、再 screenshot 看像素"是标准验证流程。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -900,6 +912,11 @@ export const studioTools = [
         revision: { type: 'integer', minimum: 1 },
         pageId: { type: 'string' },
         nodeId: { type: 'string' },
+        panelStates: {
+          type: 'object',
+          additionalProperties: { type: 'string' },
+          description: '临时覆盖动态面板激活状态（如 {"drawer_panel":"confirm"}），仅作用于本次截图渲染，不修改源文档也不递增 revision',
+        },
         outPath: { type: 'string' },
         includeImage: { type: 'boolean', description: '默认 true，直接返回 MCP 图片供模型查看' },
         timeoutMs: { type: 'integer', minimum: 50 },
@@ -1032,7 +1049,7 @@ export const studioTools = [
   },
   {
     name: 'studio_scenario',
-    description: '在隔离的交互运行态会话（StudioRuntimeSession）中执行业务交互剧本并断言变量、面板状态、文本、显隐与数据集，不污染设计态文档。默认走语义执行层，不做遮挡/hitTest校验：click只要求目标在当前运行态可见，通过≠真实可点。hitTest:true 先用真实浏览器指针重放校验每个点击目标（遮挡/命中按真实DOM结论），被遮挡返回E_SCENARIO_OCCLUDED（含nodeId/occludedBy遮挡者/stepIndex，语义层不执行该步）；真实浏览器不可用返回E_SCENARIO_HITTEST_UNAVAILABLE（不静默降级）；含navigate/dataset等浏览器层无法重放的步骤返回E_SCENARIO_HITTEST_UNSUPPORTED。步骤示例：{action:"click",target:"reveal",expect:{visible:{answer:true}}}；未知步骤或零断言会拒绝。acceptance:true 改为执行12个语义验收模板（faultInjection:true 跑故障注入对照）；无操作脚本或不支持的断言返回unsupported，不记为通过。',
+    description: '在隔离的交互运行态会话（StudioRuntimeSession）中执行业务交互剧本并断言变量、面板状态、文本、显隐与数据集，不污染设计态文档。默认走语义执行层，不做遮挡/hitTest校验：click只要求目标在当前运行态可见，通过≠真实可点。hitTest:true 先用真实浏览器指针重放校验每个点击/输入与跨页跳转（支持宽屏桌面画板自动避让编辑器浮层、click 触发 link 跨页与显式 navigate 步骤；遮挡/命中按真实DOM结论），被遮挡返回E_SCENARIO_OCCLUDED（含nodeId/occludedBy遮挡者/stepIndex，语义层不执行该步）；真实浏览器不可用返回E_SCENARIO_HITTEST_UNAVAILABLE（不静默降级）；含dataset等浏览器层无法重放的步骤返回E_SCENARIO_HITTEST_UNSUPPORTED。步骤示例：{action:"click",target:"reveal",expect:{visible:{answer:true}}}；未知步骤或零断言会拒绝。acceptance:true 改为执行12个语义验收模板（faultInjection:true 跑故障注入对照）；无操作脚本或不支持的断言返回unsupported，不记为通过。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1126,4 +1143,5 @@ export async function closeInProcessStudioServer() {
     }
   }
   inProcessServers.clear();
+  lastActiveProjectDir = null;
 }

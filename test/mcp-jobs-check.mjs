@@ -40,13 +40,14 @@ const call = async (name, input) => {
 
 await client.connect(transport);
 
-test('MCP 暴露完整注册表与 4 个 job 队列工具', async () => {
+test('MCP 暴露完整收敛注册表（30 个工具，含 gui_roundtrip 与统一 jobs 工具）', async () => {
   const expected = [...listMcpTools(), ...jobTools].map(t => t.name).sort();
   const actual = (await client.listTools()).tools.map(t => t.name).sort();
+  assert.equal(expected.length, 30);
   assert.deepEqual(actual, expected);
 });
 
-test('异步队列提交、jobs_list/jobs_get 轮询与排队任务取消', async () => {
+test('异步队列提交、jobs(list|get) 轮询与排队任务取消', async () => {
   const firstOut = join(outputDir, 'async-first.rp');
   const secondOut = join(outputDir, 'async-cancelled.rp');
   const first = await call('generate_prototype', { recipe: 'mobile-cards', output: firstOut, async: true });
@@ -55,26 +56,27 @@ test('异步队列提交、jobs_list/jobs_get 轮询与排队任务取消', asyn
   assert.ok(second.id);
   assert.ok(['queued', 'running'].includes(first.status));
 
-  const cancelled = await call('jobs_cancel', { id: second.id });
+  const cancelled = await call('jobs', { action: 'cancel', id: second.id });
   assert.equal(cancelled.status, 'cancelled');
-  assert.equal((await call('jobs_get', { id: second.id })).status, 'cancelled');
+  assert.equal((await call('jobs', { action: 'get', id: second.id })).status, 'cancelled');
 
-  const list = await call('jobs_list', {});
-  assert.ok(list.some(j => j.id === first.id));
+  const list = await call('jobs', { action: 'list' });
+  assert.ok(list.jobs.some(j => j.id === first.id));
 
   const deadline = Date.now() + 45000;
-  let finalJob = await call('jobs_get', { id: first.id });
+  let finalJob = await call('jobs', { action: 'get', id: first.id });
   while (Date.now() < deadline && ['queued', 'running'].includes(finalJob.status)) {
     await new Promise(r => setTimeout(r, 150));
-    finalJob = await call('jobs_get', { id: first.id });
+    finalJob = await call('jobs', { action: 'get', id: first.id });
   }
   assert.equal(finalJob.status, 'completed', JSON.stringify(finalJob));
   assert.equal(existsSync(firstOut), true);
 });
 
 test('未知句柄和非法参数拒绝', async () => {
-  assert.ok((await client.callTool({ name: 'jobs_get', arguments: { id: 'missing-job-id' } })).isError);
-  assert.ok((await client.callTool({ name: 'jobs_list', arguments: { extra: true } })).isError);
+  assert.ok((await client.callTool({ name: 'jobs', arguments: { action: 'get', id: 'missing-job-id' } })).isError);
+  assert.ok((await client.callTool({ name: 'jobs', arguments: { action: 'list', id: 'unexpected' } })).isError);
+  assert.ok((await client.callTool({ name: 'jobs', arguments: { action: 'list', extra: true } })).isError);
 });
 
 test('可选真实 macOS GUI 保存关闭重开往返', { skip: process.env.AXURE_RUN_LIVE_GUI !== '1' }, async () => {
@@ -83,7 +85,7 @@ test('可选真实 macOS GUI 保存关闭重开往返', { skip: process.env.AXUR
   let job = handle;
   while (Date.now() < deadline && ['queued', 'running'].includes(job.status)) {
     await new Promise(r => setTimeout(r, 150));
-    job = await call('jobs_get', { id: handle.id });
+    job = await call('jobs', { action: 'get', id: handle.id });
   }
   assert.equal(job.status, 'completed', JSON.stringify(job));
   for (const key of ['structure', 'guiSaved', 'closed', 'reopened']) {

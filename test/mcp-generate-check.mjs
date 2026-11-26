@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { delimiter, dirname, join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
@@ -14,8 +14,8 @@ const work = keep ? resolve(keep) : mkdtempSync(join(tmpdir(), 'zee-rp-generate-
 if (keep) mkdirSync(work, { recursive: false });
 const spec = JSON.parse(readFileSync(join(root, 'examples/rp-language/mcp-three-pages.json')));
 const protectedPath = join(work, 'protected.rp');
-const transport = new StdioClientTransport({ command: process.execPath, args: [join(root, 'bin/mcp.mjs')],
-  env: { ...process.env, AXURE_WRITE_ROOT: [work, join(work, 'second-root')].join(delimiter), AXURE_PROTECTED_PATHS: protectedPath }, stderr: 'pipe' });
+const transport = new StdioClientTransport({ command: process.execPath, args: [join(root, 'bin/mcp.mjs')], cwd: work,
+  env: { ...process.env, AXURE_WRITE_ROOT: work, AXURE_PROTECTED_PATHS: protectedPath }, stderr: 'pipe' });
 const client = new Client({ name: 'mcp-prototype-acceptance', version: '1.0.0' });
 const results = [];
 let generated;
@@ -56,7 +56,7 @@ try {
     assert.equal(generated.sha256, createHash('sha256').update(readFileSync(generated.output)).digest('hex'));
     assert.deepEqual(generated.verification, { structure: true, axureOpened: false, guiEdited: false, saveReopened: false, preview: false });
     assert.equal(JSON.parse(readFileSync(generated.artifacts.source)).language, 'rp/1');
-    const rp = JSON.parse((await call('rp_read', { args: [generated.output, '--json'] })).stdout);
+    const rp = JSON.parse((await call('rp_command', { action: 'run', command: 'rp-read', args: [generated.output, '--json'] })).stdout);
     assert.equal(rp.pages.length, 3);
     const actions = rp.pages.flatMap(p => p.widgets.flatMap(w => (w.interactions ?? []).flatMap(e => e.cases.flatMap(c => c.actions))));
     assert(actions.some(a => JSON.stringify(a).includes('topic')));
@@ -64,10 +64,10 @@ try {
   });
   await check('generated file can enter the existing editing session and target widgets by name or logical id', async () => {
     await call('axure_open', { path: generated.output });
-    await call('edit_text', { target: { name: '列表标题' }, text: 'MCP 编辑后的复习列表' });
-    await call('edit_text', { target: { name: 'hint', page: '复习列表' }, text: '按逻辑 ID 命中编辑后的说明' });
+    await call('rp_patch', { target: { name: '列表标题' }, text: 'MCP 编辑后的复习列表' });
+    await call('rp_patch', { target: { name: 'hint', page: '复习列表' }, text: '按逻辑 ID 命中编辑后的说明' });
     await call('axure_save', { as: join(work, 'mcp-edited.rp') });
-    const rp = JSON.parse((await call('rp_read', { args: [join(work, 'mcp-edited.rp'), '--json'] })).stdout);
+    const rp = JSON.parse((await call('rp_command', { action: 'run', command: 'rp-read', args: [join(work, 'mcp-edited.rp'), '--json'] })).stdout);
     assert(rp.pages[0].widgets.some(w => w.text === 'MCP 编辑后的复习列表'));
     assert(rp.pages[0].widgets.some(w => w.text === '按逻辑 ID 命中编辑后的说明'));
   });
@@ -99,7 +99,7 @@ try {
     assert(!existsSync(output));
   });
   await check('twelve-page input is assembled by the same MCP entry without changing the editing chain', async () => {
-    const before = await call('axure_state', {});
+    const before = await call('axure_save', {});
     const twelve = structuredClone(spec);
     for (let i = 4; i <= 12; i++) twelve.pages.push({ id: `p${i}`, name: `复习页${i}`, canvas: { w: 420, h: 650 }, root: {
       type: 'box', id: 'root', layout: 'column', padding: 24, children: [
@@ -110,7 +110,7 @@ try {
     const result = await call('generate_prototype', { spec: twelve, output: join(work, 'twelve-pages.rp'), compact: false });
     assert.equal(result.pages.length, 12); assert.equal(new Set(result.pages.map(p => p.record)).size, 12);
     assert.equal(result.eventCoverage.declared, result.eventCoverage.materialized);
-    assert.deepEqual((await call('axure_state', {})).chain, before.chain);
+    assert.deepEqual((await call('axure_save', {})).chain, before.chain);
   });
   await check('relative output, overwrite: true and compact: true work cleanly', async () => {
     const rel = await call('generate_prototype', { spec, output: 'relative-out.rp', compact: true });
@@ -126,7 +126,7 @@ try {
     assert.equal(result.output, join(realpathSync.native(work), '从源码生成.rp'));
     assert.deepEqual(result.structure, { unparseable: 0, danglingRefs: 0, problems: 0 });
     assert.equal(result.eventCoverage.declared, result.eventCoverage.materialized);
-    const rp = JSON.parse((await call('rp_read', { args: [result.output, '--json'] })).stdout);
+    const rp = JSON.parse((await call('rp_command', { action: 'run', command: 'rp-read', args: [result.output, '--json'] })).stdout);
     assert.equal(rp.pages.length, result.pages.length);
     assert.ok(rp.counts.widgets > 0);
   });
@@ -137,7 +137,7 @@ try {
     });
     assert.deepEqual(generated.structure, { unparseable: 0, danglingRefs: 0, problems: 0 });
     assert.equal(generated.eventCoverage.declared, generated.eventCoverage.materialized);
-    const rp = JSON.parse((await call('rp_read', { args: [generated.output, '--json'] })).stdout);
+    const rp = JSON.parse((await call('rp_command', { action: 'run', command: 'rp-read', args: [generated.output, '--json'] })).stdout);
     const widgets = rp.pages[0].widgets;
     const events = widgets.flatMap(widget => widget.interactions ?? []);
     const actions = events.flatMap(event => event.cases.flatMap(kase => kase.actions));
@@ -147,16 +147,24 @@ try {
     assert(actions.some(action => action.rp1?.mode === 'current'));
     assert(widgets.some(widget => widget.maxLength === 7));
   });
-  await check('existing, protected and outside-root outputs fail before modifying a file', async () => {
+  await check('existing, protected and skill-root outputs fail before modifying a file while sibling workdirs work freely', async () => {
     const digest = createHash('sha256').update(readFileSync(generated.output)).digest('hex');
     await failure({ spec, output: generated.output });
     assert.equal(createHash('sha256').update(readFileSync(generated.output)).digest('hex'), digest);
     await failure({ spec, output: protectedPath }); assert(!existsSync(protectedPath));
-    await failure({ spec, output: join(dirname(work), 'outside-root', 'blocked.rp') });
+    await failure({ spec, output: join(root, 'blocked-in-skill-root.rp') });
+    assert(!existsSync(join(root, 'blocked-in-skill-root.rp')));
+    const siblingDir = mkdtempSync(join(tmpdir(), 'zee-rp-sibling-free-'));
+    try {
+      const freeOut = await call('generate_prototype', { spec, output: 'free-sibling.rp', cwd: siblingDir, compact: true });
+      assert.equal(freeOut.output, join(realpathSync.native(siblingDir), 'free-sibling.rp'));
+    } finally {
+      rmSync(siblingDir, { recursive: true, force: true });
+    }
     await failure({ spec: { pages: [] }, output: join(work, 'empty.rp') });
     assert(!existsSync(join(work, 'empty.rp')));
   });
-  await check('locate matches logical id with display name, progress-bar binds variable, and multiline paragraph supports set-text and edit_text', async () => {
+  await check('locate matches logical id with display name, progress-bar binds variable, and multiline paragraph supports set-text and rp_patch', async () => {
     const round2Spec = {
       language: 'rp/1',
       target: 9,
@@ -180,13 +188,13 @@ try {
     };
     const r2 = await call('generate_prototype', { spec: round2Spec, output: 'round2.rp', compact: true });
     assert.equal(r2.status, 'completed');
-    const loc = await call('locate', { path: r2.output, query: 'headline', page: '今日' });
+    const loc = await call('rp_inspect', { view: 'locate', path: r2.output, query: 'headline', page: '今日' });
     assert.equal(loc.total, 1);
     assert.equal(loc.candidates[0].name, '今日主标题');
     await call('axure_open', { path: r2.output });
-    await call('edit_text', { target: { name: 'meaning', page: '今日' }, text: '整段应只剩下这一句。' });
+    await call('rp_patch', { target: { name: 'meaning', page: '今日' }, text: '整段应只剩下这一句。' });
     const saved = await call('axure_save', { as: join(work, 'round2-edited.rp') });
-    const rp = JSON.parse((await call('rp_read', { args: [saved.physicalPath, '--json'] })).stdout);
+    const rp = JSON.parse((await call('rp_command', { action: 'run', command: 'rp-read', args: [saved.physicalPath, '--json'] })).stdout);
     const leftover = rp.pages[0].widgets.filter(w => String(w.text ?? '').includes('旧段落'));
     assert.equal(leftover.length, 0);
     assert(rp.pages[0].widgets.some(w => w.text === '整段应只剩下这一句。'));

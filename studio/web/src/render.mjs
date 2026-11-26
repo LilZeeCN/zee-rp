@@ -178,7 +178,7 @@ export function buildNodeElementHtml(n, pageId, childrenHtml = '', parent = null
     const indicatorInner = isChecked
       ? (isRadio ? '<span style="width:6px;height:6px;border-radius:50%;background:#FFFFFF;display:block;"></span>' : '✓')
       : '';
-    return `<div ${commonAttrs} data-checked="${isChecked}" style="${style(`display:flex;align-items:center;gap:8px;cursor:${n.disabled ? 'not-allowed' : 'pointer'};${n.disabled ? 'opacity:0.5;' : ''}`)}"><span style="${boxStyle}">${indicatorInner}</span><span>${renderTextContentHtml(n)}</span>${childrenHtml}</div>`;
+    return `<div ${commonAttrs} data-checked="${isChecked}" style="${style(`display:flex;align-items:center;gap:8px;cursor:${n.disabled ? 'not-allowed' : 'pointer'};${n.disabled ? 'opacity:0.5;' : ''}`)}"><span data-studio-ignore-glyphs="true" style="${boxStyle}">${indicatorInner}</span><span class="studio-text-content">${renderTextContentHtml(n)}</span>${childrenHtml}</div>`;
   }
 
   if (n.type === 'combobox') {
@@ -190,7 +190,7 @@ export function buildNodeElementHtml(n, pageId, childrenHtml = '', parent = null
       const optHtml = opts.map(opt => `<option value="${escapeHtml(opt)}"${String(opt) === String(selOpt) ? ' selected' : ''}>${escapeHtml(opt)}</option>`).join('');
       return `<select ${commonAttrs} ${n.disabled ? 'disabled ' : ''}style="${style('padding:0 28px 0 12px;appearance:auto;cursor:pointer')}" data-runtime-select="${escapeHtml(n.scopedId)}">${optHtml}</select>`;
     }
-    return `<div ${commonAttrs} style="${style('display:flex;align-items:center;justify-content:space-between;padding:0 12px')}"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(selOpt || opts[0] || '')}</span><span style="font-size:11px;opacity:0.65;margin-left:6px;">▾</span>${childrenHtml}</div>`;
+    return `<div ${commonAttrs} style="${style('display:flex;align-items:center;justify-content:space-between;padding:0 12px')}"><span class="studio-text-content" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(selOpt || opts[0] || '')}</span><span data-studio-ignore-glyphs="true" style="font-size:11px;opacity:0.65;margin-left:6px;">▾</span>${childrenHtml}</div>`;
   }
 
   if (n.type === 'listbox') {
@@ -209,7 +209,7 @@ export function buildNodeElementHtml(n, pageId, childrenHtml = '', parent = null
     );
     const itemsHtml = opts.map(opt => {
       const active = selValues.has(String(opt));
-      return `<div data-runtime-listbox="${escapeHtml(n.scopedId)}" data-runtime-listbox-option="${escapeHtml(opt)}" style="padding:6px 10px;border-radius:6px;cursor:${n.disabled ? 'not-allowed' : 'pointer'};background:${active ? 'var(--brand-soft,#DCEFE6)' : 'transparent'};color:${active ? 'var(--brand,#2E6F57)' : 'inherit'};font-weight:${active ? 600 : 400};">${escapeHtml(opt)}</div>`;
+      return `<div class="studio-text-content" data-runtime-listbox="${escapeHtml(n.scopedId)}" data-runtime-listbox-option="${escapeHtml(opt)}" style="padding:6px 10px;border-radius:6px;cursor:${n.disabled ? 'not-allowed' : 'pointer'};background:${active ? 'var(--brand-soft,#DCEFE6)' : 'transparent'};color:${active ? 'var(--brand,#2E6F57)' : 'inherit'};font-weight:${active ? 600 : 400};">${escapeHtml(opt)}</div>`;
     }).join('');
     return `<div ${commonAttrs} style="${style('overflow-y:auto;padding:4px;display:flex;flex-direction:column;gap:2px')}">${itemsHtml}${childrenHtml}</div>`;
   }

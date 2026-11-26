@@ -14,6 +14,8 @@ node bin/axure.mjs studio describe --topic node --name repeater --fields rows,te
 
 `sourceWrite` 区分允许保存、只读、拒绝和未知。各消费面独立标记 `implemented/partial/unsupported/unverified/metadata/separate-entry`。存在消费者不等于真实画面或Axure宿主验证通过；完整RP/1保留独立原生创作入口，不能从同名字段推断Studio已支持。
 
+`shadow` 与单边边框（`borderTop/Right/Bottom/Left`、`borderSides`）在 Studio 各出口的值域已对齐：`shadow` 接受预设名（`none/xs/sm/md/lg/xl/2xl/inner`）、布尔值、`"$shadowToken"` 或合法 CSS `box-shadow` 字符串（非法裸词在 `studio_command` 写时返回 `E_INVALID_VALUE`），`studio_export(format:"rp")` 自动映射为标准 CSS 光栅阴影；`borderTop/Right/Bottom/Left` 在 Studio 画布、代码包与原生 `.rp` 导出层同时接受布尔值与合法 CSS 边框简写字符串（如 `"1px solid #CBD5E1"`，原生 `.rp` 导出自动拆解为布尔边开关 + `stroke` + `strokeWidth`，独立完整 RP/1 schema 则仅接受布尔值）。原生 `checkbox` / `radio` 开放 `color`、`fontSize`、`fontFamily`、`fontWeight` 可写；未显式声明字号时默认 `14px` 不计入全页 `type-scale` 字阶门禁。
+
 `studio_inspect` 默认带精简 `capabilities`，说明当前对象的常用字段与后续精确查询。宏展开内容回到所属参数，组件沿用实例覆盖。卡片可用已有RP/1字段titleFontSize调整标题，统计行可用valueFontSize调整数值，单项可覆盖；这些字号参数接受(0,120]的数值。卡片标题的target.propertyMap把text映射到title、fontSize映射到titleFontSize，诊断也返回同一映射。
 
 改card容器fontSize仍不会改变标题：普通属性修改、setText附带样式和editNodes命中这类已确认无效改稿会拒绝整个事务，并建议实际参数。显式子节点仍可正常修改字体。此检查尚未代表所有高级组件路径与全部创建字段均已审计。

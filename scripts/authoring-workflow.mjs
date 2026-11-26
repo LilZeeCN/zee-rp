@@ -1,10 +1,10 @@
 import { execFile, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, constants, copyFileSync, existsSync, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readdirSync, readSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, extname, join, resolve } from 'node:path';
+import { dirname, extname, basename, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
-import { assertNotProtected, assertWritable, defaultWriteRoot } from './engine.mjs';
+import { assertNotProtected, assertWritable, resolveWorkDir } from './engine.mjs';
 import { pythonInvocation } from './python.mjs';
 import { appExists, supportedVersions, templateCandidates, tryDetectFileVersion } from './version.mjs';
 import { previewPrototype, verifyOfficialPreview } from './preview-runtime.mjs';
@@ -123,11 +123,16 @@ export function recipeCatalog({ recipe, includeSource = false } = {}) {
 }
 
 export function runWorkflow(command, source, extra = {}) {
+  const { cwd, projectDir, ...restExtra } = extra;
+  const workDir = resolveWorkDir(cwd ?? projectDir);
   if (typeof source === 'string' && source.trimStart().startsWith('{')) source = JSON.parse(source);
-  if (typeof source === 'string') { source = resolve(source); assertNotProtected(source); }
+  if (typeof source === 'string') {
+    source = isAbsolute(source) ? resolve(source) : resolve(workDir, source);
+    assertNotProtected(source);
+  }
   const workflowInvocation = pythonInvocation(['-B', join(ROOT, 'scripts/rp_workflow.py')]);
   const proc = spawnSync(workflowInvocation.command, workflowInvocation.args, {
-    input: JSON.stringify({ command, source, ...extra }), encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
+    input: JSON.stringify({ command, source, ...restExtra }), encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
   });
   if (proc.status !== 0) throw new Error(proc.stderr || 'RP/1 workflow process failed');
   return JSON.parse(proc.stdout);
@@ -203,18 +208,23 @@ function copyTreeExclusive(fromDir, toDir, onRootCreated) {
 }
 
 export function revisePrototype(input, { generate, sync }) {
-  const { source, rp, operations, expectedHash, expectedRpSha256, dryRun = false, prefer = 'fail', resolutions } = input;
-  const sourcePath = resolve(source), rpPath = resolve(rp);
+  const { source, rp, operations, expectedHash, expectedRpSha256, dryRun = false, prefer = 'fail', resolutions, cwd, projectDir } = input;
+  const explicitWorkDir = cwd ?? projectDir;
+  const workDir = resolveWorkDir(explicitWorkDir);
+  const resolveInWork = p => (isAbsolute(p) ? resolve(p) : resolve(workDir, p));
+  const sourcePath = resolveInWork(source), rpPath = resolveInWork(rp);
   assertNotProtected(sourcePath); assertNotProtected(rpPath);
   if (!existsSync(`${rpPath}.baseline.json`))
     throw Object.assign(new Error('缺少共同基线；请先使用 generate_prototype 创建带基线的工程，或对已有文件使用原生编辑工具。'), { code: 'E_BASELINE_MISSING' });
   const originalHashes = new Map([sourcePath, rpPath, `${rpPath}.baseline.json`].map(path => [path, fileHash(path)]));
   if (expectedRpSha256 && originalHashes.get(rpPath) !== expectedRpSha256)
     throw Object.assign(new Error('原型已变化，请读取最新状态后重试。'), { code: 'E_STALE_SYNC_STATE' });
-  const writeRoot = defaultWriteRoot();
-  let output = input.output && input.output !== 'auto' ? resolve(writeRoot, input.output) : null;
+  let output = input.output && input.output !== 'auto' ? resolveInWork(input.output) : null;
   if (!dryRun && !output) {
-    const stem = rpPath.replace(/\.rp$/i, '').replace(/-v\d+$/, '');
+    const baseName = basename(rpPath).replace(/\.rp$/i, '').replace(/-v\d+$/, '');
+    const inSkillRoot = sourcePath.startsWith(`${ROOT}/`) || rpPath.startsWith(`${ROOT}/`);
+    const autoDir = explicitWorkDir ? workDir : (inSkillRoot ? workDir : dirname(rpPath));
+    const stem = join(autoDir, baseName);
     for (let v = 2; ; v++) {
       const candRp = `${stem}-v${v}.rp`;
       const candSrc = `${stem}-v${v}${extname(sourcePath)}`;
@@ -224,7 +234,7 @@ export function revisePrototype(input, { generate, sync }) {
       }
     }
   }
-  const outSource = input.outSource ? resolve(writeRoot, input.outSource) : output ? output.slice(0, -3) + extname(sourcePath) : null;
+  const outSource = input.outSource ? resolveInWork(input.outSource) : output ? output.slice(0, -3) + extname(sourcePath) : null;
   if (!dryRun && (!output || extname(output) !== '.rp')) throw new Error('改稿需要新的 output .rp 路径；只查看影响请传 dryRun:true。');
   if (outSource && !['.rp1', '.json'].includes(extname(outSource))) throw new Error('outSource 必须是 .rp1 或 .json。');
   const assets = output && `${output}.assets`;
@@ -304,7 +314,7 @@ export function revisePrototype(input, { generate, sync }) {
 }
 
 export async function exportPrototype({ rp, output, cwd, projectDir }) {
-  const workDir = resolve(cwd ?? projectDir ?? defaultWriteRoot());
+  const workDir = resolveWorkDir(cwd ?? projectDir);
   const source = resolve(workDir, rp);
   let rpVersion;
   let stage = 'input';
@@ -361,13 +371,9 @@ export async function exportPrototype({ rp, output, cwd, projectDir }) {
   }
 }
 
-const sourceSchema = { oneOf: [{ type: 'string', minLength: 1 }, { type: 'object' }], description: 'RP/1 源码 .rp1/.json 路径或 JSON 对象。' };
+const sourceSchema = { oneOf: [{ type: 'string', minLength: 1 }, { type: 'object' }], description: 'RP/1 源码 .rp1/.json 路径、JSON 对象文本或 JSON 对象。' };
 export function authoringTools({ generate, sync, listTools }) {
   return [
-    { name: 'review_image_structure', description: '只读审阅图片重建的 trace spec：列出卡片分组、重复结构、文字层级、共享样式及不可编辑图片/待校对文案。结果是带源码指针的候选，不推测交互或自动改层级。',
-      inputSchema: { type: 'object', properties: { spec: { oneOf: [{ type: 'string', minLength: 1 }, { type: 'object' }] },
-        limit: { type: 'integer', minimum: 1, maximum: 100 } }, required: ['spec'], additionalProperties: false },
-      handler: reviewImageStructure, readOnly: true },
     { name: 'export_prototype', description: '将现有 RP9 或 RP11 .rp 导出为 Axure 官方 HTML（含 start.html 和资源），无需打开编辑器。自动按文件版本调用本机 Axure 程序集，使用出厂发布设置。适合交付浏览器原型或为验收准备 HTML。',
       inputSchema: { type: 'object', properties: {
         rp: { type: 'string', minLength: 1, description: '现有 .rp 路径，例如 generate_prototype 返回的 output。' },
@@ -420,9 +426,11 @@ export function authoringTools({ generate, sync, listTools }) {
         }, required: ['action'], additionalProperties: false } },
       }, additionalProperties: false },
       handler: input => verifyOfficialPreview(input, { runWorkflow, exportHtml: exportPrototype }), readOnly: false },
-    { name: 'preview_prototype', description: '在已有 ego lite 任务空间中验证真实 Axure 预览。按逻辑 ID 点击、输入并断言文字/变量/面板状态，返回实际状态、源码位置及报告截图。用 export_prototype 准备官方 HTML 地址，或先运行 gui_roundtrip(preview:true)；不接管用户空间，不把模拟当原生证据。',
+    { name: 'preview_prototype', description: '在已有 ego lite 任务空间中验证真实 Axure 预览。按逻辑 ID 点击、输入并断言文字/变量/面板状态，返回实际状态、源码位置及报告截图。用 export_prototype + verify_prototype 进行无头 Chrome 验收，或先运行 gui_roundtrip(preview:true)；不接管用户空间，不把模拟当原生证据。',
       inputSchema: { type: 'object', properties: {
         source: { type: 'string', minLength: 1 }, output: { type: 'string', minLength: 1 },
+        cwd: { type: 'string', minLength: 1, description: '可选工作目录；用于解析相对路径。' },
+        projectDir: { type: 'string', minLength: 1, description: '可选工作目录（同 cwd）。' },
         spaceId: { type: 'integer', minimum: 1 }, pageLabel: { type: 'string' }, url: { type: 'string', minLength: 1 },
         timeoutMs: { type: 'integer', minimum: 500, maximum: 10000 },
         steps: { type: 'array', minItems: 1, maxItems: 40, items: { type: 'object', properties: {
@@ -433,28 +441,59 @@ export function authoringTools({ generate, sync, listTools }) {
             page: { type: 'string' }, variable: { type: 'string' }, equals: {} }, additionalProperties: false },
         }, required: ['action'], additionalProperties: false } },
       }, required: ['source', 'output', 'spaceId', 'steps'], additionalProperties: false },
-      handler: input => previewPrototype(input, runWorkflow), readOnly: false },
+      handler: input => {
+        const workDir = resolveWorkDir(input.cwd ?? input.projectDir);
+        const resolveInWork = p => (isAbsolute(p) ? p : resolve(workDir, p));
+        return previewPrototype({ ...input, source: resolveInWork(input.source), output: resolveInWork(input.output) }, runWorkflow);
+      }, readOnly: false },
     { name: 'prototype_recipe', description: '查看完整 RP/1 创作范例（含原生轮播、左右滑动、拖动与输入长度）、RP/1 零算高语法速查表（cheatsheet/tokens/gotchas）、推荐修改入口和可直接调用的生成参数；不写文件。',
       inputSchema: { type: 'object', properties: { recipe: { type: 'string', enum: recipes.map(r => r.id) }, includeSource: { type: 'boolean' } }, additionalProperties: false },
       handler: recipeCatalog, readOnly: true },
-    { name: 'diagnose_prototype', description: '只读诊断 RP/1；收集独立节点错误并给出页面/元件/字段、源码行列、当前值及可审查补丁。依赖检查未完成时明确标记；不自动改源码。',
-      inputSchema: { type: 'object', properties: { source: sourceSchema, limit: { type: 'integer', minimum: 1, maximum: 50 } }, required: ['source'], additionalProperties: false },
-      handler: ({ source, limit }) => runWorkflow('diagnose', source, { limit }), readOnly: true },
-    { name: 'explain_binding', description: '解释 RP/1 文字或进度条绑定的完整表达式、依赖、初始值、实际编译出的刷新事件和显示精度。静态编译关系，不冒充原生运行观测。重名用 page/id 或源码指针。',
-      inputSchema: { type: 'object', properties: { source: sourceSchema, target: { type: 'string', minLength: 1 } }, required: ['source', 'target'], additionalProperties: false },
-      handler: ({ source, target }) => runWorkflow('binding', source, { target }), readOnly: true },
+    { name: 'diagnose_prototype', description: '统一只读诊断与审阅入口（不改源码/不写产物）：1) 默认诊断 RP/1 source（语法/语义/自适应，返回行列号、当前值与候选补丁）；2) 传 target（或 mode="binding"）解释 RP/1 元件数据绑定、依赖变量、初始值与刷新事件；3) 传图片分层 spec（或 mode="image"）审阅卡片分组、重复结构与共享样式候选。',
+      inputSchema: { type: 'object', properties: {
+        mode: { type: 'string', enum: ['diagnose', 'binding', 'image'], description: '诊断模式：diagnose（默认，RP/1 静态诊断）、binding（数据绑定与刷新链路解释）、image（图片还原 trace spec 结构审阅）。省略时按 target/spec 自动推断。' },
+        source: sourceSchema,
+        target: { type: 'string', minLength: 1, description: '可选：要解释绑定的元件逻辑 ID（如 page/widget）或源码指针；提供时执行绑定解释。' },
+        spec: { oneOf: [{ type: 'string', minLength: 1 }, { type: 'object' }], description: '可选：图片还原 trace spec 路径、JSON 文本或对象；提供且无 source（或 mode="image"）时执行图片结构只读审阅。' },
+        limit: { type: 'integer', minimum: 1, maximum: 100 },
+        cwd: { type: 'string', minLength: 1 },
+        projectDir: { type: 'string', minLength: 1 },
+      }, additionalProperties: false },
+      handler: ({ mode, source, target, spec, limit, cwd, projectDir } = {}) => {
+        const workDir = resolveWorkDir(cwd ?? projectDir);
+        const resolveInput = val => {
+          if (typeof val !== 'string') return val;
+          if (val.trimStart().startsWith('{')) return JSON.parse(val);
+          return isAbsolute(val) ? resolve(val) : resolve(workDir, val);
+        };
+        const effectiveMode = mode ?? (target !== undefined ? 'binding' : (source === undefined && spec !== undefined ? 'image' : 'diagnose'));
+        if (effectiveMode === 'image') {
+          const traceInput = spec ?? source;
+          if (traceInput === undefined) throw new Error('diagnose_prototype(mode="image") 需要提供 spec。');
+          return reviewImageStructure({ spec: typeof traceInput === 'string' && !traceInput.trimStart().startsWith('{') ? resolveInput(traceInput) : traceInput, limit });
+        }
+        const rpSource = resolveInput(source ?? spec);
+        if (rpSource === undefined) throw new Error('diagnose_prototype 需要提供 source（RP/1）或 spec（图片分层规格）。');
+        if (effectiveMode === 'binding') {
+          if (!target) throw new Error('diagnose_prototype(mode="binding") 需要提供 target（如 page/widget）。');
+          return runWorkflow('binding', rpSource, { target, cwd, projectDir });
+        }
+        return runWorkflow('diagnose', rpSource, { limit, cwd, projectDir });
+      }, readOnly: true },
     { name: 'runtime_info', description: '读取活动 MCP 版本、启动实现指纹、磁盘差异、工具清单指纹、RP9 模板与官方 HTML 导出的宿主发现结果；判断是否需要重新连接服务。',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false }, handler: () => runtimeInfo(listTools()), readOnly: true },
     { name: 'revise_prototype', description: '一次完成最小源码改稿、原生漂移检查、三方合并、原型生成和共同基线。支持逻辑 ID + property、结构节点增删改（add-node/remove-node/replace-node，value 支持直接传 .rp1 片段或 JSON）或 JSON Pointer 操作；output 省略或传 "auto" 时自动递增生成 -v2.rp；保留输入，输出新的源码与 .rp。冲突默认拒绝，dryRun 只返回影响。',
       inputSchema: { type: 'object', properties: {
         source: { type: 'string', minLength: 1 }, rp: { type: 'string', minLength: 1 }, output: { type: 'string', minLength: 1 }, outSource: { type: 'string', minLength: 1 },
+        cwd: { type: 'string', minLength: 1, description: '可选工作目录；用于解析相对路径或指定 auto 输出目录（默认源码目录或 process.cwd()）。' },
+        projectDir: { type: 'string', minLength: 1, description: '可选工作目录（同 cwd）。' },
         operations: { type: 'array', minItems: 1, items: { type: 'object', properties: {
           op: { type: 'string', enum: ['replace', 'add', 'remove', 'add-node', 'insert-node', 'addNode', 'remove-node', 'delete-node', 'removeNode', 'replace-node', 'replaceNode'] },
           target: { type: 'string' }, parent: { type: 'string' }, after: { type: 'string' }, before: { type: 'string' },
           index: { oneOf: [{ type: 'integer', minimum: 0 }, { type: 'string' }] },
           property: { type: 'string', minLength: 1 }, path: { type: 'string' }, value: {}, node: {}, oldValue: {},
         }, additionalProperties: false } },
-        async: { type: 'boolean', description: 'stdio MCP 中 true 立即返回 revise-prototype 任务句柄，使用 jobs_get 查询；支持 dryRun。' }, dryRun: { type: 'boolean' }, prefer: { type: 'string', enum: ['fail', 'source', 'native'] }, resolutions: { type: 'object' },
+        async: { type: 'boolean', description: 'stdio MCP 中 true 立即返回 revise-prototype 任务句柄，使用 jobs({action:"get",id}) 查询；支持 dryRun。' }, dryRun: { type: 'boolean' }, prefer: { type: 'string', enum: ['fail', 'source', 'native'] }, resolutions: { type: 'object' },
         expectedHash: { type: 'string' }, expectedRpSha256: { type: 'string' },
       }, required: ['source', 'rp', 'operations'], additionalProperties: false },
       handler: input => revisePrototype(input, { generate, sync }), readOnly: false },

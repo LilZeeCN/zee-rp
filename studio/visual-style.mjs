@@ -46,6 +46,104 @@ function gradientCss(value) {
   return `linear-gradient(${Number(value.angle ?? 135)}deg, ${stops.join(',')})`;
 }
 
+export const SHADOW_PRESETS = Object.freeze({
+  none: '',
+  xs: '0 1px 2px rgba(15, 23, 42, 0.06)',
+  sm: '0 1px 3px rgba(15, 23, 42, 0.08), 0 1px 2px rgba(15, 23, 42, 0.05)',
+  md: '0 8px 24px rgba(15, 23, 42, 0.12)',
+  lg: '0 16px 36px rgba(15, 23, 42, 0.16)',
+  xl: '0 24px 48px rgba(15, 23, 42, 0.20)',
+  '2xl': '0 32px 64px rgba(15, 23, 42, 0.24)',
+  inner: 'inset 0 2px 4px rgba(15, 23, 42, 0.08)',
+});
+
+const CSS_BOX_SHADOW_LENGTH_RE = /(?:^|[\s,])(?:inset\s+)?-?(?:\d+\.?\d*|\.\d+)(?:px|rem|em|vh|vw|vmin|vmax|pt|pc|cm|mm|in|%)?\s+-?(?:\d+\.?\d*|\.\d+)/i;
+
+export function resolveShadowCss(val, shadowTokens = null) {
+  if (val === null || val === undefined || val === false) return '';
+  if (val === true) return '0 8px 24px #14231D1A';
+  if (typeof val === 'object' && !Array.isArray(val)) {
+    const x = Number(val.x ?? 0);
+    const y = Number(val.y ?? 4);
+    const blur = Number(val.blur ?? 12);
+    const spread = val.spread !== undefined ? `${Number(val.spread)}px ` : '';
+    const color = val.color || 'rgba(15, 23, 42, 0.12)';
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(blur)) return null;
+    return `${val.inset ? 'inset ' : ''}${x}px ${y}px ${blur}px ${spread}${color}`;
+  }
+  if (typeof val !== 'string') return null;
+  const trimmed = val.trim();
+  if (!trimmed) return '';
+  const lower = trimmed.toLowerCase();
+  if (Object.hasOwn(SHADOW_PRESETS, lower)) return SHADOW_PRESETS[lower];
+  if (trimmed.startsWith('$') && shadowTokens && typeof shadowTokens === 'object') {
+    const key = trimmed.slice(1);
+    if (Object.hasOwn(shadowTokens, key)) return resolveShadowCss(shadowTokens[key], null);
+  }
+  if (shadowTokens && typeof shadowTokens === 'object' && Object.hasOwn(shadowTokens, trimmed)) {
+    return resolveShadowCss(shadowTokens[trimmed], null);
+  }
+  if (CSS_BOX_SHADOW_LENGTH_RE.test(trimmed)) return trimmed;
+  return null;
+}
+
+const BORDER_STYLE_KEYWORDS = new Set(['none', 'hidden', 'solid', 'dashed', 'dotted', 'double', 'groove', 'ridge', 'inset', 'outset']);
+const BORDER_WIDTH_KEYWORDS = { thin: 1, medium: 2, thick: 3 };
+
+export function parseCssBorderShorthand(val) {
+  if (typeof val === 'boolean') return { valid: true, enabled: val };
+  if (typeof val === 'number') {
+    if (!Number.isFinite(val) || val < 0) return { valid: false };
+    return { valid: true, enabled: val > 0, width: val };
+  }
+  if (typeof val !== 'string') return { valid: false };
+  const s = val.trim();
+  if (!s || /^(?:none|hidden|0(?:px)?)$/i.test(s)) {
+    return { valid: true, enabled: false, width: 0, style: 'none' };
+  }
+  let rest = s;
+  let color = null;
+  const fnColorMatch = rest.match(/(?:rgba?|hsla?|var)\([^)]+\)/i);
+  if (fnColorMatch) {
+    color = fnColorMatch[0].trim();
+    rest = `${rest.slice(0, fnColorMatch.index)} ${rest.slice(fnColorMatch.index + fnColorMatch[0].length)}`;
+  }
+  const tokens = rest.trim().split(/\s+/).filter(Boolean);
+  let width = null;
+  let style = null;
+  for (const tok of tokens) {
+    const low = tok.toLowerCase();
+    if (width === null && /^(?:\d+\.?\d*|\.\d+)(?:px)?$/i.test(tok)) {
+      width = parseFloat(tok);
+      continue;
+    }
+    if (width === null && Object.hasOwn(BORDER_WIDTH_KEYWORDS, low)) {
+      width = BORDER_WIDTH_KEYWORDS[low];
+      continue;
+    }
+    if (style === null && BORDER_STYLE_KEYWORDS.has(low)) {
+      style = low;
+      continue;
+    }
+    if (color === null && (/^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(tok) || tok.startsWith('$') || low === 'transparent' || low === 'currentcolor')) {
+      color = tok;
+      continue;
+    }
+    return { valid: false };
+  }
+  if (width === null && style === null && color === null) return { valid: false };
+  const effWidth = width ?? 1;
+  const effStyle = style || 'solid';
+  const enabled = effWidth > 0 && effStyle !== 'none' && effStyle !== 'hidden' && String(color || '').toLowerCase() !== 'transparent';
+  return {
+    valid: true,
+    enabled,
+    width: effWidth,
+    style: effStyle,
+    ...(color ? { color } : {}),
+  };
+}
+
 export function textSpanCss(span, fontStack = 'sans-serif') {
   const css = {};
   if (span.fontFamily) css['font-family'] = `${JSON.stringify(span.fontFamily)}, ${fontStack}`;
@@ -87,13 +185,16 @@ export function visualCss(node) {
   if (backgrounds.length) css['background-image'] = backgrounds.join(',');
   if (node.backdropBlur) css['backdrop-filter'] = `blur(${Number(node.backdropBlur) || 12}px)`;
   const shadows = [];
-  if (node.shadow) shadows.push(typeof node.shadow === 'string' ? node.shadow : '0 8px 24px #14231D1A');
+  const primaryShadow = resolveShadowCss(node._resolvedShadow ?? node.shadow);
+  if (primaryShadow) shadows.push(primaryShadow);
   if (node.innerGlow) {
     const glow = typeof node.innerGlow === 'string' ? node.innerGlow : '#FFFFFF66';
     shadows.push(glow.includes('inset') ? glow : `inset 0 0 12px ${glow}`);
   }
   if (Array.isArray(node.shadows)) for (const s of node.shadows) {
-    if (typeof s === 'string' && s.trim()) shadows.push(s.trim());
+    const resolvedItem = resolveShadowCss(s);
+    if (resolvedItem) shadows.push(resolvedItem);
+    else if (typeof s === 'string' && s.trim() && s.trim().toLowerCase() !== 'none') shadows.push(s.trim());
   }
   if (shadows.length) css['box-shadow'] = shadows.join(',');
   if (node.mixBlendMode) css['mix-blend-mode'] = String(node.mixBlendMode);

@@ -257,8 +257,10 @@ function whitespaceRatio(nodes, board, grid = 8) {
 }
 
 function typeScale(nodes) {
+  const IMPLICIT_FORM_TYPES = new Set(['checkbox', 'radio', 'combobox', 'listbox', 'input']);
   const raw = [...new Set(nodes
-    .filter(n => visibleText(n) && Number.isFinite(n.fontSize) && n.fontSize > 0)
+    .filter(n => visibleText(n) && Number.isFinite(n.fontSize) && n.fontSize > 0
+      && !(IMPLICIT_FORM_TYPES.has(n.type) && n.explicitFontSize === false))
     .map(n => Math.round(n.fontSize * 100) / 100))]
     .sort((a, b) => b - a);
   // 相差不到 8% 的字号在视觉上是同一级，先合并，再算字阶比。

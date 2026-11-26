@@ -187,8 +187,23 @@ function entries(index) { return [...new Set(index.byScopedId.values())]; }
 
 function resolveExact(index, target, pageId, pointer, locate, { allowCrossPage = false } = {}) {
   const raw = String(target || '').replace(/^@/, '');
-  const exact = index.byScopedId.get(raw);
-  const candidates = exact ? [exact] : (index.byId.get(raw) || []).filter(entry => entry.pageId === pageId);
+  const norm = raw.replace(/:/g, '/');
+  const exact = index.byScopedId.get(raw)
+    || index.byScopedId.get(norm)
+    || (pageId ? index.byScopedId.get(`${pageId}/${norm}`) : null);
+  let candidates = exact ? [exact] : [];
+  if (!candidates.length && norm.includes('/')) {
+    const allEntries = entries(index);
+    const [firstSeg, ...restSegs] = norm.split('/');
+    const tail = restSegs.join('/');
+    const pageScoped = allEntries.filter(entry => entry.pageId === firstSeg && (entry.id === tail || entry.scopedId.endsWith('/' + tail)));
+    candidates = pageScoped.length
+      ? pageScoped
+      : allEntries.filter(entry => entry.pageId === pageId && entry.scopedId.endsWith('/' + norm));
+  }
+  if (!candidates.length) {
+    candidates = (index.byId.get(norm) || []).filter(entry => entry.pageId === pageId);
+  }
   if (!candidates.length) fail('E_RP1_REFERENCE', `未找到页面 ${pageId} 中的节点 ${raw}`, { nodeId: raw, ...locate(pointer) });
   if (candidates.length !== 1) fail('E_RP1_REFERENCE_SCOPE', `节点 ${raw} 在多个作用域重名，请使用完整作用域路径`, { nodeId: raw, candidates: candidates.map(entry => entry.scopedId), ...locate(pointer) });
   if (!allowCrossPage && candidates[0].pageId !== pageId) fail('E_RP1_REFERENCE_SCOPE', '局部节点修改与元件动作不能跨页面；跨页使用 link（普通文字跨页更新请使用 set-text 并写明 target:"pageId/nodeId"）', { nodeId: raw, ...locate(pointer) });
@@ -197,17 +212,41 @@ function resolveExact(index, target, pageId, pointer, locate, { allowCrossPage =
 
 function resolveParentEntry(index, parentId, pageId, pointer, locate) {
   if (!parentId) return null;
-  if (typeof parentId === 'string' && parentId.includes(':')) {
-    const [panelRef, stateId] = parentId.split(':', 2);
-    const panelEntry = resolveExact(index, panelRef, pageId, pointer, locate);
-    if (panelEntry.node.type !== 'dynamic-panel' || !Array.isArray(panelEntry.node.states)) {
-      fail('E_INVALID_PARENT', `节点 ${panelRef} 不是包含 states 的动态面板，无法解析 ${parentId}`, { nodeId: panelRef, ...locate(pointer) });
+  if (typeof parentId === 'string') {
+    if (parentId.includes(':')) {
+      const [panelRef, stateId] = parentId.split(':', 2);
+      const panelEntry = resolveExact(index, panelRef, pageId, pointer, locate);
+      if (panelEntry.node.type !== 'dynamic-panel' || !Array.isArray(panelEntry.node.states)) {
+        fail('E_INVALID_PARENT', `节点 ${panelRef} 不是包含 states 的动态面板，无法解析 ${parentId}`, { nodeId: panelRef, ...locate(pointer) });
+      }
+      const st = panelEntry.node.states.find(item => item.id === stateId || item.name === stateId);
+      if (!st || !st.root?.id) {
+        fail('E_RP1_REFERENCE', `动态面板 ${panelRef} 中不存在状态 ${stateId}`, { nodeId: parentId, ...locate(pointer) });
+      }
+      return resolveExact(index, `${panelEntry.scopedId}/${st.id}/${st.root.id}`, pageId, pointer, locate);
     }
-    const st = panelEntry.node.states.find(item => item.id === stateId || item.name === stateId);
-    if (!st || !st.root?.id) {
-      fail('E_RP1_REFERENCE', `动态面板 ${panelRef} 中不存在状态 ${stateId}`, { nodeId: parentId, ...locate(pointer) });
+    if (parentId.includes('/')) {
+      const normParent = parentId.replace(/^@/, '');
+      const lastSlash = normParent.lastIndexOf('/');
+      const panelRef = normParent.slice(0, lastSlash);
+      const stateId = normParent.slice(lastSlash + 1);
+      const exactContainer = index.byScopedId.get(normParent) || (pageId ? index.byScopedId.get(`${pageId}/${normParent}`) : null);
+      if (!exactContainer && panelRef && stateId) {
+        let panelEntry = null;
+        try {
+          panelEntry = resolveExact(index, panelRef, pageId, pointer, locate);
+        } catch {
+          panelEntry = null;
+        }
+        if (panelEntry?.node?.type === 'dynamic-panel' && Array.isArray(panelEntry.node.states)) {
+          const st = panelEntry.node.states.find(item => item.id === stateId || item.name === stateId);
+          if (!st || !st.root?.id) {
+            fail('E_RP1_REFERENCE', `动态面板 ${panelRef} 中不存在状态 ${stateId}`, { nodeId: parentId, ...locate(pointer) });
+          }
+          return resolveExact(index, `${panelEntry.scopedId}/${st.id}/${st.root.id}`, pageId, pointer, locate);
+        }
+      }
     }
-    return resolveExact(index, `${panelEntry.scopedId}/${st.id}/${st.root.id}`, pageId, pointer, locate);
   }
   return resolveExact(index, parentId, pageId, pointer, locate);
 }
@@ -443,6 +482,22 @@ export function prepareRp1Commands({ doc, source, pageId, parentId = null, mode,
       record.autoDecorId = true;
     }
     if (
+      mode === 'update'
+      && typeof node.id === 'string'
+      && node.id.trim()
+      && !/\s/.test(node.id)
+      && /[/:]/.test(node.id)
+      && originalSpan
+      && parsed.explicit[String(originalSpan.line)] === node.id
+    ) {
+      const bareTail = node.id.replace(/:/g, '/').split('/').filter(Boolean).pop();
+      if (bareTail) {
+        record.lookupId = node.id;
+        node.id = bareTail;
+        parsed.explicit[String(originalSpan.line)] = bareTail;
+      }
+    }
+    if (
       typeof node.id !== 'string'
       || !node.id.trim()
       || /[\s/:]/.test(node.id)
@@ -476,10 +531,11 @@ export function prepareRp1Commands({ doc, source, pageId, parentId = null, mode,
     commands.push({ type: 'addNode', pageId, ...(parent ? { parentId: parent.scopedId } : {}), ...(insertIndex !== undefined ? { index: insertIndex } : {}), node: root });
   } else {
     const skippedPrefixes = [];
-    for (const { node, pointer } of records) {
+    for (const record of records) {
+      const { node, pointer, lookupId } = record;
       if (skippedPrefixes.some(prefix => pointer.startsWith(prefix))) continue;
       if (node.slots) fail('E_RP1_SOURCE_UNSUPPORTED', 'update 不从片段推断插槽结构替换；请定位叶节点，或使用原有结构命令', { nodeId: node.id, ...locate(pointer) });
-      const current = resolveExact(index, node.id, pageId, pointer, locate);
+      const current = resolveExact(index, lookupId || node.id, pageId, pointer, locate);
       if (parent && current.path !== parent.path && !current.path.startsWith(parent.path + '/')) fail('E_RP1_SOURCE_SCOPE', `节点 ${node.id} 不在指定更新区域内`, { nodeId: node.id, ...locate(pointer) });
       if (current.node.type !== node.type) fail('E_RP1_SOURCE_TYPE', `update 不改变节点 ${node.id} 类型 ${current.node.type} → ${node.type}`, { nodeId: node.id, ...locate(pointer) });
       if (node.states) {

@@ -23,6 +23,7 @@ const work = mkdtempSync(join(tmpdir(), 'axure-mcp-check-'));
 const fixture = name => fixturePath(name);
 const env = Object.fromEntries(Object.entries(process.env).filter(([, v]) => typeof v === 'string'));
 env.AXURE_WRITE_ROOT = work;
+env.AXURE_STRICT_WRITE_ROOT = '1';
 const transport = new StdioClientTransport({ command: process.execPath, args: [join(serverRoot, 'bin/mcp.mjs')], env, stderr: 'pipe' });
 const client = new Client({ name: 'axure-mcp-check', version: '1.0.0' });
 const results = [];
@@ -30,21 +31,61 @@ const check = async (name, action) => {
   try { await action(); results.push({ name, passed: true }); console.log(`PASS  ${name}`); }
   catch (error) { results.push({ name, passed: false, detail: error.message }); console.log(`FAIL  ${name} — ${error.message}`); }
 };
-const call = (name, args) => client.callTool({ name, arguments: args });
+const CLI_COMMANDS_MAP = new Map([
+  ['rp_read', 'rp-read'],
+  ['set_widget_text', 'set-widget-text'],
+  ['add_interaction', 'add-interaction'],
+  ['fill_panel_state', 'fill-panel-state'],
+  ['create_blank_project', 'create-blank-project'],
+  ['axvg_selftest', 'axvg selftest'],
+  ['create_blank_page', 'create-blank-page'],
+  ['duplicate_page', 'duplicate-page'],
+  ['remove_interaction', 'remove-interaction'],
+  ['remove_panel_state_content', 'remove-panel-state-content'],
+]);
+function mapConvergedCall(name, args = {}) {
+  if (name === 'axure_state') return { name: 'axure_save', arguments: {} };
+  if (name === 'locate') return { name: 'rp_inspect', arguments: { view: 'locate', ...args } };
+  if (name === 'inspect') return { name: 'rp_inspect', arguments: { view: 'widget', ...args } };
+  if (name === 'read_interactions') return { name: 'rp_inspect', arguments: { view: 'interactions', ...args } };
+  if (name === 'verify') return { name: 'rp_inspect', arguments: { view: 'verify', ...args } };
+  if (name === 'edit_text') return { name: 'rp_patch', arguments: args };
+  if (CLI_COMMANDS_MAP.has(name)) {
+    const command = CLI_COMMANDS_MAP.get(name);
+    const { args: rawArgs, session: sessionFlag, ...rest } = args ?? {};
+    const hasRest = Object.keys(rest).length > 0;
+    return {
+      name: 'rp_command',
+      arguments: {
+        action: 'run',
+        command,
+        ...(rawArgs !== undefined ? { args: rawArgs } : {}),
+        ...(sessionFlag !== undefined ? { session: sessionFlag } : {}),
+        ...(hasRest || rawArgs === undefined ? { params: rest } : {}),
+      },
+    };
+  }
+  return { name, arguments: args };
+}
+const callOn = (c, name, args) => c.callTool(mapConvergedCall(name, args));
+const call = (name, args) => callOn(client, name, args);
 const protectedPath = '/zee-rp-test-protected/final.rp';
 env.AXURE_PROTECTED_PATHS = protectedPath;
 process.env.AXURE_PROTECTED_PATHS = protectedPath;
+process.env.AXURE_WRITE_ROOT = work;
+process.env.AXURE_STRICT_WRITE_ROOT = '1';
 
 try {
   await client.connect(transport);
-  await check('stdio 初始化与注册表全部命令工具对齐', async () => {
+  await check('stdio 初始化与收敛后 28 个工具及底层命令 Schema 对齐', async () => {
     const { tools } = await client.listTools();
     const expected = [...listMcpTools(), ...jobTools].map(t => t.name).sort();
+    assert.equal(expected.length, 30);
     assert.deepEqual(tools.map(t => t.name).sort(), expected);
-    for (const name of ['rp_read', 'add_interaction', 'fill_panel_state', 'set_widget_text']) {
-      const schema = tools.find(t => t.name === name).inputSchema;
-      assert.equal(schema.oneOf.length, 2);
-      for (const branch of schema.oneOf) assert.equal(branch.additionalProperties, false);
+    for (const command of ['rp-read', 'add-interaction', 'fill-panel-state', 'set-widget-text']) {
+      const desc = JSON.parse((await client.callTool({ name: 'rp_command', arguments: { action: 'describe', command } })).content[0].text);
+      assert.equal(desc.inputSchema.oneOf.length, 2);
+      for (const branch of desc.inputSchema.oneOf) assert.equal(branch.additionalProperties, false);
     }
   });
   await check('rp_read 实际调用', async () => {
@@ -250,15 +291,15 @@ try {
     assert.ok((await call('create_blank_project', { args: [output] })).isError); assert.ok(!existsSync(output));
   });
   // ---- 会话状态层（任务 A 追加；上方旧 13 项原样保留）----
-  await check('会话层 8 个意图工具登记', async () => {
+  await check('会话层 5 个收敛原生工具登记', async () => {
     const { tools } = await client.listTools();
-    for (const name of ['axure_open', 'axure_state', 'axure_save', 'locate', 'inspect', 'read_interactions', 'edit_text', 'verify']) {
+    for (const name of ['axure_open', 'axure_save', 'rp_inspect', 'rp_patch', 'rp_command']) {
       const tool = tools.find(t => t.name === name);
       assert.ok(tool, `缺工具 ${name}`);
       assert.equal(tool.inputSchema.type, 'object');
       assert.equal(tool.inputSchema.additionalProperties, false);
     }
-    const richRuns = tools.find(tool => tool.name === 'edit_text').inputSchema.properties.richRuns;
+    const richRuns = tools.find(tool => tool.name === 'rp_patch').inputSchema.properties.richRuns;
     const link = richRuns.oneOf[0].items.properties.runs.items.properties.link;
     assert.ok(link.oneOf.some(branch => branch.required.includes('page')));
     assert.ok(link.oneOf.some(branch => branch.required.includes('url')));
@@ -482,7 +523,7 @@ try {
     const r = await call('set_widget_text', { page: 'Page 1' }); assert.ok(r.isError);
     assert.match(JSON.parse(r.content[0].text).usage, /<widgetName>/);
     const unknown = await call('not_registered', {}); assert.ok(unknown.isError);
-    const actual = (await client.listTools()).tools.filter(t => !t.name.startsWith('jobs_') && t.name !== 'gui_roundtrip').map(t => t.name);
+    const actual = (await client.listTools()).tools.map(t => t.name);
     assert.deepEqual(JSON.parse(unknown.content[0].text).availableTools, actual);
   });
   await check('locate 分页保持总数、下一页且拒绝非法范围', async () => {
@@ -574,11 +615,11 @@ try {
     const tr = new StdioClientTransport({ command: process.execPath, args: [join(serverRoot, 'bin/mcp.mjs')], env, stderr: 'pipe' });
     try {
       await another.connect(tr);
-      const inactive = valueOf(await another.callTool({ name: 'axure_state', arguments: {} })); assert.equal(inactive.active, false);
-      const missing = await another.callTool({ name: 'rp_read', arguments: {} }); assert.ok(missing.isError); assert.match(missing.content[0].text, /没有活动会话/);
-      const read = valueOf(await another.callTool({ name: 'rp_read', arguments: { file: fixture('blank-ui-native.rp') } })); assert.equal(JSON.parse(read.stdout).counts.widgets, 0);
-      const out = join(work, 'isolated-explicit.rp'); valueOf(await another.callTool({ name: 'set_widget_text', arguments: { source: fixture('var-set-counter-roundtrip.rp'), output: out, page: 'Page 1', widget: 'VALUE_PREVIEW', text: 'ISOLATED' } }));
-      assert.equal(valueOf(await another.callTool({ name: 'axure_state', arguments: {} })).active, false);
+      const inactive = valueOf(await callOn(another, 'axure_state', {})); assert.equal(inactive.active, false);
+      const missing = await callOn(another, 'rp_read', {}); assert.ok(missing.isError); assert.match(missing.content[0].text, /没有活动会话/);
+      const read = valueOf(await callOn(another, 'rp_read', { file: fixture('blank-ui-native.rp') })); assert.equal(JSON.parse(read.stdout).counts.widgets, 0);
+      const out = join(work, 'isolated-explicit.rp'); valueOf(await callOn(another, 'set_widget_text', { source: fixture('var-set-counter-roundtrip.rp'), output: out, page: 'Page 1', widget: 'VALUE_PREVIEW', text: 'ISOLATED' }));
+      assert.equal(valueOf(await callOn(another, 'axure_state', {})).active, false);
     } finally { await another.close(); }
   });
   await check('并发命令请求串行提交，不丢失任一修改', async () => {
@@ -633,11 +674,11 @@ try {
         const opened = await openFixture('var-set-counter-roundtrip.rp', `two-process-${i}`);
         valueOf(await another.callTool({ name: 'axure_open', arguments: { path: opened.session.sourceFile } }));
         const args = text => ({ page: 'Page 1', widget: 'VALUE_PREVIEW', text });
-        const [one, two] = await Promise.all([call('set_widget_text', args('PROCESS_ONE')), another.callTool({ name: 'set_widget_text', arguments: args('PROCESS_TWO') })]);
+        const [one, two] = await Promise.all([call('set_widget_text', args('PROCESS_ONE')), callOn(another, 'set_widget_text', args('PROCESS_TWO'))]);
         const a = valueOf(one), b = valueOf(two); assert.notEqual(a.chainTail, b.chainTail);
         assert.ok(existsSync(a.chainTail)); assert.ok(existsSync(b.chainTail));
         for (const [result, text] of [[a, 'PROCESS_ONE'], [b, 'PROCESS_TWO']]) assert.equal(readRp(readFileSync(result.chainTail)).pages[0].widgets.find(w => w.name === 'VALUE_PREVIEW').text, text);
-        valueOf(await call('verify', {})); valueOf(await another.callTool({ name: 'verify', arguments: {} }));
+        valueOf(await call('verify', {})); valueOf(await callOn(another, 'verify', {}));
       }
     } finally { await another.close(); }
     assert.ok(!readdirSync(work).some(name => name.endsWith('.lock')), '正常结束不留下预约锁');
@@ -670,7 +711,7 @@ try {
           return originalWrite(path, ...args);
         };
         syncBuiltinESMExports();
-        const r = callCommandTool('edit_text', { target: { name: 'VALUE_PREVIEW' }, text: 'AFTER_RACE' });
+        const r = callCommandTool('rp_patch', { target: { name: 'VALUE_PREVIEW' }, text: 'AFTER_RACE' });
         assert.ok(!r.isError, r.content[0].text); assert.ok(JSON.parse(r.content[0].text).chainTail.endsWith(`${label}.work-3.rp`));
       } finally { fs.writeFileSync = originalWrite; syncBuiltinESMExports(); }
       assert.ok(injected); assert.ok(readFileSync(raced).equals(original)); assert.ok(!readdirSync(work).some(n => n.endsWith('.lock')));

@@ -498,7 +498,7 @@ export class StudioServer {
         code,
         message: err.message,
         diagnostic:this.store&&this.scene?errorDiagnostic(err,this):null,
-        ...Object.fromEntries(['sourceSpan', 'line', 'column', 'snippet', 'nodeId', 'field', 'candidates', 'suggestion', 'currentRevision'].filter(key => err[key] !== undefined).map(key => [key, err[key]])),
+        ...Object.fromEntries(['sourceSpan', 'line', 'column', 'snippet', 'nodeId', 'field', 'candidates', 'suggestion', 'currentRevision', 'requestedBaseRevision'].filter(key => err[key] !== undefined).map(key => [key, err[key]])),
         appliedRevision: this.store?.appliedRevision,
         durableRevision: this.store?.durableRevision,
         renderedRevision: this.renderedRevision,
@@ -799,6 +799,7 @@ export class StudioServer {
           revision: body.revision ?? this.store.appliedRevision,
           pageId: body.pageId || null,
           nodeId: body.nodeId || null,
+          panelStates: body.panelStates ?? null,
           outPath: body.outPath || null,
           timeoutMs: body.timeoutMs ?? 5000,
           simulateHang: Boolean(body.simulateHang),
@@ -1322,7 +1323,7 @@ export class StudioServer {
             if (!browser.passed) {
               freshSemanticSession(); // 指针层失败：语义不执行，共享会话复位回初始运行态
               if (browser.status === 'unsupported') {
-                sendJson(res, 200, { ok: false, code: 'E_SCENARIO_HITTEST_UNSUPPORTED', message: '场景包含无法在真实浏览器指针层重放的步骤或字段（如 navigate/dataset 动作），hitTest 不能只对初始态做部分校验', browserLayer: browser, designContentHash: this.store.doc.contentHash });
+                sendJson(res, 200, { ok: false, code: 'E_SCENARIO_HITTEST_UNSUPPORTED', message: '场景包含无法在真实浏览器指针层重放的步骤或字段（如 dataset 动作），hitTest 不能只对初始态做部分校验', browserLayer: browser, designContentHash: this.store.doc.contentHash });
                 return;
               }
               if (/不可见或被遮挡|未找到可见操作目标/.test(browser.message || '')) {

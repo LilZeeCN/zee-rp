@@ -4,17 +4,22 @@
 //     消解为左到右逐组件处理符号链接与 '..'（readlink 只读链接文件自身，链接目标从未被触碰），
 //     并在 darwin/win32 这类大小写不敏感文件系统上做大小写折叠比较——堵住大小写变体与符号链接两种
 //     resolve() 字符串比较的穿透（两者在本机已实测复现）。
-//   白名单——AXURE_WRITE_ROOT（按平台分隔多根）设置时，输出路径必须位于某个根之下，未设置时只查红线；
+//   系统禁写——始终拒绝写入操作系统核心目录与技能安装包源码/资产目录；
+//   严格白名单（显式 opt-in）——默认允许任意本地工作目录自由读写；仅当显式设置 AXURE_STRICT_WRITE_ROOT=1 时，
+//     才要求输出绝对路径位于 AXURE_WRITE_ROOT（按平台分隔多根）之下。
 //     输出定位按脚本真实解析规则取位（前置 flag 形态滤 '--' 后按位置参数序），axvg build 省略 -o 时
 //     纳管 spec 同名默认输出。
 // 引擎自身不写 stdout（子进程 stdout 以 Buffer 原样返回给调用方），日志与拒绝信息只走 stderr（由调用方打印）。
 import { lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { basename, delimiter, dirname, join, parse, resolve, sep } from 'node:path';
+import { basename, delimiter, dirname, isAbsolute, join, parse, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { getCommand, listCommands } from './registry.mjs';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
+const SKILL_ROOT = resolve(SCRIPTS_DIR, '..');
+const SYSTEM_FORBIDDEN_DIRS = ['/System', '/usr', '/bin', '/sbin', '/etc', '/private/etc', '/dev', '/proc', '/sys'];
+const SKILL_FORBIDDEN_SUBDIRS = ['bin', 'scripts', 'studio', 'tools', 'assets', 'examples', '.git', '.github', 'node_modules'];
 
 // Windows 用 ';'，避免盘符里的 ':' 被当作分隔符。
 const splitPathList = value => (value ?? '').split(delimiter).filter(Boolean);
@@ -112,19 +117,51 @@ export function assertNotProtected(path) {
   physResolve(path); // 命中受保护路径时在消解过程中抛错
 }
 
-// 输出检查：先红线，再可选白名单。输出与根都做物理消解（符号链接目录归位），
-// 按路径段比较避免 /wr 误匹配 /wr2 这类前缀假阳性；大小写折叠与红线同一策略。
+// 解析调用方工作目录优先级：显式 cwd/projectDir > 当前本地工作目录 process.cwd()（仅当显式开启 AXURE_STRICT_WRITE_ROOT=1，或守护进程 cwd 落在根目录/技能安装目录本身时回退 AXURE_WRITE_ROOT 首目录）。
+export function resolveWorkDir(explicitDir) {
+  if (typeof explicitDir === 'string' && explicitDir.trim()) return resolve(explicitDir.trim());
+  const cwd = process.cwd();
+  if (process.env.AXURE_STRICT_WRITE_ROOT === '1') {
+    const firstRoot = splitPathList(process.env.AXURE_WRITE_ROOT)[0];
+    if (firstRoot) return resolve(firstRoot);
+  }
+  const skillBase = physResolve(SKILL_ROOT, false);
+  const cwdBase = physResolve(cwd, false);
+  if (cwd === '/' || fold(cwdBase) === fold(skillBase)) {
+    const firstRoot = splitPathList(process.env.AXURE_WRITE_ROOT)[0];
+    if (firstRoot) return resolve(firstRoot);
+  }
+  return cwd;
+}
+
+// 输出检查：先红线，再最小系统级/技能源码级禁写保护；仅当显式开启 AXURE_STRICT_WRITE_ROOT=1 时才强制校验 AXURE_WRITE_ROOT 白名单。
+// 输出与根都做物理消解（符号链接目录归位），按路径段比较避免 /wr 误匹配 /wr2 这类前缀假阳性；大小写折叠与红线同一策略。
 export function assertWritable(path) {
   assertNotProtected(path);
-  const roots = splitPathList(process.env.AXURE_WRITE_ROOT);
-  if (roots.length === 0 || typeof path !== 'string' || path.length === 0) return;
+  if (typeof path !== 'string' || path.length === 0) return;
   const abs = physResolve(path);
+  if (abs === '/' || SYSTEM_FORBIDDEN_DIRS.some(sysDir => fold(abs) === fold(sysDir) || fold(abs).startsWith(`${fold(sysDir)}${sep}`))) {
+    throw new Error(`拒绝执行：禁止写入操作系统受保护目录（${abs}）`);
+  }
+  const skillBase = physResolve(SKILL_ROOT, false);
+  const inSkillProtectedSubdir = SKILL_FORBIDDEN_SUBDIRS.some(sub => {
+    const target = `${skillBase}${sep}${sub}`;
+    return fold(abs) === fold(target) || fold(abs).startsWith(`${fold(target)}${sep}`);
+  });
+  if (fold(abs) === fold(skillBase) || fold(dirname(abs)) === fold(skillBase) || inSkillProtectedSubdir) {
+    throw new Error(`拒绝执行：禁止将输出直接写入技能安装目录（${abs}），请输出到您的本地工作目录`);
+  }
+  if (process.env.AXURE_STRICT_WRITE_ROOT !== '1') return;
+  const roots = splitPathList(process.env.AXURE_WRITE_ROOT);
+  if (roots.length === 0) {
+    throw new Error('拒绝执行：已开启 AXURE_STRICT_WRITE_ROOT=1，但未设置有效的 AXURE_WRITE_ROOT 目录白名单');
+  }
   const under = roots.some(root => {
     const base = fold(physResolve(root));
     const candidate = fold(abs);
     return candidate === base || candidate.startsWith(base.endsWith(sep) ? base : base + sep);
   });
-  if (!under) throw new Error(`拒绝执行：输出 ${path}（消解为 ${abs}）不在 AXURE_WRITE_ROOT 白名单（${roots.join(delimiter)}）内`);
+  if (!under) throw new Error(`拒绝执行：已开启 AXURE_STRICT_WRITE_ROOT=1，输出 ${path}（消解为 ${abs}）不在 AXURE_WRITE_ROOT 白名单（${roots.join(delimiter)}）内`);
 }
 
 // 注册表 output → 本次调用的输出路径（供白名单定位）。
@@ -152,15 +189,21 @@ function locateOutput(command, args) {
 
 export class AxureSession {
   // source 是可选的会话级输入源（多步编排时的共同上游），同样受红线约束。
-  constructor({ source } = {}) {
-    this.source = typeof source === 'string' && source.length > 0 ? resolve(source) : null;
+  constructor({ source, cwd } = {}) {
+    this.cwd = resolveWorkDir(cwd);
+    this.source = typeof source === 'string' && source.length > 0
+      ? (isAbsolute(source) ? source : resolve(this.cwd, source))
+      : null;
     assertNotProtected(this.source);
   }
 
   // 输出落盘统一检查点（红线 + 可选白名单），run 内部与未来多步编排复用。
   saveAs(path) {
-    assertWritable(path);
-    return resolve(path);
+    const resolved = typeof path === 'string' && path.length > 0 && !isAbsolute(path)
+      ? resolve(this.cwd, path)
+      : path;
+    assertWritable(resolved);
+    return resolve(resolved);
   }
 
   // commandName 为注册表命令名（axvg 三个子命令各占一条，如 'axvg build'）；
@@ -173,12 +216,18 @@ export class AxureSession {
     assertNotProtected(this.source);
     // 红线扫全部字符串参数：注册表 output 只标记输出位，输入位（源 .rp/.rplib/spec）没有机读标记，
     // 逐参数物理消解比对是安全超集——非路径参数不可能消解成受保护绝对路径。
-    for (const a of args) assertNotProtected(a);
+    for (const a of args) {
+      assertNotProtected(a);
+      if (typeof a === 'string' && a.length > 0 && !isAbsolute(a)) {
+        assertNotProtected(resolve(this.cwd, a));
+      }
+    }
     const output = locateOutput(command, args);
     if (output !== null) this.saveAs(output); // 白名单只约束输出；输入只查红线。
 
     // 透传执行：node + 脚本绝对路径 + 原样参数，不经 shell、不改写任何参数。
     const child = spawnSync(process.execPath, [join(SCRIPTS_DIR, command.script), ...args], {
+      cwd: this.cwd,
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 64 * 1024 * 1024,
     });

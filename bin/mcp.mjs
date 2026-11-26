@@ -36,16 +36,30 @@ try {
         if (name === 'generate_prototype' && input.includeImage) {
           throw Object.assign(new Error('includeImage:true 需要同步生成，请省略 async 或通过任务结果读取预览路径。'), { code: 'E_PREVIEW_IMAGE_ASYNC' });
         }
+        if (name === 'generate_prototype' && input.verify) {
+          throw Object.assign(new Error('verify:true 需要同步运行浏览器行为验证，请省略 async 或生成后调用 verify_prototype。'), { code: 'E_VERIFY_ASYNC' });
+        }
         const value = name === 'revise_prototype' ? jobs.startRevision(input) : jobs.startGeneration(input);
         return { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value, isError: false };
       }
       const tool = jobTools.find(t => t.name === name);
       if (!tool) return callCommandTool(name, input);
       validateInput(tool.inputSchema, input);
-      const value = name === 'gui_roundtrip' ? await jobs.startRoundtrip(input)
-        : name === 'jobs_list' ? jobs.list()
-        : name === 'jobs_get' ? jobs.get(input.id) : jobs.cancel(input.id);
-      return { content: [{ type: 'text', text: JSON.stringify(value) }], isError: value?.status === 'failed' };
+      let value;
+      if (name === 'gui_roundtrip') {
+        value = await jobs.startRoundtrip(input);
+      } else {
+        if ((input.action === 'get' || input.action === 'cancel') && !input.id) {
+          throw new Error(`jobs(${input.action}) 必须提供任务 id`);
+        }
+        if (input.action === 'list' && input.id !== undefined) {
+          throw new Error('jobs(list) 不接受 id 参数');
+        }
+        value = input.action === 'list'
+          ? (() => { const list = jobs.list(); return { status: 'completed', count: list.length, jobs: list }; })()
+          : input.action === 'get' ? jobs.get(input.id) : jobs.cancel(input.id);
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(value) }], structuredContent: value, isError: value?.status === 'failed' };
     }
     catch (error) {
       const value = { status: 'failed', diagnostics: [{ code: error.code ?? 'E_TOOL_ARGUMENT', message: error.message,

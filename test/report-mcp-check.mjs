@@ -119,10 +119,10 @@ try {
   const deadline = Date.now() + 120000;
   while (['queued', 'running'].includes(finished.status) && Date.now() < deadline) {
     await new Promise(r => setTimeout(r, 250));
-    finished = await call('jobs_get', { id: job.id });
+    finished = await call('jobs', { action: 'get', id: job.id });
   }
   assert.equal(finished.status, 'completed', JSON.stringify(finished));
-  const cancelled = await call('jobs_cancel', { id: job.id });
+  const cancelled = await call('jobs', { action: 'cancel', id: job.id });
   assert.equal(cancelled.cancelled, false); assert.equal(cancelled.reason, 'already_completed');
   record('completed job explicitly refuses cancellation');
 
@@ -154,23 +154,23 @@ try {
   const info = await call('runtime_info', {});
   assert.equal(info.restartRequired, false); record('fresh stdio fingerprint matches disk');
 
-  // Round 4 MCP regressions: R4-06 (set_widget_style on Layer without fill/invalid color) & R4-07 (set_widget_richtext args structured error)
+  // Round 4 MCP regressions: R4-06 (rp_patch style on Layer without fill/invalid color) & R4-07 (set-widget-richtext args structured error)
   const r4Rp = join(work, 'r4-mcp.rp');
   await call('generate_prototype', { spec: fixture(), output: r4Rp });
   await call('axure_open', { path: r4Rp });
-  const badStyleLayer = await call('set_widget_style', { widget: 'root', fill: 'notacolor' }, true);
+  const badStyleLayer = await call('rp_patch', { widget: 'root', fill: 'notacolor' }, true);
   assert.equal(badStyleLayer.code, 'E_TOOL_INPUT');
-  const noFillLayer = await call('set_widget_style', { widget: 'root', fill: '#FF0000' }, true);
+  const noFillLayer = await call('rp_patch', { widget: 'root', fill: '#FF0000' }, true);
   assert.equal(noFillLayer.code, 'E_TOOL_INPUT');
-  record('set_widget_style rejects invalid colors upfront and refuses no-op style writes on unsupported widgets');
+  record('rp_patch rejects invalid colors upfront and refuses no-op style writes on unsupported widgets');
 
   const rtSpec = join(work, 'bad-rt.json');
   writeFileSync(rtSpec, JSON.stringify({ page: 'home', widget: 'txt-t1', paragraphs: [{ runs: [{ text: 'x', style: { bogusKey: 1 } }] }] }));
-  const badRt = await call('set_widget_richtext', { args: [r4Rp, join(work, 'rt-out.rp'), rtSpec] }, true);
+  const badRt = await call('rp_command', { action: 'run', command: 'set-widget-richtext', args: [r4Rp, join(work, 'rt-out.rp'), rtSpec] }, true);
   assert.equal(badRt.code, 'E_TOOL_INPUT');
   assert(Array.isArray(badRt.diagnostics) && badRt.diagnostics.length > 0);
   assert(!String(badRt.stderr || '').includes('file://'));
-  record('set_widget_richtext args mode returns structured E_TOOL_INPUT without raw stack traces');
+  record('rp_command set-widget-richtext args mode returns structured E_TOOL_INPUT without raw stack traces');
 
   writeFileSync(join(work, 'checks.json'), JSON.stringify({ root, passed: checks.length, checks }, null, 2));
 } finally {

@@ -91,7 +91,7 @@ try {
     const spec = JSON.parse(readFileSync(join(root, 'examples/richtext.json')));
     const opened = callCommandTool('axure_open', {path:source});
     assert.ok(!opened.isError, opened.content[0].text);
-    const result = callCommandTool('edit_text', {target:{page,name:'StatusBanner'},richRuns:spec.paragraphs});
+    const result = callCommandTool('rp_patch', {target:{page,name:'StatusBanner'},richRuns:spec.paragraphs});
     assert.ok(!result.isError, result.content[0].text);
     const rich = readFileSync(JSON.parse(result.content[0].text).chainTail); healthy(rich);
     assert.ok([...pageGraph(rich).objects.values()].some(o => o.className === 'Axure:DiagramObject:Hyperlink'));
@@ -119,7 +119,7 @@ try {
     const rp = healthy(readFileSync(output));
     assert.ok(rp.globalVariables.some(v => v.name === 'Counter' && v.value === '7'));
     const second = join(work, 'mcp-variable.rp');
-    const result = callCommandTool('create_global_variable', {source, output:second, name:'McpCounter', defaultValue:'9'});
+    const result = callCommandTool('rp_command', {action:'run', command:'create-global-variable', params:{source, output:second, name:'McpCounter', defaultValue:'9'}});
     assert.ok(!result.isError, result.content[0].text);
     assert.equal(JSON.parse(result.content[0].text).exitCode, 0, result.content[0].text);
     assert.ok(healthy(readFileSync(second)).globalVariables.some(v => v.name === 'McpCounter' && v.value === '9'));

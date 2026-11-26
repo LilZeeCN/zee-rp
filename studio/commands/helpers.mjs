@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { VALID_NODE_TYPES } from './taxonomy.mjs';
 import { normalizeInteractionSpec } from '../interactions.mjs';
 import { NODE_PROPERTY_NAMES, NODE_READONLY_PROPERTIES, NODE_UNCONSUMED_PROPERTIES, NODE_SYNTAX_ONLY_PROPERTIES, propertySuggestions } from '../node-properties.mjs';
-import { normalizeVisualCss } from '../visual-style.mjs';
+import { normalizeVisualCss, parseCssBorderShorthand, resolveShadowCss } from '../visual-style.mjs';
 import { normalizeVectorNodeSpec } from '../vector-paths.mjs';
 import { assertKnownNodeEffects, assertCanvasNodeType } from '../node-capabilities.mjs';
 import { resolveDocumentScene, parsePadding } from '../scene-resolver.mjs';
@@ -246,6 +246,33 @@ export function validatePropertiesObject(props, nodeId, cmdIdx, {creation=false,
         throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 shadows[${idx}] 必须是字符串或阴影对象`, { commandIndex: cmdIdx, nodeId, field: `shadows[${idx}]` });
       }
     });
+  }
+  if ('shadow' in props && props.shadow !== null && props.shadow !== undefined) {
+    const s = props.shadow;
+    const okShadow = typeof s === 'boolean'
+      || (typeof s === 'string' && s.trim().startsWith('$'))
+      || resolveShadowCss(s) !== null;
+    if (!okShadow) {
+      throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 shadow 值不受支持: ${JSON.stringify(s)}`, {
+        commandIndex: cmdIdx,
+        nodeId,
+        field: 'shadow',
+        suggestion: '请使用布尔值、预设名（none/xs/sm/md/lg/xl/2xl/inner）、$阴影令牌或标准 CSS box-shadow 字符串（如 "0 4px 12px rgba(15,23,42,0.08)"）',
+      });
+    }
+  }
+  for (const bKey of ['borderTop', 'borderRight', 'borderBottom', 'borderLeft']) {
+    if (bKey in props && props[bKey] !== null && props[bKey] !== undefined) {
+      const parsed = parseCssBorderShorthand(props[bKey]);
+      if (!parsed.valid) {
+        throw cmdError('E_INVALID_VALUE', `节点 "${nodeId}" 的 ${bKey} 格式非法: ${JSON.stringify(props[bKey])}`, {
+          commandIndex: cmdIdx,
+          nodeId,
+          field: bKey,
+          suggestion: `请使用布尔值、非负线宽数值或标准 CSS 边框简写（如 "1px solid #CBD5E1"）`,
+        });
+      }
+    }
   }
   if ('spans' in props && props.spans !== null && props.spans !== undefined) {
     if (!Array.isArray(props.spans)) {

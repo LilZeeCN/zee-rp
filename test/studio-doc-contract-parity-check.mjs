@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
  * 文档与公开工具面一致性门禁（Batch 6 B6.4）：
- *  1. 锁定公开 MCP 工具总数为 74（其中 studioTools 精确为 13 个动词化工具，含 export_prototype 与 verify_prototype）
- *  2. 断言 SKILL.md、studio/authoring-help.mjs（全部 6 个 topic 返回值）、studioTools schema 及现行 docs/*.md 中
+ *  1. 锁定公开 MCP 工具总数为 30（其中 studioTools 精确为 13 个动词化工具，含 export_prototype 与 verify_prototype）
+ *  2. 断言 SKILL.md、studio/authoring-help.mjs（全部 6 个 topic 返回值）、studioTools schema 及现行 docs/*.md + references/*.md 中
  *     出现的每一个 studio_* 标识符都属于公开注册的 13 个 studioTools，杜绝已删旧工具名残留误导 AI
- *  3. 断言上述活跃入口中不再残留已删裸工具名（get_design_context / run_scenario / apply_commands 等）
+ *  3. 断言上述活跃入口中不再残留已删裸工具名（get_design_context / run_scenario / apply_commands / explain_binding / edit_text 等）
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -27,6 +27,9 @@ const ACTIVE_DOC_PATHS = [
   'docs/studio-native-roundtrip.md',
   'docs/architecture.md',
   'docs/gaps.md',
+  'references/mcp-prototype.md',
+  'references/authoring-workflow.md',
+  'references/custom-styles.md',
 ];
 
 const BANNED_LEGACY_BARE_NAMES = [
@@ -36,12 +39,26 @@ const BANNED_LEGACY_BARE_NAMES = [
   'query_nodes',
   'review_design',
   'prepare_media',
+  'explain_binding',
+  'review_image_structure',
+  'jobs_list',
+  'jobs_get',
+  'jobs_cancel',
+  'axure_state',
+  'edit_text',
+  'rename_widget',
+  'set_widget_geometry',
+  'set_widget_style',
+  'read_interactions',
+  'list_custom_styles',
+  'rename_custom_style',
+  'rebind_widgets',
 ];
 
 test('公开 MCP 工具面规模与 13 个 studio_* 动词锁定', () => {
   const allMcpTools = [...listMcpTools(), ...jobTools];
   assert.equal(studioTools.length, 13, `studioTools 应保持 13 个动词工具，实际为 ${studioTools.length}`);
-  assert.equal(allMcpTools.length, 74, `公开 MCP 工具总数应为 74，实际为 ${allMcpTools.length}`);
+  assert.equal(allMcpTools.length, 30, `公开 MCP 工具总数应为 30，实际为 ${allMcpTools.length}`);
 });
 
 test('SKILL.md、authoring-help、公开 schema 与现行文档零旧工具名残留', () => {
@@ -76,7 +93,7 @@ test('SKILL.md、authoring-help、公开 schema 与现行文档零旧工具名�
     const invalid = refs.filter(name => !validStudioNames.has(name));
     assert.deepEqual(invalid, [], `${relPath} 中引用了不存在的 studio_* 工具名: ${invalid.join(', ')}`);
 
-    if (relPath === 'SKILL.md' || relPath === 'studio/authoring-help.mjs' || relPath.startsWith('docs/studio-')) {
+    if (relPath === 'SKILL.md' || relPath === 'studio/authoring-help.mjs' || relPath.startsWith('docs/studio-') || relPath.startsWith('references/')) {
       for (const legacy of BANNED_LEGACY_BARE_NAMES) {
         assert.ok(
           !new RegExp(`\\b${legacy}\\b`).test(content),

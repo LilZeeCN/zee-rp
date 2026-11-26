@@ -3,8 +3,8 @@
 // 公开入口经 StudioServer 上的同名一行委托调用,外部调用面不变。
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { sha256 } from './document.mjs';
-import { RENDERER_VERSION } from './scene-resolver.mjs';
+import { buildNodeIndex, sha256 } from './document.mjs';
+import { RENDERER_VERSION, resolveDocumentScene } from './scene-resolver.mjs';
 import { launchChrome } from './cdp.mjs';
 import { collectRenderedText, contrastTextNodes, measurePixelContrast } from './pixel-truth.mjs';
 import { decodePng } from './png-decode.mjs';
@@ -124,7 +124,7 @@ export async function waitForRenderedRevision(server, targetRevision = server.st
     } else {
       const fallbackTimer = setTimeout(() => {
         if (server.renderedRevision < targetRevision) syncManagedRenderer();
-      }, 250);
+      }, 40);
       waitPromise.finally(() => clearTimeout(fallbackTimer)).catch(() => {});
     }
 
@@ -183,9 +183,11 @@ export async function _capturePixelContrast(server, pageId, { dpr = 2 } = {}) {
       const screenshot = () => page.screenshot({ clip: { ...clip, scale: 1 }, captureBeyondViewport: true });
       const png = await screenshot();
       await page.evaluate(`(() => {
+        const glyphSel = '[data-studio-hide-glyphs], [data-studio-hide-glyphs] > .studio-text-span, [data-studio-hide-glyphs] > .studio-text-content, [data-studio-hide-glyphs] > .studio-text-content > .studio-text-span';
         document.getElementById('studio-pixel-paint').textContent +=
-          '[data-studio-hide-glyphs], [data-studio-hide-glyphs] > .studio-text-span { -webkit-text-fill-color:transparent!important; -webkit-text-stroke-color:transparent!important; text-shadow:none!important; text-decoration-color:transparent!important; }';
-        for (const el of document.querySelectorAll('[data-studio-hide-glyphs], [data-studio-hide-glyphs] > .studio-text-span')) {
+          glyphSel + ' { -webkit-text-fill-color:transparent!important; -webkit-text-stroke-color:transparent!important; text-shadow:none!important; text-decoration-color:transparent!important; }' +
+          '[data-studio-ignore-glyphs], [data-studio-ignore-glyphs] * { -webkit-text-fill-color:currentColor!important; }';
+        for (const el of document.querySelectorAll(glyphSel)) {
           if (getComputedStyle(el).backgroundClip === 'text') {
             el.setAttribute('data-studio-original-paint', el.getAttribute('style') || '');
             el.style.setProperty('background-image', 'none', 'important');
@@ -196,11 +198,12 @@ export async function _capturePixelContrast(server, pageId, { dpr = 2 } = {}) {
       // Render the same browser glyphs without scene paint or occluders. This
       // reference mask exposes lost strokes inside a character, not just lost words.
       await page.evaluate(`(() => {
+        const glyphSel = '[data-studio-hide-glyphs], [data-studio-hide-glyphs] > .studio-text-span, [data-studio-hide-glyphs] > .studio-text-content, [data-studio-hide-glyphs] > .studio-text-content > .studio-text-span';
         document.getElementById('studio-pixel-paint').textContent +=
           '.artboard-outer, .artboard-screen { background:#000!important; }' +
           '.studio-node, .studio-node * { background:none!important; border-color:transparent!important; box-shadow:none!important; text-shadow:none!important; text-decoration:none!important; color:transparent!important; -webkit-text-fill-color:transparent!important; -webkit-text-stroke:0!important; opacity:1!important; filter:none!important; backdrop-filter:none!important; mix-blend-mode:normal!important; mask:none!important; clip-path:none!important; overflow:visible!important; }' +
-          '.studio-node img, .studio-node svg, .artboard-island, .artboard-home-indicator { visibility:hidden!important; }' +
-          '[data-studio-hide-glyphs], [data-studio-hide-glyphs] > .studio-text-span { color:#fff!important; -webkit-text-fill-color:#fff!important; }';
+          '.studio-node img, .studio-node svg, .artboard-island, .artboard-home-indicator, [data-studio-ignore-glyphs], [data-studio-ignore-glyphs] * { visibility:hidden!important; }' +
+          glyphSel + ' { color:#fff!important; -webkit-text-fill-color:#fff!important; }';
       })()`);
       const inkPng = await screenshot();
       if (revision !== server.store.appliedRevision || contentHash !== server.store.doc.contentHash) {
@@ -250,6 +253,7 @@ export async function _captureScreenshot(server, {
     revision = server.store.appliedRevision,
     pageId = null,
     nodeId = null,
+    panelStates = null,
     outPath = null,
     timeoutMs = 5000,
     simulateHang = false,
@@ -263,6 +267,48 @@ export async function _captureScreenshot(server, {
       );
     }
 
+    const targetPageId = pageId || server.store.doc.pages[0]?.id || 'home';
+    let tempDoc = null;
+    let tempScene = null;
+    let appliedPanelStates = null;
+    if (panelStates !== null && panelStates !== undefined) {
+      if (typeof panelStates !== 'object' || Array.isArray(panelStates)) {
+        throw Object.assign(new Error('panelStates 必须是 { [panelId]: stateId } 对象'), { code: 'E_INVALID_PANEL_STATES' });
+      }
+      const entries = Object.entries(panelStates);
+      if (entries.length > 0) {
+        tempDoc = structuredClone(server.store.doc);
+        const tempIdx = buildNodeIndex(tempDoc);
+        appliedPanelStates = {};
+        for (const [panelKey, rawStateId] of entries) {
+          const panelEntry = tempIdx.resolve(panelKey, targetPageId);
+          if (!panelEntry || panelEntry.node?.type !== 'dynamic-panel') {
+            throw Object.assign(new Error(`未找到动态面板 "${panelKey}"`), { code: 'E_NODE_NOT_FOUND', nodeId: panelKey });
+          }
+          const stateIdStr = String(rawStateId ?? '').trim();
+          const afterColon = stateIdStr.includes(':') ? stateIdStr.split(':').pop() : stateIdStr;
+          const bareStateCandidate = afterColon.includes('/') ? afterColon.split('/').pop() : afterColon;
+          const matchedState = (panelEntry.node.states || []).find(
+            st => st.id === stateIdStr || st.name === stateIdStr || st.id === bareStateCandidate || st.name === bareStateCandidate
+          );
+          if (!matchedState) {
+            throw Object.assign(
+              new Error(`动态面板 "${panelKey}" 中不存在状态 "${stateIdStr}"`),
+              {
+                code: 'E_PANEL_STATE_NOT_FOUND',
+                nodeId: panelKey,
+                stateId: stateIdStr,
+                availableStates: (panelEntry.node.states || []).map(st => st.id),
+              }
+            );
+          }
+          panelEntry.node.activeState = matchedState.id;
+          appliedPanelStates[panelEntry.id] = matchedState.id;
+        }
+        tempScene = resolveDocumentScene(tempDoc, { projectDir: server.projectDir });
+      }
+    }
+
     if (!simulateHang) {
       await server.ensureManagedBrowserPage();
     }
@@ -270,8 +316,8 @@ export async function _captureScreenshot(server, {
     const page = await server.ensureManagedBrowserPage();
 
     // Ensure the managed page has rendered the exact requested revision and active page
-    const targetPageId = pageId || server.store.doc.pages[0]?.id || 'home';
-    const board = server.scene.pages.find(pg => pg.id === targetPageId)?.board;
+    const activeScene = tempScene || server.scene;
+    const board = activeScene.pages.find(pg => pg.id === targetPageId)?.board;
     if (board) {
       // The capture renderer must fit the artboard inside the canvas viewport;
       // clipping a larger board otherwise includes the Inspector over its right edge.
@@ -282,103 +328,156 @@ export async function _captureScreenshot(server, {
         mobile: false,
       });
     }
-    await page.evaluate(`(async () => {
-      if (window.__STUDIO_APP__) {
-        if (window.__STUDIO_APP__.state.mode !== 'design') document.querySelector('[data-mode="design"]')?.click();
-        window.__STUDIO_APP__.selectNodes([], ${JSON.stringify(targetPageId)});
-        const pg = window.__STUDIO_STATE__?.scene?.pages?.find(p => p.id === ${JSON.stringify(targetPageId)});
-        if (pg) window.__STUDIO_APP__.setPanZoom(40 - (pg._stageX ?? 60), 40 - (pg._stageY ?? 40), 1);
-      }
-      if (window.__STUDIO_RENDERED_REVISION__ !== ${revision} || window.__STUDIO_STATE__?.activePageId !== ${JSON.stringify(targetPageId)}) {
-        const res = await fetch('/api/context');
-        const data = await res.json();
-        if (window.__STUDIO_STATE__ && window.__STUDIO_APP__) {
-          window.__STUDIO_STATE__.doc = data.doc;
-          window.__STUDIO_STATE__.scene = data.scene;
-          window.__STUDIO_STATE__.appliedRevision = data.appliedRevision;
-          window.__STUDIO_STATE__.durableRevision = data.durableRevision;
-          window.__STUDIO_APP__.selectNodes([], ${JSON.stringify(targetPageId)});
-        }
-        if (document.fonts && document.fonts.ready) await document.fonts.ready;
-        const imgs = [...document.querySelectorAll('#canvas-stage img')];
-        await Promise.all(imgs.map(img => img.complete ? Promise.resolve() : new Promise(r => { img.onload = r; img.onerror = r; setTimeout(r, 1000); })));
-        await new Promise(r => requestAnimationFrame(r));
-        window.__STUDIO_RENDERED_REVISION__ = data.appliedRevision;
-        window.__STUDIO_RENDERED_HASH__ = data.contentHash;
-      }
-    })()`);
 
-    // Device viewport changes and SSE renders commit asynchronously in Chromium.
-    // Wait for compositor frames even when the document revision did not change.
-    await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
-    const renderCheck = await page.evaluate(`(() => {
-      const targetEl = ${
-        nodeId
-          ? `document.querySelector('.studio-node[data-node-id=${JSON.stringify(nodeId)}]')`
-          : `document.querySelector('.artboard-wrapper[data-artboard-id=${JSON.stringify(targetPageId)}] .artboard-outer') || document.getElementById('screen-root')`
-      };
-      if (!targetEl) return null;
-      const r = targetEl.getBoundingClientRect();
-      return {
-        pageId: targetEl.closest('.artboard-wrapper')?.getAttribute('data-artboard-id'),
-        renderedRevision: window.__STUDIO_RENDERED_REVISION__,
-        contentHash: window.__STUDIO_RENDERED_HASH__,
-        rect: { x: Math.max(0, Math.round(r.left)), y: Math.max(0, Math.round(r.top)), w: Math.round(r.width), h: Math.round(r.height) },
-      };
-    })()`);
-
-    if (renderCheck?.pageId !== targetPageId) throw Object.assign(new Error('实际截取画板与请求页面不一致'), { code: 'E_SCREENSHOT_PAGE_MISMATCH' });
-
-    if (!renderCheck || renderCheck.renderedRevision < revision) {
-      throw Object.assign(
-        new Error(`截图失败：浏览器渲染版本 (${renderCheck?.renderedRevision}) 未达到请求版本 (${revision})`),
-        { code: 'E_SCREENSHOT_REVISION_MISMATCH', requestedRevision: revision, renderedRevision: renderCheck?.renderedRevision }
-      );
-    }
-
-    // The workspace has floating panels above the canvas. Only the dedicated
-    // capture page hides them; document geometry and the human UI stay intact.
-    await page.evaluate("document.body.classList.add('studio-capture')");
-    let buf;
     try {
-      buf = await page.screenshot({
-        captureBeyondViewport: true,
-        clip: {
-          x: renderCheck.rect.x,
-          y: renderCheck.rect.y,
-          w: Math.max(10, renderCheck.rect.w),
-          h: Math.max(10, renderCheck.rect.h),
-          // DPR already supplies the 2x pixels. Multiplying clip scale as well
-          // produced 4x images (with incorrect metadata) and huge effect surfaces.
-          scale: 1,
-        },
-      });
+      if (tempDoc && tempScene) {
+        await page.evaluate(`(async () => {
+          const overrideDoc = ${JSON.stringify(tempDoc)};
+          const overrideScene = ${JSON.stringify(tempScene)};
+          if (window.__STUDIO_STATE__ && window.__STUDIO_APP__) {
+            if (window.__STUDIO_APP__.state.mode !== 'design') document.querySelector('[data-mode="design"]')?.click();
+            window.__STUDIO_STATE__.doc = overrideDoc;
+            window.__STUDIO_STATE__.scene = overrideScene;
+            window.__STUDIO_APP__.selectNodes([], ${JSON.stringify(targetPageId)});
+            const pg = window.__STUDIO_STATE__?.scene?.pages?.find(p => p.id === ${JSON.stringify(targetPageId)});
+            if (pg) window.__STUDIO_APP__.setPanZoom(40 - (pg._stageX ?? 60), 40 - (pg._stageY ?? 40), 1);
+          }
+          if (document.fonts && document.fonts.ready) await document.fonts.ready;
+          const imgs = [...document.querySelectorAll('#canvas-stage img')];
+          await Promise.all(imgs.map(img => img.complete ? Promise.resolve() : new Promise(r => { img.onload = r; img.onerror = r; setTimeout(r, 1000); })));
+          await new Promise(r => requestAnimationFrame(r));
+        })()`);
+      } else {
+        await page.evaluate(`(async () => {
+          if (window.__STUDIO_APP__) {
+            if (window.__STUDIO_APP__.state.mode !== 'design') document.querySelector('[data-mode="design"]')?.click();
+            window.__STUDIO_APP__.selectNodes([], ${JSON.stringify(targetPageId)});
+            const pg = window.__STUDIO_STATE__?.scene?.pages?.find(p => p.id === ${JSON.stringify(targetPageId)});
+            if (pg) window.__STUDIO_APP__.setPanZoom(40 - (pg._stageX ?? 60), 40 - (pg._stageY ?? 40), 1);
+          }
+          if (window.__STUDIO_RENDERED_REVISION__ !== ${revision} || window.__STUDIO_STATE__?.activePageId !== ${JSON.stringify(targetPageId)}) {
+            const res = await fetch('/api/context');
+            const data = await res.json();
+            if (window.__STUDIO_STATE__ && window.__STUDIO_APP__) {
+              window.__STUDIO_STATE__.doc = data.doc;
+              window.__STUDIO_STATE__.scene = data.scene;
+              window.__STUDIO_STATE__.appliedRevision = data.appliedRevision;
+              window.__STUDIO_STATE__.durableRevision = data.durableRevision;
+              window.__STUDIO_APP__.selectNodes([], ${JSON.stringify(targetPageId)});
+            }
+            if (document.fonts && document.fonts.ready) await document.fonts.ready;
+            const imgs = [...document.querySelectorAll('#canvas-stage img')];
+            await Promise.all(imgs.map(img => img.complete ? Promise.resolve() : new Promise(r => { img.onload = r; img.onerror = r; setTimeout(r, 1000); })));
+            await new Promise(r => requestAnimationFrame(r));
+            window.__STUDIO_RENDERED_REVISION__ = data.appliedRevision;
+            window.__STUDIO_RENDERED_HASH__ = data.contentHash;
+          }
+        })()`);
+      }
+
+      // Device viewport changes and SSE renders commit asynchronously in Chromium.
+      // Wait for compositor frames even when the document revision did not change.
+      await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
+      const renderCheck = await page.evaluate(`(() => {
+        const boardWrap = document.querySelector('.artboard-wrapper[data-artboard-id=${JSON.stringify(targetPageId)}]');
+        const targetEl = (() => {
+          const rawId = ${JSON.stringify(nodeId)};
+          if (!rawId) return boardWrap?.querySelector('.artboard-outer') || document.getElementById('screen-root');
+          const norm = String(rawId).replace(/:/g, '/');
+          const scopedPrefix = ${JSON.stringify(targetPageId)} + '/';
+          const bare = norm.startsWith(scopedPrefix) ? norm.slice(scopedPrefix.length) : norm;
+          const root = boardWrap || document;
+          return root.querySelector('.studio-node[data-scoped-id=' + JSON.stringify(norm) + ']')
+            || root.querySelector('.studio-node[data-scoped-id=' + JSON.stringify(scopedPrefix + bare) + ']')
+            || [...root.querySelectorAll('.studio-node')].find(el => {
+              const sid = el.getAttribute('data-scoped-id') || '';
+              return el.getAttribute('data-node-id') === bare || sid.endsWith('/' + bare);
+            })
+            || document.querySelector('.studio-node[data-node-id=' + JSON.stringify(rawId) + ']');
+        })();
+        if (!targetEl) return null;
+        const r = targetEl.getBoundingClientRect();
+        return {
+          pageId: targetEl.closest('.artboard-wrapper')?.getAttribute('data-artboard-id'),
+          renderedRevision: window.__STUDIO_RENDERED_REVISION__,
+          contentHash: window.__STUDIO_RENDERED_HASH__,
+          rect: { x: Math.max(0, Math.round(r.left)), y: Math.max(0, Math.round(r.top)), w: Math.round(r.width), h: Math.round(r.height) },
+        };
+      })()`);
+
+      if (nodeId && !renderCheck) {
+        throw Object.assign(new Error(`页面 "${targetPageId}" 中未找到可见节点 "${nodeId}"`), { code: 'E_NODE_NOT_FOUND', pageId: targetPageId, nodeId });
+      }
+      if (renderCheck?.pageId !== targetPageId) throw Object.assign(new Error('实际截取画板与请求页面不一致'), { code: 'E_SCREENSHOT_PAGE_MISMATCH' });
+
+      if (!renderCheck || renderCheck.renderedRevision < revision) {
+        throw Object.assign(
+          new Error(`截图失败：浏览器渲染版本 (${renderCheck?.renderedRevision}) 未达到请求版本 (${revision})`),
+          { code: 'E_SCREENSHOT_REVISION_MISMATCH', requestedRevision: revision, renderedRevision: renderCheck?.renderedRevision }
+        );
+      }
+
+      // The workspace has floating panels above the canvas. Only the dedicated
+      // capture page hides them; document geometry and the human UI stay intact.
+      await page.evaluate("document.body.classList.add('studio-capture')");
+      let buf;
+      try {
+        buf = await page.screenshot({
+          captureBeyondViewport: true,
+          clip: {
+            x: renderCheck.rect.x,
+            y: renderCheck.rect.y,
+            w: Math.max(10, renderCheck.rect.w),
+            h: Math.max(10, renderCheck.rect.h),
+            // DPR already supplies the 2x pixels. Multiplying clip scale as well
+            // produced 4x images (with incorrect metadata) and huge effect surfaces.
+            scale: 1,
+          },
+        });
+      } finally {
+        await page.evaluate("document.body.classList.remove('studio-capture')");
+      }
+
+      const imageSha = sha256(buf);
+      let savedPath = null;
+      if (outPath) {
+        savedPath = resolve(outPath);
+        mkdirSync(dirname(savedPath), { recursive: true });
+        writeFileSync(savedPath, buf);
+      }
+
+      return {
+        ok: true,
+        revision: server.store.appliedRevision,
+        durableRevision: server.store.durableRevision,
+        renderedRevision: renderCheck.renderedRevision,
+        contentHash: server.store.doc.contentHash,
+        rendererVersion: RENDERER_VERSION,
+        pageId: targetPageId,
+        nodeId: nodeId || null,
+        ...(appliedPanelStates ? { panelStates: appliedPanelStates, previewOnly: true } : {}),
+        width: renderCheck.rect.w * dpr,
+        height: renderCheck.rect.h * dpr,
+        sha256: imageSha,
+        outPath: savedPath,
+        base64: outPath ? undefined : buf.toString('base64'),
+        ...(includeImage ? { mcpImages: [{ mimeType: 'image/png', data: buf.toString('base64') }], base64: undefined } : {}),
+      };
     } finally {
-      await page.evaluate("document.body.classList.remove('studio-capture')");
+      if (tempDoc && tempScene) {
+        await page.evaluate(`(async () => {
+          const res = await fetch('/api/context');
+          const data = await res.json();
+          if (window.__STUDIO_STATE__ && window.__STUDIO_APP__) {
+            window.__STUDIO_STATE__.doc = data.doc;
+            window.__STUDIO_STATE__.scene = data.scene;
+            window.__STUDIO_STATE__.appliedRevision = data.appliedRevision;
+            window.__STUDIO_STATE__.durableRevision = data.durableRevision;
+            window.__STUDIO_APP__.selectNodes([], ${JSON.stringify(targetPageId)});
+            window.__STUDIO_RENDERED_REVISION__ = data.appliedRevision;
+            window.__STUDIO_RENDERED_HASH__ = data.contentHash;
+          }
+        })()`).catch(() => {});
+      }
     }
-
-    const imageSha = sha256(buf);
-    let savedPath = null;
-    if (outPath) {
-      savedPath = resolve(outPath);
-      mkdirSync(dirname(savedPath), { recursive: true });
-      writeFileSync(savedPath, buf);
-    }
-
-    return {
-      ok: true,
-      revision: server.store.appliedRevision,
-      durableRevision: server.store.durableRevision,
-      renderedRevision: renderCheck.renderedRevision,
-      contentHash: server.store.doc.contentHash,
-      rendererVersion: RENDERER_VERSION,
-      pageId: targetPageId,
-      nodeId: nodeId || null,
-      width: renderCheck.rect.w * dpr,
-      height: renderCheck.rect.h * dpr,
-      sha256: imageSha,
-      outPath: savedPath,
-      base64: outPath ? undefined : buf.toString('base64'),
-      ...(includeImage ? { mcpImages: [{ mimeType: 'image/png', data: buf.toString('base64') }], base64: undefined } : {}),
-    };
   }

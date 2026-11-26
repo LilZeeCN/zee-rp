@@ -29,11 +29,11 @@ async function check(name, action) {
   catch (error) { results.push({ name, passed: false, error: error.message }); console.log('FAIL', name, error.message); }
 }
 const nodes = data => [...data.pages.flatMap(p => p.widgets), ...(data.containedWidgets ?? [])];
-const native = async path => JSON.parse((await call('rp_read', { file: path })).stdout);
+const native = async path => JSON.parse((await call('rp_command', { action: 'run', command: 'rp-read', params: { file: path } })).stdout);
 async function finished(id) {
   const until = Date.now() + 60000;
   while (Date.now() < until) {
-    const job = await call('jobs_get', { id }, null);
+    const job = await call('jobs', { action: 'get', id }, null);
     if (['completed', 'failed', 'cancelled'].includes(job.status)) return job;
     await new Promise(r => setTimeout(r, 150));
   }
@@ -42,10 +42,11 @@ async function finished(id) {
 let current;
 try {
   await client.connect(transport);
-  await check('fresh MCP advertises real preview and read-only image structure review', async () => {
+  await check('fresh MCP advertises real preview and read-only diagnostic/image structure review', async () => {
     const list = (await client.listTools()).tools;
+    assert.equal(list.length, 30);
     assert.equal(new Set(list.map(t => t.name)).size, list.length);
-    assert.equal(list.find(t => t.name === 'review_image_structure').annotations.readOnlyHint, true);
+    assert.equal(list.find(t => t.name === 'diagnose_prototype').annotations.readOnlyHint, true);
     assert.equal(list.find(t => t.name === 'preview_prototype').annotations.readOnlyHint, false);
     assert.equal((await call('runtime_info', {})).toolCount, list.length);
   });
@@ -76,7 +77,7 @@ try {
     const stale = await call('generate_prototype', { source, output: join(work, 'stale-job.rp'), async: true });
     const cancelled = await call('generate_prototype', { source, output: join(work, 'cancel-job.rp'), async: true });
     writeFileSync(source, readFileSync(source, 'utf8') + '\n# Changed after submission\n');
-    assert.equal((await call('jobs_cancel', { id: cancelled.id })).status, 'cancelled');
+    assert.equal((await call('jobs', { action: 'cancel', id: cancelled.id })).status, 'cancelled');
     assert.equal((await finished(blocker.id)).status, 'completed');
     const result = await finished(stale.id);
     assert.equal(result.status, 'failed'); assert.equal(result.result.diagnostics[0].code, 'E_STALE_JOB_INPUT');
@@ -90,7 +91,7 @@ try {
     ]);
     children.push({ kind: 'image', name: 'photo', x: 20, y: 360, w: 80, h: 80, imageKey: 'test' });
     const spec = { frames: [{ w: 402, h: 874, children }] }, before = JSON.stringify(spec);
-    const r = await call('review_image_structure', { spec });
+    const r = await call('diagnose_prototype', { mode: 'image', spec });
     assert.equal(r.summary.groupCandidates, 2); assert.equal(r.summary.repeatedPatterns, 1);
     assert.equal(r.summary.rasterOnly, 1); assert.equal(r.nativeHierarchyChanged, false);
     assert.equal(JSON.stringify(spec), before); assert(r.groups.every(g => g.requiresReview));
@@ -114,7 +115,7 @@ try {
   });
   await check('cycle 1 preserves native rename while changing a separate source property', async () => {
     await call('axure_open', { path: current.output });
-    await call('rename_widget', { target: { name: 'headline', page: '首页' }, name: '原生主标题' });
+    await call('rp_patch', { target: { name: 'headline', page: '首页' }, name: '原生主标题' });
     const saved = await call('axure_save', { as: join(work, 'native1.rp') });
     current = await call('revise_prototype', { source: current.source, rp: saved.physicalPath, output: join(work, 'round1.rp'),
       operations: [{ target: 'home/note', property: 'text', value: '第一轮源码说明' }] });
@@ -122,8 +123,8 @@ try {
   });
   await check('cycle 2 preserves native text and geometry through source child reordering', async () => {
     await call('axure_open', { path: current.output });
-    await call('edit_text', { target: { name: 'headline', page: '首页' }, text: '第二轮原生标题' });
-    await call('set_widget_geometry', { target: { name: 'headline', page: '首页' }, x: 48, y: 28 });
+    await call('rp_patch', { target: { name: 'headline', page: '首页' }, text: '第二轮原生标题' });
+    await call('rp_patch', { target: { name: 'headline', page: '首页' }, x: 48, y: 28 });
     const saved = await call('axure_save', { as: join(work, 'native2.rp') });
     const source = JSON.parse(readFileSync(current.source));
     current = await call('revise_prototype', { source: current.source, rp: saved.physicalPath, output: join(work, 'round2.rp'),
@@ -135,7 +136,7 @@ try {
   });
   await check('cycle 3 preserves identity after rename/reordering and stops delete-vs-edit without writing', async () => {
     await call('axure_open', { path: current.output });
-    await call('edit_text', { target: { name: 'headline', page: '首页' }, text: '第三轮原生修改' });
+    await call('rp_patch', { target: { name: 'headline', page: '首页' }, text: '第三轮原生修改' });
     const saved = await call('axure_save', { as: join(work, 'native3.rp') });
     const source = JSON.parse(readFileSync(current.source));
     const index = source.pages[0].root.children.findIndex(n => n.id === 'headline' || n.label === 'headline');

@@ -227,7 +227,7 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
   const unsupEntries = nodeUnsupportedMap.get(n.scopedId) || [];
   const supCount = nodeSupportedMap.get(n.scopedId) || 0;
   const paint = {};
-  if (n.fills || n.shadows || n.mixBlendMode) {
+  if (n.fills || n.shadows || n.shadow || n.mixBlendMode || n.gradient || n.innerGlow) {
     const css = visualCss(n);
     for (const key of ['background-image', 'box-shadow', 'mix-blend-mode']) {
       if (!css[key]) continue;
@@ -281,6 +281,11 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
     stroke: n.booleanRect && n.stroke === '#FFFFFF00' ? null : n.stroke || null,
     strokeWidth: n.strokeWidth ?? 0,
     strokeStyle: n.strokeStyle || 'solid',
+    borderSides: n.borderSides ?? null,
+    borderTop: n.borderTop ?? null,
+    borderRight: n.borderRight ?? null,
+    borderBottom: n.borderBottom ?? null,
+    borderLeft: n.borderLeft ?? null,
     radius: n.radius ?? 0,
     opacity: n.opacity ?? 1,
     rotation: n.rotation ?? 0,
@@ -375,7 +380,29 @@ function renderStaticInitialNodeHtml(n) {
   if (!n.visible) styleParts.push('display:none');
   if (n.fill && n.type !== 'path') styleParts.push(`background:${n.fill}`);
   for (const [key, value] of Object.entries(n.paint || {})) styleParts.push(`${key}:${value}`);
-  if (n.stroke && n.strokeWidth > 0 && n.type !== 'path') {
+  const hasSideBorders = Boolean(n.borderSides || n.borderTop || n.borderRight || n.borderBottom || n.borderLeft);
+  if (hasSideBorders && n.type !== 'path') {
+    const borderColor = n.stroke || '#CBD5E1';
+    const borderW = n.strokeWidth > 0 ? n.strokeWidth : 1;
+    const sides = typeof n.borderSides === 'string'
+      ? new Set(n.borderSides.split(/[\s,]+/).filter(Boolean))
+      : Array.isArray(n.borderSides)
+        ? new Set(n.borderSides)
+        : typeof n.borderSides === 'number'
+          ? new Set([
+              ...(n.borderSides & 2 ? ['top'] : []),
+              ...(n.borderSides & 4 ? ['right'] : []),
+              ...(n.borderSides & 8 ? ['bottom'] : []),
+              ...(n.borderSides & 1 ? ['left'] : []),
+            ])
+          : new Set();
+    for (const [side, prop] of [['top', 'borderTop'], ['right', 'borderRight'], ['bottom', 'borderBottom'], ['left', 'borderLeft']]) {
+      const val = n[prop];
+      if (val || sides.has(side)) {
+        styleParts.push(`border-${side}:${typeof val === 'string' ? val : `${typeof val === 'number' ? val : borderW}px ${n.strokeStyle || 'solid'} ${borderColor}`}`);
+      }
+    }
+  } else if (n.stroke && n.strokeWidth > 0 && n.type !== 'path') {
     styleParts.push(`border:${n.strokeWidth}px ${n.strokeStyle || 'solid'} ${n.stroke}`);
   }
   if (n.radius > 0) styleParts.push(`border-radius:${n.radius}px`);
@@ -1721,8 +1748,30 @@ function buildAppJs(bundlePayload) {
       if (isSelectedVisual && !n.fill) el.style.background = '#DCEFE6';
       else if (n.fill && n.type !== 'path') el.style.background = n.fill;
       for (const [key, value] of Object.entries(n.paint || {})) el.style.setProperty(key, value);
-      if (isSelectedVisual && !n.stroke) el.style.border = '1px solid #2E6F57';
-      else if (n.stroke && n.strokeWidth > 0 && n.type !== 'path') {
+      const hasSideBorders = Boolean(n.borderSides || n.borderTop || n.borderRight || n.borderBottom || n.borderLeft);
+      if (isSelectedVisual && !n.stroke && !hasSideBorders) el.style.border = '1px solid #2E6F57';
+      else if (hasSideBorders && n.type !== 'path') {
+        const borderColor = n.stroke || '#CBD5E1';
+        const borderW = n.strokeWidth > 0 ? n.strokeWidth : 1;
+        const sides = typeof n.borderSides === 'string'
+          ? new Set(n.borderSides.split(/[\\s,]+/).filter(Boolean))
+          : Array.isArray(n.borderSides)
+            ? new Set(n.borderSides)
+            : typeof n.borderSides === 'number'
+              ? new Set([
+                  ...(n.borderSides & 2 ? ['top'] : []),
+                  ...(n.borderSides & 4 ? ['right'] : []),
+                  ...(n.borderSides & 8 ? ['bottom'] : []),
+                  ...(n.borderSides & 1 ? ['left'] : []),
+                ])
+              : new Set();
+        for (const [side, prop] of [['top', 'borderTop'], ['right', 'borderRight'], ['bottom', 'borderBottom'], ['left', 'borderLeft']]) {
+          const val = n[prop];
+          if (val || sides.has(side)) {
+            el.style.setProperty('border-' + side, typeof val === 'string' ? val : ((typeof val === 'number' ? val : borderW) + 'px ' + (n.strokeStyle || 'solid') + ' ' + borderColor));
+          }
+        }
+      } else if (n.stroke && n.strokeWidth > 0 && n.type !== 'path') {
         el.style.border = n.strokeWidth + 'px ' + (n.strokeStyle || 'solid') + ' ' + n.stroke;
       }
       if (n.radius > 0) el.style.borderRadius = n.radius + 'px';
@@ -1780,6 +1829,7 @@ function buildAppJs(bundlePayload) {
         if (Number.isInteger(n.maxLength) && n.maxLength >= 0) el.maxLength = n.maxLength;
         el.style.color = n.color || '#1E293B';
         el.style.fontSize = (n.fontSize || 14) + 'px';
+        el.style.fontWeight = String(n.fontWeight || 400);
         el.style.fontFamily = (n.fontFamily || 'PingFang SC') + ', sans-serif';
         el.style.padding = n.multiline ? '8px 12px' : '0 12px';
         if (n.multiline) el.style.resize = 'none';
@@ -1794,6 +1844,7 @@ function buildAppJs(bundlePayload) {
         el.style.gap = '8px';
         el.style.color = n.color || '#1E293B';
         el.style.fontSize = (n.fontSize || 14) + 'px';
+        el.style.fontWeight = String(n.fontWeight || 400);
         el.style.fontFamily = (n.fontFamily || 'PingFang SC') + ', sans-serif';
         const ind = document.createElement('span');
         Object.assign(ind.style, {
@@ -1821,6 +1872,7 @@ function buildAppJs(bundlePayload) {
         const sel = n.scopedId in this.selectedOptions ? this.selectedOptions[n.scopedId] : (opts[n.selectedIndex ?? 0] ?? '');
         el.style.color = n.color || '#1E293B';
         el.style.fontSize = (n.fontSize || 14) + 'px';
+        el.style.fontWeight = String(n.fontWeight || 400);
         el.style.fontFamily = (n.fontFamily || 'PingFang SC') + ', sans-serif';
         el.style.padding = '0 28px 0 12px';
         for (const opt of opts) {
@@ -1851,6 +1903,7 @@ function buildAppJs(bundlePayload) {
         el.style.overflowY = 'auto';
         el.style.color = n.color || '#1E293B';
         el.style.fontSize = (n.fontSize || 14) + 'px';
+        el.style.fontWeight = String(n.fontWeight || 400);
         el.style.fontFamily = (n.fontFamily || 'PingFang SC') + ', sans-serif';
         for (const opt of opts) {
           const itemEl = document.createElement('div');

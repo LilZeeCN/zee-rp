@@ -20,7 +20,7 @@ node bin/axure.mjs rebind-widgets input.rp rebound-clean.rp STYLE_GUID selector.
 
 输出必须使用新文件名。样式 GUID 来自第一步的列表；空选择器和名称冲突会拒绝。筛选支持 `name`、`type`（完整原生类名）、`record`、`id`、`owner`，各字段为精确匹配且同时满足；`all` 必须单独使用。分组 `Layer` 无可绑定外观，选择它会报错；可用 `type` 限定叶元件。没有选中元件时返回空 `applied`，文件保持原样。
 
-MCP 对应 `list_custom_styles({source})`、`rename_custom_style({source,output,oldName,newName})`、`rebind_widgets({source,output,styleGuid,selector,resetOverrides})`。`selector` 是本机 JSON 文件路径；不接受可执行代码或字符串谓词。更改后的工具列表需重连 MCP。
+MCP 对应统一入口：`rp_inspect({view:"styles", path})` 查询样式列表，`rp_patch({source, output, op:"rename-style", oldName, newName})` 级联改名，`rp_patch({source, output, op:"rebind-style", styleGuid, selector, resetOverrides})` 批量绑定（`rp_patch` 的 `selector` 直接接受选择器对象或本机 JSON 文件路径；亦可经 `rp_command` 调用原 CLI 命令）。更改后的工具列表需重连 MCP。
 
 JavaScript 接口供程序内筛选：
 

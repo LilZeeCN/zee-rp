@@ -7,6 +7,7 @@ export const BROWSER_SCENARIO_STEP_SCHEMA = {
     key === 'action' ? { type: 'string', enum: ['click', 'input', 'expect', 'assert'] } :
     key === 'expect' ? SCENARIO_STEP_SCHEMA.properties.expect : SCENARIO_STEP_SCHEMA.properties[key]])),
 };
+const ALLOWED_INTERACTION_STEP_KEYS = new Set([...Object.keys(BROWSER_SCENARIO_STEP_SCHEMA.properties), 'page', 'goto']);
 
 // 单次真实指针命中判定：滚动到可见后取 6 个采样点做 elementFromPoint。
 // 返回 {ok:true, point, sampledPoints} 或 {ok:false, reason:'not-found'|'occluded', occludedBy:{nodeId, scopedId, tagName}, sampledPoints}。
@@ -60,9 +61,22 @@ export async function resolvePointerHit(page, selector) {
 
 // 语义步骤目标 → 浏览器层 CSS 选择器（data-node-id 或作用域 data-scoped-id）。
 export async function resolveBrowserStepSelector(page, target) {
-  const id = String(target);
-  const resolved = id.includes('/') ? await page.evaluate(`(() => { const rt=window.__STUDIO_APP__.state.runtimeState;const id=${JSON.stringify(id)};return (rt.activePageScene?.nodes || []).find(n=>n.scopedId===id || n.scopedId===rt.currentPageId+'/'+id)?.scopedId; })()`) : null;
-  if (id.includes('/') && !resolved) throw new Error(`未找到指定作用域目标: ${id}`);
+  const id = String(target).replace(/^@/, '').replace(/:/g, '/');
+  const resolved = id.includes('/')
+    ? await page.evaluate(`(() => {
+        const rt = window.__STUDIO_APP__.state.runtimeState;
+        const id = ${JSON.stringify(id)};
+        const pagePrefix = rt.currentPageId + '/';
+        const suffix = id.startsWith(pagePrefix) ? id.slice(pagePrefix.length) : id;
+        return (rt.activePageScene?.nodes || []).find(n =>
+          n.scopedId === id
+          || n.scopedId === pagePrefix + id
+          || n.id === suffix
+          || n.scopedId.endsWith('/' + suffix)
+        )?.scopedId;
+      })()`)
+    : null;
+  if (id.includes('/') && !resolved) throw new Error(`未找到指定作用域目标: ${target}`);
   return resolved ? `#screen-root [data-scoped-id=${JSON.stringify(resolved)}]` : `#screen-root [data-node-id=${JSON.stringify(id)}]`;
 }
 
@@ -180,12 +194,12 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
   if (!Array.isArray(steps) || !steps.length) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_ACTIONS_REQUIRED', reason: '场景尚未提供可重放的用户操作，不能将静态渲染或结构检查记为通过' };
   const native = layer === 'axure-preview';
   for (const step of steps) {
-    const unknown = Object.keys(step).filter(key => !Object.hasOwn(BROWSER_SCENARIO_STEP_SCHEMA.properties, key));
-    if (unknown.length) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_STEP', fields: unknown, reason: `步骤包含未知字段 ${unknown.join(', ')}；可用字段：${Object.keys(BROWSER_SCENARIO_STEP_SCHEMA.properties).join(', ')}` };
+    const unknown = Object.keys(step).filter(key => !ALLOWED_INTERACTION_STEP_KEYS.has(key));
+    if (unknown.length) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_STEP', fields: unknown, reason: `步骤包含未知字段 ${unknown.join(', ')}；可用字段：${[...ALLOWED_INTERACTION_STEP_KEYS].join(', ')}` };
     const unsupported = Object.keys(step.expect || {}).filter(key => !(native ? ['page', 'variables', 'text', 'visible'] : Object.keys(SCENARIO_STEP_SCHEMA.properties.expect.properties)).includes(key));
     if (unsupported.length) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_ASSERTION_UNSUPPORTED', fields: unsupported };
     if (step.type !== undefined) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_STEP', reason: '步骤使用 action/expect，不能用 type' };
-    if (step.action && !['click', 'input', 'fill', 'expect', 'assert'].includes(step.action)) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_ACTION_UNSUPPORTED', action: step.action, reason: `步骤动作 ${step.action} 不受支持；可用动作：click、input、fill、expect、assert` };
+    if (step.action && !['navigate', 'click', 'input', 'fill', 'expect', 'assert'].includes(step.action)) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_ACTION_UNSUPPORTED', action: step.action, reason: `步骤动作 ${step.action} 不受支持；可用动作：navigate、click、input、fill、expect、assert` };
   }
   const assertionCount = countScenarioAssertions(steps);
   if (!assertionCount) return { passed: false, status: 'unsupported', code: 'E_SCENARIO_ASSERTIONS_REQUIRED', reason: '场景需要至少一项页面、变量或可见文字断言' };
@@ -193,8 +207,11 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
   const history = [];
   const names = new Set();
   for (const step of steps) {
-    if (step.target || step.id || step.click || step.fill) names.add(String(step.target || step.id || step.click || step.fill).split('/').at(-1));
-    for (const key of [...Object.keys(step.expect?.text || {}), ...Object.keys(step.expect?.visible || {}), ...Object.keys(step.expect?.checked || {}), ...Object.keys(step.expect?.selected || {})]) names.add(key.split('/').at(-1));
+    const inferredAction = step.action || (step.goto ? 'navigate' : step.click ? 'click' : step.fill ? 'input' : 'expect');
+    if (inferredAction !== 'navigate' && (step.target || step.id || step.click || step.fill)) {
+      names.add(String(step.target || step.id || step.click || step.fill).replace(/:/g, '/').split('/').at(-1));
+    }
+    for (const key of [...Object.keys(step.expect?.text || {}), ...Object.keys(step.expect?.visible || {}), ...Object.keys(step.expect?.checked || {}), ...Object.keys(step.expect?.selected || {})]) names.add(key.replace(/:/g, '/').split('/').at(-1));
   }
   const read = async () => {
     if (!native) return page.evaluate(`(() => {
@@ -280,19 +297,78 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
     } else {
       await page.navigate(`${new URL(await page.evaluate('location.href')).origin}/?clientId=scenario_executor`);
       await page.waitForFunction('Boolean(window.__STUDIO_APP__ && window.__STUDIO_RENDERED_REVISION__)');
+      const maxBoard = await page.evaluate(`(() => {
+        const pages = window.__STUDIO_STATE__?.scene?.pages || [];
+        let maxW = 393, maxH = 852;
+        for (const p of pages) {
+          if (p?.board?.totalW > maxW) maxW = p.board.totalW;
+          if (p?.board?.totalH > maxH) maxH = p.board.totalH;
+        }
+        return { maxW, maxH };
+      })()`);
+      // 为宽屏桌面画板动态扩容浏览器视口并将画板平移到左右侧栏与顶栏之间的净空区，防止编辑器自身 UI 遮挡画板边缘元件。
+      await page.send('Emulation.setDeviceMetricsOverride', {
+        width: Math.max(1440, Math.ceil((maxBoard?.maxW || 393) + 700)),
+        height: Math.max(960, Math.ceil((maxBoard?.maxH || 852) + 260)),
+        deviceScaleFactor: 1,
+        mobile: false,
+      });
       if (startPageId) await page.evaluate(`window.__STUDIO_APP__.selectNodes([], ${JSON.stringify(startPageId)})`);
       await pointerTarget(page, '#mode-interact-btn', 'click');
       await page.waitForFunction('Boolean(window.__STUDIO_APP__.state.runtimeState)');
+      await page.evaluate('window.__STUDIO_APP__.setPanZoom(240, 60, 1)');
+      await page.evaluate('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
     }
     for (let stepIdx = 0; stepIdx < steps.length; stepIdx++) {
       const step = steps[stepIdx];
-      const action = step.action || (step.click ? 'click' : step.fill ? 'input' : 'expect');
-      const target = step.target || step.id || step.click || step.fill;
+      const action = step.action || (step.goto ? 'navigate' : step.click ? 'click' : step.fill ? 'input' : 'expect');
+      const target = action === 'navigate'
+        ? (step.page || step.goto || step.target)
+        : (step.target || step.id || step.click || step.fill);
       currentStepInfo = { stepIndex: stepIdx + 1, totalSteps: steps.length, action, target: target ?? null };
-      if (action !== 'expect' && action !== 'assert') {
+      if (action === 'navigate') {
+        if (!target) throw new Error('navigate 步骤缺少目标页面 page/goto');
+        if (native) {
+          const targetPage = (doc.pages || []).find(p => p.id === target || p.name === target);
+          const targetName = targetPage?.name || String(target);
+          const sitemapHref = await page.evaluate(`(() => {
+            const targetName = ${JSON.stringify(targetName)};
+            const windows = [window];
+            const findNode = nodes => {
+              for (const n of nodes || []) {
+                if (n.pageName === targetName && n.url) return n.url;
+                const sub = findNode(n.children);
+                if (sub) return sub;
+              }
+              return null;
+            };
+            for (let i = 0; i < windows.length && i < 20; i++) {
+              const w = windows[i];
+              try {
+                const found = findNode(w.$axure?.document?.sitemap?.rootNodes);
+                if (found) return new URL(found, w.location.href).href;
+                for (let j = 0; j < w.frames.length; j++) windows.push(w.frames[j]);
+              } catch {}
+            }
+            return null;
+          })()`);
+          if (!sitemapHref) throw new Error(`原生预览中未找到页面: ${target}`);
+          await page.navigate('about:blank');
+          await page.navigate(sitemapHref);
+          await page.waitForFunction(`(() => { const o = (${observeAxure.toString()})(${JSON.stringify({ names: [...names], variables: Object.keys(doc.variables || {}) })}); return o.ready && o.page === ${JSON.stringify(targetName)}; })()`);
+        } else {
+          const previousTrace = await page.evaluate('window.__STUDIO_APP__.state.runtimeState.traceCount');
+          await page.evaluate(`(async () => {
+            await window.__STUDIO_APP__.selectPage(${JSON.stringify(String(target))});
+            window.__STUDIO_APP__.setPanZoom(240, 60, 1);
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          })()`);
+          await page.waitForFunction(`window.__STUDIO_APP__.state.runtimeState.traceCount > ${previousTrace}`);
+        }
+      } else if (action !== 'expect' && action !== 'assert') {
         let selector;
         if (native) {
-          const name = String(target).split('/').at(-1);
+          const name = String(target).replace(/:/g, '/').split('/').at(-1);
           let matches = [];
           const readyDeadline = Date.now() + 5000;
           do {
@@ -308,11 +384,31 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
         }
         const previousTrace = native ? null : await page.evaluate('window.__STUDIO_APP__.state.runtimeState.traceCount');
         await pointerTarget(page, selector, action, step.value ?? step.text);
-        if (!native) await page.waitForFunction(`window.__STUDIO_APP__.state.runtimeState.traceCount > ${previousTrace}`);
+        if (!native) {
+          await page.waitForFunction(`window.__STUDIO_APP__.state.runtimeState.traceCount > ${previousTrace}`);
+          await page.evaluate(`(async () => {
+            window.__STUDIO_APP__.setPanZoom(240, 60, 1);
+            await new Promise(resolve => requestAnimationFrame(resolve));
+          })()`);
+        }
       }
       let actual;
       let failures;
       const deadline = Date.now() + 4000;
+      const matchBrowserWidget = (w, rawName, curPage) => {
+        const normName = String(rawName).replace(/^@/, '').replace(/:/g, '/');
+        if (!normName.includes('/')) return w.name === normName;
+        const pagePrefix = `${curPage}/`;
+        const suffix = normName.startsWith(pagePrefix) ? normName.slice(pagePrefix.length) : normName;
+        return w.scopedId === normName || w.scopedId === pagePrefix + normName || w.name === suffix || Boolean(w.scopedId && w.scopedId.endsWith('/' + suffix));
+      };
+      const matchBrowserNode = (n, rawName, curPage) => {
+        const normName = String(rawName).replace(/^@/, '').replace(/:/g, '/');
+        if (!normName.includes('/')) return n.id === normName;
+        const pagePrefix = `${curPage}/`;
+        const suffix = normName.startsWith(pagePrefix) ? normName.slice(pagePrefix.length) : normName;
+        return n.scopedId === normName || n.scopedId === pagePrefix + normName || n.id === suffix || Boolean(n.scopedId && n.scopedId.endsWith('/' + suffix));
+      };
       do {
         actual = await read();
         failures = [];
@@ -320,26 +416,28 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
         if (step.expect?.page !== undefined && actual.page !== step.expect.page) failures.push('page');
         for (const [name, value] of Object.entries(step.expect?.variables || {})) if (String(actual.variables?.[name]) !== String(value)) failures.push(`variable:${name}`);
         for (const [name, value] of Object.entries(step.expect?.visible || {})) {
-          const matches = w => !native && name.includes('/') ? w.scopedId === name || w.scopedId === `${actual.page}/${name}` : w.name === name.split('/').at(-1);
+          const matches = w => !native ? matchBrowserWidget(w, name, actual.page) : w.name === name.replace(/:/g, '/').split('/').at(-1);
           const visible = actual.widgets?.some(w => matches(w) && w.visible) || false;
           if (typeof value !== 'boolean' || visible !== value) failures.push(`visible:${name}`);
         }
         for (const [name, value] of Object.entries(step.expect?.text || {})) {
-          const widget = actual.widgets?.find(w => (!native && name.includes('/') ? w.scopedId === name || w.scopedId === `${actual.page}/${name}` : w.name === name.split('/').at(-1)) && w.visible);
+          const widget = actual.widgets?.find(w => (!native ? matchBrowserWidget(w, name, actual.page) : w.name === name.replace(/:/g, '/').split('/').at(-1)) && w.visible);
           const substring = value !== null && typeof value === 'object' && typeof value.includes === 'string';
           if (!widget || !(substring ? widget.text.includes(value.includes) : widget.text.trim() === String(value))) failures.push(`text:${name}`);
         }
         if (!native) {
           for (const [name, value] of Object.entries(step.expect?.checked || {})) {
-            const candidates = (actual.nodes || []).filter(n => name.includes('/') ? n.scopedId === name || n.scopedId === `${actual.page}/${name}` : n.id === name);
-            const scopedKey = candidates[0]?.scopedId || (name.includes('/') && actual.checked?.[name] !== undefined ? name : `${actual.page}/${name}`);
+            const normName = String(name).replace(/^@/, '').replace(/:/g, '/');
+            const candidates = (actual.nodes || []).filter(n => matchBrowserNode(n, normName, actual.page));
+            const scopedKey = candidates[0]?.scopedId || (normName.includes('/') && actual.checked?.[normName] !== undefined ? normName : `${actual.page}/${normName}`);
             const curChk = Boolean(actual.checked?.[scopedKey] ?? candidates[0]?.checked);
             if (curChk !== Boolean(value)) failures.push(`checked:${name}`);
           }
           for (const [name, value] of Object.entries(step.expect?.selected || {})) {
-            const candidates = (actual.nodes || []).filter(n => name.includes('/') ? n.scopedId === name || n.scopedId === `${actual.page}/${name}` : n.id === name);
+            const normName = String(name).replace(/^@/, '').replace(/:/g, '/');
+            const candidates = (actual.nodes || []).filter(n => matchBrowserNode(n, normName, actual.page));
             const node = candidates[0];
-            const scopedKey = node?.scopedId || (name.includes('/') && (actual.selectedOptions?.[name] !== undefined || actual.selectedNodes?.[name] !== undefined) ? name : `${actual.page}/${name}`);
+            const scopedKey = node?.scopedId || (normName.includes('/') && (actual.selectedOptions?.[normName] !== undefined || actual.selectedNodes?.[normName] !== undefined) ? normName : `${actual.page}/${normName}`);
             const curSel = (node && (node.type === 'combobox' || node.type === 'listbox')) || actual.selectedOptions?.[scopedKey] !== undefined
               ? actual.selectedOptions?.[scopedKey]
               : (actual.selectedNodes?.[scopedKey] ?? actual.checked?.[scopedKey] ?? node?.selected);
@@ -351,11 +449,17 @@ export async function runInteractionSteps(page, doc, steps, { layer, url = null,
             if (!okSel) failures.push(`selected:${name}`);
           }
           for (const [name, value] of Object.entries(step.expect?.panelState || {})) {
-            const candidates = (actual.nodes || []).filter(n => n.type === 'dynamic-panel' && (name.includes('/') ? n.scopedId === name || n.scopedId === `${actual.page}/${name}` : n.id === name));
+            const normName = String(name).replace(/^@/, '').replace(/:/g, '/');
+            const candidates = (actual.nodes || []).filter(n => n.type === 'dynamic-panel' && matchBrowserNode(n, normName, actual.page));
             const actualPanelState = candidates.length === 1
               ? (actual.panelStates?.[candidates[0].scopedId] ?? actual.panelStates?.[`${actual.page}/${candidates[0].id}`])
               : undefined;
-            if (candidates.length !== 1 || actualPanelState !== value) failures.push(`panelState:${name}`);
+            const rawVal = String(value ?? '').trim();
+            const afterColon = rawVal.includes(':') ? rawVal.split(':').pop() : rawVal;
+            const bareExpectedState = afterColon.includes('/') ? afterColon.split('/').pop() : afterColon;
+            if (candidates.length !== 1 || (actualPanelState !== rawVal && actualPanelState !== bareExpectedState)) {
+              failures.push(`panelState:${name}`);
+            }
           }
           for (const [name, value] of Object.entries(step.expect?.datasetCount || {})) if (actual.datasets?.[name]?.visibleRows?.length !== value) failures.push(`datasetCount:${name}`);
           for (const [name, fields] of Object.entries(step.expect?.datasetFirstRow || {})) {

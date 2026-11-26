@@ -57,7 +57,7 @@ function textReplace(value, mapping) {
 async function create(id, sourceSpec) {
   const source = join(work, `${id}.json`); writeFileSync(source, JSON.stringify(sourceSpec, null, 2) + '\n');
   const r = await call('generate_prototype', { source, output: join(work, `${id}.rp`), strictAudit: true });
-  const verification = await call('verify', { path: r.output }); assert(verification.ok);
+  const verification = await call('rp_inspect', { view: 'verify', path: r.output }); assert(verification.ok);
   projects[id] = r; return { output: r.output, source: r.source, previews: r.previews, verification: r.verification };
 }
 try {
@@ -100,7 +100,7 @@ try {
   await task('native-source-merge', async () => {
     const p = projects['habit-cards'];
     await call('axure_open', { path: p.output });
-    await call('edit_text', { target: { name: 'headline', page: '今日复习' }, text: '原生改稿：从一个小习惯开始' });
+    await call('rp_patch', { target: { name: 'headline', page: '今日复习' }, text: '原生改稿：从一个小习惯开始' });
     const saved = await call('axure_save', { as: join(work, 'habit-native.rp') });
     const r = await call('revise_prototype', { source: p.source, rp: saved.physicalPath, output: join(work, 'habit-merged.rp'),
       operations: [{ target: 'today/intro', property: 'text', value: '源码改稿：每次只练一个动作。' }] });
@@ -114,7 +114,7 @@ try {
     const r = await call('generate_from_image', { image, output: join(work, 'equipment-image.rp'), scale: 2, page: '设备清单图片还原' });
     assert(r.widgetCounts.texts > 0 || r.widgetCounts.text > 0);
     assert(r.widgetCounts.shapes > 0); assert(r.baseline);
-    const verified = await call('verify', { path: r.output }); assert(verified.ok);
+    const verified = await call('rp_inspect', { view: 'verify', path: r.output }); assert(verified.ok);
     return { output: r.output, counts: r.widgetCounts, source: r.artifacts.spec, verification: r.verification };
   });
 } finally {

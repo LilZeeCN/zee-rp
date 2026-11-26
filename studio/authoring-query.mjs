@@ -244,9 +244,56 @@ export function queryAuthoringNodes({ doc, scene, args = {} }) {
   if (shape.pageId && !scene.pages.some(page => page.id === shape.pageId)) fail('E_PAGE_NOT_FOUND', `页面不存在：${shape.pageId}`);
   const all = scene.pages.flatMap(page => page.nodes);
   const resolvedById = new Map(all.map(node => [node.scopedId, node]));
+  const sourceIndex = buildNodeIndex(doc);
+  const entries = [...new Set(sourceIndex.byScopedId.values())];
   let nodes = shape.pageId ? all.filter(node => node.pageId === shape.pageId) : all;
   const one = id => {
-    const matches = nodes.filter(node => node.scopedId === id || node.id === id);
+    const norm = String(id || '').replace(/^@/, '').replace(/:/g, '/');
+    let matches = nodes.filter(node =>
+      node.scopedId === id
+      || node.scopedId === norm
+      || node.id === id
+      || node.id === norm
+      || (shape.pageId && node.scopedId === `${shape.pageId}/${norm}`)
+    );
+    if (!matches.length && norm.includes('/')) {
+      const [firstSeg, ...restSegs] = norm.split('/');
+      const tail = restSegs.join('/');
+      matches = nodes.filter(node =>
+        (node.pageId === firstSeg && (node.id === tail || node.scopedId.endsWith('/' + tail)))
+        || (shape.pageId && node.pageId === shape.pageId && node.scopedId.endsWith('/' + norm))
+      );
+    }
+    if (!matches.length) {
+      const srcEntry = sourceIndex.resolve(id, shape.pageId || null);
+      if (srcEntry && (!shape.pageId || srcEntry.pageId === shape.pageId)) {
+        const rawNode = srcEntry.node || {};
+        return {
+          id: srcEntry.id,
+          scopedId: srcEntry.scopedId,
+          pageId: srcEntry.pageId,
+          name: rawNode.name || srcEntry.id,
+          type: rawNode.type,
+          role: rawNode.role || null,
+          rawText: rawNode.text,
+          text: rawNode.text,
+          visible: false,
+          locked: Boolean(rawNode.locked),
+          x: rawNode.x ?? 0,
+          y: rawNode.y ?? 0,
+          w: rawNode.w ?? 0,
+          h: rawNode.h ?? 0,
+          layout: rawNode.layout || null,
+          parentScopedId: srcEntry.parentId ? `${srcEntry.pageId}/${srcEntry.parentId}` : null,
+          parentLayout: null,
+          sourceX: rawNode.x ?? 0,
+          sourceY: rawNode.y ?? 0,
+          padding: rawNode.padding ?? 0,
+          gap: rawNode.gap ?? 0,
+          opacity: rawNode.opacity ?? 1,
+        };
+      }
+    }
     if (matches.length !== 1) fail(matches.length ? 'E_AMBIGUOUS_NODE' : 'E_NODE_NOT_FOUND', matches.length ? `节点 ${id} 不唯一，请使用 scopedId` : `当前查询范围中没有节点 ${id}`, { candidates: matches.map(node => node.scopedId) });
     return matches[0];
   };
@@ -264,8 +311,6 @@ export function queryAuthoringNodes({ doc, scene, args = {} }) {
   for (const key of ['role', 'type', 'textContains']) if (shape[key] !== null) nodes = nodes.filter(node => key === 'textContains'
     ? String(node.rawText ?? node.text ?? '').includes(shape[key]) : node[key] === shape[key]);
   const total = nodes.length;
-  const sourceIndex = buildNodeIndex(doc);
-  const entries = [...new Set(sourceIndex.byScopedId.values())];
   const available = new Set(['id', 'scopedId', 'pageId', 'name', 'type', 'role', 'text', 'textLength', 'textTruncated', 'visible', 'locked', 'bounds', 'editableTargetId', 'target', 'capabilities', 'source', 'layoutContext', 'vector', 'controls', 'interactions', 'suggestedEdit']);
   if (shape.view === 'full') { available.clear(); available.add('authoring'); for (const node of all) for (const key of Object.keys(node)) available.add(key); }
   if (shape.fields) for (const field of shape.fields) if (!available.has(field)) fail('E_QUERY_FIELDS', `当前 ${shape.view} 视图没有字段 ${field}`, { candidates: [...available].sort() });

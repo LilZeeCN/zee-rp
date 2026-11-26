@@ -4,9 +4,9 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertNotProtected, EXPORTER_VERSION, nodeEvents, sha256,canonicalJson } from './document.mjs';
-import { exportCssPlan } from './visual-style.mjs';
+import { exportCssPlan, parseCssBorderShorthand, resolveShadowCss } from './visual-style.mjs';
 import { rasterizeStudioPaint } from './css-raster.mjs';
-import { resolveDocumentScene } from './scene-resolver.mjs';
+import { resolveColorValue, resolveDocumentScene } from './scene-resolver.mjs';
 import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
 import {nodePropertyCapability,STUDIO_SOURCE_ONLY_MACROS} from './node-capabilities.mjs';
 import { normalizeVectorNodeSpec, buildRp9ControlPointsForSubpaths } from './vector-paths.mjs';
@@ -150,12 +150,26 @@ function normalizeSingleExportAction(act, exportCtx = null) {
     c.value = toRp1RuntimeValue(c.value);
     return c;
   }
-  if (c.type === 'navigate') {
+  if (c.type === 'set-panel-state') {
+    if (c.panel && !c.target) {
+      c.target = c.panel;
+      delete c.panel;
+    }
+    if (typeof c.state === 'string' && /[:/]/.test(c.state)) {
+      c.state = c.state.split(/[:/]/).pop();
+    }
+    return c;
+  }
+  if (c.type === 'navigate' || c.type === 'link') {
     c.type = 'link';
     if (c.to && !c.page) {
       c.page = c.to;
-      delete c.to;
     }
+    if (c.target && !c.page && !c.url) {
+      c.page = c.target;
+    }
+    delete c.to;
+    delete c.target;
     return c;
   }
   if (typeof c.type === 'string' && (c.type.startsWith('dataset-') || c.type.startsWith('repeater-'))) {
@@ -996,6 +1010,80 @@ export function classifyNodeCompatibility(node, pageId, entries) {
   });
 }
 
+function resolveExportBorderColor(rawColor, palette = {}) {
+  const expandShortHex = hex => {
+    const m = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(String(hex || '').trim());
+    return m ? `#${m[1]}${m[1]}${m[2]}${m[2]}${m[3]}${m[3]}`.toUpperCase() : hex;
+  };
+  let candidate = rawColor ? String(rawColor).trim() : '';
+  if (candidate.startsWith('var(')) {
+    const m = /^var\(\s*--([\w-]+)(?:\s*,\s*([^)]+))?\s*\)$/i.exec(candidate);
+    if (m) {
+      const tokenVal = palette?.[m[1]];
+      candidate = tokenVal || (m[2] ? m[2].trim() : '');
+    }
+  }
+  const resolved = resolveColorValue(candidate, palette || {});
+  const norm = expandShortHex(resolved || '');
+  if (typeof norm === 'string' && (/^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(norm) || /^rgba?\(/i.test(norm))) {
+    return norm;
+  }
+  const fallback = expandShortHex(resolveColorValue(palette?.line, palette || {}) || '#CBD5E1');
+  return /^#[0-9a-fA-F]{6}([0-9a-fA-F]{2})?$/.test(String(fallback)) ? fallback : '#CBD5E1';
+}
+
+function applyExportBorders(node, out, palette = {}) {
+  const hasAny = ['borderSides', 'borderTop', 'borderRight', 'borderBottom', 'borderLeft']
+    .some(k => node[k] !== undefined && node[k] !== null);
+  if (!hasAny) return;
+
+  const sidesSet = typeof node.borderSides === 'string'
+    ? new Set(node.borderSides.split(/[\s,]+/).map(s => s.trim().toLowerCase()).filter(Boolean))
+    : Array.isArray(node.borderSides)
+      ? new Set(node.borderSides.map(s => String(s).trim().toLowerCase()).filter(Boolean))
+      : typeof node.borderSides === 'number'
+        ? new Set([
+            ...(node.borderSides & 2 ? ['top'] : []),
+            ...(node.borderSides & 4 ? ['right'] : []),
+            ...(node.borderSides & 8 ? ['bottom'] : []),
+            ...(node.borderSides & 1 ? ['left'] : []),
+          ])
+        : new Set();
+
+  const flags = { borderTop: false, borderRight: false, borderBottom: false, borderLeft: false };
+  let inferredWidth = null;
+  let inferredColor = null;
+
+  for (const [side, prop] of [['top', 'borderTop'], ['right', 'borderRight'], ['bottom', 'borderBottom'], ['left', 'borderLeft']]) {
+    const rawVal = node[prop];
+    if (rawVal !== undefined && rawVal !== null) {
+      const parsed = parseCssBorderShorthand(rawVal);
+      flags[prop] = Boolean(parsed.valid ? parsed.enabled : rawVal);
+      if (parsed.valid && parsed.enabled) {
+        if (inferredWidth === null && typeof parsed.width === 'number' && parsed.width > 0) inferredWidth = parsed.width;
+        if (inferredColor === null && parsed.color) inferredColor = parsed.color;
+      }
+    } else if (sidesSet.has(side)) {
+      flags[prop] = true;
+    }
+  }
+
+  out.borderTop = flags.borderTop;
+  out.borderRight = flags.borderRight;
+  out.borderBottom = flags.borderBottom;
+  out.borderLeft = flags.borderLeft;
+
+  const anyEnabled = flags.borderTop || flags.borderRight || flags.borderBottom || flags.borderLeft;
+  if (anyEnabled) {
+    if (!out.stroke || out.stroke === '#FFFFFF00' || out.stroke === 'transparent') {
+      out.stroke = resolveExportBorderColor(inferredColor, palette);
+    }
+    if (out.strokeWidth === undefined || out.strokeWidth === null || out.strokeWidth <= 0) {
+      out.strokeWidth = inferredWidth ?? 1;
+    }
+  }
+}
+
 function decorateExportNode(out, node) {
   if (!node._cssPaintAsset) return out;
   const image = {
@@ -1009,7 +1097,7 @@ function decorateExportNode(out, node) {
     ...(out.visible === false ? { visible: false } : {}),
     ...(out.rotation && (!(out.type === 'box' || out.type === 'phone-shell') || !out.children?.length) ? { rotation: out.rotation } : {}),
   };
-  for (const key of ['gradient', 'shadow', 'backdropBlur', 'aurora', 'noise']) delete out[key];
+  for (const key of ['gradient', 'shadow', 'backdropBlur', 'aurora', 'noise', 'borderSides', 'borderTop', 'borderRight', 'borderBottom', 'borderLeft']) delete out[key];
   if ('fill' in out) out.fill = '#FFFFFF00';
   if ('stroke' in out) out.stroke = '#FFFFFF00';
   if (out.type === 'box' || out.type === 'phone-shell') {
@@ -1117,7 +1205,8 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
     if (node.radius !== undefined) out.radius = node.radius;
     if (node.opacity !== undefined) out.opacity = node.opacity;
     if (node.rotation) out.rotation = node.rotation;
-    if (node.shadow) out.shadow = node.shadow;
+    const resolvedImageShadow = resolveShadowCss(node._resolvedShadow ?? node.shadow);
+    if (resolvedImageShadow) out.shadow = resolvedImageShadow;
     if (nodeEvents(node)) out.on = normalizeExportOn(nodeEvents(node), exportCtx);
     return decorateExportNode(out, node);
   }
@@ -1244,15 +1333,14 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
     if (node.radius !== undefined) out.radius = node.radius;
     if (node.opacity !== undefined) out.opacity = node.opacity;
     if (node.rotation) out.rotation = node.rotation; // 原生可编辑 2D 旋转（.rp DOA 3221225522）
-    if (node.shadow) out.shadow = node.shadow;
+    const resolvedBoxShadow = resolveShadowCss(node._resolvedShadow ?? node.shadow);
+    if (resolvedBoxShadow) out.shadow = resolvedBoxShadow;
     if (node.innerGlow) out.innerGlow = node.innerGlow;
     if (node.gradient) out.gradient = node.gradient;
     if (node.backdropBlur) out.backdropBlur = node.backdropBlur;
     if (node.aurora) out.aurora = node.aurora;
     if (node.noise) out.noise = node.noise;
-    for (const bKey of ['borderSides', 'borderTop', 'borderRight', 'borderBottom', 'borderLeft']) {
-      if (node[bKey] !== undefined) out[bKey] = node[bKey];
-    }
+    applyExportBorders(node, out, exportCtx?.palette);
   }
 
   if (out.type === 'icon') {
@@ -1399,7 +1487,13 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
         for (const st of nd.states || []) if (st.root) scanRepeaters(st.root);
       };
       scanRepeaters(pgScene.rootTree);
-      const exportCtx = { datasetToRepeaterId, repeaterKeyById, defaultRepeaterId, datasetRowsByName };
+      const exportCtx = {
+        datasetToRepeaterId,
+        repeaterKeyById,
+        defaultRepeaterId,
+        datasetRowsByName,
+        palette: { ...(snapshotDoc.palette || {}), ...(snapshotDoc.tokens?.colors || {}) },
+      };
       const isPhoneShell = pgScene.rootTree?.type === 'phone-shell';
       return {
         id: pgScene.id,

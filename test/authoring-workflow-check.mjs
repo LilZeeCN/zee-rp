@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { delimiter, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,7 +14,7 @@ const root = process.env.AXURE_TEST_ROOT ?? resolve(dirname(fileURLToPath(import
 const keep = process.env.AXURE_AUTHORING_OUTPUT;
 const work = keep ? resolve(keep) : mkdtempSync(join(tmpdir(), 'zee-authoring-'));
 if (keep) mkdirSync(work, { recursive: false });
-const transport = new StdioClientTransport({ command: process.execPath, args: [join(root, 'bin/mcp.mjs')],
+const transport = new StdioClientTransport({ command: process.execPath, args: [join(root, 'bin/mcp.mjs')], cwd: work,
   env: { ...process.env, AXURE_WRITE_ROOT: work, AXURE_PROTECTED_PATHS: join(work, 'protected.rp') }, stderr: 'pipe' });
 const client = new Client({ name: 'authoring-acceptance', version: '1.0.0' });
 const results = [], calls = [];
@@ -33,7 +33,7 @@ async function check(name, action) {
   try { await action(); results.push({ name, passed: true }); console.log(`PASS ${name}`); }
   catch (error) { results.push({ name, passed: false, detail: error.message }); console.log(`FAIL ${name}: ${error.message}`); }
 }
-const native = async path => JSON.parse((await request('rp_read', { args: [path, '--json'] })).stdout);
+const native = async path => JSON.parse((await request('rp_command', { action: 'run', command: 'rp-read', args: [path, '--json'] })).stdout);
 const nodes = rp => [...rp.pages.flatMap(p => p.widgets), ...(rp.containedWidgets ?? [])];
 
 try {
@@ -46,8 +46,9 @@ try {
     assert.match(info.toolSchemaHash, /^[a-f0-9]{64}$/);
     const tools = (await client.listTools()).tools;
     assert.equal(info.toolCount, tools.length);
+    assert.equal(tools.length, 30);
     assert.equal(new Set(tools.map(t => t.name)).size, tools.length);
-    for (const name of ['list_custom_styles', 'rename_custom_style', 'rebind_widgets']) assert(tools.some(t => t.name === name));
+    for (const name of ['rp_inspect', 'rp_patch', 'rp_command', 'jobs']) assert(tools.some(t => t.name === name));
     assert(tools.find(t => t.name === 'diagnose_prototype').annotations.readOnlyHint);
     assert.equal(tools.find(t => t.name === 'revise_prototype').annotations.readOnlyHint, false);
   });
@@ -64,7 +65,7 @@ try {
       assert.equal(r.verification.structure, true); assert.equal(r.verification.preview, false);
       assert.equal(r.artifacts, undefined); assert.equal(r.statePreviews, undefined);
       assert(existsSync(r.source) && existsSync(r.baseline) && existsSync(r.report));
-      assert(r.source.startsWith(work));
+      assert(realpathSync.native(r.source).startsWith(realpathSync.native(work)));
       assert(Object.values(r.previews).every(existsSync));
       const baseline = JSON.parse(readFileSync(r.baseline));
       assert.equal(baseline.sourcePath, r.source); assert.equal(baseline.sourceSha256, hash(r.source));
@@ -73,20 +74,20 @@ try {
     });
   }
   await check('binding explanation uses complete expressions, emitted refresh events, and explicit evidence boundaries', async () => {
-    const r = await request('explain_binding', { source: generated['mobile-cards'].source, target: 'stats/progress' });
+    const r = await request('diagnose_prototype', { mode: 'binding', source: generated['mobile-cards'].source, target: 'stats/progress' });
     assert.equal(r.evidence, 'compiled-static'); assert.equal(r.nativePreviewObserved, false);
     const binding = r.bindings[0]; assert.deepEqual(binding.dependencies.variables, ['done']);
     assert.equal(binding.presentation.stepPercent, 10); assert.equal(binding.initialValue, 0);
     assert(binding.refreshEvents.some(e => e.event === 'OnLoad' && e.page === 'stats'));
     assert(binding.refreshEvents.some(e => e.event === 'OnClick'));
-    await request('explain_binding', { source: generated['mobile-cards'].source, target: 'progress' }, true);
+    await request('diagnose_prototype', { mode: 'binding', source: generated['mobile-cards'].source, target: 'progress' }, true);
   });
   await check('binding explanation includes every expression dependency and the second variable refresh', async () => {
     const source = { language: 'rp/1', variables: { done: 2, bonus: 1 }, pages: [{ id: 'home', root: { type: 'box', id: 'root', children: [
       { type: 'progress-bar', id: 'progress', label: '进度', value: '=var.done + var.bonus', max: 10, w: 320 },
       { button: 'bonus', text: '奖励', onClick: { set: { '$bonus': 3 } } },
     ] } }] };
-    const r = await request('explain_binding', { source, target: 'home/progress' });
+    const r = await request('diagnose_prototype', { mode: 'binding', source, target: 'home/progress' });
     assert.deepEqual(r.bindings[0].dependencies.variables, ['bonus', 'done']);
     assert.equal(r.bindings[0].initialValue, 30);
     assert(r.bindings[0].refreshEvents.some(e => e.event === 'OnClick'));
@@ -151,13 +152,13 @@ try {
     const after = JSON.parse(readFileSync(revised.source));
     assert.equal(after.tokens.font.title, 22); assert.equal(after.pages[0].root.children[0].fontSize, '$font.title');
     assert.equal(revised.restoredTokenReferences, 1); assert(revised.impact.affectedPages.includes('home'));
-    const r = await request('inspect', { path: revised.output, target: { name: 'title', page: 'home' } });
+    const r = await request('rp_inspect', { view: 'widget', path: revised.output, target: { name: 'title', page: 'home' } });
     assert.equal(r.richText.paragraphs[0].runs[0].size, 16.5); // RP stores 22 CSS px as 16.5 pt.
   });
   await check('native text drift and a separate source edit are both preserved in one revision', async () => {
     const r = generated['mobile-cards'];
     await request('axure_open', { path: r.output });
-    await request('edit_text', { target: { name: 'headline', page: '今日复习' }, text: 'Axure 侧保留的改稿' });
+    await request('rp_patch', { target: { name: 'headline', page: '今日复习' }, text: 'Axure 侧保留的改稿' });
     const saved = await request('axure_save', { as: join(work, 'native-edited.rp') });
     const edited = saved.physicalPath;
     assert(existsSync(`${edited}.baseline.json`));

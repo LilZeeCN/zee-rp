@@ -16,7 +16,7 @@ const keep = process.env.AXURE_ROUND3_OUTPUT;
 const work = keep ? resolve(keep) : mkdtempSync(join(tmpdir(), 'zee-round3-'));
 mkdirSync(work, { recursive: true });
 const client = new Client({ name: 'round3-workflows', version: '1.0' });
-const transport = new StdioClientTransport({ command: process.execPath, args: [join(root, 'bin/mcp.mjs')],
+const transport = new StdioClientTransport({ command: process.execPath, args: [join(root, 'bin/mcp.mjs')], cwd: work,
   env: { ...process.env, AXURE_WRITE_ROOT: work }, stderr: 'pipe' });
 const checks = [];
 const hash = path => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -24,7 +24,7 @@ const fixture = name => JSON.parse(readFileSync(join(root, 'test/fixtures', name
 const record = name => { checks.push(name); console.log('PASS', name); };
 async function call(name, args, error = false) {
   const raw = await client.callTool({ name, arguments: args }, undefined, { timeout: 300000 });
-  if (name === 'read_interactions') assert(Buffer.byteLength(JSON.stringify(raw)) < 50000, 'including both MCP content representations');
+  if (name === 'rp_inspect' && args?.view === 'interactions') assert(Buffer.byteLength(JSON.stringify(raw)) < 50000, 'including both MCP content representations');
   const result = raw.structuredContent ?? JSON.parse(raw.content[0].text);
   assert.equal(Boolean(raw.isError), error, JSON.stringify(result));
   return result;
@@ -32,7 +32,7 @@ async function call(name, args, error = false) {
 async function waitJob(id) {
   const until = Date.now() + 300000;
   while (Date.now() < until) {
-    const job = await call('jobs_get', { id });
+    const job = await call('jobs', { action: 'get', id });
     if (!['queued', 'running'].includes(job.status)) return job;
     await new Promise(r => setTimeout(r, 200));
   }
@@ -69,7 +69,7 @@ try {
   assert.equal(finished.status, 'completed', JSON.stringify(finished));
   const revised = finished.result;
   assert.equal(revised.status, 'completed');
-  assert.equal((await call('verify', { path: revised.output })).syncStatus.state, 'in_sync');
+  assert.equal((await call('rp_inspect', { view: 'verify', path: revised.output })).syncStatus.state, 'in_sync');
   assert(!readdirSync(work).some(n => n.startsWith('.revision-')));
   for (const path of [revised.source, revised.baseline, revised.contactSheet, revised.report, revised.artifacts.ir]) assert(existsSync(path), path);
   assert(!JSON.stringify(revised).includes('.revision-'));
@@ -79,7 +79,7 @@ try {
   const restored = JSON.parse(readFileSync(revised.source, 'utf8'));
   assert.deepEqual(restored.pages[0].root.children[1].onClick[1].rows, runtime.pages[0].root.children[1].onClick[1].rows);
   for (const [path, digest] of originals) assert.equal(hash(path), digest);
-  const cancelled = await call('jobs_cancel', { id: job.id });
+  const cancelled = await call('jobs', { action: 'cancel', id: job.id });
   assert.equal(cancelled.cancelled, false); assert.equal(cancelled.reason, 'already_completed');
   record('async revise publishes durable assets, preserves expressions/inputs, removes staging, syncs cleanly');
   for (const [modeLabel, extra] of [
@@ -92,49 +92,49 @@ try {
     const res = extra.async ? (await waitJob(reply.id)).result : reply;
     assert.equal(res.status, 'completed', modeLabel);
     assert(existsSync(res.output) && existsSync(`${res.output}.assets/revision-report.json`), modeLabel);
-    assert.equal((await call('verify', { path: res.output })).syncStatus.state, 'in_sync', modeLabel);
+    assert.equal((await call('rp_inspect', { view: 'verify', path: res.output })).syncStatus.state, 'in_sync', modeLabel);
   }
   record('revise_prototype all four modes (sync/async x auto/explicit) publish .rp and .assets cleanly');
   const first = await call('revise_prototype', { ...args, dryRun: true, async: true });
   const queued = await call('revise_prototype', { ...args, dryRun: true, async: true });
-  const cancelledQueued = await call('jobs_cancel', { id: queued.id });
+  const cancelledQueued = await call('jobs', { action: 'cancel', id: queued.id });
   assert.equal(cancelledQueued.cancelled, true);
   assert.equal(cancelledQueued.reason, 'cancelled_queued');
   assert.equal((await waitJob(first.id)).status, 'completed');
   record('revision queue cancellation leaves the active revision responsive');
 
   await call('axure_open', { path: revised.output });
-  const located = await call('locate', { query: '新按钮' });
+  const located = await call('rp_inspect', { view: 'locate', query: '新按钮' });
   const candidate = located.candidates[0];
   assert(candidate);
   for (const encode of [v => v, JSON.stringify]) {
     const target = encode({ record: candidate.record, id: candidate.id, container: candidate.container });
-    const inspected = await call('inspect', { target });
+    const inspected = await call('rp_inspect', { view: 'widget', target });
     assert.equal(inspected.id, candidate.id);
-    await call('edit_text', { target, text: '定位验证' });
-    await call('rename_widget', { target, name: '精确定位按钮' });
-    await call('set_widget_geometry', { target, x: 24 });
-    await call('set_widget_style', { target, color: '#123456' });
-    record(`target ${typeof target}: inspect/edit/rename/geometry/style`);
+    await call('rp_patch', { target, text: '定位验证' });
+    await call('rp_patch', { target, name: '精确定位按钮' });
+    await call('rp_patch', { target, x: 24 });
+    await call('rp_patch', { target, color: '#123456' });
+    record(`target ${typeof target}: rp_inspect(widget) + rp_patch(text/rename/geometry/style)`);
   }
-  const nested = (await call('locate', { query: 'txt-rt-' })).candidates.find(c => c.container.length && c.type !== 'Layer');
+  const nested = (await call('rp_inspect', { view: 'locate', query: 'txt-rt-' })).candidates.find(c => c.container.length && c.type !== 'Layer');
   assert(nested);
   for (const encode of [v => v, JSON.stringify]) {
     const target = encode({ record: nested.record, id: nested.id, container: nested.container });
-    assert.equal((await call('inspect', { target })).id, nested.id);
-    await call('edit_text', { target, text: '行内容' });
-    await call('rename_widget', { target, name: '行文字' });
-    await call('set_widget_geometry', { target, x: 2 });
-    await call('set_widget_style', { target, color: '#234567' });
+    assert.equal((await call('rp_inspect', { view: 'widget', target })).id, nested.id);
+    await call('rp_patch', { target, text: '行内容' });
+    await call('rp_patch', { target, name: '行文字' });
+    await call('rp_patch', { target, x: 2 });
+    await call('rp_patch', { target, color: '#234567' });
   }
-  record('container exact target object/JSON-text across all five tools');
+  record('container exact target object/JSON-text across rp_inspect & rp_patch');
   for (const spec of [runtime, JSON.stringify(runtime)]) {
     assert.equal((await call('diagnose_prototype', { source: spec })).ok, true);
     const bound = structuredClone(runtime); bound.pages[0].root.children[1].text = '=text(var.seq)';
-    assert.equal((await call('explain_binding', { source: typeof spec === 'string' ? JSON.stringify(bound) : bound, target: 'p/btn' })).ok, true);
+    assert.equal((await call('diagnose_prototype', { mode: 'binding', source: typeof spec === 'string' ? JSON.stringify(bound) : bound, target: 'p/btn' })).ok, true);
     const sync = await call('sync_prototype', { spec, rp: generated.output, mode: 'lift', outSource: join(work, `lift-${typeof spec}.json`) });
     assert.equal(sync.ok, true);
-    const review = await call('review_image_structure', { spec: typeof spec === 'string' ? JSON.stringify({ frames: [] }) : { frames: [] } });
+    const review = await call('diagnose_prototype', { mode: 'image', spec: typeof spec === 'string' ? JSON.stringify({ frames: [] }) : { frames: [] } });
     assert.notEqual(review.status, 'failed');
   }
   record('source/spec object and JSON-text family');
@@ -187,7 +187,7 @@ try {
     }
   }
   assert(adaptive);
-  const masterEvents = await call('read_interactions', { path: master.output, widget: 'home' });
+  const masterEvents = await call('rp_inspect', { view: 'interactions', path: master.output, widget: 'home' });
   assert(masterEvents.contained.some(w => w.master && w.interactions.some(e => e.event === 'OnClick')), 'master definition interactions must survive pagination');
   assert(masterEvents.items.some(w => w.master && w.interactions.some(e => e.event === 'OnClick')));
   const summary = readRp(readFileSync(master.output));
@@ -204,18 +204,18 @@ try {
   const big = await call('generate_prototype', { spec: large, output: 'large.rp' });
   const seen = new Set(); let offset = 0, total;
   do {
-    const page = await call('read_interactions', { path: big.output, limit: 5, offset });
+    const page = await call('rp_inspect', { view: 'interactions', path: big.output, limit: 5, offset });
     assert(Buffer.byteLength(JSON.stringify(page)) < 50000);
     total = page.total;
     for (const w of page.pages.flatMap(p => p.widgets)) { assert(!seen.has(w.id)); seen.add(w.id); assert.equal(w.interactions[0].cases[0].actions.length, 12); }
     offset = page.nextOffset;
   } while (offset !== null);
   assert.equal(seen.size, total);
-  const filtered = await call('read_interactions', { path: big.output, widget: 'p/b5' });
+  const filtered = await call('rp_inspect', { view: 'interactions', path: big.output, widget: 'p/b5' });
   assert.equal(filtered.total, 1);
   assert.equal(filtered.items.length, 1);
   assert.deepEqual(filtered.items[0].interactions, filtered.pages[0].widgets[0].interactions);
-  record('read_interactions pagination complete, bounded responses and logical widget filter');
+  record('rp_inspect(interactions) pagination complete, bounded responses and logical widget filter');
 
   const makeButton = id => ({ type: 'button', id, text: id, w: 160, h: 28, onClick: [{ goto: 'mix' }] });
   const mixed = { language: 'rp/1', domain: 'test', variables: { counter: { type: 'number', value: 0 } }, pages: [
@@ -230,18 +230,18 @@ try {
     } },
   ] };
   const mixedRp = await call('generate_prototype', { spec: mixed, output: 'mixed.rp' });
-  const mixedArgs = { path: mixedRp.output, page: 'mix', limit: 5 };
-  const full = await call('read_interactions', { ...mixedArgs, limit: 100 });
+  const mixedArgs = { view: 'interactions', path: mixedRp.output, page: 'mix', limit: 5 };
+  const full = await call('rp_inspect', { ...mixedArgs, limit: 100 });
   assert.equal(full.total, 11); assert.equal(full.items.length, 11);
-  const initial = await call('read_interactions', mixedArgs);
-  const defaults = await call('read_interactions', { path: mixedRp.output, page: 'mix' });
+  const initial = await call('rp_inspect', mixedArgs);
+  const defaults = await call('rp_inspect', { view: 'interactions', path: mixedRp.output, page: 'mix' });
   assert.deepEqual(defaults.items, full.items, 'omitting both offset and limit starts at the first owner');
   assert.equal(initial.contained.length, 0, 'first page has top-level owners, not nested owners');
   assert.equal(initial.pages[0].pageInteractions.length, 1);
   assert.equal(initial.pages[0].widgets.length, 4);
   assert.equal(initial.items.length, 5, 'unified first page is nonempty');
   for (const skip of [0, 1, 2, 5, 10, 11, 12]) {
-    const response = await call('read_interactions', { ...mixedArgs, offset: skip });
+    const response = await call('rp_inspect', { ...mixedArgs, offset: skip });
     const expected = full.items.slice(skip, skip + 5);
     assert.deepEqual(response.items, expected, `offset=${skip} must skip owners`);
     assert.equal(response.offset, skip);
@@ -252,7 +252,7 @@ try {
   const gathered = [];
   let next = 0;
   do {
-    const response = await call('read_interactions', { ...mixedArgs, offset: next });
+    const response = await call('rp_inspect', { ...mixedArgs, offset: next });
     gathered.push(...response.items); next = response.nextOffset;
   } while (next !== null);
   assert.deepEqual(gathered, full.items, 'mixed owners traverse once without omissions');

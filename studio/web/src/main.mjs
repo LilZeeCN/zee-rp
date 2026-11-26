@@ -151,6 +151,7 @@ window.__STUDIO_APP__ = {
   dispatchCommands,
   openInlineTextEditor,
   commitInlineTextEditor,
+  selectPage,
   setPanZoom(panX, panY, zoom) {
     state.panX = panX;
     state.panY = panY;

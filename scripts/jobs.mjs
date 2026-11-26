@@ -1,9 +1,9 @@
 import { spawn } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, readFileSync, statSync, lstatSync, unlinkSync, realpathSync, constants } from 'node:fs';
-import { dirname, basename, join, extname, resolve } from 'node:path';
+import { dirname, basename, join, extname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { assertNotProtected, assertWritable, defaultWriteRoot } from './engine.mjs';
+import { assertNotProtected, assertWritable, resolveWorkDir } from './engine.mjs';
 import { readRp } from './rp-read.mjs';
 import { resolvePasteTarget } from './version.mjs';
 
@@ -37,10 +37,22 @@ export class JobManager {
   }
 
   startPrototype(input, type) {
-    const writeRoot = defaultWriteRoot();
-    const output = input.output && input.output !== 'auto' ? resolve(writeRoot, input.output) : null;
+    const workDir = resolveWorkDir(input.cwd ?? input.projectDir);
+    const resolveInWork = p => (typeof p === 'string' && p.length > 0 ? (isAbsolute(p) ? p : resolve(workDir, p)) : p);
+    const output = input.output && input.output !== 'auto' ? resolveInWork(input.output) : null;
     if (output) assertWritable(output);
-    const args = structuredClone({ ...input, ...(output ? { output } : {}) });
+    const args = structuredClone({
+      ...input,
+      cwd: workDir,
+      ...(input.source ? { source: resolveInWork(input.source) } : {}),
+      ...(input.sourcePath ? { sourcePath: resolveInWork(input.sourcePath) } : {}),
+      ...(typeof input.spec === 'string' && !input.spec.trimStart().startsWith('{') ? { spec: resolveInWork(input.spec) } : {}),
+      ...(input.rp ? { rp: resolveInWork(input.rp) } : {}),
+      ...(input.baseRp ? { baseRp: resolveInWork(input.baseRp) } : {}),
+      ...(input.template ? { template: resolveInWork(input.template) } : {}),
+      ...(input.outSource ? { outSource: resolveInWork(input.outSource) } : {}),
+      ...(output ? { output } : {}),
+    });
     delete args.async;
     const inputHashes = {};
     for (const file of [args.source, args.sourcePath,
@@ -88,8 +100,11 @@ export class JobManager {
     } catch (error) { this.complete(job, 1, error.message); }
   }
 
-  async startRoundtrip({ source, output, wait = false, version, preview = false }) {
+  async startRoundtrip({ source, output, cwd, projectDir, wait = false, version, preview = false }) {
     if (process.platform !== 'darwin') throw new Error('GUI roundtrip 当前仅支持 macOS');
+    const workDir = resolveWorkDir(cwd ?? projectDir);
+    if (typeof source === 'string' && !isAbsolute(source)) source = join(workDir, source);
+    if (typeof output === 'string' && output !== 'auto' && !isAbsolute(output)) output = join(workDir, output);
     assertNotProtected(source);
     source = realpathSync.native(source);
     if (!output || output === 'auto') {

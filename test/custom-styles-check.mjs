@@ -123,9 +123,13 @@ check('CLI writes a new file, refuses collisions, and MCP schemas expose named a
     const selector = join(work, 'selector.json'); writeFileSync(selector, '{"record":0}');
     assert.equal(run(['rebind-widgets', input, join(work, 'bound.rplib'), B, selector, '--reset-overrides']).status, 0);
     const tools = listMcpTools();
-    validateInput(tools.find(t => t.name === 'rename_custom_style').inputSchema, { source: input, output, oldName: 'Style_A', newName: 'Style_C' });
-    validateInput(tools.find(t => t.name === 'rebind_widgets').inputSchema, { source: input, output, styleGuid: B, selector, resetOverrides: true });
-    assert.equal(tools.find(t => t.name === 'list_custom_styles').annotations.readOnlyHint, true);
+    const patchSchema = tools.find(t => t.name === 'rp_patch').inputSchema;
+    validateInput(patchSchema, { source: input, output, op: 'rename-style', oldName: 'Style_A', newName: 'Style_C' });
+    validateInput(patchSchema, { source: input, output, op: 'rebind-style', styleGuid: B, selector, resetOverrides: true });
+    validateInput(patchSchema, { source: input, output, op: 'rebind-style', styleGuid: B, selector: { record: 0 }, resetOverrides: true });
+    const inspectTool = tools.find(t => t.name === 'rp_inspect');
+    validateInput(inspectTool.inputSchema, { view: 'styles', path: input });
+    assert.equal(inspectTool.annotations.readOnlyHint, true);
   } finally { rmSync(work, { recursive: true, force: true }); }
 });
 console.log(JSON.stringify({ total: checks.length, passed: checks.length }));

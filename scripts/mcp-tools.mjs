@@ -7,14 +7,14 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listCommands } from './registry.mjs';
-import { assertNotProtected, assertWritable, defaultWriteRoot, AxureSession } from './engine.mjs';
+import { assertNotProtected, assertWritable, AxureSession, resolveWorkDir } from './engine.mjs';
 import { spawnPythonSync } from './python.mjs';
 import { readRp } from './rp-read.mjs';
 import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
 import { parsePayload, encodePayload, field, walkNodes } from './parse-payload.mjs';
-import { setRecordWidgetText } from './set-widget-text.mjs';
 import { setWidgetRichText } from './set-widget-richtext.mjs';
 import { setWidgetNames } from './name-widget.mjs';
+import { listCustomStyles, renameCustomStyle, rebindWidgets, widgetSelector } from './custom-styles.mjs';
 import { EVENTS } from './ix-actions.mjs';
 import { compilePrototype, buildInteractiveRp, reportPrototypeProgress } from './proto.mjs';
 import { expandSpec, pasteAxvg } from './axvg.mjs';
@@ -26,9 +26,14 @@ import { reviewImageStructure } from './image-structure.mjs';
 import { studioTools } from '../studio/mcp-adapter.mjs';
 
 const SCRIPTS_DIR = dirname(fileURLToPath(import.meta.url));
+const SKILL_ROOT_DIR = resolve(SCRIPTS_DIR, '..');
 const TRACE_PY = join(SCRIPTS_DIR, 'trace.py');
 const PROTO_PY = join(SCRIPTS_DIR, 'proto.py');
 const RP_LANG_CLI = join(SCRIPTS_DIR, 'rp_language_cli.py');
+const resolveInWork = (p, explicitDir) => {
+  if (typeof p !== 'string' || !p) return p;
+  return isAbsolute(p) ? p : resolve(resolveWorkDir(explicitDir), p);
+};
 
 const dump = spawnSync(process.execPath, [fileURLToPath(new URL('./registry.mjs', import.meta.url)), 'dump'], { encoding: 'utf8' });
 if (dump.status !== 0) throw new Error(dump.stderr || 'registry dump failed');
@@ -51,9 +56,9 @@ export const MCP_PROFILES = {
   full: null,
   core: new Set([
     'generate_prototype', 'revise_prototype', 'export_prototype', 'verify_prototype',
-    'prototype_recipe', 'diagnose_prototype', 'explain_binding', 'sync_prototype',
-    'generate_from_image', 'review_image_structure', 'add_interaction',
-    'axure_open', 'axure_save', 'runtime_info', 'gui_roundtrip',
+    'prototype_recipe', 'diagnose_prototype', 'sync_prototype', 'generate_from_image',
+    'axure_open', 'axure_save', 'rp_inspect', 'rp_patch', 'rp_command',
+    'runtime_info', 'gui_roundtrip', 'jobs',
   ]),
   studio: new Set([
     'studio_open_project', 'studio_describe', 'studio_command', 'studio_inspect',
@@ -63,9 +68,8 @@ export const MCP_PROFILES = {
   ]),
   author: new Set([
     'generate_prototype', 'revise_prototype', 'export_prototype', 'verify_prototype',
-    'prototype_recipe', 'diagnose_prototype', 'explain_binding', 'sync_prototype',
-    'generate_from_image', 'review_image_structure', 'add_interaction',
-    'axure_open', 'axure_save', 'runtime_info', 'gui_roundtrip',
+    'prototype_recipe', 'diagnose_prototype', 'sync_prototype', 'generate_from_image',
+    'axure_open', 'axure_save', 'runtime_info', 'gui_roundtrip', 'jobs',
     'studio_open_project', 'studio_describe', 'studio_command', 'studio_inspect',
     'studio_screenshot', 'studio_export', 'studio_history', 'studio_stage',
     'studio_design', 'studio_scenario', 'studio_media', 'studio_merge', 'studio_operations',
@@ -83,15 +87,12 @@ export function resolveMcpProfile(profile) {
 export function listMcpTools({ profile } = {}) {
   const active = resolveMcpProfile(profile);
   const allow = MCP_PROFILES[active];
-  const all = [...listCommands().map(c => ({
-    name: toolName(c.command),
-    description: `${c.summary}。${commandIO(c) ? '具名调用省略宿主源/输出即使用会话链；原始 args 用 session:true 并省略这两个参数（多源工具保留导入源）。显式路径不推进链。' : ''} 登记证据 ${c.evidence}，只适用 capabilities.md 的已验样本。CLI: ${c.usage}${c.command.startsWith('axvg ') ? '；args 省略子命令词，服务自动加入。' : ''}`,
-    inputSchema: commandSchema(c.command),
-    annotations: { readOnlyHint: ['rp-read', 'axvg selftest', 'list-custom-styles'].includes(c.command), destructiveHint: false, openWorldHint: c.command === 'axvg paste' },
-  })), ...sessionTools.map(({ name, description, inputSchema, readOnly }) => ({
-    name, description, inputSchema,
-    annotations: { readOnlyHint: readOnly ?? ['axure_state', 'locate', 'inspect', 'read_interactions', 'verify'].includes(name), destructiveHint: false, openWorldHint: false },
-  }))];
+  const all = sessionTools.map(({ name, description, inputSchema, readOnly }) => ({
+    name,
+    description,
+    inputSchema,
+    annotations: { readOnlyHint: Boolean(readOnly), destructiveHint: false, openWorldHint: false },
+  }));
   return allow ? all.filter(t => allow.has(t.name)) : all;
 }
 
@@ -133,7 +134,8 @@ function commandArgs(command, input) {
   return args;
 }
 
-function runCommandTool(command, input) {
+function runCommandPayload(command, input, { cwd } = {}) {
+  const workDir = resolveWorkDir(cwd);
   const io = commandIO(command);
   const raw = Object.hasOwn(input, 'args');
   let args = commandArgs(command, input);
@@ -145,7 +147,7 @@ function runCommandTool(command, input) {
       throw new Error('显式模式必须同时提供宿主源和输出；全部省略才自动接续会话。');
     if (useSession) {
       state = refreshState(requireSession());
-      if (!io.readOnly && Object.values(zerosOf(state.rp)).some(Boolean)) throw new Error('链尾结构不健康，请先 verify。');
+      if (!io.readOnly && Object.values(zerosOf(state.rp)).some(Boolean)) throw new Error('链尾结构不健康，请先调用 rp_inspect({ view: "verify" }) 检查。');
       source = state.chain.at(-1);
       before = countsOf(state.rp);
       if (io.readOnly) args = raw ? [source, ...args] : commandArgs(command, { ...input, file: source });
@@ -159,15 +161,16 @@ function runCommandTool(command, input) {
       }
     } else {
       // 显式模式只增加前后摘要，不改变原始参数或活动会话。
-      source = raw ? args.filter(a => !a.startsWith('--'))[io.external ? 1 : 0] : input[io.source];
-      if (!io.source) source = null;
+      const rawSource = raw ? args.filter(a => !a.startsWith('--'))[io.external ? 1 : 0] : input[io.source];
+      source = io.source && rawSource ? resolveInWork(rawSource, workDir) : null;
       if (source) { assertNotProtected(source); before = countsOf(readRp(readFileSync(source), { path: source })); }
     }
   }
   if (command.command === 'add-interaction' && !raw) {
-    const effectiveSrc = source ?? input.source;
-    const effectiveOut = node ?? input.output;
-    const baselinePath = findBaselineForRp(effectiveSrc, input.baseline, state);
+    const effectiveSrc = source ?? (input.source ? resolveInWork(input.source, workDir) : undefined);
+    const effectiveOut = node ?? (input.output ? resolveInWork(input.output, workDir) : undefined);
+    const explicitBaseline = input.baseline ? resolveInWork(input.baseline, workDir) : undefined;
+    const baselinePath = findBaselineForRp(effectiveSrc, explicitBaseline, state);
     if (Array.isArray(input.items) || Array.isArray(input.interactions)) {
       tempSpecFile = join(tmpdir(), `zee-add-ix-${randomUUID()}.json`);
       const specObj = Array.isArray(input.items)
@@ -184,7 +187,7 @@ function runCommandTool(command, input) {
     }
   }
   if (command.command.startsWith('axvg ')) args = [command.command.split(' ')[1], ...args];
-  const result = new AxureSession({ source }).run(command.command, args);
+  const result = new AxureSession({ source, cwd: workDir }).run(command.command, args);
   const rawStderr = result.stderr.toString();
   const errHeaderMatch = rawStderr.match(/^(?:[\w$]*Error|ERR_[\w$]+):\s*(.+)$/m);
   const cleanStderr = errHeaderMatch
@@ -194,27 +197,30 @@ function runCommandTool(command, input) {
         .map(ln => ln.trim())
         .filter(ln => ln && !/^at\s+/.test(ln) && !ln.includes('file://') && !/^\^+$/.test(ln) && !/^Node\.js\s+v/i.test(ln))
         .join('\n') || rawStderr.trim());
-  const value = { exitCode: result.status, stdout: result.stdout.toString(), stderr: result.status === 0 ? rawStderr : cleanStderr, status: result.status === 0 ? 'completed' : 'failed' };
+  const value = { command: command.command, exitCode: result.status, stdout: result.stdout.toString(), stderr: result.status === 0 ? rawStderr : cleanStderr, status: result.status === 0 ? 'completed' : 'failed' };
   if (result.status !== 0) {
     if (node && !/EEXIST|already exists/i.test(rawStderr) && pathExists(node)) value.rejected = rejectNode(node);
     const errCode = /EEXIST|already exists/i.test(rawStderr) ? 'E_OUTPUT_EXISTS' : 'E_TOOL_INPUT';
+    value.ok = false;
     value.code = errCode;
     value.message = cleanStderr || `${command.command} 执行失败 (exit=${result.status})`;
     value.diagnostics = [{ code: errCode, pointer: '/arguments', message: value.message, nextAction: '检查参数或读取最新原型状态；保留原文件后重试。' }];
     value.usage = command.usage;
     value.candidates = errorCandidates(command, input, args, source, rawStderr);
     if (state) value.chainTail = state.chain.at(-1);
-    return toolResult(value, true);
+    return value;
   }
   if (node) {
     commitChainNode(state, node, { op: command.command, at: now(), from: source, node });
-    Object.assign(value, { chainTail: node, previousTail: source, before, after: countsOf(state.rp), structure: zerosOf(state.rp) });
+    const syncStatus = computeSyncStatus(state);
+    Object.assign(value, { chainTail: node, previousTail: source, before, after: countsOf(state.rp), structure: zerosOf(state.rp), ...(syncStatus ? { syncStatus } : {}) });
   } else if (io && !io.readOnly) {
     // 宿主输出在所有 RP 工具中固定为前缀末尾；Axvg 不进入此分支。
-    const output = raw ? args.filter(a => !a.startsWith('--'))[io.prefix - 1] : input.output;
+    const rawOutput = raw ? args.filter(a => !a.startsWith('--'))[io.prefix - 1] : input.output;
+    const output = rawOutput ? resolveInWork(rawOutput, workDir) : null;
     if (output) { assertNotProtected(output); value.output = output; value.before = before; value.after = countsOf(readRp(readFileSync(output), { path: output })); }
   }
-  return toolResult(value);
+  return value;
   } finally {
     if (tempSpecFile) try { unlinkSync(tempSpecFile); } catch {}
     if (node) releaseWorkNode(node);
@@ -243,14 +249,39 @@ function errorCandidates(command, input, args, source, message) {
   } catch { return []; }
 }
 
+const LEGACY_TOOL_HINTS = {
+  axure_state: '会话状态已合并至 axure_save({}) 或 rp_inspect({ view: "state" })。',
+  locate: '元件搜索已合并至 rp_inspect({ view: "locate", query, page, type, path })。',
+  inspect: '元件深看已合并至 rp_inspect({ view: "widget", target, path })。',
+  read_interactions: '交互树读取已合并至 rp_inspect({ view: "interactions", page, widget, path })。',
+  verify: '结构与三零校验已合并至 rp_inspect({ view: "verify", deep, path })（浏览器真机验收可用 verify_prototype）。',
+  rp_read: '文档总览读取已合并至 rp_inspect({ view: "overview", path, full })（底层 CLI 可用 rp_command）。',
+  list_custom_styles: '自定义样式列表已合并至 rp_inspect({ view: "styles", path })。',
+  edit_text: '文字与富文本修改已合并至 rp_patch({ target, text | richRuns, edits })。',
+  set_widget_text: '文字修改已合并至 rp_patch({ target, text })（或 rp_command({ command: "set-widget-text", ... })）。',
+  set_widget_richtext: '富文本修改已合并至 rp_patch({ target, richRuns })（或 rp_command({ command: "set-widget-richtext", ... })）。',
+  rename_widget: '元件改名已合并至 rp_patch({ target, name, edits })。',
+  name_widget: '元件改名已合并至 rp_patch({ target, name })（或 rp_command({ command: "name-widget", ... })）。',
+  set_widget_geometry: '几何修改已合并至 rp_patch({ target, x, y, w, h, edits })。',
+  set_widget_style: '视觉样式修改已合并至 rp_patch({ target, fill, stroke, color, radius, edits })。',
+  rename_custom_style: '自定义样式重命名已合并至 rp_patch({ op: "rename-style", oldName, newName, source, output })。',
+  rebind_widgets: '自定义样式重绑定已合并至 rp_patch({ op: "rebind-style", styleGuid, selector, resetOverrides, source, output })。',
+  explain_binding: '交互与绑定追踪已合并至 diagnose_prototype({ mode: "binding", source, target })。',
+  review_image_structure: '截图分层结构审查已合并至 diagnose_prototype({ mode: "image", spec })。',
+  jobs_list: '异步任务管理已合并至 jobs({ action: "list" })。',
+  jobs_get: '异步任务查询已合并至 jobs({ action: "get", id })。',
+  jobs_cancel: '异步任务取消已合并至 jobs({ action: "cancel", id })。',
+};
+
 export function callCommandTool(name, input) {
+  const legacyHint = LEGACY_TOOL_HINTS[name];
   const command = listCommands().find(c => toolName(c.command) === name);
   try {
     const sessionTool = sessionToolIndex.get(name);
     if (sessionTool) return sessionTool(input);
-    if (!command) throw new Error(`未知工具 ${name}`);
-    validateInput(commandSchema(command.command), input);
-    return runCommandTool(command, input);
+    if (legacyHint) throw new Error(`未知工具 ${name}：${legacyHint}`);
+    if (command) throw new Error(`未知工具 ${name}：底层原生命令已折叠至 rp_command({ command: "${command.command}", params | args })。`);
+    throw new Error(`未知工具 ${name}`);
   } catch (error) {
     if (name === 'generate_prototype') return toolResult({ status: 'failed', stage: 'validation', message: error.message,
       diagnostics: [{ code: 'E_GENERATE_ARGUMENT', pointer: '/arguments', message: error.message }],
@@ -258,10 +289,12 @@ export function callCommandTool(name, input) {
     if (name === 'generate_from_image' || name === 'sync_prototype') return toolResult({ status: 'failed', stage: 'validation', message: error.message,
       diagnostics: [{ code: name === 'generate_from_image' ? 'E_IMAGE_ARGUMENT' : 'E_SYNC_ARGUMENT', pointer: '/arguments', message: error.message }],
     }, true);
+    const nextAction = legacyHint
+      || (command ? `改用 rp_command({ action: "describe", command: "${command.command}" }) 查看参数契约后通过 rp_command 执行。` : '检查参数或读取最新原型状态；保留原文件后重试。');
     return toolResult({ status: 'error', code: error.code ?? 'E_TOOL_INPUT', message: error.message,
-      diagnostics: [{ code: error.code ?? 'E_TOOL_INPUT', pointer: '/arguments', message: error.message,
-        nextAction: '检查参数或读取最新原型状态；保留原文件后重试。' }],
-      ...(command ? { usage: command.usage } : !sessionToolIndex.has(name) ? { availableTools: listMcpTools().map(t => t.name) } : {}),
+      diagnostics: [{ code: error.code ?? 'E_TOOL_INPUT', pointer: '/arguments', message: error.message, nextAction }],
+      ...(!sessionToolIndex.has(name) ? { availableTools: [...listMcpTools(), ...jobTools].map(t => t.name) } : {}),
+      ...(error.availableCommands ? { availableCommands: error.availableCommands } : {}),
       ...(error.candidates ? { candidates: error.candidates } : {}),
     }, true);
   }
@@ -550,23 +583,22 @@ function resolveTarget(state, target) {
 
 export function openSession(path) {
   assertNotProtected(path);
+  if (!existsSync(path)) throw new Error(`源文件不存在：${path}`);
   const sourceFile = realpathSync.native(path);
   assertNotProtected(sourceFile);
   if (extname(sourceFile).toLowerCase() !== '.rp') throw new Error(`axure_open 只接受 .rp 源文件：${sourceFile}`);
-  if (!existsSync(sourceFile)) throw new Error(`源文件不存在：${sourceFile}`);
   const bytes = readFileSync(sourceFile);
   const rp = readRp(bytes, { path: sourceFile }); // 不可解析直接抛错，不建链
   if (Object.values(zerosOf(rp)).some(Boolean)) throw new Error(`源文件结构检查失败，不建会话：${JSON.stringify(zerosOf(rp))}`);
   let node;
   try { node = nextWorkNode({ sourceFile }); assertWritable(node); } catch (error) {
-    // 白名单拒绝时补充可执行指引，避免“工作副本落不了盘”的静默失败（硬规则 3）。
-    const hint = error.message.includes('AXURE_WRITE_ROOT')
-      ? '。指引：把源文件复制到 AXURE_WRITE_ROOT 白名单根内再 open，或把源目录加入白名单' : '';
+    const hint = error.message.includes('AXURE_STRICT_WRITE_ROOT')
+      ? '。指引：把源文件复制到 AXURE_WRITE_ROOT 白名单根内再 open，或关闭 AXURE_STRICT_WRITE_ROOT' : '';
     throw new Error(`${error.message}${hint}`);
   }
   try { writeFileSync(node, bytes, { flag: 'wx' }); } catch (error) {
     if (['EACCES', 'EPERM', 'EROFS'].includes(error.code))
-      throw new Error(`源目录不可写（${dirname(sourceFile)}），工作副本无法落盘。指引：把源文件复制到可写目录后再 open，或设置/调整 AXURE_WRITE_ROOT。原始错误：${error.message}`);
+      throw new Error(`源目录不可写（${dirname(sourceFile)}），工作副本无法落盘。指引：把源文件复制到有写权限的本地工作目录后再 open。原始错误：${error.message}`);
     throw error;
   } finally { releaseWorkNode(node); }
   const sourceFileShaAtOpen = createHash('sha256').update(bytes).digest('hex');
@@ -705,80 +737,6 @@ function overviewOf(state) {
 
 const targetOf = cand => `${cand.page ?? '(无页)'} 记录#${cand.record}/对象${cand.id}「${cand.name || '(未命名)'}」${cand.container.length ? `@${cand.container.join('/')}` : '（顶层）'}`;
 
-function textEdit(state, { target, widget, page, text, richRuns }) {
-  if ((text === undefined) === (richRuns === undefined)) throw new Error('每次编辑必须提供 text 或 richRuns 之一，不能同时提供。');
-  const effectiveTarget = target ?? (widget !== undefined ? { name: widget, ...(page !== undefined ? { page } : {}) } : undefined);
-  const cand = resolveTarget(state, effectiveTarget);
-  const tail = state.chain.at(-1), node = nextWorkNode(state);
-  assertNotProtected(tail); assertWritable(node);
-  let report, created = false;
-  try {
-    if (richRuns !== undefined) {
-      const paragraphs = Array.isArray(richRuns) ? richRuns : richRuns.paragraphs;
-      const spec = { record: cand.record, widgetId: cand.id, paragraphs };
-      if (!Array.isArray(richRuns) && richRuns.defaults) spec.defaults = richRuns.defaults;
-      const result = setWidgetRichText(readFileSync(tail), spec);
-      report = result.report;
-      writeFileSync(node, result.file, { flag: 'wx' });
-    } else setRecordWidgetText(tail, node, cand.record, cand.id, text);
-    created = true;
-    commitChainNode(state, node, { op: 'edit_text', kind: richRuns === undefined ? 'text' : 'richtext', at: now(), target: targetOf(cand), before: cand.fullText, after: report?.text ?? text, node });
-  } catch (error) {
-    if (created && pathExists(node)) error.message += `；失败节点保留 ${rejectNode(node)}`;
-    throw error;
-  } finally { releaseWorkNode(node); }
-  const syncStatus = computeSyncStatus(state);
-  return { before: cand.fullText, after: report?.text ?? text, chainTail: node, previousTail: tail, ...(report ? { report } : {}), ...(syncStatus ? { syncStatus } : {}) };
-}
-
-function editTexts(input) {
-  const state = refreshState(requireSession());
-  if (Object.values(zerosOf(state.rp)).some(Boolean)) throw new Error(`链尾结构不健康，请先 verify：${JSON.stringify(zerosOf(state.rp))}`);
-  if (!input.edits) return textEdit(state, input);
-  if (input.target !== undefined || input.text !== undefined || input.richRuns !== undefined) throw new Error('edits 批量模式不能混用单条 target/text/richRuns。');
-  for (const edit of input.edits) if ((edit.text === undefined) === (edit.richRuns === undefined)) throw new Error('每条 edits 必须提供 text 或 richRuns 之一。');
-  // 在私有分支上完整执行后提交；失败不触碰活动链，已写出的节点隔离为 rejected。
-  const branch = { ...state, chain: [...state.chain], timeline: [...state.timeline], index: null, graphs: null };
-  const previousTail = state.chain.at(-1), before = countsOf(state.rp);
-  const edits = [];
-  try { for (const edit of input.edits) edits.push(textEdit(branch, edit)); }
-  catch (error) {
-    const rejected = branch.chain.slice(state.chain.length).filter(pathExists).map(rejectNode);
-    error.message = `批量编辑失败，整批回退到 ${previousTail}；隔离 ${rejected.length} 个已写节点。${error.message}`;
-    throw error;
-  }
-  Object.assign(state, branch);
-  const syncStatus = computeSyncStatus(state);
-  return { status: 'completed', edits, previousTail, chainTail: state.chain.at(-1), before, after: countsOf(state.rp), structure: zerosOf(state.rp), ...(syncStatus ? { syncStatus } : {}) };
-}
-
-function renameWidgets(input) {
-  const state = refreshState(requireSession());
-  if (Object.values(zerosOf(state.rp)).some(Boolean)) throw new Error('链尾结构不健康，请先 verify。');
-  if (input.edits && (input.target !== undefined || input.name !== undefined || input.newName !== undefined)) throw new Error('edits 不能混用 target/name。');
-  const edits = input.edits ?? [input];
-  const resolved = edits.map(edit => {
-    const effTarget = edit.target ?? (edit.widget !== undefined ? { name: edit.widget, ...(edit.page !== undefined ? { page: edit.page } : {}) } : undefined);
-    const effName = edit.name ?? edit.newName;
-    if (effTarget === undefined || typeof effName !== 'string') throw new Error('改名需要 target (或 widget) 和 name (或 newName)。');
-    const cand = resolveTarget(state, effTarget);
-    return { record: cand.record, id: cand.id, name: effName };
-  });
-  const tail = state.chain.at(-1), node = nextWorkNode(state);
-  let created = false;
-  try {
-    assertNotProtected(tail); assertWritable(node);
-    const result = setWidgetNames(readFileSync(tail), resolved);
-    writeFileSync(node, result.file, { flag: 'wx' }); created = true;
-    commitChainNode(state, node, { op: 'rename_widget', at: now(), edits: result.applied, node });
-    const syncStatus = computeSyncStatus(state);
-    return { status: 'completed', edits: result.applied, chainTail: node, previousTail: tail, structure: zerosOf(state.rp), ...(syncStatus ? { syncStatus } : {}) };
-  } catch (error) {
-    if (created && pathExists(node)) error.message += `；失败节点保留 ${rejectNode(node)}`;
-    throw error;
-  } finally { releaseWorkNode(node); }
-}
-
 function parseHexArgb(hexStr) {
   if (typeof hexStr !== 'string') throw new Error(`颜色值必须是十六进制字符串：${hexStr}`);
   const clean = hexStr.trim().replace(/^#/, '');
@@ -804,104 +762,142 @@ function formatHexArgb(val) {
   return `#${rgb}${aa.toString(16).toUpperCase().padStart(2, '0')}`;
 }
 
-function setWidgetGeometries(input) {
-  const state = refreshState(requireSession());
-  if (Object.values(zerosOf(state.rp)).some(Boolean)) throw new Error('链尾结构不健康，请先 verify。');
-  if (input.edits && (input.target !== undefined || input.widget !== undefined || input.x !== undefined || input.y !== undefined || input.w !== undefined || input.h !== undefined)) {
-    throw new Error('edits 批量模式不能混用单条参数。');
+const PATCH_SINGLE_KEYS = [
+  'op', 'target', 'widget', 'page', 'text', 'richRuns', 'runIndex', 'name', 'newName',
+  'x', 'y', 'w', 'width', 'h', 'height', 'fill', 'stroke', 'color', 'radius',
+  'oldName', 'styleGuid', 'selector', 'resetOverrides',
+];
+
+function setBufferWidgetText(input, recordIndex, widgetId, text, { runIndex } = {}) {
+  const record = readRecords(input).find(item => item.index === Number(recordIndex));
+  if (!record || !['Axure:Page', 'Axure:PanelState'].includes(record.className)) {
+    throw new Error(`Editable Page or PanelState record #${recordIndex} not found`);
   }
-  const edits = input.edits ?? [input];
-  const resolved = edits.map(edit => {
-    const effTarget = edit.target ?? (edit.widget !== undefined ? { name: edit.widget, ...(edit.page !== undefined ? { page: edit.page } : {}) } : undefined);
-    if (effTarget === undefined) throw new Error('set_widget_geometry 需要 target 或 widget。');
-    const x = edit.x;
-    const y = edit.y;
-    const w = edit.w ?? edit.width;
-    const h = edit.h ?? edit.height;
-    if (x === undefined && y === undefined && w === undefined && h === undefined) {
-      throw new Error('set_widget_geometry 至少需要提供 x、y、w/width、h/height 之一。');
+  const graph = parsePayload(record);
+  const widget = graph.objects.get(Number(widgetId));
+  if (!widget?.className.startsWith('Axure:DiagramObject:')) {
+    throw new Error(`Unsupported widget target: ${widget?.className ?? widgetId}`);
+  }
+  let textBlock = field(widget.body, 'RichTextBlock') ?? field(widget.body, 'TextBlock');
+  if (textBlock?.tag === 3) textBlock = graph.objects.get(textBlock.value)?.body;
+  if (!textBlock) throw new Error(`Widget #${widgetId} has no text block`);
+  const textNodes = [];
+  walkNodes([textBlock], node => {
+    if (node.tag !== 1 || !node.entries) return;
+    for (const [key, value] of node.entries) {
+      if (key.text === 'Text' && value.tag === 8) textNodes.push(value);
     }
-    const cand = resolveTarget(state, effTarget);
-    return { cand, record: cand.record, id: cand.id, x, y, w, h };
   });
-  const tail = state.chain.at(-1), node = nextWorkNode(state);
-  let created = false;
-  try {
-    assertNotProtected(tail); assertWritable(node);
-    let fileBuf = readFileSync(tail);
-    const byRecord = new Map();
-    for (const item of resolved) {
-      if (!byRecord.has(item.record)) byRecord.set(item.record, []);
-      byRecord.get(item.record).push(item);
+  let target;
+  if (runIndex !== undefined) {
+    if (!Number.isInteger(runIndex) || runIndex < 0 || runIndex >= textNodes.length) {
+      throw new Error(`Widget #${widgetId} has ${textNodes.length} rich text runs; --run must be between 0 and ${textNodes.length - 1}`);
     }
-    const applied = [];
-    for (const [recIdx, items] of byRecord.entries()) {
-      const rec = readRecords(fileBuf).find(r => r.index === recIdx);
-      if (!rec) throw new Error(`记录 #${recIdx} 不存在`);
-      const graph = parsePayload(rec);
-      const strings = [...rec.strings];
-      for (const item of items) {
-        const obj = graph.objects.get(item.id);
-        const st = graph.objects.get(field(obj?.body ?? {}, 'MyStyle')?.value);
-        if (!st) throw new Error(`元件 ${item.cand.name || item.id} 缺少 MyStyle`);
-        const propItems = field(st.body, 'PropList')?.items ?? [];
-        const before = { x: item.cand.x, y: item.cand.y, w: item.cand.w, h: item.cand.h };
-        const after = {
-          x: item.x !== undefined ? Number(item.x) : before.x,
-          y: item.y !== undefined ? Number(item.y) : before.y,
-          w: item.w !== undefined ? Number(item.w) : before.w,
-          h: item.h !== undefined ? Number(item.h) : before.h,
-        };
-        for (const it of propItems) {
-          const doaNode = field(it, 'DOAName');
-          const key = (doaNode?.value ?? 0) & 0x3fffffff;
-          const val = field(it, 'Value');
-          if (key === 101 && val && (item.x !== undefined || item.y !== undefined)) {
-            doaNode.value = (0xc0000000 + 101) >>> 0;
-            if (item.x !== undefined && field(val, 'X')) field(val, 'X').value = after.x;
-            if (item.y !== undefined && field(val, 'Y')) field(val, 'Y').value = after.y;
-          }
-          if (key === 105 && val && (item.w !== undefined || item.h !== undefined)) {
-            doaNode.value = (0xc0000000 + 105) >>> 0;
-            if (item.w !== undefined && field(val, 'Width')) field(val, 'Width').value = after.w;
-            if (item.h !== undefined && field(val, 'Height')) field(val, 'Height').value = after.h;
-          }
-        }
-        applied.push({ record: item.record, id: item.id, name: item.cand.name, page: item.cand.page, before, after });
-      }
-      fileBuf = replaceRecord(fileBuf, rec, encodeRecord(rec, strings, encodePayload(graph.roots)));
-    }
-    writeFileSync(node, fileBuf, { flag: 'wx' }); created = true;
-    commitChainNode(state, node, { op: 'set_widget_geometry', at: now(), edits: applied, node });
-    const syncStatus = computeSyncStatus(state);
-    return {
-      status: 'completed',
-      ...(applied.length === 1 ? { before: applied[0].before, after: applied[0].after } : {}),
-      edits: applied,
-      chainTail: node,
-      previousTail: tail,
-      structure: zerosOf(state.rp),
-      ...(syncStatus ? { syncStatus } : {}),
-    };
-  } catch (error) {
-    if (created && pathExists(node)) error.message += `；失败节点保留 ${rejectNode(node)}`;
-    throw error;
-  } finally { releaseWorkNode(node); }
+    target = textNodes[runIndex];
+  } else if (textNodes.length === 1) {
+    target = textNodes[0];
+  } else if (textNodes.length === 0 && field(textBlock, 'text')?.tag === 8) {
+    target = field(textBlock, 'text');
+  } else {
+    throw new Error(`Widget #${widgetId} must have one simple text value; found ${textNodes.length} rich text runs (select one with runIndex)`);
+  }
+  const value = String(text);
+  let index = record.strings.indexOf(value);
+  if (index < 0) {
+    index = record.strings.length;
+    record.strings.push(value);
+  }
+  target.value = index + 1;
+  target.text = value;
+  const file = replaceRecord(input, record, encodeRecord(record, record.strings, encodePayload(graph.roots)));
+  return { file, record: record.index, widgetId: Number(widgetId), ...(runIndex === undefined ? {} : { runIndex }), text: value };
 }
 
-function setWidgetStyles(input) {
-  const state = refreshState(requireSession());
-  if (Object.values(zerosOf(state.rp)).some(Boolean)) throw new Error('链尾结构不健康，请先 verify。');
-  if (input.edits && (input.target !== undefined || input.widget !== undefined || input.fill !== undefined || input.stroke !== undefined || input.color !== undefined || input.radius !== undefined)) {
-    throw new Error('edits 批量模式不能混用单条参数。');
-  }
-  const edits = input.edits ?? [input];
-  const resolved = edits.map(edit => {
-    const effTarget = edit.target ?? (edit.widget !== undefined ? { name: edit.widget, ...(edit.page !== undefined ? { page: edit.page } : {}) } : undefined);
-    if (effTarget === undefined) throw new Error('set_widget_style 需要 target 或 widget。');
-    const { fill, stroke, color, radius } = edit;
-    if (fill === undefined && stroke === undefined && color === undefined && radius === undefined) {
-      throw new Error('set_widget_style 至少需要提供 fill、stroke、color、radius 之一。');
+function applyPatchItemsToBuffer(initialBuf, items, { sourcePath, sessionState = null }) {
+  let buf = initialBuf;
+  const ext = extname(sourcePath).toLowerCase();
+  const applied = [];
+
+  for (const rawEdit of items) {
+    const inferredOp = rawEdit.op ?? (
+      rawEdit.styleGuid !== undefined ? 'rebind-style'
+        : (rawEdit.oldName !== undefined && rawEdit.newName !== undefined && rawEdit.target === undefined && rawEdit.widget === undefined ? 'rename-style' : 'widget')
+    );
+
+    if (inferredOp === 'rename-style') {
+      if (typeof rawEdit.oldName !== 'string' || typeof rawEdit.newName !== 'string') {
+        throw new Error('rename-style 需要非空字符串 oldName 与 newName。');
+      }
+      const res = renameCustomStyle(buf, rawEdit.oldName, rawEdit.newName);
+      buf = res.file;
+      applied.push({
+        op: 'rename-style',
+        style: res.style,
+        before: res.style.before,
+        after: res.style.name,
+        references: res.references,
+        changedRecords: res.changedRecords,
+      });
+      continue;
+    }
+
+    if (inferredOp === 'rebind-style') {
+      if (typeof rawEdit.styleGuid !== 'string' || !rawEdit.selector) {
+        throw new Error('rebind-style 需要提供 styleGuid 与 selector（对象、JSON 字符串或选择器文件路径）。');
+      }
+      let selectorObj = rawEdit.selector;
+      if (typeof selectorObj === 'string') {
+        const trimmed = selectorObj.trim();
+        if (trimmed.startsWith('{')) {
+          selectorObj = JSON.parse(trimmed);
+        } else {
+          const selPath = resolveInWork(trimmed);
+          assertNotProtected(selPath);
+          selectorObj = JSON.parse(readFileSync(selPath, 'utf8'));
+        }
+      }
+      const predicate = widgetSelector(selectorObj);
+      const res = rebindWidgets(buf, rawEdit.styleGuid, predicate, { resetOverrides: Boolean(rawEdit.resetOverrides) });
+      buf = res.file;
+      applied.push({
+        op: 'rebind-style',
+        style: res.style,
+        resetOverrides: res.resetOverrides,
+        applied: res.applied,
+        count: res.applied.length,
+      });
+      continue;
+    }
+
+    if (ext !== '.rp') {
+      throw new Error(`元件级修改仅支持 .rp 文件（当前为 ${sourcePath}）；.rplib 仅支持 rename-style 与 rebind-style。`);
+    }
+
+    const curState = {
+      sourceFile: sessionState?.sourceFile ?? sourcePath,
+      chain: sessionState?.chain ?? [sourcePath],
+      timeline: sessionState?.timeline ?? [],
+      rp: readRp(buf, { path: sourcePath }),
+    };
+    const effTarget = rawEdit.target ?? (rawEdit.widget !== undefined ? { name: rawEdit.widget, ...(rawEdit.page !== undefined ? { page: rawEdit.page } : {}) } : undefined);
+    if (effTarget === undefined) {
+      throw new Error('rp_patch 元件修改需要提供 target 或 widget（可选加 page 过滤）。');
+    }
+    const hasText = rawEdit.text !== undefined;
+    const hasRich = rawEdit.richRuns !== undefined;
+    if (hasText && hasRich) throw new Error('每次编辑不能同时提供 text 与 richRuns。');
+    const effName = rawEdit.name ?? rawEdit.newName;
+    const hasRename = effName !== undefined;
+    const x = rawEdit.x;
+    const y = rawEdit.y;
+    const w = rawEdit.w ?? rawEdit.width;
+    const h = rawEdit.h ?? rawEdit.height;
+    const hasGeom = x !== undefined || y !== undefined || w !== undefined || h !== undefined;
+    const { fill, stroke, color, radius } = rawEdit;
+    const hasStyle = fill !== undefined || stroke !== undefined || color !== undefined || radius !== undefined;
+
+    if (!hasText && !hasRich && !hasRename && !hasGeom && !hasStyle) {
+      throw new Error('rp_patch 每条修改至少需要提供 text / richRuns / name(newName) / 几何(x,y,w,h) / 样式(fill,stroke,color,radius) 之一，或指定 rename-style / rebind-style。');
     }
     if (fill !== undefined) parseHexArgb(fill);
     if (stroke !== undefined) parseHexArgb(stroke);
@@ -909,93 +905,142 @@ function setWidgetStyles(input) {
     if (radius !== undefined && (typeof radius !== 'number' || !Number.isFinite(radius) || radius < 0)) {
       throw new Error(`非法圆角 radius: ${radius}（期望非负数字）`);
     }
-    const cand = resolveTarget(state, effTarget);
-    return { cand, record: cand.record, id: cand.id, fill, stroke, color, radius };
-  });
-  const tail = state.chain.at(-1), node = nextWorkNode(state);
-  let created = false;
-  try {
-    assertNotProtected(tail); assertWritable(node);
-    let fileBuf = readFileSync(tail);
-    const byRecord = new Map();
-    for (const item of resolved) {
-      if (!byRecord.has(item.record)) byRecord.set(item.record, []);
-      byRecord.get(item.record).push(item);
+
+    const cand = resolveTarget(curState, effTarget);
+    const aspects = [];
+    const beforeMap = {};
+    const afterMap = {};
+    let richReport;
+
+    if (hasRich) {
+      const paragraphs = Array.isArray(rawEdit.richRuns) ? rawEdit.richRuns : rawEdit.richRuns.paragraphs;
+      const spec = { record: cand.record, widgetId: cand.id, paragraphs };
+      if (!Array.isArray(rawEdit.richRuns) && rawEdit.richRuns.defaults) spec.defaults = rawEdit.richRuns.defaults;
+      const res = setWidgetRichText(buf, spec);
+      buf = res.file;
+      richReport = res.report;
+      beforeMap.text = cand.fullText;
+      afterMap.text = res.report?.text ?? '';
+      aspects.push('richtext');
+    } else if (hasText) {
+      const res = setBufferWidgetText(buf, cand.record, cand.id, rawEdit.text, { runIndex: rawEdit.runIndex });
+      buf = res.file;
+      beforeMap.text = cand.fullText;
+      afterMap.text = String(rawEdit.text);
+      aspects.push('text');
     }
-    const applied = [];
-    for (const [recIdx, items] of byRecord.entries()) {
-      const rec = readRecords(fileBuf).find(r => r.index === recIdx);
-      if (!rec) throw new Error(`记录 #${recIdx} 不存在`);
+
+    if (hasRename) {
+      if (typeof effName !== 'string') throw new Error('改名需要字符串 name（或 newName）。');
+      const res = setWidgetNames(buf, [{ record: cand.record, id: cand.id, name: effName }]);
+      buf = res.file;
+      beforeMap.name = cand.name;
+      afterMap.name = effName;
+      aspects.push('rename');
+    }
+
+    if (hasGeom || hasStyle) {
+      const rec = readRecords(buf).find(r => r.index === cand.record);
+      if (!rec) throw new Error(`记录 #${cand.record} 不存在`);
       const graph = parsePayload(rec);
       const strings = [...rec.strings];
-      for (const item of items) {
-        const obj = graph.objects.get(item.id);
-        const st = graph.objects.get(field(obj?.body ?? {}, 'MyStyle')?.value);
-        if (!st) throw new Error(`元件 ${item.cand.name || item.id} 缺少 MyStyle`);
-        const propItems = field(st.body, 'PropList')?.items ?? [];
-        const before = {};
-        const after = {};
+      const obj = graph.objects.get(cand.id);
+      const st = graph.objects.get(field(obj?.body ?? {}, 'MyStyle')?.value);
+      if (!st) throw new Error(`元件 ${cand.name || cand.id} 缺少 MyStyle`);
+      const propItems = field(st.body, 'PropList')?.items ?? [];
+
+      if (hasGeom) {
+        const geomBefore = { x: cand.x, y: cand.y, w: cand.w, h: cand.h };
+        const geomAfter = {
+          x: x !== undefined ? Number(x) : geomBefore.x,
+          y: y !== undefined ? Number(y) : geomBefore.y,
+          w: w !== undefined ? Number(w) : geomBefore.w,
+          h: h !== undefined ? Number(h) : geomBefore.h,
+        };
+        for (const it of propItems) {
+          const doaNode = field(it, 'DOAName');
+          const key = (doaNode?.value ?? 0) & 0x3fffffff;
+          const val = field(it, 'Value');
+          if (key === 101 && val && (x !== undefined || y !== undefined)) {
+            doaNode.value = (0xc0000000 + 101) >>> 0;
+            if (x !== undefined && field(val, 'X')) field(val, 'X').value = geomAfter.x;
+            if (y !== undefined && field(val, 'Y')) field(val, 'Y').value = geomAfter.y;
+          }
+          if (key === 105 && val && (w !== undefined || h !== undefined)) {
+            doaNode.value = (0xc0000000 + 105) >>> 0;
+            if (w !== undefined && field(val, 'Width')) field(val, 'Width').value = geomAfter.w;
+            if (h !== undefined && field(val, 'Height')) field(val, 'Height').value = geomAfter.h;
+          }
+        }
+        beforeMap.geometry = geomBefore;
+        afterMap.geometry = geomAfter;
+        aspects.push('geometry');
+      }
+
+      if (hasStyle) {
+        const styleBefore = {};
+        const styleAfter = {};
         let hitColor = false, hitFill = false, hitStroke = false, hitRadius = false;
         for (const it of propItems) {
           const doaNode = field(it, 'DOAName');
           const key = (doaNode?.value ?? 0) & 0x3fffffff;
           const val = field(it, 'Value');
           if (key === 6 && val) {
-            before.color = formatHexArgb(field(val, 'fill-color')?.value);
-            if (item.color !== undefined) {
+            styleBefore.color = formatHexArgb(field(val, 'fill-color')?.value);
+            if (color !== undefined) {
               doaNode.value = (0xc0000000 + 6) >>> 0;
-              const argb = parseHexArgb(item.color);
+              const argb = parseHexArgb(color);
               if (field(val, 'fill-color')) field(val, 'fill-color').value = argb;
-              after.color = formatHexArgb(argb);
+              styleAfter.color = formatHexArgb(argb);
               hitColor = true;
             }
           }
           if (key === 7 && val) {
-            before.fill = formatHexArgb(field(val, 'fill-color')?.value);
-            if (item.fill !== undefined) {
+            styleBefore.fill = formatHexArgb(field(val, 'fill-color')?.value);
+            if (fill !== undefined) {
               doaNode.value = (0xc0000000 + 7) >>> 0;
-              const argb = parseHexArgb(item.fill);
+              const argb = parseHexArgb(fill);
               if (field(val, 'fill-color')) field(val, 'fill-color').value = argb;
-              after.fill = formatHexArgb(argb);
+              styleAfter.fill = formatHexArgb(argb);
               hitFill = true;
             }
           }
           if (key === 8 && val) {
-            before.stroke = formatHexArgb(field(val, 'fill-color')?.value);
-            if (item.stroke !== undefined) {
+            styleBefore.stroke = formatHexArgb(field(val, 'fill-color')?.value);
+            if (stroke !== undefined) {
               doaNode.value = (0xc0000000 + 8) >>> 0;
-              const argb = parseHexArgb(item.stroke);
+              const argb = parseHexArgb(stroke);
               if (field(val, 'fill-color')) field(val, 'fill-color').value = argb;
-              after.stroke = formatHexArgb(argb);
+              styleAfter.stroke = formatHexArgb(argb);
               hitStroke = true;
             }
           }
-          if (key === 15 && val && item.stroke !== undefined) {
-            const argb = parseHexArgb(item.stroke);
+          if (key === 15 && val && stroke !== undefined) {
+            const argb = parseHexArgb(stroke);
             if ((argb >>> 24) > 0 && (!val.value || val.value <= 0)) {
               doaNode.value = (0xc0000000 + 15) >>> 0;
               val.value = 1;
             }
           }
-          if (key === 80 && val && item.stroke !== undefined) {
-            const argb = parseHexArgb(item.stroke);
+          if (key === 80 && val && stroke !== undefined) {
+            const argb = parseHexArgb(stroke);
             if ((argb >>> 24) > 0) {
               doaNode.value = (0xc0000000 + 80) >>> 0;
               val.value = 15;
             }
           }
           if (key === 71 && val) {
-            before.radius = val.value;
-            if (item.radius !== undefined) {
+            styleBefore.radius = val.value;
+            if (radius !== undefined) {
               doaNode.value = (0xc0000000 + 71) >>> 0;
-              val.value = Number(item.radius);
-              after.radius = Number(item.radius);
+              val.value = Number(radius);
+              styleAfter.radius = Number(radius);
               hitRadius = true;
             }
           }
         }
-        if (item.color !== undefined) {
-          const argb = parseHexArgb(item.color);
+        if (color !== undefined) {
+          const argb = parseHexArgb(color);
           const rtb = field(obj?.body ?? {}, 'RichTextBlock');
           const attrStr = field(rtb ?? {}, 'attributed-string');
           for (const para of field(attrStr ?? {}, 'Paragraphs')?.items ?? []) {
@@ -1009,33 +1054,151 @@ function setWidgetStyles(input) {
           }
         }
         const unsupportedProps = [];
-        if (item.fill !== undefined && !hitFill) unsupportedProps.push('fill');
-        if (item.stroke !== undefined && !hitStroke) unsupportedProps.push('stroke');
-        if (item.color !== undefined && !hitColor) unsupportedProps.push('color');
-        if (item.radius !== undefined && !hitRadius) unsupportedProps.push('radius');
+        if (fill !== undefined && !hitFill) unsupportedProps.push('fill');
+        if (stroke !== undefined && !hitStroke) unsupportedProps.push('stroke');
+        if (color !== undefined && !hitColor) unsupportedProps.push('color');
+        if (radius !== undefined && !hitRadius) unsupportedProps.push('radius');
         if (unsupportedProps.length > 0) {
-          throw new Error(`元件 ${item.cand.name || item.id} (${item.cand.type || 'Widget'}) 不支持样式属性: ${unsupportedProps.join(', ')}`);
+          throw new Error(`元件 ${cand.name || cand.id} (${cand.type || 'Widget'}) 不支持样式属性: ${unsupportedProps.join(', ')}`);
         }
-        applied.push({ record: item.record, id: item.id, name: item.cand.name, page: item.cand.page, before, after: { ...before, ...after } });
+        beforeMap.style = styleBefore;
+        afterMap.style = { ...styleBefore, ...styleAfter };
+        aspects.push('style');
       }
-      fileBuf = replaceRecord(fileBuf, rec, encodeRecord(rec, strings, encodePayload(graph.roots)));
+
+      buf = replaceRecord(buf, rec, encodeRecord(rec, strings, encodePayload(graph.roots)));
     }
-    writeFileSync(node, fileBuf, { flag: 'wx' }); created = true;
-    commitChainNode(state, node, { op: 'set_widget_style', at: now(), edits: applied, node });
+
+    let beforeOut = beforeMap;
+    let afterOut = afterMap;
+    if (aspects.length === 1) {
+      const only = aspects[0];
+      const mapKey = only === 'richtext' ? 'text' : (only === 'rename' ? 'name' : only);
+      beforeOut = beforeMap[mapKey];
+      afterOut = afterMap[mapKey];
+    }
+
+    applied.push({
+      op: aspects.length === 1 ? aspects[0] : 'widget',
+      record: cand.record,
+      id: cand.id,
+      name: hasRename ? effName : cand.name,
+      page: cand.page,
+      target: targetOf(cand),
+      before: beforeOut,
+      after: afterOut,
+      ...(richReport ? { report: richReport } : {}),
+    });
+  }
+
+  return { buf, applied };
+}
+
+function rpPatch(input = {}) {
+  const batchList = input.edits ?? input.operations;
+  if (input.edits !== undefined && input.operations !== undefined) {
+    throw new Error('edits 与 operations 二选一，不能同时提供。');
+  }
+  if (batchList !== undefined) {
+    const mixed = PATCH_SINGLE_KEYS.filter(k => input[k] !== undefined);
+    if (mixed.length > 0) {
+      throw new Error(`edits/operations 批量模式不能混用顶层单条参数（${mixed.join(', ')}）。`);
+    }
+  }
+  const items = batchList ?? [input];
+  const workDir = input.cwd ?? input.projectDir;
+  const rawSource = input.source ?? input.path ?? input.rp ?? input.file ?? input.rpFile;
+  const rawOutput = input.output;
+  if ((rawSource !== undefined) !== (rawOutput !== undefined)) {
+    throw new Error('显式文件模式必须同时提供 source（或 path/rp/file）与 output；若修改当前活动会话请同时省略二者。');
+  }
+
+  if (rawSource !== undefined) {
+    const resolvedSource = resolveInWork(rawSource, workDir);
+    assertNotProtected(resolvedSource);
+    if (!existsSync(resolvedSource)) throw new Error(`源文件不存在：${resolvedSource}`);
+    const sourceFile = realpathSync.native(resolvedSource);
+    assertNotProtected(sourceFile);
+    const ext = extname(sourceFile).toLowerCase();
+    if (!['.rp', '.rplib'].includes(ext)) throw new Error(`rp_patch 仅支持 .rp 或 .rplib 源文件：${sourceFile}`);
+
+    const resolvedOutput = resolveInWork(rawOutput, workDir);
+    assertNotProtected(resolvedOutput);
+    assertWritable(resolvedOutput);
+    const outDir = dirname(resolvedOutput);
+    if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+    const target = writablePath(resolvedOutput);
+    if (!input.overwrite && existsSync(target)) {
+      throw new Error(`目标已存在，rp_patch 默认不覆盖（如需覆盖显式传 overwrite: true）：${target}`);
+    }
+
+    const initialBuf = readFileSync(sourceFile);
+    const beforeCounts = ext === '.rp' ? countsOf(readRp(initialBuf, { path: sourceFile })) : undefined;
+    const { buf, applied } = applyPatchItemsToBuffer(initialBuf, items, { sourcePath: sourceFile });
+
+    if (ext === '.rp') {
+      const outRp = readRp(buf, { path: target });
+      const zeros = zerosOf(outRp);
+      if (zeros.unparseable || zeros.danglingRefs || zeros.problems) {
+        throw new Error(`输出未过结构三零：${JSON.stringify(zeros)}`);
+      }
+      writeFileSync(target, buf, input.overwrite ? {} : { flag: 'wx' });
+      return {
+        status: 'completed',
+        ...(applied.length === 1 ? applied[0] : {}),
+        edits: applied,
+        source: sourceFile,
+        output: target,
+        beforeCounts,
+        afterCounts: countsOf(outRp),
+        structure: zeros,
+      };
+    }
+
+    listCustomStyles(buf);
+    writeFileSync(target, buf, input.overwrite ? {} : { flag: 'wx' });
+    return {
+      status: 'completed',
+      ...(applied.length === 1 ? applied[0] : {}),
+      edits: applied,
+      source: sourceFile,
+      output: target,
+    };
+  }
+
+  const state = refreshState(requireSession());
+  if (Object.values(zerosOf(state.rp)).some(Boolean)) {
+    throw new Error(`链尾结构不健康，请先调用 rp_inspect({ view: "verify" }) 检查：${JSON.stringify(zerosOf(state.rp))}`);
+  }
+  const tail = state.chain.at(-1);
+  const beforeCounts = countsOf(state.rp);
+  const { buf, applied } = applyPatchItemsToBuffer(readFileSync(tail), items, { sourcePath: tail, sessionState: state });
+  const node = nextWorkNode(state);
+  let created = false;
+  try {
+    assertNotProtected(tail);
+    assertWritable(node);
+    writeFileSync(node, buf, { flag: 'wx' });
+    created = true;
+    commitChainNode(state, node, { op: 'rp_patch', at: now(), edits: applied, node });
     const syncStatus = computeSyncStatus(state);
     return {
       status: 'completed',
-      ...(applied.length === 1 ? { before: applied[0].before, after: applied[0].after } : {}),
+      ...(applied.length === 1 ? applied[0] : {}),
       edits: applied,
       chainTail: node,
       previousTail: tail,
+      beforeCounts,
+      afterCounts: countsOf(state.rp),
       structure: zerosOf(state.rp),
       ...(syncStatus ? { syncStatus } : {}),
     };
   } catch (error) {
     if (created && pathExists(node)) error.message += `；失败节点保留 ${rejectNode(node)}`;
     throw error;
-  } finally { releaseWorkNode(node); }
+  } finally {
+    releaseWorkNode(node);
+  }
 }
 
 function generationDiagnostic(diagnostic, spec, plan) {
@@ -1159,19 +1322,21 @@ function loadSpecObjectFromSource(sourcePath) {
   return JSON.parse(proc.stdout);
 }
 
-export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sourcePath: sourcePathAlias, recipe, output: requestedOutput, strictAudit = false, autoHeal = false, variants, overwrite = false, compact = true, template, baseRp, prefer = 'fail', resolutions }, { beforePublish } = {}) {
+export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sourcePath: sourcePathAlias, recipe, output: requestedOutput, cwd, projectDir, strictAudit = false, autoHeal = false, variants, overwrite = false, compact = true, template, baseRp, prefer = 'fail', resolutions }, { beforePublish } = {}) {
   let spec = { language: 'rp/1', target: 9 };
   let stage = 'validation', output, artifactDir, source, resolvedSourceFile = null, plan;
   let publishedRecipeSource = null, publishedRecipeOutput = null;
   try {
+    const explicitWorkDir = cwd ?? projectDir;
+    const workDir = resolveWorkDir(explicitWorkDir);
     if (typeof inputSpec === 'string' && inputSpec.trimStart().startsWith('{')) inputSpec = JSON.parse(inputSpec);
     if ([inputSpec, sourcePathArg, sourcePathAlias, recipe].filter(v => v !== undefined).length > 1)
       throw new Error('recipe、spec、source、sourcePath 只能选择一个输入入口。');
     if (recipe && (inputSpec || sourcePathArg || sourcePathAlias)) throw new Error('recipe 与 spec/source 只能选择一个。');
     const rawSourceArg = recipe ? recipeSource(recipe) : sourcePathArg ?? sourcePathAlias;
     resolvedSourceFile = typeof rawSourceArg === 'string'
-      ? resolve(rawSourceArg)
-      : (typeof inputSpec === 'string' ? resolve(inputSpec) : null);
+      ? resolveInWork(rawSourceArg, explicitWorkDir)
+      : (typeof inputSpec === 'string' ? resolveInWork(inputSpec, explicitWorkDir) : null);
     const rawSpecObj = (inputSpec && typeof inputSpec === 'object' && !Array.isArray(inputSpec))
       ? inputSpec
       : (resolvedSourceFile ? loadSpecObjectFromSource(resolvedSourceFile) : null);
@@ -1185,21 +1350,23 @@ export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sour
     if (typeof requestedOutput !== 'string' || !requestedOutput.trim()) {
       throw new Error('output 必须是有效的 .rp 路径。');
     }
-    const defaultRoot = defaultWriteRoot();
     let effectiveRequestedOutput = requestedOutput;
     if (requestedOutput === 'auto') {
-      const baseDir = resolvedSourceFile ? dirname(resolvedSourceFile) : defaultRoot;
+      const sourceOutsideSkill = !recipe && resolvedSourceFile
+        && !resolvedSourceFile.startsWith(`${SKILL_ROOT_DIR}/`) && resolvedSourceFile !== SKILL_ROOT_DIR;
+      const baseDir = (!explicitWorkDir && sourceOutsideSkill) ? dirname(resolvedSourceFile) : workDir;
       const baseStem = recipe ? recipe : (resolvedSourceFile ? basename(resolvedSourceFile, extname(resolvedSourceFile)) : 'prototype');
+      const isAvailable = cand => !pathExists(cand) && !pathExists(`${cand}.assets`) && !pathExists(`${cand}.baseline.json`) && (!recipe || !pathExists(`${cand.slice(0, -3)}.rp1`));
       const cand0 = join(baseDir, `${baseStem}.rp`);
-      if (!pathExists(cand0)) effectiveRequestedOutput = cand0;
+      if (isAvailable(cand0)) effectiveRequestedOutput = cand0;
       else {
         for (let v = 2; ; v++) {
           const candV = join(baseDir, `${baseStem}-v${v}.rp`);
-          if (!pathExists(candV)) { effectiveRequestedOutput = candV; break; }
+          if (isAvailable(candV)) { effectiveRequestedOutput = candV; break; }
         }
       }
     }
-    const resolvedOutput = isAbsolute(effectiveRequestedOutput) ? effectiveRequestedOutput : resolve(defaultRoot, effectiveRequestedOutput);
+    const resolvedOutput = isAbsolute(effectiveRequestedOutput) ? effectiveRequestedOutput : resolve(workDir, effectiveRequestedOutput);
     if (extname(resolvedOutput).toLowerCase() !== '.rp')
       throw new Error('output 必须是新的 .rp 路径。');
     assertWritable(resolvedOutput);
@@ -1208,8 +1375,8 @@ export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sour
       assertWritable(recipeOutputSource);
       if (pathExists(recipeOutputSource)) throw new Error(`范例源码已存在，请通过 source 继续改稿：${recipeOutputSource}`);
     }
-    if (template !== undefined) {
-      const resolvedTpl = resolve(template);
+    const resolvedTpl = template !== undefined ? resolveInWork(template, explicitWorkDir) : undefined;
+    if (resolvedTpl !== undefined) {
       assertNotProtected(resolvedTpl);
       if (!pathExists(resolvedTpl)) throw new Error(`template 不存在：${resolvedTpl}`);
     }
@@ -1231,7 +1398,7 @@ export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sour
       }
     }
     if (baseRp !== undefined) {
-      const resolvedBaseRp = resolve(baseRp);
+      const resolvedBaseRp = resolveInWork(baseRp, explicitWorkDir);
       if (!pathExists(resolvedBaseRp)) throw new Error(`baseRp 不存在：${resolvedBaseRp}`);
       const syncStatus = computeSyncStatus(resolvedBaseRp, resolvedSourceFile);
       if (syncStatus.nativeChanged) {
@@ -1281,12 +1448,12 @@ export function generatePrototype({ spec: inputSpec, source: sourcePathArg, sour
     stage = 'native';
     const staged = join(artifactDir, 'prototype.rp');
     const prevTpl = process.env.AXURE_BLANK_TEMPLATE_RP9;
-    if (template !== undefined) process.env.AXURE_BLANK_TEMPLATE_RP9 = resolve(template);
+    if (resolvedTpl !== undefined) process.env.AXURE_BLANK_TEMPLATE_RP9 = resolvedTpl;
     let build;
     try {
       build = buildInteractiveRp(compiled.planPath, staged, { backend: 'native' });
     } finally {
-      if (template !== undefined) {
+      if (resolvedTpl !== undefined) {
         if (prevTpl === undefined) delete process.env.AXURE_BLANK_TEMPLATE_RP9;
         else process.env.AXURE_BLANK_TEMPLATE_RP9 = prevTpl;
       }
@@ -1487,6 +1654,8 @@ function syncPrototype({
   outRp: outRpArg,
   outSource: outSourceArg,
   outSpec: outSpecArg,
+  cwd,
+  projectDir,
   prefer = 'fail',
   resolutions,
   expectedRpSha256,
@@ -1495,16 +1664,23 @@ function syncPrototype({
 }, { beforePublish } = {}) {
   let stage = 'validation', tmpDir;
   try {
+    const explicitWorkDir = cwd ?? projectDir;
     if (typeof specArg === 'string' && specArg.trimStart().startsWith('{')) specArg = JSON.parse(specArg);
-    const rpInput = rpArg ?? pathArg ?? rpFileArg ?? fileArg;
-    const source = sourceArg ?? sourcePathArg ?? (typeof specArg === 'string' ? specArg : undefined);
-    const baselineInput = baselineArg ?? baselinePathArg;
+    const rpInputRaw = rpArg ?? pathArg ?? rpFileArg ?? fileArg;
+    const rpInput = rpInputRaw !== undefined ? resolveInWork(rpInputRaw, explicitWorkDir) : undefined;
+    const sourceRaw = sourceArg ?? sourcePathArg ?? (typeof specArg === 'string' ? specArg : undefined);
+    const source = sourceRaw !== undefined ? resolveInWork(sourceRaw, explicitWorkDir) : undefined;
+    const baselineInputRaw = baselineArg ?? baselinePathArg;
+    const baselineInput = baselineInputRaw !== undefined ? resolveInWork(baselineInputRaw, explicitWorkDir) : undefined;
+    const resolvedBaseRpArg = baseRpArg !== undefined ? resolveInWork(baseRpArg, explicitWorkDir) : undefined;
     const inlineSpec = (specArg && typeof specArg === 'object' && !Array.isArray(specArg)) ? specArg : undefined;
-    const output = outputArg ?? outRpArg;
-    const outSource = outSourceArg ?? outSpecArg;
+    const outputRaw = outputArg ?? outRpArg;
+    const output = outputRaw !== undefined ? resolveInWork(outputRaw, explicitWorkDir) : undefined;
+    const outSourceRaw = outSourceArg ?? outSpecArg;
+    const outSource = outSourceRaw !== undefined ? resolveInWork(outSourceRaw, explicitWorkDir) : undefined;
 
     const activeSession = session ? refreshState(session) : null;
-    const statusInfo = computeSyncStatus(rpInput ?? activeSession, source, baseRpArg);
+    const statusInfo = computeSyncStatus(rpInput ?? activeSession, source, resolvedBaseRpArg);
     const rpFile = statusInfo.rpFile ?? (rpInput ? resolve(rpInput) : null);
     if (mode === 'status') {
       return { status: 'completed', mode: 'status', ...statusInfo, syncStatus: statusInfo };
@@ -1525,14 +1701,14 @@ function syncPrototype({
       throw Object.assign(new Error(`基线 semanticHash 不匹配（期望 ${expectedSemanticHash}，实际 ${baselineData.semanticHash}），拒绝过期更新。`), { code: 'E_STALE_SYNC_STATE' });
     }
     if (output !== undefined) {
-      if (!isAbsolute(output) || extname(output).toLowerCase() !== '.rp')
-        throw Object.assign(new Error('output 必须是 .rp 绝对路径。'), { code: 'E_OUTPUT_PATH' });
+      if (typeof output !== 'string' || !output.trim() || extname(output).toLowerCase() !== '.rp')
+        throw Object.assign(new Error('output 必须是有效的 .rp 路径。'), { code: 'E_OUTPUT_PATH' });
       assertNotProtected(output);
       assertWritable(output);
     }
     if (outSource !== undefined) {
-      if (!isAbsolute(outSource))
-        throw Object.assign(new Error('outSource 必须是绝对路径。'), { code: 'E_OUT_SOURCE_PATH' });
+      if (typeof outSource !== 'string' || !outSource.trim())
+        throw Object.assign(new Error('outSource 必须是有效的文件路径。'), { code: 'E_OUT_SOURCE_PATH' });
       assertNotProtected(outSource);
       assertWritable(outSource);
     }
@@ -1555,8 +1731,8 @@ function syncPrototype({
     }
 
     let baseRpFile = rpFile;
-    if (baseRpArg && pathExists(resolve(baseRpArg))) {
-      baseRpFile = resolve(baseRpArg);
+    if (resolvedBaseRpArg && pathExists(resolve(resolvedBaseRpArg))) {
+      baseRpFile = resolve(resolvedBaseRpArg);
     } else if (baselineData?.baseRpBase64) {
       baseRpFile = join(tmpDir, 'baseline.rp');
       writeFileSync(baseRpFile, Buffer.from(baselineData.baseRpBase64, 'base64'));
@@ -1919,7 +2095,9 @@ sys.exit(0 if res.get('ok') else 2)
 function generateFromImage({
   image: imageArg,
   spec: specArg,
-  output: requestedOutput,
+  output: requestedOutputRaw,
+  cwd,
+  projectDir,
   version = 9,
   scale,
   page = '图片还原页',
@@ -1931,8 +2109,10 @@ function generateFromImage({
 }) {
   let stage = 'validation', artifactDir, output;
   try {
-    if (!isAbsolute(requestedOutput) || extname(requestedOutput).toLowerCase() !== '.rp') {
-      throw Object.assign(new Error('output 必须是新的 .rp 绝对路径。'), { code: 'E_OUTPUT_PATH' });
+    const explicitWorkDir = cwd ?? projectDir;
+    const requestedOutput = resolveInWork(requestedOutputRaw, explicitWorkDir);
+    if (typeof requestedOutput !== 'string' || !requestedOutput.trim() || extname(requestedOutput).toLowerCase() !== '.rp') {
+      throw Object.assign(new Error('output 必须是新的 .rp 路径。'), { code: 'E_OUTPUT_PATH' });
     }
     assertNotProtected(requestedOutput);
     assertWritable(requestedOutput);
@@ -1942,7 +2122,7 @@ function generateFromImage({
     if (!imageArg && !specArg) {
       throw Object.assign(new Error('必须提供本地图片路径 image 或已有分层 spec。'), { code: 'E_INPUT_REQUIRED' });
     }
-    const imagePath = imageArg ? resolve(imageArg) : null;
+    const imagePath = imageArg ? resolveInWork(imageArg, explicitWorkDir) : null;
     if (imagePath && !pathExists(imagePath)) {
       throw Object.assign(new Error(`本地图片不存在：${imagePath}`), { code: 'E_IMAGE_NOT_FOUND' });
     }
@@ -1957,7 +2137,7 @@ function generateFromImage({
         nextAction: '在已安装 requirements.txt 依赖的 Python 环境中启动 MCP，然后用 runtime_info 核对实际解释器。' }] });
     }
     if (baseRp !== undefined) {
-      const resolvedBaseRp = resolve(baseRp);
+      const resolvedBaseRp = resolveInWork(baseRp, explicitWorkDir);
       if (!pathExists(resolvedBaseRp)) {
         throw Object.assign(new Error(`baseRp 不存在：${resolvedBaseRp}`), { code: 'E_BASE_RP_NOT_FOUND' });
       }
@@ -1987,7 +2167,7 @@ function generateFromImage({
     const effectiveScale = scale ?? 2;
     if (specArg) {
       if (typeof specArg === 'string') {
-        const resolvedSpec = resolve(specArg);
+        const resolvedSpec = resolveInWork(specArg, explicitWorkDir);
         if (!pathExists(resolvedSpec)) throw Object.assign(new Error(`spec 文件不存在：${resolvedSpec}`), { code: 'E_SPEC_NOT_FOUND' });
         copyFileSync(resolvedSpec, specPath);
       } else {
@@ -2045,7 +2225,7 @@ function generateFromImage({
           status: 'failed',
           stage,
           code: 'E_RP11_GUI_PASTE_REQUIRED',
-          message: 'RP11 原生格式使用 SQLite 单库，不支持离线直接写出二进制 .rp；已在 artifacts 中生成 RP11 专用 .axvg.json 与分层 spec，请在 Axure RP 11 打开目标工程后设置 guiPaste=true 或调用 axvg_paste 放置。',
+          message: 'RP11 原生格式使用 SQLite 单库，不支持离线直接写出二进制 .rp；已在 artifacts 中生成 RP11 专用 .axvg.json 与分层 spec，请在 Axure RP 11 打开目标工程后设置 guiPaste=true 或调用 rp_command({ command: "axvg paste", ... }) 放置。',
           version: 11,
           artifacts: { directory: artifactDir, assetsDir, image: imagePath, spec: specPath, axvg: axvgPath },
         };
@@ -2089,7 +2269,8 @@ function generateFromImage({
 
     stage = 'verify_diff';
     const refSource = imagePath || (traceSpec.reference && pathExists(traceSpec.reference) ? traceSpec.reference : null);
-    let previewImgPath = typeof preview === 'string' && pathExists(resolve(preview)) ? resolve(preview) : null;
+    const resolvedPreview = typeof preview === 'string' ? resolveInWork(preview, explicitWorkDir) : null;
+    let previewImgPath = resolvedPreview && pathExists(resolvedPreview) ? resolvedPreview : null;
     if (!previewImgPath && preview === true && process.platform === 'darwin') {
       const autoCapPath = join(artifactDir, 'host-window-capture.png');
       const swiftCap = `
@@ -2268,38 +2449,70 @@ function procStdoutJson(stdout) {
   return start >= 0 && end >= start ? text.slice(start, end + 1) : '';
 }
 
-function resolveReadOnlyState(pathArg) {
+function resolveReadOnlyState(pathArg, { cwd } = {}) {
   if (pathArg === undefined) return refreshState(requireSession());
-  assertNotProtected(pathArg);
-  if (!existsSync(pathArg)) throw new Error(`源文件不存在：${pathArg}`);
-  const sourceFile = realpathSync.native(pathArg);
+  const resolved = resolveInWork(pathArg, cwd);
+  assertNotProtected(resolved);
+  if (!existsSync(resolved)) throw new Error(`源文件不存在：${resolved}`);
+  const sourceFile = realpathSync.native(resolved);
   assertNotProtected(sourceFile);
   if (extname(sourceFile).toLowerCase() !== '.rp') throw new Error(`只接受 .rp 源文件：${sourceFile}`);
   const rp = readRp(readFileSync(sourceFile), { path: sourceFile });
   return { sourceFile, chain: [sourceFile], timeline: [], rp };
 }
 
+function resolveRegistryCommand(rawName) {
+  if (typeof rawName !== 'string' || !rawName.trim()) return null;
+  const trimmed = rawName.trim();
+  const normDash = trimmed.replaceAll('_', '-');
+  const normSpace = trimmed.replace(/^axvg[-_]/i, 'axvg ');
+  return listCommands().find(c =>
+    c.command === trimmed || c.command === normDash || c.command === normSpace || toolName(c.command) === trimmed
+  ) ?? null;
+}
+
+function sessionSnapshotPayload() {
+  if (!session) {
+    return {
+      active: false,
+      file: null,
+      hint: '没有活动会话；调用 axure_open 开启，或使用 rp_inspect / rp_patch / rp_command 的显式路径模式。',
+    };
+  }
+  const state = refreshState(requireSession());
+  const tail = state.chain.at(-1);
+  const syncStatus = computeSyncStatus(state);
+  return {
+    active: true,
+    file: tail,
+    sha256: sha256Of(tail),
+    ...sessionSummary(state),
+    structure: zerosOf(state.rp),
+    ...(syncStatus ? { syncStatus } : {}),
+  };
+}
+
 // ---- 意图级工具的实现 ----
 const sessionHandlers = {
-  axure_open({ path, rp, file, rpFile } = {}) {
-    const targetPath = path ?? rp ?? file ?? rpFile;
-    if (!targetPath) throw new Error('axure_open 必须提供 path（或 rp/file/rpFile）');
+  axure_open({ path, rp, file, rpFile, cwd, projectDir } = {}) {
+    const rawPath = path ?? rp ?? file ?? rpFile;
+    if (!rawPath) throw new Error('axure_open 必须提供 path（或 rp/file/rpFile）');
+    const targetPath = resolveInWork(rawPath, cwd ?? projectDir);
     return overviewOf(openSession(targetPath));
   },
-  axure_state() {
-    if (!session) return { active: false, hint: '没有活动会话；调用 axure_open <path.rp> 开启，或继续用命令工具的显式路径模式' };
-    const state = requireSession();
-    const syncStatus = computeSyncStatus(state);
-    return { active: true, ...sessionSummary(state), structure: zerosOf(state.rp), ...(syncStatus ? { syncStatus } : {}) };
-  },
-  axure_save({ as, cleanup = false } = {}) {
+  axure_save({ as, cleanup = false, cwd, projectDir } = {}) {
+    if (as === undefined) return sessionSnapshotPayload();
     const state = refreshState(requireSession());
     const tail = state.chain.at(-1);
-    if (Object.values(zerosOf(state.rp)).some(Boolean)) throw new Error('链尾结构不健康，拒绝另存；先 verify 查看问题。');
-    if (as === undefined) return { file: tail, sha256: sha256Of(tail), structure: zerosOf(state.rp) };
-    assertNotProtected(as);
-    assertWritable(as);
-    const target = writablePath(as);
+    if (Object.values(zerosOf(state.rp)).some(Boolean)) {
+      throw new Error('链尾结构不健康，拒绝另存；请先调用 rp_inspect({ view: "verify" }) 查看问题。');
+    }
+    const resolvedAs = resolveInWork(as, cwd ?? projectDir);
+    assertNotProtected(resolvedAs);
+    assertWritable(resolvedAs);
+    const outDir = dirname(resolvedAs);
+    if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
+    const target = writablePath(resolvedAs);
     if (existsSync(target)) throw new Error(`目标已存在，axure_save 只写新文件不覆盖：${target}`);
     copyFileSync(tail, target, constants.COPYFILE_EXCL);
     const srcBaseline = findBaselineForRp(tail, undefined, state);
@@ -2324,119 +2537,254 @@ const sessionHandlers = {
     }
     state.timeline.push({ op: 'save', at: now(), from: tail, path: target, sha256: digest, ...(cleanedWorkFiles.length ? { cleanedWorkFiles } : {}) });
     return {
-      path: isAbsolute(as) ? as : join(process.cwd(), as),
+      path: resolvedAs,
       physicalPath: target,
       sha256: digest,
       fromChainTail: tail,
       ...(cleanup ? { cleanedWorkFiles } : {}),
     };
   },
-  locate({ path, rp, file, rpFile, query, page, type, limit = 50, offset = 0 } = {}) {
-    const targetPath = path ?? rp ?? file ?? rpFile;
-    const state = targetPath !== undefined ? resolveReadOnlyState(targetPath) : requireSession();
-    if (query === undefined && page === undefined && type === undefined) throw new Error('locate 至少提供 query/page/type 之一');
-    const candidates = locateCandidates(state, { query, page, type });
-    return { file: state.chain.at(-1), total: candidates.length, candidates: candidates.slice(offset, offset + limit).map(candidateView), hasMore: offset + limit < candidates.length, nextOffset: offset + limit < candidates.length ? offset + limit : null };
-  },
-  inspect({ path, rp, file, rpFile, target, ...rest } = {}) {
-    const targetPath = path ?? rp ?? file ?? rpFile;
-    const state = targetPath !== undefined ? resolveReadOnlyState(targetPath) : requireSession();
-    const effectiveTarget = target ?? (Object.keys(rest).length > 0 ? rest : undefined);
-    if (effectiveTarget === undefined) throw new Error('inspect 必须提供 target（或 query/name/record+id）');
-    const cand = resolveTarget(state, effectiveTarget);
-    const { fullText, x, y, w, h, ...candRest } = cand;
-    const graph = graphsOf(state).get(cand.record);
-    const widget = graph?.objects.get(cand.id);
-    const style = graph?.objects.get(field(widget?.body ?? {}, 'MyStyle')?.value);
-    return {
-      ...candRest, text: brief(fullText, 200), geometry: { x, y, w, h },
-      richText: richRunsDetail(state, cand),
-      style: (field(style?.body ?? {}, 'PropList')?.items ?? []).map(p => ({ property: field(p, 'DOAName')?.value, value: scalar(field(p, 'Value'), graph) })),
-      interactions: cand.interactions === null
-        ? { count: null, human: [], tree: [], note: '嵌套容器内元件的交互树 rp-read 当前不解析（仅页面顶层元件有）' }
-        : { count: cand.interactions.length, human: interactionLines(cand.name || `#${cand.id}`, cand.interactions), tree: cand.interactions },
-    };
-  },
-  read_interactions({ path, rp, file, rpFile, page, widget, limit = 20, offset = 0 } = {}) {
-    const targetPath = path ?? rp ?? file ?? rpFile;
-    const state = targetPath !== undefined ? resolveReadOnlyState(targetPath) : requireSession();
-    const pages = page === undefined ? state.rp.pages : state.rp.pages.filter(p => p.name === page);
-    if (page !== undefined && pages.length === 0) throw new Error(`页面「${page}」不存在；现有页面：${state.rp.pages.map(p => p.name).join('、')}`);
-    const index = widgetIndex(state).filter(w => w.interactions?.length && (page === undefined || w.page === page));
-    const matches = widget === undefined ? index : matchByLogicalId(state, index, widget, page);
-    const selectedWidgets = widget === undefined || matches.length ? matches
-      : index.filter(w => w.name === widget || String(w.id) === widget);
-    const owners = pages.flatMap(p => [
-      ...(widget === undefined && p.interactions?.length ? [{ kind: 'page', page: p.name, record: p.record, interactions: p.interactions }] : []),
-      ...selectedWidgets.filter(w => w.page === p.name).map(w => ({ kind: 'widget', ...w })),
-    ]).concat(selectedWidgets.filter(w => !pages.some(p => p.name === w.page)).map(w => ({ kind: 'widget', ...w })));
-    const resultFor = selected => ({
-      file: state.chain.at(-1),
-      total: owners.length, offset, limit: selected.length, returned: selected.length,
-      hasMore: offset + selected.length < owners.length,
-      nextOffset: offset + selected.length < owners.length ? offset + selected.length : null,
-      items: selected.map(w => w.kind === 'page'
-        ? { kind: 'page', page: w.page, record: w.record, interactions: w.interactions }
-        : { kind: 'widget', page: w.page, record: w.record, id: w.id, name: w.name, type: w.type,
-          container: w.container, ...(w.master ? { master: w.master } : {}), interactions: w.interactions }),
-      contained: selected.filter(w => w.kind === 'widget' && w.container.length).map(w => ({ ...candidateView(w), kind: undefined, interactions: w.interactions })),
-      pages: pages.map(p => ({ name: p.name,
-        pageInteractions: selected.find(w => w.kind === 'page' && w.page === p.name)?.interactions ?? [],
-        widgets: selected.filter(w => w.kind === 'widget' && w.page === p.name && !w.container.length)
-          .map(w => ({ name: w.name || `#${w.id}`, id: w.id, type: w.type, interactions: w.interactions })),
-        counts: { interactions: p.counts.interactions },
-      })),
-      human: selected.flatMap(w => interactionLines(w.kind === 'page' ? `[页面] ${w.page}` : targetOf(w), w.interactions)),
-    });
-    const selected = owners.slice(offset, offset + limit);
-    let result = resultFor(selected);
-    while (selected.length > 1 && Buffer.byteLength(JSON.stringify(result)) > 20000) {
-      selected.pop(); result = resultFor(selected);
+  rp_inspect(input = {}) {
+    const {
+      view: explicitView,
+      path, rp, file, rpFile, source,
+      cwd, projectDir,
+      query, page, type, limit, offset = 0,
+      target, name, record, id, container,
+      widget,
+      deep = false, includeCrossPageDuplicates = false,
+      full = false,
+    } = input;
+    const workDir = cwd ?? projectDir;
+    const rawPath = path ?? rp ?? file ?? rpFile ?? source;
+    const inferredView = explicitView ?? (
+      (input.deep !== undefined || input.includeCrossPageDuplicates !== undefined) ? 'verify'
+        : (target !== undefined || (record !== undefined && id !== undefined) || name !== undefined) ? 'widget'
+          : (query !== undefined || type !== undefined) ? 'locate'
+            : (widget !== undefined) ? 'interactions'
+              : 'overview'
+    );
+
+    if (inferredView === 'state') {
+      return { view: 'state', ...sessionSnapshotPayload() };
     }
-    if (Buffer.byteLength(JSON.stringify(result)) > 20000) result.human = [];
-    return result;
+
+    if (inferredView === 'styles') {
+      let styleFile;
+      if (rawPath !== undefined) {
+        const resolved = resolveInWork(rawPath, workDir);
+        assertNotProtected(resolved);
+        if (!existsSync(resolved)) throw new Error(`源文件不存在：${resolved}`);
+        styleFile = realpathSync.native(resolved);
+        assertNotProtected(styleFile);
+        if (!['.rp', '.rplib'].includes(extname(styleFile).toLowerCase())) {
+          throw new Error(`styles 视图仅接受 .rp 或 .rplib 文件：${styleFile}`);
+        }
+      } else {
+        styleFile = refreshState(requireSession()).chain.at(-1);
+        assertNotProtected(styleFile);
+      }
+      const styles = listCustomStyles(readFileSync(styleFile));
+      return { view: 'styles', file: styleFile, count: styles.length, styles };
+    }
+
+    const state = resolveReadOnlyState(rawPath, { cwd: workDir });
+
+    if (inferredView === 'overview') {
+      const rpDoc = state.rp;
+      const syncStatus = computeSyncStatus(state);
+      return {
+        view: 'overview',
+        file: state.chain.at(-1),
+        counts: countsOf(rpDoc),
+        pages: rpDoc.pages.map(p => ({
+          name: p.name,
+          record: p.record,
+          widgets: p.counts.widgets,
+          dynamicPanels: p.counts.dynamicPanels,
+          interactions: p.counts.interactions,
+          namedWidgets: p.counts.namedWidgets,
+        })),
+        globalVariables: rpDoc.globalVariables,
+        masters: rpDoc.sitemap.masters,
+        containedWidgets: rpDoc.containedWidgets.length,
+        structure: zerosOf(rpDoc),
+        ...(syncStatus ? { syncStatus } : {}),
+        ...(full ? { rp: rpDoc } : {}),
+      };
+    }
+
+    if (inferredView === 'locate') {
+      const effLimit = limit ?? 50;
+      const candidates = locateCandidates(state, { query, page, type });
+      return {
+        view: 'locate',
+        file: state.chain.at(-1),
+        total: candidates.length,
+        candidates: candidates.slice(offset, offset + effLimit).map(candidateView),
+        hasMore: offset + effLimit < candidates.length,
+        nextOffset: offset + effLimit < candidates.length ? offset + effLimit : null,
+      };
+    }
+
+    if (inferredView === 'widget') {
+      const inlineRest = Object.fromEntries(
+        Object.entries({ query, page, type, name, record, id, container }).filter(([, v]) => v !== undefined)
+      );
+      const effectiveTarget = target ?? (Object.keys(inlineRest).length > 0 ? inlineRest : undefined);
+      if (effectiveTarget === undefined) {
+        throw new Error('rp_inspect(view="widget") 必须提供 target（或 query/name/record+id）');
+      }
+      const cand = resolveTarget(state, effectiveTarget);
+      const { fullText, x, y, w, h, ...candRest } = cand;
+      const graph = graphsOf(state).get(cand.record);
+      const widgetObj = graph?.objects.get(cand.id);
+      const style = graph?.objects.get(field(widgetObj?.body ?? {}, 'MyStyle')?.value);
+      return {
+        view: 'widget',
+        ...candRest,
+        text: brief(fullText, 200),
+        geometry: { x, y, w, h },
+        richText: richRunsDetail(state, cand),
+        style: (field(style?.body ?? {}, 'PropList')?.items ?? []).map(p => ({
+          property: field(p, 'DOAName')?.value,
+          value: scalar(field(p, 'Value'), graph),
+        })),
+        interactions: cand.interactions === null
+          ? { count: null, human: [], tree: [], note: '嵌套容器内元件的交互树 rp-read 当前不解析（仅页面顶层元件有）' }
+          : { count: cand.interactions.length, human: interactionLines(cand.name || `#${cand.id}`, cand.interactions), tree: cand.interactions },
+      };
+    }
+
+    if (inferredView === 'interactions') {
+      const effLimit = Math.min(limit ?? 20, 100);
+      const pages = page === undefined ? state.rp.pages : state.rp.pages.filter(p => p.name === page);
+      if (page !== undefined && pages.length === 0) {
+        throw new Error(`页面「${page}」不存在；现有页面：${state.rp.pages.map(p => p.name).join('、')}`);
+      }
+      const index = widgetIndex(state).filter(w => w.interactions?.length && (page === undefined || w.page === page));
+      const matches = widget === undefined ? index : matchByLogicalId(state, index, widget, page);
+      const selectedWidgets = widget === undefined || matches.length ? matches
+        : index.filter(w => w.name === widget || String(w.id) === widget);
+      const owners = pages.flatMap(p => [
+        ...(widget === undefined && p.interactions?.length ? [{ kind: 'page', page: p.name, record: p.record, interactions: p.interactions }] : []),
+        ...selectedWidgets.filter(w => w.page === p.name).map(w => ({ kind: 'widget', ...w })),
+      ]).concat(selectedWidgets.filter(w => !pages.some(p => p.name === w.page)).map(w => ({ kind: 'widget', ...w })));
+      const resultFor = selected => ({
+        view: 'interactions',
+        file: state.chain.at(-1),
+        total: owners.length, offset, limit: selected.length, returned: selected.length,
+        hasMore: offset + selected.length < owners.length,
+        nextOffset: offset + selected.length < owners.length ? offset + selected.length : null,
+        items: selected.map(w => w.kind === 'page'
+          ? { kind: 'page', page: w.page, record: w.record, interactions: w.interactions }
+          : { kind: 'widget', page: w.page, record: w.record, id: w.id, name: w.name, type: w.type,
+            container: w.container, ...(w.master ? { master: w.master } : {}), interactions: w.interactions }),
+        contained: selected.filter(w => w.kind === 'widget' && w.container.length).map(w => ({ ...candidateView(w), kind: undefined, interactions: w.interactions })),
+        pages: pages.map(p => ({ name: p.name,
+          pageInteractions: selected.find(w => w.kind === 'page' && w.page === p.name)?.interactions ?? [],
+          widgets: selected.filter(w => w.kind === 'widget' && w.page === p.name && !w.container.length)
+            .map(w => ({ name: w.name || `#${w.id}`, id: w.id, type: w.type, interactions: w.interactions })),
+          counts: { interactions: p.counts.interactions },
+        })),
+        human: selected.flatMap(w => interactionLines(w.kind === 'page' ? `[页面] ${w.page}` : targetOf(w), w.interactions)),
+      });
+      const selected = owners.slice(offset, offset + effLimit);
+      let result = resultFor(selected);
+      while (selected.length > 1 && Buffer.byteLength(JSON.stringify(result)) > 20000) {
+        selected.pop(); result = resultFor(selected);
+      }
+      if (Buffer.byteLength(JSON.stringify(result)) > 20000) result.human = [];
+      return result;
+    }
+
+    if (inferredView === 'verify') {
+      const syncStatus = computeSyncStatus(state);
+      const ok = !Object.values(zerosOf(state.rp)).some(Boolean);
+      const base = {
+        view: 'verify',
+        ok,
+        file: state.chain.at(-1),
+        status: ok ? 'verified' : 'failed',
+        structure: zerosOf(state.rp),
+        ...(syncStatus ? { syncStatus } : {}),
+      };
+      if (!deep) return base;
+      const allDuplicates = state.rp.duplicates ?? [];
+      const samePageDuplicates = [];
+      const crossPageDuplicates = [];
+      for (const dup of allDuplicates) {
+        const pageCounts = new Map();
+        for (const loc of dup.locations ?? []) {
+          const pageName = String(loc).split(':')[0];
+          pageCounts.set(pageName, (pageCounts.get(pageName) ?? 0) + 1);
+        }
+        const hasSamePageDup = [...pageCounts.values()].some(c => c > 1);
+        if (hasSamePageDup) samePageDuplicates.push(dup);
+        else crossPageDuplicates.push(dup);
+      }
+      return {
+        ...base,
+        duplicates: includeCrossPageDuplicates ? allDuplicates : samePageDuplicates,
+        duplicateSummary: {
+          samePageGroups: samePageDuplicates.length,
+          crossPageSharedGroups: crossPageDuplicates.length,
+          ...(crossPageDuplicates.length > 0 ? { crossPageSampleNames: crossPageDuplicates.slice(0, 5).map(d => d.name) } : {}),
+        },
+        danglingRefs: state.rp.problems.filter(p => p.kind === 'dangling-ref'),
+        problems: state.rp.problems,
+        pages: state.rp.pages.map(p => ({ name: p.name, record: p.record, widgets: p.counts.widgets, interactions: p.counts.interactions })),
+        containedWidgets: state.rp.containedWidgets.length,
+        indexedWidgets: widgetIndex(state).length,
+      };
+    }
+
+    throw new Error(`未知的 rp_inspect 视图：${inferredView}`);
   },
-  edit_text: editTexts,
-  rename_widget: renameWidgets,
-  set_widget_geometry: setWidgetGeometries,
-  set_widget_style: setWidgetStyles,
+  rp_patch: rpPatch,
+  rp_command({ action, command: rawCommand, params, args, session: useSessionFlag, cwd, projectDir } = {}) {
+    const allCommands = listCommands();
+    const effAction = action ?? (rawCommand === undefined ? 'describe' : 'run');
+    if (effAction === 'describe' && rawCommand === undefined) {
+      return {
+        action: 'describe',
+        count: allCommands.length,
+        commands: allCommands.map(c => ({
+          command: c.command,
+          usage: c.usage,
+          readOnly: Boolean(commandIO(c)?.readOnly),
+          supportsSession: Boolean(commandIO(c)),
+        })),
+      };
+    }
+    const cmd = resolveRegistryCommand(rawCommand);
+    if (!cmd) {
+      const err = new Error(`未知底层命令 "${rawCommand ?? ''}"；调用 rp_command({ action: "describe" }) 查看全部 ${allCommands.length} 个命令。`);
+      err.availableCommands = allCommands.map(c => c.command);
+      throw err;
+    }
+    const schema = commandSchema(cmd.command);
+    if (effAction === 'describe') {
+      return {
+        action: 'describe',
+        command: cmd.command,
+        usage: cmd.usage,
+        readOnly: Boolean(commandIO(cmd)?.readOnly),
+        supportsSession: Boolean(commandIO(cmd)),
+        inputSchema: schema,
+      };
+    }
+    if (params !== undefined && args !== undefined) {
+      throw new Error('rp_command 执行时 params 与 args 二选一，不能同时提供。');
+    }
+    const commandInput = args !== undefined
+      ? { args, ...(useSessionFlag !== undefined ? { session: useSessionFlag } : {}) }
+      : (params ?? {});
+    validateInput(schema, commandInput, 'params');
+    return runCommandPayload(cmd, commandInput, { cwd: cwd ?? projectDir });
+  },
   sync_prototype: syncPrototype,
   generate_from_image: generateFromImage,
-  verify({ path, rp, file, rpFile, deep, includeCrossPageDuplicates = false } = {}) {
-    const targetPath = path ?? rp ?? file ?? rpFile;
-    const state = resolveReadOnlyState(targetPath);
-    const syncStatus = computeSyncStatus(state);
-    const ok = !Object.values(zerosOf(state.rp)).some(Boolean);
-    const base = { ok, file: state.chain.at(-1), status: ok ? 'verified' : 'failed', structure: zerosOf(state.rp), ...(syncStatus ? { syncStatus } : {}) };
-    if (!deep) return base;
-    const allDuplicates = state.rp.duplicates ?? [];
-    const samePageDuplicates = [];
-    const crossPageDuplicates = [];
-    for (const dup of allDuplicates) {
-      const pageCounts = new Map();
-      for (const loc of dup.locations ?? []) {
-        const pageName = String(loc).split(':')[0];
-        pageCounts.set(pageName, (pageCounts.get(pageName) ?? 0) + 1);
-      }
-      const hasSamePageDup = [...pageCounts.values()].some(c => c > 1);
-      if (hasSamePageDup) samePageDuplicates.push(dup);
-      else crossPageDuplicates.push(dup);
-    }
-    return {
-      ...base,
-      duplicates: includeCrossPageDuplicates ? allDuplicates : samePageDuplicates,
-      duplicateSummary: {
-        samePageGroups: samePageDuplicates.length,
-        crossPageSharedGroups: crossPageDuplicates.length,
-        ...(crossPageDuplicates.length > 0 ? { crossPageSampleNames: crossPageDuplicates.slice(0, 5).map(d => d.name) } : {}),
-      },
-      danglingRefs: state.rp.problems.filter(p => p.kind === 'dangling-ref'),
-      problems: state.rp.problems,
-      pages: state.rp.pages.map(p => ({ name: p.name, record: p.record, widgets: p.counts.widgets, interactions: p.counts.interactions })),
-      containedWidgets: state.rp.containedWidgets.length,
-      indexedWidgets: widgetIndex(state).length,
-    };
-  },
 };
 
 // ---- 意图级工具的 MCP 定义（校验复用本文件 validateInput）----
@@ -2467,7 +2815,7 @@ const richRunsSchema = {
   ],
 };
 const targetSchema = {
-  description: 'locate 返回的定位字段对象（record+id [+container] 精确定位）或 {query[,page][,type]} 搜索（须唯一）或字符串（按名称/文本搜）',
+  description: 'rp_inspect(locate) 返回的定位字段对象（record+id [+container] 精确定位）或 {query[,page][,type]} 搜索（须唯一）或字符串（按名称/文本搜）',
   oneOf: [
     { type: 'object', properties: {
       query: { type: 'string' }, page: { type: 'string' }, type: { type: 'string' }, name: { type: 'string' },
@@ -2475,6 +2823,49 @@ const targetSchema = {
     } },
     { type: 'string', minLength: 1 },
   ],
+};
+const styleSelectorSchema = {
+  description: '元件选择器（显式字段精确匹配对象、JSON 字符串或选择器文件路径，或 {"all": true} 全选）。',
+  oneOf: [
+    { type: 'string', minLength: 1 },
+    {
+      type: 'object',
+      properties: {
+        name: { type: 'string', minLength: 1 },
+        type: { type: 'string', minLength: 1 },
+        record: { type: 'integer', minimum: 0 },
+        id: { type: 'integer', minimum: 0 },
+        owner: { type: 'string', minLength: 1 },
+        all: { type: 'boolean' },
+      },
+      additionalProperties: false,
+    },
+  ],
+};
+const patchItemProperties = {
+  op: { type: 'string', enum: ['widget', 'text', 'richtext', 'rename', 'geometry', 'style', 'rename-style', 'rebind-style'], description: '可选：操作类型；省略时按所传字段自动识别。' },
+  target: targetSchema,
+  page: { type: 'string' },
+  widget: { type: 'string' },
+  text: { type: 'string', description: '简单文本修改。与 richRuns 二选一。' },
+  runIndex: { type: 'integer', minimum: 0, description: '可选：多 run 文本按索引单段替换。' },
+  richRuns: richRunsSchema,
+  name: { type: 'string', description: '元件改名目标名（别名 newName）。' },
+  newName: { type: 'string', description: '元件改名目标名或自定义样式新名称。' },
+  x: { type: 'number' },
+  y: { type: 'number' },
+  w: { type: 'number', minimum: 1 },
+  width: { type: 'number', minimum: 1 },
+  h: { type: 'number', minimum: 1 },
+  height: { type: 'number', minimum: 1 },
+  fill: { type: 'string', minLength: 4, description: '背景色 #RRGGBB 或 #RRGGBBAA。' },
+  stroke: { type: 'string', minLength: 4, description: '描边色 #RRGGBB 或 #RRGGBBAA。' },
+  color: { type: 'string', minLength: 4, description: '文字色 #RRGGBB 或 #RRGGBBAA。' },
+  radius: { type: 'number', minimum: 0, description: '圆角半径（非负数字）。' },
+  oldName: { type: 'string', minLength: 1, description: 'rename-style 模式：原自定义样式名称。' },
+  styleGuid: { type: 'string', minLength: 32, description: 'rebind-style 模式：目标原生自定义样式 GUID（可从 rp_inspect({ view: "styles" }) 获取）。' },
+  selector: styleSelectorSchema,
+  resetOverrides: { type: 'boolean', description: 'rebind-style 模式：是否清除元件局部样式覆盖，默认 false。' },
 };
 
 export const sessionTools = [
@@ -2485,7 +2876,7 @@ export const sessionTools = [
   } }),
   {
     name: 'generate_prototype',
-    description: '一次生成完整单页/多页原生 RP9 原型：spec 直接传 RP/1 结构化页面（或 .rp1/.json 文件路径）、共享 theme/palette/components、variables 与交互，自动编译、装配和检查跨页引用及事件覆盖，并记录 <output>.baseline.json 共同基线；无需装配脚本。若提供 baseRp 且检测到原生已改稿，自动按 prefer 执行三方合并或冲突保护。output 为 .rp 路径（相对路径基于 AXURE_WRITE_ROOT 或当前工作目录解析）。',
+    description: '一次生成完整单页/多页原生 RP9 原型：spec 直接传 RP/1 结构化页面（或 .rp1/.json 文件路径）、共享 theme/palette/components、variables 与交互，自动编译、装配和检查跨页引用及事件覆盖，并记录 <output>.baseline.json 共同基线；无需装配脚本。若提供 baseRp 且检测到原生已改稿，自动按 prefer 执行三方合并或冲突保护。output 为 .rp 路径（支持绝对路径、基于 cwd/projectDir 或当前工作目录解析的相对路径，或 "auto" 自动生成不重名路径）。',
     inputSchema: { type: 'object', properties: {
       recipe: { type: 'string', enum: recipes.map(recipe => recipe.id), description: '从完整范例直接生成；与 spec/source 二选一。成功后在 .rp 旁保留独立 .rp1 源码。' },
       spec: { description: 'RP/1 内联对象或 .rp1/.json 文件路径。文件输入优先使用 source；二者互斥。', oneOf: [
@@ -2498,17 +2889,19 @@ export const sessionTools = [
         variables: { oneOf: [{ type: 'object' }, { type: 'array', items: { type: 'object' } }] },
         pages: { type: 'array', minItems: 1, items: { type: 'object', properties: { id: { type: 'string', minLength: 1 }, name: { type: 'string' }, domain: { type: 'string', enum: ['mobile', 'web', 'doc', 'test'] }, device: { type: 'string' }, shell: { oneOf: [{ type: 'boolean' }, { type: 'string' }] }, canvas: { oneOf: [{ type: 'array', minItems: 2, maxItems: 2, items: { type: 'number' } }, { type: 'object' }] }, root: { type: 'object' }, master: { type: 'string' }, slot: { type: 'object' } }, required: ['id'] } },
       }, required: ['pages'] }] },
-      source: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件绝对路径（.rp1 或 .json），与 spec 二选一（别名 sourcePath）。' },
-      sourcePath: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件绝对路径（同 source）。' },
-      output: { type: 'string', minLength: 1, description: '输出 .rp 路径（相对路径基于 AXURE_WRITE_ROOT 或当前工作目录解析；传 "auto" 时按源码/范例名自动生成不重名 .rp 路径）。' },
-      async: { type: 'boolean', description: 'true 时立即返回生成任务句柄，用 jobs_get(id) 查询最终结果；适合超过客户端超时的大原型。仅 stdio MCP 服务入口支持。' },
+      source: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径（.rp1 或 .json），与 spec 二选一（别名 sourcePath）。' },
+      sourcePath: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径（同 source）。' },
+      output: { type: 'string', minLength: 1, description: '输出 .rp 路径（绝对路径，或基于 cwd/projectDir/当前工作目录解析的相对路径；传 "auto" 时按源码或工作目录自动生成不重名 .rp 路径）。' },
+      cwd: { type: 'string', minLength: 1, description: '可选：解析相对路径与 output="auto" 时的本地工作目录（别名 projectDir）。' },
+      projectDir: { type: 'string', minLength: 1, description: '可选：解析相对路径时的本地工作目录（同 cwd）。' },
+      async: { type: 'boolean', description: 'true 时立即返回生成任务句柄，用 jobs({ action: "get", id }) 查询最终结果；适合超过客户端超时的大原型。仅 stdio MCP 服务入口支持。' },
       includeImage: { type: 'boolean', description: '同步生成时传 true，返回供模型直接查看的 PNG 页面总览（最多 1 MiB）。默认只返回文件路径；与 async:true 互斥。' },
       strictAudit: { type: 'boolean', description: 'true 时额外要求美学审计通过；结构检查始终执行。' },
       autoHeal: { type: 'boolean', description: '默认 false，与 CLI 一致。true 时尝试布局自愈；完整重验后回退引入新错误的变更，审计记录接受与回退详情。' },
       variants: { type: 'array', maxItems: 4, description: '可选：一次额外编译多个主题/色板变体并返回对比拼图（每项为主题名字符串或 {id, name, theme, palette, tokens}）。', items: { oneOf: [{ type: 'string', minLength: 1 }, { type: 'object' }] } },
       overwrite: { type: 'boolean', description: '可选：为 true 时允许覆盖已存在的无原生漂移 .rp 文件，默认 false。' },
       compact: { type: 'boolean', description: '默认 true：返回成品、源码、预览、验证状态及完整报告路径。false 展开中间产物和事件覆盖信息。' },
-      template: { type: 'string', minLength: 1, description: '可选：显式指定 RP9 空白模板 .rp 路径（沙箱环境下无需重启 MCP 即可指定模板）。' },
+      template: { type: 'string', minLength: 1, description: '可选：显式指定 RP9 空白模板 .rp 路径。' },
       baseRp: { type: 'string', minLength: 1, description: '可选：已有 .rp 路径；若检测到原生改稿则自动走三方合并而非静默覆盖。' },
       prefer: { type: 'string', enum: ['fail', 'source', 'native'], description: '当 baseRp 有原生改稿且出现同属性冲突时的策略，默认 fail。' },
       resolutions: { type: 'object', description: '可选：按冲突键（logicalId:prop 或 pointer:prop）指定 source/native/{value}。' },
@@ -2542,6 +2935,8 @@ export const sessionTools = [
         const bv = await verifyOfficialPreview({
           rp: result.output,
           source: result.source ?? input.source ?? input.sourcePath,
+          cwd: input.cwd,
+          projectDir: input.projectDir,
           steps: verifySteps,
           viewport: verifyViewport,
           virtualClock,
@@ -2561,7 +2956,7 @@ export const sessionTools = [
   },
   {
     name: 'sync_prototype',
-    description: '源码（RP/1 .rp1/.json 或内联 spec）、MCP 原生改稿与 Axure GUI 改稿三方一致性同步工具。支持 status（检查源码与原生 .rp 是否漂移）、lift（将原生文字/几何/样式/改名/增删元件/交互提取回 RP/1 源码）、merge（基于共同基线做源码与原生改稿三方合并并可输出合并后 .rp 与源码）及 rebuild（带原生改稿防覆盖保护的重建）。默认返回精简变更摘要（summary/lifted*/preserved*）与输出文件路径，避免内联完整源码撑爆上下文；如需在返回 JSON 中内联完整 spec/rp1，可传 includeSpec=true。',
+    description: '源码（RP/1 .rp1/.json 或内联 spec）、MCP 原生改稿与 Axure GUI 改稿三方一致性同步工具。支持 status（检查源码与原生 .rp 是否漂移）、lift（将原生文字/几何/样式/改名/增删元件/交互提取回 RP/1 源码）、merge（基于共同基线做源码与原生改稿三方合并并可输出合并后 .rp 与源码）及 rebuild（带原生改稿防覆盖保护的重建）。默认返回精简变更摘要与输出文件路径；如需内联完整 spec/rp1，可传 includeSpec=true。',
     inputSchema: { type: 'object', properties: {
       mode: { type: 'string', enum: ['status', 'lift', 'merge', 'rebuild'], description: '同步模式：status 检查状态，lift 导回源码，merge 三方合并，rebuild 受保护重建。默认 merge。' },
       source: { type: 'string', minLength: 1, description: 'RP/1 源码路径（.rp1 或 .json，别名 sourcePath）；省略时尝试从基线读取。' },
@@ -2574,15 +2969,17 @@ export const sessionTools = [
       baseRp: { type: 'string', minLength: 1, description: '可选：显式指定共同基线 .rp 路径。' },
       baseline: { type: 'string', minLength: 1, description: '可选：显式指定 .baseline.json 路径（别名 baselinePath）。' },
       baselinePath: { type: 'string', minLength: 1, description: '可选：显式指定 .baseline.json 路径（同 baseline）。' },
-      output: { type: 'string', minLength: 1, description: '可选：合并或重建后的 .rp 输出绝对路径（别名 outRp）。' },
-      outRp: { type: 'string', minLength: 1, description: '可选：合并或重建后的 .rp 输出绝对路径（同 output）。' },
-      outSource: { type: 'string', minLength: 1, description: '可选：导回或合并后的源码输出绝对路径（.rp1 或 .json，别名 outSpec）。' },
-      outSpec: { type: 'string', minLength: 1, description: '可选：导回或合并后的源码输出绝对路径（.rp1 或 .json，同 outSource）。' },
+      output: { type: 'string', minLength: 1, description: '可选：合并或重建后的 .rp 输出路径（别名 outRp）。' },
+      outRp: { type: 'string', minLength: 1, description: '可选：合并或重建后的 .rp 输出路径（同 output）。' },
+      outSource: { type: 'string', minLength: 1, description: '可选：导回或合并后的源码输出路径（.rp1 或 .json，别名 outSpec）。' },
+      outSpec: { type: 'string', minLength: 1, description: '可选：导回或合并后的源码输出路径（.rp1 或 .json，同 outSource）。' },
+      cwd: { type: 'string', minLength: 1, description: '可选：解析相对路径时的本地工作目录（别名 projectDir）。' },
+      projectDir: { type: 'string', minLength: 1, description: '可选：解析相对路径时的本地工作目录（同 cwd）。' },
       prefer: { type: 'string', enum: ['fail', 'source', 'native'], description: '冲突解决策略：fail（默认，报冲突并保留原文件）、source（源码优先）、native（原生改稿优先）。' },
       resolutions: { type: 'object', description: '可选：逐项冲突解决方案映射（键为 logicalId:prop 或 pointer:prop，值为 "source"、"native" 或 {"value": ...}）。' },
       expectedRpSha256: { type: 'string', minLength: 1, description: '可选：乐观并发校验的期望 .rp SHA-256；若磁盘文件已变化则拒绝提交。' },
       expectedSemanticHash: { type: 'string', minLength: 1, description: '可选：期望的基线 semanticHash；若基线已过期则拒绝提交。' },
-      includeSpec: { type: 'boolean', description: '可选：是否在返回 JSON 中内联完整 spec/rp1 源码文本，默认 false（仅返回变更摘要与文件路径，避免大响应撑爆上下文）。' },
+      includeSpec: { type: 'boolean', description: '可选：是否在返回 JSON 中内联完整 spec/rp1 源码文本，默认 false。' },
     }, additionalProperties: false },
     handler: sessionHandlers.sync_prototype,
   },
@@ -2590,9 +2987,11 @@ export const sessionTools = [
     name: 'generate_from_image',
     description: '高层图片转原型入口：从本地 UI 截图（或已提取的分层 spec）自动执行 Apple Vision OCR、几何卡片/分割线/图标媒体切片识别、可选文案替换（replace），并在 RP9 下直接写出真实可编辑二进制 .rp（文字、矩形、卡片、圆、分割线为独立原生元件，复杂矢量/图表/裁剪媒体为独立透明 PNG ImageBox，素材持久保存在 <output>.assets 目录），同时记录 <output>.baseline.json 与分层校验摘要。',
     inputSchema: { type: 'object', properties: {
-      image: { type: 'string', minLength: 1, description: '本地截图文件绝对路径（PNG/JPG）。' },
+      image: { type: 'string', minLength: 1, description: '本地截图文件路径（PNG/JPG）。' },
       spec: { oneOf: [{ type: 'string', minLength: 1 }, { type: 'object' }], description: '可选：已校对的分层 trace spec 路径或对象（用于二次校对后重建）。' },
-      output: { type: 'string', minLength: 1, description: '新生成的二进制 .rp 绝对路径（只写新文件，不覆盖）。' },
+      output: { type: 'string', minLength: 1, description: '新生成的二进制 .rp 输出路径（只写新文件，不覆盖）。' },
+      cwd: { type: 'string', minLength: 1, description: '可选：解析相对路径时的本地工作目录（别名 projectDir）。' },
+      projectDir: { type: 'string', minLength: 1, description: '可选：解析相对路径时的本地工作目录（同 cwd）。' },
       version: { type: 'integer', enum: [9, 11], description: '目标 Axure 版本，默认 9（直接写二进制 .rp）；11 生成 .axvg.json 并需 GUI 粘贴。' },
       scale: { type: 'number', minimum: 0.25, maximum: 4, description: '截图逻辑像素缩放比（如 1 表示 1x，2 表示 Retina 2x）；省略时默认 2。' },
       page: { type: 'string', minLength: 1, description: '生成的目标页面/画板名称，默认「图片还原页」。' },
@@ -2615,133 +3014,122 @@ export const sessionTools = [
   },
   {
     name: 'axure_open',
-    description: '开启编辑会话：红线检查源 .rp → 复制出工作副本链[0]（与源同目录，源主名.work-1.rp）→ 返回总览（页面清单/元件数/交互数、全局变量、母版、结构三零）。每连接一个会话；再次 open 换源重建。',
-    inputSchema: { type: 'object', properties: { path: { type: 'string', minLength: 1 }, rp: { type: 'string', minLength: 1 }, file: { type: 'string', minLength: 1 }, rpFile: { type: 'string', minLength: 1 } }, additionalProperties: false },
+    description: '开启原生 .rp 编辑会话：受保护路径检查源 .rp → 复制出工作副本链[0]（与源同目录，源主名.work-1.rp）→ 返回总览（页面清单/元件数/交互数、全局变量、母版、结构三零）。每连接维护一个活动会话，供后续 rp_inspect / rp_patch / rp_command / axure_save 直接复用。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', minLength: 1 },
+        rp: { type: 'string', minLength: 1 },
+        file: { type: 'string', minLength: 1 },
+        rpFile: { type: 'string', minLength: 1 },
+        cwd: { type: 'string', minLength: 1 },
+        projectDir: { type: 'string', minLength: 1 },
+      },
+      additionalProperties: false,
+    },
     handler: sessionHandlers.axure_open,
   },
   {
-    name: 'axure_state',
-    description: '当前会话快照（缓存摘要；重新检查磁盘用 verify）：源文件、工作副本链全部节点、timeline、链尾结构三零。上下文被压缩后用一次调用恢复状态。',
-    inputSchema: { type: 'object', properties: {}, additionalProperties: false },
-    handler: sessionHandlers.axure_state,
-  },
-  {
     name: 'axure_save',
-    description: '链尾另存为交付文件（白名单+防覆盖，只写新文件），返回绝对路径与 SHA-256；省略 as 时返回链尾现状（路径/SHA/三零）。传 cleanup:true 可在另存成功后自动清理中间 .work-*.rp 副本并保持链尾连续。',
-    inputSchema: { type: 'object', properties: { as: { type: 'string', minLength: 1 }, cleanup: { type: 'boolean', description: 'true 时清理中间 .work-*.rp 副本（绝不删除源文件与输出文件）。' } }, additionalProperties: false },
+    description: '管理当前 .rp 编辑会话快照或将链尾另存为交付文件：省略 as 时返回完整会话状态快照（active、源文件、工作副本链 chain、timeline、链尾 SHA-256、结构三零与 syncStatus）；传入 as 时将链尾安全另存为新 .rp 文件（防覆盖，只写新文件）。传 cleanup:true 可清理中间 .work-*.rp 副本。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        as: { type: 'string', minLength: 1, description: '可选：另存为新 .rp 文件路径；省略时仅返回当前活动会话状态快照。' },
+        cleanup: { type: 'boolean', description: 'true 时清理中间 .work-*.rp 副本（绝不删除源文件与输出文件）。' },
+        cwd: { type: 'string', minLength: 1 },
+        projectDir: { type: 'string', minLength: 1 },
+      },
+      additionalProperties: false,
+    },
     handler: sessionHandlers.axure_save,
   },
   {
-    name: 'locate',
-    description: '按名称或显示文本子串搜全文档元件（可选 page/type 过滤），覆盖页面顶层与面板状态/中继器行模板内元件；返回候选（page、record、对象 id、guid、name、text 摘要、type、容器路径），默认最多 50 项，limit/offset 分页并返回 total/hasMore/nextOffset。可选传 path/rp/file 直接只读查询指定 .rp（不建 .work 副本）。把 record+id（嵌套再加 container）喂给 inspect/edit_text，或 set_widget_text 的 --record/--widget。',
-    inputSchema: { type: 'object', properties: { path: { type: 'string', minLength: 1 }, rp: { type: 'string', minLength: 1 }, file: { type: 'string', minLength: 1 }, rpFile: { type: 'string', minLength: 1 }, query: { type: 'string' }, page: { type: 'string' }, type: { type: 'string' }, limit: { type: 'integer', minimum: 1, maximum: 200 }, offset: { type: 'integer', minimum: 0 } }, additionalProperties: false },
-    handler: sessionHandlers.locate,
-  },
-  {
-    name: 'inspect',
-    description: '单元件深看：富文本段落/runs 明细（字体/字号/样式/颜色/链接目标）、几何、交互树人类可读展开。target 接受 locate 返回的定位字段（也可直接在顶层传 query/name/page/record/id）；可选传 path/rp/file 直接只读查看指定 .rp。',
-    inputSchema: { type: 'object', properties: { path: { type: 'string', minLength: 1 }, rp: { type: 'string', minLength: 1 }, file: { type: 'string', minLength: 1 }, rpFile: { type: 'string', minLength: 1 }, target: targetSchema, query: { type: 'string' }, page: { type: 'string' }, type: { type: 'string' }, name: { type: 'string' }, record: { type: 'number' }, id: { type: 'number' }, container: { type: 'array', items: { type: 'string' } } }, additionalProperties: false },
-    handler: sessionHandlers.inspect,
-  },
-  {
-    name: 'read_interactions',
-    description: '读取完整事件/Case/动作树。分页以统一 items 为准，包含页面事件、顶层元件、嵌套元件和母版；offset 是跳过的拥有者数，returned 是本次条数。contained 仅为嵌套元件的兼容视图，为空不代表本页没有交互。默认 limit=20，响应接近 20KB 时减少条数，按 nextOffset 继续；支持 page/widget（逻辑 ID、原生名称或对象 ID）过滤，可传 path/rp/file 只读查看 .rp。',
-    inputSchema: { type: 'object', properties: { path: { type: 'string', minLength: 1 }, rp: { type: 'string', minLength: 1 }, file: { type: 'string', minLength: 1 }, rpFile: { type: 'string', minLength: 1 }, page: { type: 'string' }, widget: { type: 'string', minLength: 1 }, limit: { type: 'integer', minimum: 1, maximum: 100, description: '最多读取的交互拥有者数量；响应预算可能减少本次 returned。' }, offset: { type: 'integer', minimum: 0, description: '从统一 items 顺序跳过的拥有者数量，默认 0；继续使用 nextOffset。' } }, additionalProperties: false },
-    handler: sessionHandlers.read_interactions,
-  },
-  {
-    name: 'edit_text',
-    description: '改一个元件的文字：定位（唯一匹配或 locate 定位字段；多匹配报错列候选）→ 经 set-widget-text / set-widget-richtext 库导出写新链节点 → 新节点过 rp-read 三零（失败则坏节点保留 .rejected、链回退并报差异）。text=简单文本；richRuns=富文本段落/runs，可含段落行距、原生列表级别（list）、wrapping/trimming 及链接目标。edits 数组一次批量改多个元件，全部成功才提交，任一失败整批回退。返回逐条 before/after 与新链尾；GUI/预览需另验。',
-    inputSchema: { type: 'object', properties: { target: targetSchema, page: { type: 'string' }, widget: { type: 'string' }, text: { type: 'string' }, richRuns: richRunsSchema, edits: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object', properties: { target: targetSchema, page: { type: 'string' }, widget: { type: 'string' }, text: { type: 'string' }, richRuns: richRunsSchema }, additionalProperties: false } } }, additionalProperties: false },
-    handler: sessionHandlers.edit_text,
-  },
-  {
-    name: 'rename_widget',
-    description: '快捷改名：target 为名称/文本或 locate 的 record+id，name（或 newName）为新名称；edits 可批量修改。覆盖页面、面板状态、中继器模板和母版定义。只改元件名，保留文字、身份与交互；允许重名，目标歧义时返回候选。全部成功后提交一个新链节点。',
-    inputSchema: { type: 'object', properties: { target: targetSchema, page: { type: 'string' }, widget: { type: 'string' }, name: { type: 'string' }, newName: { type: 'string' }, edits: { type: 'array', minItems: 1, maxItems: 100, items: { type: 'object', properties: { target: targetSchema, page: { type: 'string' }, widget: { type: 'string' }, name: { type: 'string' }, newName: { type: 'string' } }, additionalProperties: false } } }, additionalProperties: false },
-    handler: sessionHandlers.rename_widget,
-  },
-  {
-    name: 'set_widget_geometry',
-    description: '快捷修改元件几何位置与尺寸（x、y、w/width、h/height）：定位（target 或 widget+page）→ 更新二进制 MyStyle 坐标与尺寸（DOAName 3221225573 / 3221225577）→ 写新链节点并校验三零。支持单条或 edits 批量修改，改动可被 sync_prototype(lift/merge) 自动导回 RP/1 源码。',
+    name: 'rp_inspect',
+    readOnly: true,
+    description: '统一只读检查原生 .rp / .rplib 文档（零副作用，支持活动会话或传 path/rp/file 直接读取指定文件）：view="overview" 返回全书页面/变量/母版与计数总览；view="locate" 按 query/page/type 分页搜索顶层与容器内元件；view="widget" 深看单元件富文本 runs、几何、样式与交互；view="interactions" 分页读取页面与元件完整事件/Case/动作树；view="verify" 执行结构三零与深层重名/悬空引用校验；view="styles" 列出 .rp/.rplib 原生自定义样式；view="state" 查看会话链状态。省略 view 时按参数自动推断。',
     inputSchema: {
       type: 'object',
       properties: {
+        view: { type: 'string', enum: ['overview', 'locate', 'widget', 'interactions', 'verify', 'styles', 'state'], description: '检查视图；省略时按所传过滤/定位参数自动推断（默认 overview）。' },
+        path: { type: 'string', minLength: 1, description: '可选：直接只读检查指定 .rp（styles 视图亦支持 .rplib），不建 .work 副本。' },
+        rp: { type: 'string', minLength: 1 },
+        file: { type: 'string', minLength: 1 },
+        rpFile: { type: 'string', minLength: 1 },
+        source: { type: 'string', minLength: 1 },
+        cwd: { type: 'string', minLength: 1 },
+        projectDir: { type: 'string', minLength: 1 },
+        query: { type: 'string', description: 'locate / widget 模式：名称、显示文本或逻辑 ID 搜索词。' },
+        page: { type: 'string', description: 'locate / widget / interactions 模式：限定页面名称。' },
+        type: { type: 'string', description: 'locate / widget 模式：限定元件类型。' },
         target: targetSchema,
-        page: { type: 'string' },
-        widget: { type: 'string' },
-        x: { type: 'number' },
-        y: { type: 'number' },
-        w: { type: 'number', minimum: 1 },
-        width: { type: 'number', minimum: 1 },
-        h: { type: 'number', minimum: 1 },
-        height: { type: 'number', minimum: 1 },
+        name: { type: 'string', description: 'widget 模式：精确元件名。' },
+        record: { type: 'integer', minimum: 0, description: 'widget 模式：locate 返回的记录号。' },
+        id: { type: 'integer', minimum: 0, description: 'widget 模式：locate 返回的对象 ID。' },
+        container: { type: 'array', items: { type: 'string' }, description: 'widget 模式：嵌套容器路径。' },
+        widget: { type: 'string', minLength: 1, description: 'interactions 模式：按元件名、对象 ID 或逻辑 ID 过滤交互。' },
+        limit: { type: 'integer', minimum: 1, maximum: 200, description: 'locate / interactions 分页条数上限。' },
+        offset: { type: 'integer', minimum: 0, description: 'locate / interactions 分页起始偏移。' },
+        deep: { type: 'boolean', description: 'verify 模式：true 时展开同页重名、悬空引用与全容器统计。' },
+        includeCrossPageDuplicates: { type: 'boolean', description: 'verify(deep=true) 模式：是否包含跨页共享同名元件，默认 false。' },
+        full: { type: 'boolean', description: 'overview 模式：true 时附带完整底层 rp-read 解析树。' },
+      },
+      additionalProperties: false,
+    },
+    handler: sessionHandlers.rp_inspect,
+  },
+  {
+    name: 'rp_patch',
+    description: '统一原生二进制补丁工具：支持单条修改或 edits/operations 数组原子批量提交（任一失败整批不提交），涵盖文字替换（text）、富文本段落/runs/链接/列表（richRuns）、元件改名（name/newName）、几何位置尺寸（x/y/w/h）、视觉样式（fill/stroke/color/radius），以及 .rp/.rplib 原生自定义样式重命名（op="rename-style"）与重绑定（op="rebind-style"）。默认作用于当前 axure_open 会话链并自动过三零校验；亦可同时传 source + output 执行无会话文件转换。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        ...patchItemProperties,
         edits: {
           type: 'array',
           minItems: 1,
           maxItems: 100,
-          items: {
-            type: 'object',
-            properties: {
-              target: targetSchema,
-              page: { type: 'string' },
-              widget: { type: 'string' },
-              x: { type: 'number' },
-              y: { type: 'number' },
-              w: { type: 'number', minimum: 1 },
-              width: { type: 'number', minimum: 1 },
-              h: { type: 'number', minimum: 1 },
-              height: { type: 'number', minimum: 1 },
-            },
-            additionalProperties: false,
-          },
+          description: '原子批量补丁列表（别名 operations）；全部校验通过才写入新节点。',
+          items: { type: 'object', properties: patchItemProperties, additionalProperties: false },
         },
-      },
-      additionalProperties: false,
-    },
-    handler: sessionHandlers.set_widget_geometry,
-  },
-  {
-    name: 'set_widget_style',
-    description: '快捷修改元件视觉样式（fill 背景色、stroke 边框色、color 文字颜色、radius 圆角）：定位（target 或 widget+page）→ 更新二进制 MyStyle（DOAName 3221225479 / 3221225480 / 3221225478 / 3221225543）及富文本 Run 颜色 → 写新链节点并校验三零。颜色支持 #RRGGBB 或 #RRGGBBAA；改动可被 sync_prototype(lift/merge) 自动导回 RP/1 源码。',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        target: targetSchema,
-        page: { type: 'string' },
-        widget: { type: 'string' },
-        fill: { type: 'string', minLength: 4 },
-        stroke: { type: 'string', minLength: 4 },
-        color: { type: 'string', minLength: 4 },
-        radius: { type: 'number', minimum: 0 },
-        edits: {
+        operations: {
           type: 'array',
           minItems: 1,
           maxItems: 100,
-          items: {
-            type: 'object',
-            properties: {
-              target: targetSchema,
-              page: { type: 'string' },
-              widget: { type: 'string' },
-              fill: { type: 'string', minLength: 4 },
-              stroke: { type: 'string', minLength: 4 },
-              color: { type: 'string', minLength: 4 },
-              radius: { type: 'number', minimum: 0 },
-            },
-            additionalProperties: false,
-          },
+          description: '同 edits。',
+          items: { type: 'object', properties: patchItemProperties, additionalProperties: false },
         },
+        source: { type: 'string', minLength: 1, description: '可选：显式文件模式源 .rp/.rplib 路径（需与 output 同时提供）。' },
+        path: { type: 'string', minLength: 1 },
+        rp: { type: 'string', minLength: 1 },
+        file: { type: 'string', minLength: 1 },
+        rpFile: { type: 'string', minLength: 1 },
+        output: { type: 'string', minLength: 1, description: '可选：显式文件模式输出 .rp/.rplib 路径（默认不覆盖）。' },
+        overwrite: { type: 'boolean', description: '显式文件模式下是否允许覆盖已有输出文件，默认 false。' },
+        cwd: { type: 'string', minLength: 1 },
+        projectDir: { type: 'string', minLength: 1 },
       },
       additionalProperties: false,
     },
-    handler: sessionHandlers.set_widget_style,
+    handler: sessionHandlers.rp_patch,
   },
   {
-    name: 'verify',
-    description: '重新读取磁盘链尾（或通过 path/rp/file 指定的 .rp 文件）并校验（包含 GUI 或外部改动）：浅查=三零（unparseable/danglingRefs/problems）；deep=true 加同页重复名（跨页共享组件同名汇总在 duplicateSummary，传 includeCrossPageDuplicates=true 可展开全部）、悬空引用与问题明细、全页全容器遍历统计。',
-    inputSchema: { type: 'object', properties: { path: { type: 'string', minLength: 1 }, rp: { type: 'string', minLength: 1 }, file: { type: 'string', minLength: 1 }, rpFile: { type: 'string', minLength: 1 }, deep: { type: 'boolean' }, includeCrossPageDuplicates: { type: 'boolean', description: '可选：deep=true 时是否返回跨页面共享组件同名元件列表，默认 false（仅返回同页内重名元件）。' } }, additionalProperties: false },
-    handler: sessionHandlers.verify,
+    name: 'rp_command',
+    description: '受控底层原生命令总控入口（折叠全部 34 个专家级 CLI 命令，如建页、母版、动态面板克隆/填充、原生下拉/列表/表格、连接线、add-interaction 批量交互增删与 AXVG 转换）：action="describe"（省略 command 列全表，指定 command 返回精确用法与参数 Schema）；action="run" 执行指定命令（传结构化 params 或原始 args；省略宿主源与输出或传 session=true 时自动接续当前 axure_open 会话链并过三零校验）。日常创作优先使用 studio_* 或 generate_prototype / revise_prototype / rp_patch。',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', enum: ['describe', 'run'], description: 'describe 查询命令清单或单命令 Schema；run 执行命令（传 command 时默认 run，未传 command 时默认 describe）。' },
+        command: { type: 'string', minLength: 1, description: '注册表命令名（连字符或下划线均可，如 "create-blank-page"、"add-interaction"、"set-combobox-options"、"axvg build"）。' },
+        params: { type: 'object', description: '命名参数对象（可先用 action="describe" 查看该命令的 inputSchema；省略 source/output 时自动接续活动会话；add-interaction 支持 items 批量与自动 .baseline.json 逻辑 ID）。' },
+        args: { type: 'array', items: { type: 'string' }, description: '可选：原始 CLI 参数数组（与 params 二选一）。' },
+        session: { type: 'boolean', description: '使用原始 args 时设为 true 以自动注入当前活动会话链尾源与新节点输出。' },
+        cwd: { type: 'string', minLength: 1, description: '可选：解析相对路径时的本地工作目录（别名 projectDir）。' },
+        projectDir: { type: 'string', minLength: 1, description: '可选：解析相对路径时的本地工作目录（同 cwd）。' },
+      },
+      additionalProperties: false,
+    },
+    handler: sessionHandlers.rp_command,
   },
   ...studioTools,
 ];
@@ -2752,7 +3140,7 @@ const sessionToolIndex = new Map(sessionTools.map(tool => [tool.name, input => {
   const finish = result => toolResult(result, result.ok === false || result.status === 'failed' || result.status === 'conflict');
   if (value && typeof value.then === 'function') return value.then(finish).catch(error => toolResult({ status: 'failed',
     diagnostics: [{ code: error.code ?? 'E_TOOL_INPUT', message: error.message,
-      ...Object.fromEntries(['field', 'candidates', 'sourceSpan', 'line', 'column', 'snippet'].filter(key => error[key] !== undefined).map(key => [key, error[key]])),
+      ...Object.fromEntries(['field', 'candidates', 'sourceSpan', 'line', 'column', 'snippet', 'currentRevision', 'requestedBaseRevision', 'renderedRevision'].filter(key => error[key] !== undefined).map(key => [key, error[key]])),
       nextAction: error.code === 'E_WRITE_OUTCOME_UNKNOWN' ? '先读取当前版本和实际内容，确认本次写入结果；不要盲目重发。' : '按返回字段与候选修正参数；用studio_describe按需读取公开契约。' }],
   }, true));
   return finish(value);

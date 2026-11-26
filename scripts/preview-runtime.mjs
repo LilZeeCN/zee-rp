@@ -6,7 +6,7 @@ import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { assertNotProtected, assertWritable, defaultWriteRoot } from './engine.mjs';
+import { assertNotProtected, assertWritable, resolveWorkDir } from './engine.mjs';
 import { pythonInvocation } from './python.mjs';
 import { findChromeExecutable, launchChrome } from '../studio/cdp.mjs';
 
@@ -376,7 +376,7 @@ function startStaticServer(rootDir) {
 }
 
 export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) {
-  const workDir = resolve(input.cwd ?? input.projectDir ?? defaultWriteRoot());
+  const workDir = resolveWorkDir(input.cwd ?? input.projectDir);
   const rpPath = input.rp ? resolve(workDir, input.rp) : null;
   const htmlInputDir = input.html ? resolve(workDir, input.html) : null;
   const sourcePath = input.source ? resolve(workDir, input.source) : null;
@@ -423,7 +423,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
   const wantStoryboard = Boolean(storyboardPath || input.includeStoryboard);
   const storyboardFrames = [];
   if (!activeHtmlDir) {
-    tempStageDir = mkdtempSync(join(defaultWriteRoot(), '.zee-verify-'));
+    tempStageDir = mkdtempSync(join(workDir, '.zee-verify-'));
     const exportedHtml = join(tempStageDir, 'html');
     const exp = await exportHtml({ rp: rpPath, output: exportedHtml, cwd: workDir });
     if (exp.status !== 'completed') {

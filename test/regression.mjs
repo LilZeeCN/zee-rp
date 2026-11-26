@@ -8,7 +8,7 @@ import { delimiter, dirname, join, parse, posix, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expandSpec, resetIds } from '../scripts/axvg.mjs';
 import { listCommands } from '../scripts/registry.mjs';
-import { listMcpTools, jobTools, validateInput } from '../scripts/mcp-tools.mjs';
+import { listMcpTools, jobTools, validateInput, callCommandTool } from '../scripts/mcp-tools.mjs';
 import { encodeStyleEntry } from '../scripts/set-widget-richtext.mjs';
 import { assertNotProtected, assertWritable, defaultWriteRoot } from '../scripts/engine.mjs';
 import { spawnPythonSync } from '../scripts/python.mjs';
@@ -58,26 +58,30 @@ try {
     assert.equal(result.status, 0, result.stdout + result.stderr);
   });
   check('registry covers every production script', () => assert.equal(run('scripts/registry.mjs', ['validate']).status, 0));
-  check('CLI and MCP expose the global-variable writer', () => {
+  check('CLI and converged MCP rp_command expose the global-variable writer', () => {
     assert.ok(listCommands().some(c => c.command === 'create-global-variable'));
-    assert.ok(listMcpTools().some(t => t.name === 'create_global_variable'));
+    assert.ok(listMcpTools().some(t => t.name === 'rp_command'));
+    const desc = JSON.parse(callCommandTool('rp_command', { action: 'describe', command: 'create-global-variable' }).content[0].text);
+    assert.equal(desc.command, 'create-global-variable');
     assert.match(run('bin/axure.mjs', ['create-global-variable', '--help']).stdout, /--default-value/);
   });
-  check('MCP tool names are unique and cover CLI commands', () => {
+  check('MCP tool names are unique (30 tools) and rp_command covers all 34 CLI commands', () => {
     const tools = [...listMcpTools(), ...jobTools];
+    assert.equal(tools.length, 30);
     assert.equal(new Set(tools.map(t => t.name)).size, tools.length);
-    for (const command of listCommands()) assert.ok(tools.some(t => t.name === command.command.replaceAll(/[ -]/g, '_')));
+    const catalog = JSON.parse(callCommandTool('rp_command', { action: 'describe' }).content[0].text);
+    for (const command of listCommands()) assert.ok(catalog.commands.some(c => c.command === command.command));
   });
-  check('MCP accepts paragraph list/wrapping/trimming/spacing/link fields', () => {
-    const schema = listMcpTools().find(t => t.name === 'edit_text').inputSchema;
+  check('MCP rp_patch accepts paragraph list/wrapping/trimming/spacing/link fields', () => {
+    const schema = listMcpTools().find(t => t.name === 'rp_patch').inputSchema;
     validateInput(schema, { target: {name:'StatusBanner'},
       richRuns: [{ list: true, wrapping: 1, trimming: 2, lineSpacing: 72, runs: [{ text: 'Docs', link: { url: 'https://example.com', window: 'new' } }] }] });
     assert.throws(() => validateInput(schema, { target:{name:'W'}, richRuns: [{ runs: [{text:'x'}], unknown: true }] }));
   });
-  check('MCP global-variable named arguments include the default value', () => {
-    const schema = listMcpTools().find(t => t.name === 'create_global_variable').inputSchema;
-    validateInput(schema, { source: '/s.rp', output: '/o.rp', name: 'Counter', defaultValue: '7' });
-    assert.throws(() => validateInput(schema, { source: '/s.rp', output: '/o.rp' }));
+  check('MCP rp_command global-variable named arguments include the default value', () => {
+    const desc = JSON.parse(callCommandTool('rp_command', { action: 'describe', command: 'create-global-variable' }).content[0].text);
+    validateInput(desc.inputSchema, { source: '/s.rp', output: '/o.rp', name: 'Counter', defaultValue: '7' });
+    assert.throws(() => validateInput(desc.inputSchema, { source: '/s.rp', output: '/o.rp' }));
   });
   check('MCP generation schema exposes structured pages and restricts native target', () => {
     const schema = listMcpTools().find(t => t.name === 'generate_prototype').inputSchema;
@@ -124,29 +128,28 @@ try {
     assert.throws(() => assertNotProtected(link), /受保护/);
     delete process.env.AXURE_PROTECTED_PATHS;
   });
-  check('path guard rejects writes outside the allowed directory', () => {
-    const first = join(work, 'first');
-    const second = join(work, 'second');
-    process.env.AXURE_WRITE_ROOT = [first, second].join(delimiter);
-    try {
-      assert.equal(defaultWriteRoot(), first);
-      assertWritable(join(first, 'allowed.json'));
-      assertWritable(join(second, 'allowed.json'));
-      assert.throws(() => assertWritable(join(work, 'outside.json')), /AXURE_WRITE_ROOT/);
-
-      const child = join(first, 'child');
-      mkdirSync(child, { recursive: true });
-      assertWritable(join(realpathSync.native(first), 'physical-name.json'));
-      const shortcut = join(work, 'shortcut');
-      if (process.platform === 'win32') symlinkSync(child, shortcut, 'junction');
-      else symlinkSync(join('first', 'child'), shortcut, 'dir');
-      assertWritable(shortcut + sep + '..' + sep + 'project.json');
-
-      process.env.AXURE_WRITE_ROOT = parse(work).root;
-      assertWritable(join(work, 'root-allowed.json'));
-    } finally {
-      delete process.env.AXURE_WRITE_ROOT;
-    }
+  check('path guard allows local working directories by default, blocks system/skill dirs, and honors opt-in AXURE_STRICT_WRITE_ROOT', () => {
+    process.env.AXURE_WRITE_ROOT = [work, join(work, 'second')].join(delimiter);
+    delete process.env.AXURE_STRICT_WRITE_ROOT;
+    assertWritable(join(work, 'allowed.json'));
+    assertWritable(join(tmpdir(), 'zee-rp-outside.json'));
+    assert.throws(() => assertWritable('/System/bad.rp'), /操作系统受保护目录/);
+    assert.throws(() => assertWritable(join(root, 'bad.rp')), /技能安装目录/);
+    process.env.AXURE_STRICT_WRITE_ROOT = '1';
+    assert.throws(() => assertWritable(join(tmpdir(), 'zee-rp-outside.json')), /AXURE_WRITE_ROOT/);
+    assert.equal(defaultWriteRoot(), work);
+    assertWritable(join(work, 'second', 'allowed.json'));
+    const child = join(work, 'first', 'child');
+    mkdirSync(child, { recursive: true });
+    assertWritable(join(realpathSync.native(work), 'physical-name.json'));
+    const shortcut = join(work, 'shortcut');
+    if (process.platform === 'win32') symlinkSync(child, shortcut, 'junction');
+    else symlinkSync(join('first', 'child'), shortcut, 'dir');
+    assertWritable(shortcut + sep + '..' + sep + 'project.json');
+    process.env.AXURE_WRITE_ROOT = parse(work).root;
+    assertWritable(join(work, 'root-allowed.json'));
+    delete process.env.AXURE_STRICT_WRITE_ROOT;
+    delete process.env.AXURE_WRITE_ROOT;
   });
   check('MCP file generation compiles RP/1 with the configured Python and a relative output', () => {
     const python = spawnPythonSync(['-c', 'import sys; print(sys.executable)'], { encoding: 'utf8' });
@@ -167,6 +170,7 @@ try {
         PATH: work,
         ZEE_PYTHON: python.stdout.trim(),
         AXURE_WRITE_ROOT: [outputRoot, join(work, 'other output')].join(delimiter),
+        AXURE_STRICT_WRITE_ROOT: '1',
       },
     });
     assert.equal(result.status, 0, result.stderr);

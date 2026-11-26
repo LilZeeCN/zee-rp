@@ -162,7 +162,7 @@ export class StudioRuntimeSession {
   }
 
   findNodeEntry(pageId, targetId, { scopePrefix = this.interactionScope } = {}) {
-    const raw = String(targetId?.ref ?? targetId), entries = [];
+    const raw = String(targetId?.ref ?? targetId).replace(/^@/, '').replace(/:/g, '/'), entries = [];
     const explicitPage = this.docSnapshot.pages.find(pg => raw.startsWith(`${pg.id}/`));
     const pg = explicitPage || this.docSnapshot.pages.find(p => p.id === pageId);
     if (!pg) return null;
@@ -180,6 +180,11 @@ export class StudioRuntimeSession {
     walk(pg.root, pg.id);
     const full = explicitPage ? raw : `${pg.id}/${raw}`;
     let matches = entries.filter(e => e.scopedId === full);
+    if (!matches.length && raw.includes('/')) {
+      const suffix = explicitPage ? raw.slice(explicitPage.id.length + 1) : raw;
+      matches = entries.filter(e => e.node.id === suffix || e.scopedId.endsWith('/' + suffix));
+      if (matches.length > 1 && matches.some(e => e.active)) matches = matches.filter(e => e.active);
+    }
     if (!raw.includes('/') && scopePrefix && scopePrefix !== pg.id) {
       const local = entries.filter(e => e.scopePrefix === scopePrefix && (e.node.id === raw || e.node.name === raw));
       if (local.length) matches = local;
@@ -195,7 +200,10 @@ export class StudioRuntimeSession {
     if (!matches.length) {
       const scene = resolveDocumentScene(this.docSnapshot, { projectDir: this.projectDir, activePanelStates: this.panelStates });
       const nodes = scene.pages.find(p => p.id === pg.id)?.nodes || [];
-      const candidates = nodes.filter(n => raw.includes('/') ? n.scopedId === full : n.id === raw || n.name === raw);
+      const suffix = explicitPage ? raw.slice(explicitPage.id.length + 1) : raw;
+      const candidates = nodes.filter(n => raw.includes('/')
+        ? (n.scopedId === full || n.id === suffix || n.scopedId.endsWith('/' + suffix))
+        : (n.id === raw || n.name === raw));
       matches = candidates.map(n => ({ node: { ...n, text: n.rawText ?? n.text }, scopedId: n.scopedId, scopePrefix: n.scopedId.slice(0, -n.id.length - 1), pageId: pg.id, active: true }));
     }
     if (matches.length > 1) throw Object.assign(new Error(`运行态目标 ${raw} 不唯一，请使用完整作用域路径`), { code: 'E_RUNTIME_TARGET_AMBIGUOUS', targetId: raw, candidates: matches.map(e => e.scopedId) });
@@ -969,7 +977,10 @@ export class StudioRuntimeSession {
         if (exp.panelState) {
           for (const [panelId, expectedState] of Object.entries(exp.panelState)) {
             const actual = this.panelStates[this.targetKey(panelId)];
-            assertions.push({ type: 'panelState', target: panelId, expected: expectedState, actual, passed: actual === expectedState });
+            const rawExp = String(expectedState ?? '').trim();
+            const afterColon = rawExp.includes(':') ? rawExp.split(':').pop() : rawExp;
+            const bareExp = afterColon.includes('/') ? afterColon.split('/').pop() : afterColon;
+            assertions.push({ type: 'panelState', target: panelId, expected: expectedState, actual, passed: actual === rawExp || actual === bareExp });
           }
         }
         if (exp.variables) {

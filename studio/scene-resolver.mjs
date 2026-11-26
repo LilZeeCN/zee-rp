@@ -1,7 +1,7 @@
 import { BoundedCache } from './bounded-cache.mjs';
 import {applyRepeaterView,bindRepeaterTemplate,repeaterDatasetName,repeaterRows} from './repeater-view.mjs';
 import { DEVICE_PRESETS, RENDERER_VERSION, currentDocumentDiagnostics, getCachedNodeCanonical, nodeEvents } from './document.mjs';
-import { normalizeVisualCss } from './visual-style.mjs';
+import { normalizeVisualCss, resolveShadowCss } from './visual-style.mjs';
 import {
   measureLineWidthExact,
   wrapTextLinesExact,
@@ -896,14 +896,20 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
     normalizeVisualCss(node.css);
     validateNodeSizing(node, parentLayout);
 
+    // Record explicit fontSize authorship before defaults are applied
+    node._explicitFontSize = node.fontSize !== undefined && node.fontSize !== null
+      || node.size !== undefined && node.size !== null;
+
     // Record token references before resolving
     const tokenRefs = {};
-    for (const prop of ['fill', 'stroke', 'color', 'fontSize', 'gap', 'padding', 'radius']) {
+    for (const prop of ['fill', 'stroke', 'color', 'fontSize', 'gap', 'padding', 'radius', 'shadow']) {
       if (typeof node[prop] === 'string' && node[prop].startsWith('$')) {
         tokenRefs[prop] = node[prop];
       }
     }
     node._tokenRefs = tokenRefs;
+    const shadowTokens = { ...(doc.tokens && typeof doc.tokens === 'object' ? doc.tokens : {}), ...(doc.tokens?.shadows || {}) };
+    node._resolvedShadow = resolveShadowCss(node.shadow, shadowTokens);
     // Resolve the numeric references already accepted by the authoring API
     // before measuring. Keep the original source and references for editing
     // and transitive impact; never pass "$display" into Number()/CSS.
@@ -1753,6 +1759,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
         fontStatus: n._fontDescriptor?.status || 'loaded',
         measurementMode: n._textMetrics?.measurementMode || n._fontDescriptor?.measurementMode || 'calibrated-glyph',
         fontSize: Number(n.fontSize || n.size || 14),
+        explicitFontSize: Boolean(n._explicitFontSize),
         fontWeight: Number(n.fontWeight || n.weight || 400),
         lineHeight: n._textMetrics?.lineHeight || Number(n.lineHeight || 20),
         letterSpacing: Number(n.letterSpacing || 0),

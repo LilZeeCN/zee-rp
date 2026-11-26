@@ -8,8 +8,8 @@ description: Reconstruct screenshots as editable Axure layouts, compile RP/1 spe
 > **能力边界与入口路由表**：
 > - **标准/高交互原生原型（表单、状态联动、有界拖拽/碰撞、手势轮播）** → 用 RP/1 `generate_prototype`（支持缩进式事件块、`carousel`/`slider-captcha` 宏与 `verify: true` 一站式浏览器自验） + `revise_prototype` + `verify_prototype`。
 > - **自由画布设计探索、视觉评审与像素级打磨** → 用 `studio_stage` → `studio_command` → `studio_design(action:"review")` → `studio_export`。
-> - **存量 `.rp` 直接补多组交互（需保留源工程外额外动作）** → 用 `axure_open` → `add_interaction({ items: [...] })`（自动读 `.baseline.json` 解析逻辑 ID）→ `axure_save({ as, cleanup: true })`。
-> - **省上下文启动**：`node bin/mcp.mjs --profile=core` 仅暴露 15 个核心闭环工具（工具 Schema token 降低约 80%）；`--profile=author` 含核心 + 13 个 `studio_*` 工具；默认 `--profile=full` 暴露全量 74 工具。
+> - **存量 `.rp` 直接补多组交互（需保留源工程外额外动作）** → 用 `axure_open` → `rp_command({ command: "add-interaction", params: { items: [...] } })`（自动读 `.baseline.json` 解析逻辑 ID）→ `axure_save({ as, cleanup: true })`。
+> - **省上下文启动**：`node bin/mcp.mjs --profile=core` 仅暴露 16 个核心闭环工具（工具 Schema token 降低约 80%）；`--profile=studio` 含 17 个画布与浏览器验收工具；`--profile=author` 含 26 个创作+画布工具；默认 `--profile=full` 暴露收敛后的全部 30 个工具。
 
 完整 RP/1 与 Studio 画布均支持原生表单与交互样式（2026-11-12 本机开发快照）：`radio` / `checkbox` / `combobox`（别名 `select` / `droplist`）/ `listbox` / `textarea`（及 `input multiline=true`；浏览器与代码出口渲染多行 `<textarea>`，导出 `.rp` 时映射为原生可编辑 `TextBox` 并在兼容报告记录 `input.multiline`），支持勾选、互斥组、选项初值、原生取值和重置；完整 RP/1 还支持 `styles={"hover":{...},"selected":{...},"disabled":{...},"focused":{...}}` 写入原生状态样式。动作支持 `set-check`、普通元件 `set-selected`、下拉/列表 `set-option`（均支持 `"toggle"`），详情与完整四页例子见 [原生表单](references/native-forms.md)。
 
@@ -32,7 +32,7 @@ description: Reconstruct screenshots as editable Axure layouts, compile RP/1 spe
 
 自由画布已支持关系与批量改稿：`studio_command` 的 `editNodes` 可按 role/type/文字/容器/ID 集合选择节点，执行 set、move、align、place、distribute；支持同事务 token 绑定和撤销。常规样式优先使用 token 与语义 role，重复内容优先考虑已有组件和动态状态。改稿前记录一次 `studio_design(action:"review")`，改稿后传 `compareWithReviewId` 可一次取得前后真实图片、变更图层和指标变化。编辑器顶栏也有「对照」入口。完整命令示例与边界见 [关系编辑与画面对照](docs/studio-editing-20261027.md)。
 
-Studio 的完整用法见 [AI 创作流程](docs/studio-design-workflow.md)。2026-11-08 工具面收敛后,MCP 共 13 个 `studio_*` 工具(open_project/describe/command/inspect/screenshot/export/history/stage/design/scenario/media/merge/operations),总 74 个;功能分支未发行新版本，已运行连接须核对指纹。`studio_describe` 的 workflow/rp1 返回交互指南、可执行三词例子与验证剧本；条件错误写前拒绝，场景回包包含分支实际值。原生出口支持普通文字跨页更新；输入框旋转使用原生加载动作，保留可输入性。精确边界见 [AI 与 RP/1 创作](docs/studio-ai-authoring.md)。开始创作时先检查当前连接：若没有 `studio_open_project`，重新连接指向本安装目录 `bin/mcp.mjs` 的 MCP，或用 `node bin/axure.mjs studio start --project /abs/project --source /abs/source.json` 启动画布；旧连接里的59个工具不能代表已安装程序。
+Studio 的完整用法见 [AI 创作流程](docs/studio-design-workflow.md)。2026-11-14 第二轮收敛后，MCP 默认 `--profile=full` 共 **30 个**工具：**13 个** `studio_*` 工具（`open_project`/`describe`/`command`/`inspect`/`screenshot`/`export`/`history`/`stage`/`design`/`scenario`/`media`/`merge`/`operations`）、**10 个** RP/1 创作/官方导出/Chrome 验收与统一诊断工具（`prototype_recipe`/`generate_prototype`/`revise_prototype`/`sync_prototype`/`diagnose_prototype`/`export_prototype`/`verify_prototype`/`preview_prototype`/`runtime_info`/`generate_from_image`）、**5 个**原生 `.rp` 会话与统一调度工具（`axure_open`/`axure_save`/`rp_inspect`/`rp_patch`/`rp_command`）以及 **2 个**队列与 GUI 往返工具（`gui_roundtrip`/`jobs`）。`studio_describe` 的 `workflow`/`rp1`/`node` 返回交互指南、四消费面（`canvas`/`runtime`/`native`/`full-rp1`）值域、可执行三词例子与验证剧本；条件与属性错误写前拒绝，场景回包包含分支实际值。原生出口支持 `shadow` 预设与 CSS 单边边框自动转换、普通文字跨页更新及输入框旋转加载动作。精确边界见 [AI 与 RP/1 创作](docs/studio-ai-authoring.md)。开始创作时先检查当前连接：若没有 `studio_open_project`，重新连接指向本安装目录 `bin/mcp.mjs` 的 MCP，或用 `node bin/axure.mjs studio start --project /abs/project --source /abs/source.json` 启动画布；旧连接里的旧工具列表不能代表已安装程序。
 
 1. 打开工程，调用 `studio_stage` 选择 `editorial`、`task` 或 `learning`，明确每页的用户任务、必备内容、主操作和状态。栖羽仅是用户认可的摄影内容型参考；设备与学习应用尚无用户认可标杆。
 2. 先确定构图、字号角色、素材与文字留白，再用基础节点自由构建。现有三种探索模板是可选示例；不要把换色、替换标题当成完成设计。系统内容不得编造为默认示例条目。
@@ -43,7 +43,7 @@ Studio 的完整用法见 [AI 创作流程](docs/studio-design-workflow.md)。20
 
 Studio 开发版本的验收层级、真实浏览器/Axure操作与字体边界见 [Studio 验收说明](docs/studio-acceptance.md)。12个语义模板与已配置操作脚本的真实场景分别计数；缺少操作或不支持的断言不能记为通过。
 
-已有全局自定义样式可用 `list_custom_styles` 查询、`rename_custom_style` 级联改名、`rebind_widgets` 批量绑定。全局定义先在 Axure UI 创建并保存，不直接注入新 `StyleSheet.CustomStyles`；详见 [样式工作流](references/custom-styles.md)。
+已有全局自定义样式可用 `rp_inspect({ view: "styles" })` 查询、`rp_patch({ op: "rename-style" })` 级联改名、`rp_patch({ op: "rebind-style" })` 批量绑定。全局定义先在 Axure UI 创建并保存，不直接注入新 `StyleSheet.CustomStyles`；详见 [样式工作流](references/custom-styles.md)。
 
 > ⚡ **零跳读声明**：本文件已包含日常原型创作、单图视觉联审与增量改稿所需的**全部 RP/1 语法、宏属性表、完整范例与 MCP 调用模板**。日常从零做原型与改稿**只需读完本文件即可直接动手**，无需再翻阅 `references/` 子文档或 `scripts/` 源码！
 
@@ -73,8 +73,8 @@ Studio 开发版本的验收层级、真实浏览器/Axure操作与字体边界�
    ```
    - `target` 支持 `<page>/<id>` 直接跨动态面板状态唯一定位深层子节点，也支持完整路径 `<page>/<panel>/<state>/<id>`。
    - `op: "add"` 的 `path` 支持 `"after:<page>/<sibling_id>"`、`"before:<page>/<sibling_id>"` 或容器 `"<page>/<container_id>"`，`value` 直接传 `.rp1` 文本片段。
-   - 耗时较长时传 `async: true`，立即返回任务句柄，用 `jobs_get({id})` 取 `result`；生成与改稿均支持，改稿可同时传 `dryRun: true`。成功改稿的预览、编译结果与报告位于 `<output>.assets/`，临时 `.revision-*` 自动删除。
-   - 会话工具 `inspect` / `edit_text` / `rename_widget` / `set_widget_geometry` / `set_widget_style` 的 `target` 接受 locate 返回的 `{record,id,container}` 对象或该对象的 JSON 文本。`read_interactions` 读取统一的 `items` 分页列表（页面事件、顶层/嵌套元件、母版）；`offset` 是跳过条数，`returned` 是本次条数，按 `nextOffset` 继续。`contained` 仅列嵌套元件，为空不代表无交互；可用 `widget: "page/id"` 缩小范围。
+   - 耗时较长时传 `async: true`，立即返回任务句柄，用 `jobs({ action: "get", id })` 取 `result`；生成与改稿均支持，改稿可同时传 `dryRun: true`。成功改稿的预览、编译结果与报告位于 `<output>.assets/`，临时 `.revision-*` 自动删除。
+   - 会话工具 `rp_inspect` / `rp_patch` 的 `target` 接受 `rp_inspect({ view: "locate" })` 返回的 `{record,id,container}` 对象或该对象的 JSON 文本。`rp_inspect({ view: "interactions" })` 读取统一的 `items` 分页列表（页面事件、顶层/嵌套元件、母版）；`offset` 是跳过条数，`returned` 是本次条数，按 `nextOffset` 继续。`contained` 仅列嵌套元件，为空不代表无交互；可用 `widget: "page/id"` 缩小范围。
 
 ---
 
@@ -147,7 +147,7 @@ page #detail name="打卡录入" device=iphone-17
 - **安全与证据原则**：切勿覆盖用户原始 `.rp`（可用 `AXURE_PROTECTED_PATHS` / `AXURE_WRITE_ROOT` 限制）；汇报时区分结构校验、Axure 打开、离线预览、GUI 编辑与保存重开。
 - **按需扩展文档（仅在对应特殊任务时读取）**：
   - 截图 1:1 转可编辑 `.rp`：`generate_from_image({image, output, scale, replace})` → [screenshot-workflow.md](references/screenshot-workflow.md)
-  - 已有 `.rp` 检查/会话改名改字/三方同步：`verify` / `locate` / `inspect` / `edit_text` / `rename_widget` / `sync_prototype` → [mcp-prototype.md](references/mcp-prototype.md)
-  - 浏览器真实预览点击校验与深度诊断：`diagnose_prototype` / `explain_binding` / `runtime_info` → [authoring-workflow.md](references/authoring-workflow.md)
+  - 已有 `.rp` 检查/会话改名改字/三方同步：`rp_inspect` / `rp_patch` / `rp_command` / `sync_prototype` → [mcp-prototype.md](references/mcp-prototype.md)
+  - 浏览器真实预览点击校验与深度诊断：`verify_prototype` / `diagnose_prototype` / `runtime_info` → [authoring-workflow.md](references/authoring-workflow.md)
   - 手机壳几何细节与最小示例 → [mobile-layout.md](references/mobile-layout.md)、[mobile-layout.rp1](examples/rp-language/mobile-layout.rp1)
   - 完整高阶语言手册（Repeater 增删改查/规则/母版）、能力表、HTML 重建与安装说明 → [rp-language.md](references/rp-language.md)、[capabilities.md](references/capabilities.md)、[html-workflow.md](references/html-workflow.md)、[README.zh-CN.md](README.zh-CN.md)

@@ -63,9 +63,22 @@ try {
     await assert.rejects(manager.startRoundtrip({ source, output: file }), error => error.code === 'EEXIST' && error.message.includes(file) && error.message.includes('未覆盖'));
     assert.ok(before.equals(readFileSync(file)));
   });
-  await check('白名单外输出与非法扩展拒绝', async () => {
-    const output = join(work, '..', `axure-job-outside-${process.pid}.rp`);
-    await assert.rejects(manager.startRoundtrip({ source, output })); assert.ok(!existsSync(output));
+  await check('默认本地目录可写，严格沙箱、技能目录与非法扩展拒绝', async () => {
+    const outside = join(work, '..', `axure-job-outside-${process.pid}.rp`);
+    delete process.env.AXURE_STRICT_WRITE_ROOT;
+    try {
+      const freeJob = await manager.startRoundtrip({ source, output: outside, wait: true });
+      assert.equal(freeJob.status, 'completed');
+    } finally {
+      rmSync(outside, { force: true });
+    }
+    process.env.AXURE_STRICT_WRITE_ROOT = '1';
+    try {
+      await assert.rejects(manager.startRoundtrip({ source, output: outside }));
+      assert.ok(!existsSync(outside));
+    } finally {
+      delete process.env.AXURE_STRICT_WRITE_ROOT;
+    }
     await assert.rejects(manager.startRoundtrip({ source, output: join(work, 'bad.txt') }));
   });
   await check('受保护路径及链接在读取前拒绝', async () => {

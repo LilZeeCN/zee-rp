@@ -216,6 +216,14 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
     // T-H-6：锚定在 Studio 内生效、导出时解算为绝对几何；fill 等无几何语义的值只存储。
     result.surfaces.native = fact('partial', '导出把锚定解算为绝对几何（不再保留约束语义）；fill 等无几何效果的值只存储，不产生原生差异', 'studio/export-rp.mjs:resolvedTreeToRp1Node');
   }
+  if (['borderSides', 'borderTop', 'borderRight', 'borderBottom', 'borderLeft'].includes(field)) {
+    result.surfaces.canvas = fact('implemented', '支持布尔值、线宽数值或 CSS 边框简写（如 "1px solid #CBD5E1"）；borderSides 支持字符串/数组/位掩码', 'studio/web/src/render.mjs:buildNodeElementHtml');
+    result.surfaces.runtime = result.surfaces.canvas;
+    result.surfaces.native = fact('implemented', '导出 .rp 自动将布尔/数值/CSS 边框简写及 borderSides 归一化为原生单边描边位（borderTop/Right/Bottom/Left boolean + stroke + strokeWidth）', 'studio/export-rp.mjs:applyExportBorders + scripts/proto_engine/layout.py:_node_border_sides');
+    result.surfaces['full-rp1'] = field === 'borderSides'
+      ? fact('partial', '完整 RP/1 原生字段为位掩码整数（1=左,2=上,4=右,8=下）；Studio 导出 .rp 时自动转换为单边布尔位', 'scripts/proto_engine/layout.py:_node_border_sides')
+      : fact('implemented', '完整 RP/1 原生 schema 为 boolean（配合 stroke 与 strokeWidth）；Studio 画布支持 CSS 边框简写并在导出 .rp 时自动拆解转换', 'references/rp-language.schema.json + studio/export-rp.mjs:applyExportBorders');
+  }
 
   // 2. Universal browser visual effects & CSS
   if (visualEffects.includes(field)) {
@@ -225,6 +233,12 @@ function buildNodePropertyCapability(type, field, { operation = 'edit', node = n
     result.surfaces.native = field === 'threeDTransform'
       ? fact('partial', '原生 .rp 没有 CSS transform，不产生原生可编辑变换（纯 2D 旋转请用 node.rotation，原生可编辑 DOA 3221225522）；导出兼容报告按 unsupported:css:transform 披露光栅化/省略降级', 'studio/export-rp.mjs:classifyNodeCompatibility + studio/visual-style.mjs:exportCssPlan（W7 2026-11-02 实测口径）')
       : fact('partial', '静态表面装饰层导出为独立 PNG；影响文字/子节点的 3D 变换或实时背景模糊在兼容报告中显式标记降级', 'studio/export-rp.mjs:classifyNodeCompatibility + studio/css-raster.mjs:rasterizeStudioPaint');
+    if (field === 'shadow') {
+      result.surfaces.canvas = fact('implemented', '支持布尔值、预设名（none/xs/sm/md/lg/xl/2xl/inner）、$阴影令牌或 CSS box-shadow 字符串', 'studio/visual-style.mjs:resolveShadowCss + studio/web/src/render.mjs');
+      result.surfaces.runtime = result.surfaces.canvas;
+      result.surfaces.native = fact('partial', '导出 .rp 自动把预设名/阴影令牌展开为标准 CSS box-shadow 并光栅化为独立表面装饰 PNG（不截取文字或子节点）', 'studio/export-rp.mjs:resolvedTreeToRp1Node + studio/css-raster.mjs:rasterizeStudioPaint');
+      result.surfaces['full-rp1'] = fact('implemented', '完整 RP/1 接受布尔值或标准 CSS box-shadow 字符串；Studio 导出 .rp 前自动展开 sm/md/lg 等预设与令牌', 'references/rp-language.schema.json + studio/visual-style.mjs:resolveShadowCss');
+    }
     if (field === 'mixBlendMode') {
       result.surfaces.native = fact('unsupported', '混合模式需要实时背景，原生 .rp 省略该效果并在兼容报告列出', 'studio/visual-style.mjs:exportCssPlan');
     }
@@ -474,8 +488,8 @@ export function nodeCapabilitySummary(type, { node = null, target = null, source
     ...(type === 'tab-bar' ? ['items', 'tabs', 'active'] : []),
     ...(type === 'repeater' ? ['rows', 'filter', 'sort', 'template'] : []),
     ...(type === 'divider' ? ['direction', 'color'] : []),
-    ...(type === 'checkbox' ? ['text', 'checked', 'disabled'] : []),
-    ...(type === 'radio' ? ['text', 'checked', 'group', 'disabled'] : []),
+    ...(type === 'checkbox' ? ['text', 'fontSize', 'fontFamily', 'fontWeight', 'color', 'checked', 'disabled'] : []),
+    ...(type === 'radio' ? ['text', 'fontSize', 'fontFamily', 'fontWeight', 'color', 'checked', 'group', 'disabled'] : []),
     ...(type === 'combobox' ? ['options', 'selected', 'selectedIndex', 'disabled'] : []),
     ...(type === 'listbox' ? ['options', 'selected', 'selectedIndex', 'multiple', 'disabled'] : []),
     ...(['path', 'sparkline'].includes(type) ? ['points', 'content', 'smooth', 'fill', 'stroke', 'strokeWidth'] : []),

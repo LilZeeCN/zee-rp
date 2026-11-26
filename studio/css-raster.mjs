@@ -35,7 +35,32 @@ export async function rasterizeStudioPaint(pages, { workDir, projectDir, colors 
       const width = Math.max(1, Math.round(node._w));
       const height = Math.max(1, Math.round(node._h));
       const css = Object.fromEntries(Object.entries(plan.paint).map(([key, value]) => [key, localCssAssets(value, projectDir)]));
-      const surface = { width, height, fill: node._resolvedFill || node.fill || 'transparent', radius: node.radius || 0, stroke: node._resolvedStroke || 'transparent', strokeWidth: node.strokeWidth ?? (node._resolvedStroke ? 1 : 0), css, colors };
+      const hasSideBorders = node.borderSides || node.borderTop || node.borderRight || node.borderBottom || node.borderLeft;
+      const sideBorders = {};
+      if (hasSideBorders) {
+        const rawStroke = node._resolvedStroke || node.stroke;
+        const borderColor = rawStroke && rawStroke !== '#FFFFFF00' ? rawStroke : 'var(--line, #E3E7DC)';
+        const borderW = node.strokeWidth > 0 ? node.strokeWidth : 1;
+        const sides = typeof node.borderSides === 'string'
+          ? new Set(node.borderSides.split(/[\s,]+/).filter(Boolean))
+          : Array.isArray(node.borderSides)
+            ? new Set(node.borderSides)
+            : typeof node.borderSides === 'number'
+              ? new Set([
+                  ...(node.borderSides & 2 ? ['top'] : []),
+                  ...(node.borderSides & 4 ? ['right'] : []),
+                  ...(node.borderSides & 8 ? ['bottom'] : []),
+                  ...(node.borderSides & 1 ? ['left'] : []),
+                ])
+              : new Set();
+        for (const [side, prop] of [['top', 'borderTop'], ['right', 'borderRight'], ['bottom', 'borderBottom'], ['left', 'borderLeft']]) {
+          const val = node[prop];
+          if (val || sides.has(side)) {
+            sideBorders[`border-${side}`] = typeof val === 'string' ? val : `${typeof val === 'number' ? val : borderW}px solid ${borderColor}`;
+          }
+        }
+      }
+      const surface = { width, height, fill: node._resolvedFill || node.fill || 'transparent', radius: node.radius || 0, stroke: node._resolvedStroke || 'transparent', strokeWidth: node.strokeWidth ?? (node._resolvedStroke ? 1 : 0), sideBorders, css, colors };
       const key = createHash('sha256').update(JSON.stringify(surface)).digest('hex');
       if (!cache.has(key)) {
         await page.send('Emulation.setDeviceMetricsOverride', { width: Math.max(100, width), height: Math.max(100, height), deviceScaleFactor: 1, mobile: false });
@@ -48,9 +73,13 @@ export async function rasterizeStudioPaint(pages, { workDir, projectDir, colors 
           const el = document.createElement('div');
           el.style.cssText = 'box-sizing:border-box;position:absolute;left:0;top:0';
           el.style.width = s.width + 'px'; el.style.height = s.height + 'px';
-          el.style.background = s.fill; el.style.borderRadius = s.radius + 'px';
-          el.style.border = s.strokeWidth + 'px solid ' + s.stroke;
           for (const [key, value] of Object.entries(s.colors)) el.style.setProperty('--' + key, value);
+          el.style.background = s.fill; el.style.borderRadius = s.radius + 'px';
+          if (s.sideBorders && Object.keys(s.sideBorders).length > 0) {
+            for (const [bKey, bVal] of Object.entries(s.sideBorders)) el.style.setProperty(bKey, bVal);
+          } else {
+            el.style.border = s.strokeWidth + 'px solid ' + s.stroke;
+          }
           for (const [key, value] of Object.entries(s.css)) {
             if (!key.startsWith('--') && !CSS.supports(key, value)) throw new Error('Unsupported CSS: ' + key + ': ' + value);
             el.style.setProperty(key, value);

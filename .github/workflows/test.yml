@@ -35,6 +35,9 @@ jobs:
       - run: npm run test:studio-finish
         env:
           CHROME_BIN: /usr/bin/google-chrome
+      - run: npm run test:20261114
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
       - run: npm run test:studio-baselines
       - run: npm run test:scripted-validate
       - run: npm run test:attribution

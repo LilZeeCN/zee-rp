@@ -331,7 +331,7 @@ const LIB_SCRIPTS = [
   },
   {
     "script": "jobs.mjs",
-    "summary": "macOS GUI 保存关闭重开队列：wait:false 句柄、list/get/cancel，单服务内串行",
+    "summary": "后台异步生成/改稿与 macOS GUI 保存关闭重开队列：统一 jobs(list|get|cancel) 句柄管理，单服务内串行",
     "evidence": "internal",
     "tools": [
       {
@@ -346,7 +346,18 @@ const LIB_SCRIPTS = [
             },
             "output": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "输出 .rp 路径（传 \"auto\" 或省略时自动按源名生成 -gui.rp 新文件；相对路径基于 cwd 或当前工作目录解析）"
+            },
+            "cwd": {
+              "type": "string",
+              "minLength": 1,
+              "description": "可选工作目录；用于解析相对路径（默认 process.cwd()）"
+            },
+            "projectDir": {
+              "type": "string",
+              "minLength": 1,
+              "description": "可选工作目录（同 cwd）"
             },
             "wait": {
               "type": "boolean"
@@ -365,51 +376,34 @@ const LIB_SCRIPTS = [
             }
           },
           "required": [
-            "source",
-            "output"
+            "source"
           ],
           "additionalProperties": false
         }
       },
       {
-        "name": "jobs_list",
-        "description": "列出此 MCP 服务的 jobs；服务关闭后句柄失效。",
-        "inputSchema": {
-          "type": "object",
-          "properties": {},
-          "additionalProperties": false
-        }
-      },
-      {
-        "name": "jobs_get",
-        "description": "读取 job 状态、输出路径和分层验证结果。",
+        "name": "jobs",
+        "description": "管理当前 MCP 服务的后台异步任务（generate_prototype / revise_prototype 的 async:true 任务与 gui_roundtrip）：action=\"list\" 列出任务；action=\"get\" 读取状态、进度与结果；action=\"cancel\" 取消排队或运行中的任务。",
         "inputSchema": {
           "type": "object",
           "properties": {
+            "action": {
+              "type": "string",
+              "enum": [
+                "list",
+                "get",
+                "cancel"
+              ],
+              "description": "任务操作：list 列出全部；get 查询指定任务；cancel 取消排队或运行中任务"
+            },
             "id": {
               "type": "string",
-              "minLength": 1
+              "minLength": 1,
+              "description": "任务句柄 ID（action 为 get 或 cancel 时必填）"
             }
           },
           "required": [
-            "id"
-          ],
-          "additionalProperties": false
-        }
-      },
-      {
-        "name": "jobs_cancel",
-        "description": "取消排队或运行中的 job。已复制/保存的文件保留，不撤销已执行的 GUI 步骤。",
-        "inputSchema": {
-          "type": "object",
-          "properties": {
-            "id": {
-              "type": "string",
-              "minLength": 1
-            }
-          },
-          "required": [
-            "id"
+            "action"
           ],
           "additionalProperties": false
         }
@@ -423,7 +417,7 @@ const LIB_SCRIPTS = [
   },
   {
     "script": "mcp-tools.mjs",
-    "summary": "注册表驱动的 MCP 工具 schema、参数校验和 CLI 参数映射，经 AxureSession 执行",
+    "summary": "收敛后的 MCP 工具面（Studio / RP1 / 图片 / 会话 / 浏览器验证 / rp_inspect / rp_patch / rp_command），经 AxureSession 与原生库执行",
     "evidence": "internal",
     "rawArgs": true,
     "defaultInputSchema": {

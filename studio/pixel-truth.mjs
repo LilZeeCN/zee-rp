@@ -88,6 +88,7 @@ export function collectRenderedText(pageId, candidates) {
     let text;
     while ((text = walker.nextNode())) {
       if (text.parentElement.closest('.studio-node') !== el) continue;
+      if (text.parentElement.closest('[data-studio-ignore-glyphs]')) continue;
       const style = getComputedStyle(text.parentElement);
       let textScale = 1;
       for (let ancestor = text.parentElement; ancestor && ancestor !== board.parentElement; ancestor = ancestor.parentElement) {

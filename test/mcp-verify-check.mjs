@@ -172,19 +172,19 @@ test('verify_prototype auto-exports from rp only and proves real Chrome Boundary
   });
 });
 
-test('MCP profiles, axure_save cleanup, and batch add_interaction with baseline work offline', async () => {
+test('MCP profiles, axure_save cleanup, and batch add-interaction via rp_command with baseline work offline', async () => {
   await session(async ({ client, call }) => {
     const { tools } = await client.listTools();
-    assert.equal(tools.length, 15);
+    assert.equal(tools.length, 16);
     const rt = await call('runtime_info');
     assert.equal(rt.mcpProfile, 'core');
-    assert.equal(rt.toolCount, 15);
+    assert.equal(rt.toolCount, 16);
     assert.ok(rt.schemaChars < 45000);
   }, {}, ['--profile=core']);
 
   await session(async ({ client }) => {
     const { tools } = await client.listTools();
-    assert.equal(tools.length, 28);
+    assert.equal(tools.length, 26);
   }, {}, ['--profile=author']);
 
   await session(async ({ client }) => {
@@ -208,11 +208,15 @@ test('MCP profiles, axure_save cleanup, and batch add_interaction with baseline 
     assert.equal(gen.status, 'completed');
     const opened = await call('axure_open', { path: gen.output });
     assert.equal(opened.opened, gen.output);
-    const batchRes = await call('add_interaction', {
-      items: [
-        { target: 'btn_batch', event: 'OnClick', actions: [{ type: 'set-text', target: 'lbl_out', text: '已触发' }] },
-        { target: 'btn_batch', event: 'OnMouseOver', actions: [{ type: 'disable', target: 'btn_batch' }] },
-      ],
+    const batchRes = await call('rp_command', {
+      action: 'run',
+      command: 'add-interaction',
+      params: {
+        items: [
+          { target: 'btn_batch', event: 'OnClick', actions: [{ type: 'set-text', target: 'lbl_out', text: '已触发' }] },
+          { target: 'btn_batch', event: 'OnMouseOver', actions: [{ type: 'disable', target: 'btn_batch' }] },
+        ],
+      },
     });
     assert.equal(batchRes.status, 'completed');
     const saved = await call('axure_save', { as: join(work, 'batch-final.rp'), cleanup: true });
