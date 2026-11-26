@@ -95,10 +95,11 @@ test('P03 检查器提供换行开关，开启后 label 换行且 h 随行数增
  // 带宽度 + hug 高度的换行 label，文本超宽时 h 应增长（与新建文本默认 h:'hug' 一致）
  const hugRes=await apply(f.studio,{baseRevision:f.studio.store.doc.revision,idempotencyKey:'g4-wrap-hug-h',commands:[{type:'resizeNode',nodeId:'ta_label',h:'hug'}]});
  assert(hugRes.ok,JSON.stringify(hugRes));
- await f.page.waitForFunction(`(()=>{const n=window.__STUDIO_STATE__.doc.pages[0].root.children[0].children.find(n=>n.id==='ta_label');return n&&n.h==='hug'})()`);
+ await f.page.waitForFunction(`window.__STUDIO_RENDERED_REVISION__>=${hugRes.appliedRevision}`);
  const sceneH0=(await f.page.evaluate(`window.__STUDIO_STATE__.scene.pages[0].nodes.find(n=>n.id==='ta_label')`)).h;
  const grow=await apply(f.studio,{baseRevision:f.studio.store.doc.revision,idempotencyKey:'g4-wrap-grow',commands:[{type:'setText',nodeId:'ta_label',text:'这是一段相当长的文本内容用来验证开启换行后高度会随行数增长而不是横向溢出'}]});
  assert(grow.ok,JSON.stringify(grow));
+ await f.page.waitForFunction(`window.__STUDIO_RENDERED_REVISION__>=${grow.appliedRevision}`);
  const sceneNode=await f.page.evaluate(`window.__STUDIO_STATE__.scene.pages[0].nodes.find(n=>n.id==='ta_label')`);
  assert(sceneNode.h>sceneH0,`换行 label 高度应随行数增长: h0=${sceneH0} h=${sceneNode.h}`);
 });
