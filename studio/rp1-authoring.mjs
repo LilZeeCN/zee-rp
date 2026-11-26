@@ -379,7 +379,7 @@ function checkReferences(doc, records, index, pageId, locate) {
       'set-text': ['type', 'target', 'text', 'value'],
       'set-var': ['type', 'name', 'variable', 'value', 'expr'],
       'set-variable': ['type', 'name', 'variable', 'value', 'expr'],
-      'set-panel-state': ['type', 'target', 'panel', 'state'],
+      'set-panel-state': ['type', 'target', 'panel', 'state', 'mode', 'loop', 'repeat', 'repeatInterval', 'repeatSkipFirst', 'enterAnimation', 'exitAnimation', 'duration'],
       'set-check': ['type', 'target', 'checked', 'value'],
       'set-selected': ['type', 'target', 'selected', 'value'],
       'set-option': ['type', 'target', 'value', 'option', 'selected'],
@@ -398,7 +398,7 @@ function checkReferences(doc, records, index, pageId, locate) {
         }
         expression(value.text ?? value.value, pointer);
       }
-      if (value.type === 'set-panel-state' && (node.type !== 'dynamic-panel' || ![...(node.states || []).map(state => state.id), 'next', 'prev', 'toggle', 'flip'].includes(value.state))) fail('E_RP1_PANEL_STATE', '切态动作需要真实动态面板及有效状态', { ...locate(pointer) });
+      if (value.type === 'set-panel-state' && (node.type !== 'dynamic-panel' || ![...(node.states || []).map(state => state.id), 'next', 'prev', 'toggle', 'flip'].includes(value.state ?? value.mode))) fail('E_RP1_PANEL_STATE', '切态动作需要真实动态面板及有效状态', { ...locate(pointer) });
       if (value.type === 'set-check') {
         if (!['checkbox', 'radio'].includes(node.type)) fail('E_RP1_TARGET_TYPE', 'set-check 目标需要 checkbox 或 radio', { nodeId: node.id, ...locate(pointer) });
         expression(value.checked ?? value.value, pointer);

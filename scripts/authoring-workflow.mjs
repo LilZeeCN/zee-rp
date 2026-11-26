@@ -8,8 +8,8 @@ import { promisify } from 'node:util';
 import { assertNotProtected, assertWritable, resolveWorkDir } from './engine.mjs';
 import { pythonInvocation } from './python.mjs';
 import { appExists, supportedVersions, templateCandidates, tryDetectFileVersion } from './version.mjs';
-import { previewPrototype, verifyOfficialPreview } from './preview-runtime.mjs';
-export { verifyOfficialPreview } from './preview-runtime.mjs';
+import { captureOfficialHtmlScreenshot, previewPrototype, verifyOfficialPreview } from './preview-runtime.mjs';
+export { captureOfficialHtmlScreenshot, verifyOfficialPreview } from './preview-runtime.mjs';
 import { reviewImageStructure } from './image-structure.mjs';
 import { findChromeExecutable } from '../studio/cdp.mjs';
 import { listImplementationFiles } from '../studio/source-fingerprint.mjs';
@@ -437,10 +437,11 @@ export function authoringTools({ generate, sync, listTools }) {
         projectDir: { type: 'string', minLength: 1, description: 'cwd 的别名。' },
       }, required: ['rp'], additionalProperties: false },
       handler: exportPrototype, readOnly: false },
-    { name: 'verify_prototype', description: '零外部依赖（复用内置无头 Chrome CDP 与本地环回 HTTP）验证 Axure 官方 HTML 交互行为：支持 click / fill / drag / swipe / wait / advanceTime(虚拟时钟秒推定时器) / navigate / expect，可自动从 .rp 导出官方 HTML 或读取源码内联 verify: 块，并支持 screenshot/storyboard/includeStoryboard 交互时序拼图回看。',
+    { name: 'verify_prototype', description: '零外部依赖（复用内置无头 Chrome CDP 与本地环回 HTTP）验证原型交互行为：支持 click / fill / drag / swipe / wait / advanceTime(虚拟时钟秒推定时器) / navigate / expect 与双引擎（auto 有本机 Axure 时自动导出官方 HTML、无 Axure 平台/环境自动降级或显式 engine="studio-html" 走 Studio 离线 HTML），可读取源码内联 verify: 块并生成 screenshot/storyboard/includeStoryboard 交互时序拼图回看。',
       inputSchema: { type: 'object', properties: {
-        rp: { type: 'string', minLength: 1, description: '现有 .rp 路径；若未传 html 将自动导出临时官方 HTML。' },
-        html: { type: 'string', minLength: 1, description: '已导出的 Axure 官方 HTML 目录（含 start.html）。' },
+        rp: { type: 'string', minLength: 1, description: '现有 .rp 路径；若未传 html 将自动导出官方 HTML 或（无 Axure 时）Studio HTML。' },
+        html: { type: 'string', minLength: 1, description: '已导出的官方 HTML 目录（含 start.html）或 Studio 导出 HTML 目录（含 index.html）。' },
+        engine: { type: 'string', enum: ['auto', 'official', 'studio-html'], description: '验证引擎：auto（默认，有本机 Axure 走官方导出，否则自动切 Studio 离线 HTML）、official（仅官方导出）、studio-html（直接走 Studio 离线 HTML，秒级运行且跨平台可用）。' },
         source: { type: 'string', minLength: 1, description: '可选 RP/1 源码路径；省略时自动读取 .rp.baseline.json 或按页面 [data-label] 匹配（若含 verify: 块且未传 steps 时自动载入）。' },
         page: { type: 'string', minLength: 1, description: '可选起始页面 ID 或名称。' },
         cwd: { type: 'string', minLength: 1 },

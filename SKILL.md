@@ -6,9 +6,10 @@ description: Reconstruct screenshots as editable Axure layouts, compile RP/1 spe
 # zee-rp（RP/1 零手算原型创作与原生编辑）
 
 > **能力边界与入口路由表**：
-> - **标准/高交互原生原型（表单、状态联动、有界拖拽/碰撞、手势轮播）** → 用 RP/1 `generate_prototype({ rp1: "...", output: "app.rp", verify: true, virtualClock: true, includeStoryboard: true })`（**零 JSON 直传缩进源码 + 无需先调写文件工具 + 一步官方 HTML/Chrome 真机自验**） + `revise_prototype`。
-> - **接管任意存量/第三方 `.rp` 文件** → 用 `sync_prototype({ mode: "decompile", rp: "legacy.rp", outSource: "legacy.rp1", output: "legacy-editable.rp" })` 一步反编译为可编辑 `.rp1` + `.baseline.json`（或导入 `studio_open_project` 自由画布改版），比逐条手工打补丁高一个维度。
-> - **自由画布设计探索、视觉评审与像素级打磨** → 用 `studio_open_project({ projectDir, cwd })` → `studio_stage` → `studio_command` → `studio_design(action:"review")` → `studio_export({ format: "rp", verify: true })`（导出同时支持真机 Axure HTML/Chrome 行为验证）。
+> - **标准/高交互原生原型（表单、状态联动、有界拖拽/碰撞、手势轮播）** → 用 RP/1 `generate_prototype({ rp1: "...", output: "app.rp", verify: true, verifyEngine: "auto", virtualClock: true, includeStoryboard: true })`（**零 JSON 直传缩进源码 + 无需先调写文件工具 + 一步官方 HTML 或跨平台 `studio-html` Chrome 真机自验**） + `revise_prototype`。
+> - **接管任意网页 / HTML / 存量 `.rp`** → 直接将本地 `.html` 或 `http(s)://` URL 传给 `studio_open_project({ projectDir, sourcePath: "page.html" })` 或 `generate_prototype({ source: "page.html", output: "app.rp" })`，内置无头 Chrome 自动抽取 DOM/样式/表单/图片为可编辑原型；收到存量 `.rp` 可直接传 `studio_open_project({ sourcePath: "legacy.rp" })` 导入画布，或用 `sync_prototype({ mode: "decompile", rp: "legacy.rp", outSource: "legacy.rp1", output: "legacy-editable.rp" })` 反编译为 `.rp1` + `.baseline.json`。
+> - **自由画布设计探索、视觉自愈与像素级打磨** → 用 `studio_open_project({ projectDir, cwd, rp1? })` → `studio_stage` → `studio_command` → `studio_design(action:"fix_plan", apply:true, baseRevision)`（一步验证并原子落盘修复）/ `studio_design(action:"review")` → `studio_export({ format: "rp1" | "rp", verify: true })`（支持反向吐出干净 `.rp1` 源码或导出 `.rp` 并直接跑真机行为验证）。
+> - **截图 1:1 转可编辑 `.rp` + `.rp1`** → `generate_from_image({ image, output, emitRp1: true, preview: true })`（`emitRp1` 同步保留可编辑 `.rp1`，`preview:true` 优先走无弹窗本机官方 HTML + 无头 Chrome 差分）。
 > - **存量 `.rp` 直接补多组交互（需保留源工程外额外动作）** → 用 `axure_open` → `rp_command({ command: "add-interaction", params: { items: [...] } })`（自动读 `.baseline.json` 解析逻辑 ID）→ `axure_save({ as, cleanup: true })`。
 > - **省上下文启动**：`node bin/mcp.mjs --profile=core` 仅暴露 16 个核心闭环工具（工具 Schema token 降低约 80%）；`--profile=studio` 含 17 个画布与浏览器验收工具；`--profile=author` 含 26 个创作+画布工具；默认 `--profile=full` 暴露收敛后的全部 30 个工具。
 
@@ -160,7 +161,8 @@ verify:
 
 - **安全与证据原则**：切勿覆盖用户原始 `.rp`；默认允许任意本地工作目录自由读写（`AXURE_WRITE_ROOT` 仅作可选兜底，仅当显式设置 `AXURE_STRICT_WRITE_ROOT=1` 时启用严格目录白名单），红线受保护路径（`AXURE_PROTECTED_PATHS`）、系统受保护目录与技能源码目录始终禁止写入。汇报时区分结构校验、Axure 打开、离线预览、GUI 编辑与保存重开。
 - **按需扩展文档（仅在对应特殊任务时读取）**：
-  - 截图 1:1 转可编辑 `.rp`：`generate_from_image({image, output, scale, replace})` → [screenshot-workflow.md](references/screenshot-workflow.md)
+  - 任意 HTML/URL 一键转可编辑 `.rp1` / Studio / `.rp`：`studio_open_project` / `generate_prototype` → [html-workflow.md](references/html-workflow.md)
+  - 截图 1:1 转可编辑 `.rp` + `.rp1`：`generate_from_image({image, output, emitRp1, scale, replace, preview})` → [screenshot-workflow.md](references/screenshot-workflow.md)
   - 已有 `.rp` 检查/会话改名改字/三方同步：`rp_inspect` / `rp_patch` / `rp_command` / `sync_prototype` → [mcp-prototype.md](references/mcp-prototype.md)
   - 浏览器真实预览点击校验与深度诊断：`verify_prototype` / `diagnose_prototype` / `runtime_info` → [authoring-workflow.md](references/authoring-workflow.md)
   - 手机壳几何细节与最小示例 → [mobile-layout.md](references/mobile-layout.md)、[mobile-layout.rp1](examples/rp-language/mobile-layout.rp1)

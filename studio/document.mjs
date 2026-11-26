@@ -311,11 +311,34 @@ function readImageDimensions(buf) {
   return { width: null, height: null };
 }
 
+function isInlineRp1Snippet(value) {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.startsWith('{') || trimmed.startsWith('[')) return false;
+  if (!trimmed.includes('\n') && /\.(?:rp1|json|rp|html?)$/i.test(trimmed)) return false;
+  if (/^rp\/1(?:\s|$)/m.test(trimmed)) return true;
+  return trimmed.includes('\n')
+    && /^(?:palette:|tab-bar:|var\s+[A-Za-z_]|page\s+#?|component\s+|master\s+|dataset\s+|tokens:|box\b|column\b|row\b|card\b|label\b)/m.test(trimmed);
+}
+
 export function parseSourceSpec(sourcePathOrObject) {
   if (typeof sourcePathOrObject === 'object' && sourcePathOrObject !== null) {
     return { spec: normalizeSpecShorthand(structuredClone(sourcePathOrObject)), baseDir: process.cwd(), sourcePath: null };
   }
-  const absPath = resolve(String(sourcePathOrObject));
+  const rawStr = String(sourcePathOrObject);
+  if (isInlineRp1Snippet(rawStr)) {
+    const proc = spawnPythonSync(['-B', '-c', `
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from rp_dsl import dsl_to_spec
+print(json.dumps(dsl_to_spec(sys.stdin.read()), ensure_ascii=False))
+`, join(ROOT, 'scripts')], { input: rawStr, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+    if (proc.status !== 0) {
+      throw Object.assign(new Error(`Failed to parse inline RP/1 DSL: ${proc.stderr || proc.stdout || proc.error?.message}`), { code: 'E_DSL_PARSE' });
+    }
+    return { spec: normalizeSpecShorthand(JSON.parse(proc.stdout)), baseDir: process.cwd(), sourcePath: null };
+  }
+  const absPath = resolve(rawStr);
   assertNotProtected(absPath);
   const baseDir = dirname(absPath);
   const ext = extname(absPath).toLowerCase();
@@ -329,6 +352,19 @@ with open(sys.argv[2], encoding="utf-8") as f:
 `, join(ROOT, 'scripts'), absPath], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
     if (proc.status !== 0) {
       throw Object.assign(new Error(`Failed to parse .rp1 DSL: ${proc.stderr || proc.stdout || proc.error?.message}`), { code: 'E_DSL_PARSE' });
+    }
+    return { spec: normalizeSpecShorthand(JSON.parse(proc.stdout)), baseDir, sourcePath: absPath };
+  }
+  if (ext === '.rp') {
+    const proc = spawnPythonSync(['-B', '-c', `
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from rp_decompile import decompile_rp
+res = decompile_rp(sys.argv[2])
+print(json.dumps(res['spec'], ensure_ascii=False))
+`, join(ROOT, 'scripts'), absPath], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+    if (proc.status !== 0) {
+      throw Object.assign(new Error(`Failed to decompile .rp into Studio: ${proc.stderr || proc.stdout || proc.error?.message}`), { code: 'E_RP_DECOMPILE' });
     }
     return { spec: normalizeSpecShorthand(JSON.parse(proc.stdout)), baseDir, sourcePath: absPath };
   }
@@ -484,18 +520,38 @@ export function normalizeSpecShorthand(spec) {
 
 const supportsGotoSugar = node => !node.type || ['box', 'label', 'paragraph', 'button', 'badge', 'image', 'icon', 'input', 'checkbox', 'radio', 'combobox', 'listbox', 'path'].includes(node.type);
 
+const EVENT_SHORTHAND_MAP = [
+  ['onClick', 'click'],
+  ['onLoad', 'load'],
+  ['onDrag', 'drag'],
+  ['onDragStart', 'dragStart'],
+  ['onDragDrop', 'dragDrop'],
+  ['onSwipeLeft', 'swipeLeft'],
+  ['onSwipeRight', 'swipeRight'],
+  ['onSwipeUp', 'swipeUp'],
+  ['onSwipeDown', 'swipeDown'],
+  ['onPanelStateChange', 'panelStateChange'],
+  ['onStateChange', 'stateChange'],
+  ['onChange', 'change'],
+  ['onInput', 'input'],
+];
+
 export function nodeEvents(node) {
   const on = Object.fromEntries(Object.entries(node.on || {}).map(([event, spec]) => [event, normalizeInteractionSpec(spec)]));
-  for (const spec of [node.onClick, node.interactions?.click]) {
-    if (spec === undefined) continue;
-    const normalizedSpec = normalizeInteractionSpec(spec);
-    if (on.click !== undefined && canonicalJson(on.click) !== canonicalJson(normalizedSpec)) {
-      throw Object.assign(new Error(`节点 ${node.id} 的 on.click 与点击别名冲突，请只保留一种写法`), { code: 'E_INTERACTION_ALIAS_CONFLICT', nodeId: node.id });
+  for (const [aliasKey, evKey] of EVENT_SHORTHAND_MAP) {
+    for (const spec of [node[aliasKey], node.interactions?.[evKey]]) {
+      if (spec === undefined) continue;
+      const normalizedSpec = normalizeInteractionSpec(spec);
+      if (evKey === 'click') {
+        if (on.click !== undefined && canonicalJson(on.click) !== canonicalJson(normalizedSpec)) {
+          throw Object.assign(new Error(`节点 ${node.id} 的 on.click 与点击别名冲突，请只保留一种写法`), { code: 'E_INTERACTION_ALIAS_CONFLICT', nodeId: node.id });
+        }
+        if (normalizedSpec !== null && (typeof normalizedSpec !== 'object' || Array.isArray(normalizedSpec) && !normalizedSpec.every(a => a && typeof a === 'object'))) {
+          throw Object.assign(new Error('点击事件需要动作对象、动作数组或 cases 对象'), { code: 'E_INTERACTION_SHAPE', nodeId: node.id });
+        }
+      }
+      on[evKey] = normalizedSpec;
     }
-    if (normalizedSpec !== null && (typeof normalizedSpec !== 'object' || Array.isArray(normalizedSpec) && !normalizedSpec.every(a => a && typeof a === 'object'))) {
-      throw Object.assign(new Error('点击事件需要动作对象、动作数组或 cases 对象'), { code: 'E_INTERACTION_SHAPE', nodeId: node.id });
-    }
-    on.click = normalizedSpec;
   }
   if (node.goto !== undefined && supportsGotoSugar(node)) {
     if (typeof node.goto !== 'string' || !node.goto) throw Object.assign(new Error('goto 需要非空目标页面ID'), { code: 'E_INTERACTION_SHAPE', nodeId: node.id });
@@ -508,14 +564,15 @@ export function nodeEvents(node) {
 
 export function normalizeNodeInteractions(node) {
   if (!node || typeof node !== 'object') return;
-  if (node.on || node.onClick !== undefined || node.interactions?.click !== undefined || node.goto !== undefined && supportsGotoSugar(node)) {
+  const hasAlias = EVENT_SHORTHAND_MAP.some(([aliasKey, evKey]) => node[aliasKey] !== undefined || node.interactions?.[evKey] !== undefined);
+  if (node.on || hasAlias || (node.goto !== undefined && supportsGotoSugar(node))) {
     node.on = nodeEvents(node);
-    delete node.onClick;
-    if (supportsGotoSugar(node)) delete node.goto;
-    if (node.interactions?.click !== undefined) {
-      delete node.interactions.click;
-      if (!Object.keys(node.interactions).length) delete node.interactions;
+    for (const [aliasKey, evKey] of EVENT_SHORTHAND_MAP) {
+      delete node[aliasKey];
+      if (node.interactions?.[evKey] !== undefined) delete node.interactions[evKey];
     }
+    if (supportsGotoSugar(node)) delete node.goto;
+    if (node.interactions && !Object.keys(node.interactions).length) delete node.interactions;
   }
   for (const child of node.children || []) normalizeNodeInteractions(child);
   for (const state of node.states || []) normalizeNodeInteractions(state.root);

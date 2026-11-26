@@ -5,8 +5,14 @@ export function evaluatePrototypeExpression(expression, { variables, getWidgetTe
   if (typeof expression === 'number' || typeof expression === 'boolean') return expression;
   const source = String(expression).trim();
   if (!source.startsWith('=')) {
-    return itemRow ? source.replace(/\$\{\s*item\.([a-zA-Z0-9_]+)\s*\}|\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g,
+    let out = itemRow ? source.replace(/\$\{\s*item\.([a-zA-Z0-9_]+)\s*\}|\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g,
       (_, itemField, templateField) => String(itemRow[itemField || templateField] ?? '')) : source;
+    if (out.includes('${')) {
+      out = out.replace(/\$\{([^}]+)\}/g, (_, inner) => String(evaluatePrototypeExpression('=' + inner, {
+        variables, getWidgetText, getWidgetState, resolveDatasetPath, itemRow, getWidgetRect,
+      }) ?? ''));
+    }
+    return out;
   }
 
   const body = source.slice(1).trim();
@@ -442,14 +448,50 @@ export function executePrototypeInteraction(runtime, spec, executed, { declaredV
       const node = runtime.findNodeInPage(runtime.currentPageId, panel);
       const states = node?.states || [];
       const current = runtime.panelStates[panel] || node?.activeState || node?.activeStateId || states[0]?.id;
-      let state = item.state;
-      if (states.length && ['next', 'toggle', 'flip', 'prev'].includes(state)) {
-        const index = states.findIndex(candidate => candidate.id === current);
-        const delta = state === 'prev' ? -1 : 1;
-        state = states[(index + delta + states.length) % states.length].id;
+      const rawState = item.state ?? item.mode;
+      const repeatInterval = Number(item.repeatInterval);
+      const hasRepeat = (item.repeat ?? (repeatInterval > 0)) && repeatInterval > 0 && rawState !== 'current';
+      const skipFirst = hasRepeat && (item.repeatSkipFirst ?? true);
+      let state = current;
+      if (rawState === 'current') {
+        state = current;
+        if (runtime.panelTimers) delete runtime.panelTimers[panel];
+      } else if (!skipFirst) {
+        if (states.length && ['next', 'toggle', 'flip', 'prev', 'previous'].includes(rawState)) {
+          const index = states.findIndex(candidate => candidate.id === current);
+          const delta = (rawState === 'prev' || rawState === 'previous') ? -1 : 1;
+          const nextIdx = item.loop === false
+            ? Math.max(0, Math.min(states.length - 1, index + delta))
+            : (index + delta + states.length) % states.length;
+          state = states[nextIdx].id;
+        } else {
+          state = rawState;
+        }
       }
       runtime.panelStates[panel] = state;
+      if (hasRepeat && runtime.panelTimers) {
+        runtime.panelTimers[panel] = {
+          panelId: panel,
+          intervalMs: repeatInterval,
+          direction: (rawState === 'prev' || rawState === 'previous') ? 'previous' : 'next',
+          loop: Boolean(item.loop ?? true),
+          skipFirst,
+          elapsedMs: 0,
+          active: true,
+        };
+      } else if (item.repeat === false && runtime.panelTimers) {
+        delete runtime.panelTimers[panel];
+      }
       executed.push({ action: 'set-panel-state', panel, state });
+      const stateChangeSpec = node?.on?.panelStateChange || node?.on?.stateChange || node?.interactions?.panelStateChange;
+      if (stateChangeSpec && state !== current && !runtime._inPanelStateChange) {
+        runtime._inPanelStateChange = true;
+        try {
+          executePrototypeInteraction(runtime, stateChangeSpec, executed, { declaredVariables, rowContext });
+        } finally {
+          runtime._inPanelStateChange = false;
+        }
+      }
     }
 
     if (type === 'move' && typeof runtime.moveWidget === 'function') {

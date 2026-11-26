@@ -239,7 +239,7 @@ test('G01-2: vector path SVG export, declared breakpoints vs fixed board, and ex
                 w: 160,
                 h: 44,
                 on: {
-                  swipeLeft: [{ type: 'link', to: 'home' }],
+                  doubleClick: [{ type: 'link', to: 'home' }],
                 },
               },
               {
@@ -266,7 +266,7 @@ test('G01-2: vector path SVG export, declared breakpoints vs fixed board, and ex
     assert.equal(exp.manifest.interactionCompatibility.supportedCount, 1);
     assert.equal(exp.manifest.interactionCompatibility.unsupportedCount, 1);
     assert.equal(exp.manifest.interactionCompatibility.unsupported[0].nodeId, 'unsupported_btn');
-    assert.equal(exp.manifest.interactionCompatibility.unsupported[0].event, 'swipeLeft');
+    assert.equal(exp.manifest.interactionCompatibility.unsupported[0].event, 'doubleClick');
 
     const cssText = fs.readFileSync(path.join(outDir, 'styles.css'), 'utf8');
     assert.ok(cssText.includes('@media (max-width: 768px)'), 'Expected declared breakpoint in styles.css');
@@ -296,7 +296,7 @@ test('G01-2: vector path SVG export, declared breakpoints vs fixed board, and ex
       assert.equal(domCheck.fillRule, 'evenodd');
       assert.equal(domCheck.validTag, 'BUTTON');
       assert.equal(domCheck.unsupTag, 'DIV', 'Button with only unsupported interactions must not be emitted as an active <button>');
-      assert.ok(domCheck.unsupAttr && domCheck.unsupAttr.includes('swipeLeft'));
+      assert.ok(domCheck.unsupAttr && domCheck.unsupAttr.includes('doubleClick'));
       assert.equal(domCheck.unsupAriaDisabled, 'true');
       assert.equal(domCheck.statusText, '已点击有效按钮');
     } finally {

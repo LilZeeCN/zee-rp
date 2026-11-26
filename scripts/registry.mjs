@@ -830,6 +830,11 @@ const LIB_SCRIPTS = [
     "script": "py.mjs",
     "summary": "按平台选择 Python 解释器执行脚本的 npm test 包装器",
     "evidence": "internal"
+  },
+  {
+    "script": "html-import.mjs",
+    "summary": "通过 Headless Chrome CDP 提取本地 HTML 或在线网页的真实排版、表单与矢量结构为 RP/1 源码与规范",
+    "evidence": "internal"
   }
 ];
 

@@ -93,7 +93,8 @@ export async function commitInlineTextEditor(dispatchCommands, cancel = false) {
 }
 
 export function setupCanvasInteractions({
-  cancelCanvasGesture, commitInlineTextEditor, dispatchCommands, dispatchHistoryAction, onRuntimeClick,
+  cancelCanvasGesture, commitInlineTextEditor, dispatchCommands, dispatchHistoryAction,
+  onRuntimeClick, onRuntimeDrag = null, onRuntimeSwipe = null,
   refreshSnapshot, renderAll, renderCanvasStage, renderSelection, revealActiveArtboard, updateCanvasTransform,
 }) {
   const viewport = document.getElementById('canvas-viewport');
@@ -173,15 +174,61 @@ export function setupCanvasInteractions({
       }
       let nodeEl = e.target.closest('.studio-node');
       const nodes = state.runtimeState?.activePageScene?.nodes || [];
+      const byScoped = new Map(nodes.map(item => [item.scopedId, item]));
+      const seenScoped = new Set();
+      let matchedNode = null;
+      let gestureNode = null;
       while (nodeEl) {
-        const node = nodes.find(n => n.scopedId === nodeEl.dataset.scopedId);
-        if (node?.interactive === false || node?.on?.click || node?.type === 'checkbox' || node?.type === 'radio') break;
-        nodeEl = nodeEl.parentElement?.closest('.studio-node');
+        const scopedId = nodeEl.dataset.scopedId;
+        if (!scopedId || seenScoped.has(scopedId)) break;
+        seenScoped.add(scopedId);
+        const node = byScoped.get(scopedId);
+        const evs = node?.on || node?.interactions || {};
+        const hasDrag = Boolean(evs.drag || evs.dragStart || evs.dragDrop);
+        const hasSwipe = Boolean(evs.swipeLeft || evs.swipeRight || evs.swipeUp || evs.swipeDown);
+        if (!gestureNode && (hasDrag || hasSwipe) && node?.interactive !== false) {
+          gestureNode = { node, el: nodeEl, hasDrag, hasSwipe };
+        }
+        if (node?.interactive === false || evs.click || hasDrag || hasSwipe || node?.type === 'checkbox' || node?.type === 'radio') {
+          matchedNode = { node, el: nodeEl, evs, hasDrag, hasSwipe };
+          break;
+        }
+        let nextEl = nodeEl.parentElement?.closest('.studio-node') || null;
+        if (!nextEl && node) {
+          let ancestor = node.parentScopedId ? byScoped.get(node.parentScopedId) : null;
+          if (!ancestor && scopedId.includes('/')) {
+            const parts = scopedId.split('/');
+            for (let k = parts.length - 1; k >= 2; k--) {
+              const cand = byScoped.get(parts.slice(0, k).join('/'));
+              if (cand && cand.scopedId !== scopedId) { ancestor = cand; break; }
+            }
+          }
+          if (ancestor) {
+            nextEl = document.querySelector(`#screen-root .studio-node[data-scoped-id="${CSS.escape(ancestor.scopedId)}"]`);
+          }
+        }
+        nodeEl = nextEl;
       }
-      if (nodeEl && !['INPUT', 'TEXTAREA', 'SELECT'].includes(nodeEl.tagName)) {
-        const nodeId = nodeEl.getAttribute('data-scoped-id');
+      const targetMatch = gestureNode || matchedNode;
+      if (targetMatch && !['INPUT', 'TEXTAREA', 'SELECT'].includes(targetMatch.el.tagName)) {
+        const { node, el, hasDrag, hasSwipe } = targetMatch;
+        const scopedId = el.getAttribute('data-scoped-id');
+        if (hasDrag || hasSwipe) {
+          state.interactGesture = {
+            scopedId,
+            hasDrag,
+            hasSwipe,
+            hasClick: Boolean((node?.on || node?.interactions)?.click || node?.type === 'checkbox' || node?.type === 'radio'),
+            startClientX: e.clientX,
+            startClientY: e.clientY,
+            origLeft: parseFloat(el.style.left) || node?.x || 0,
+            origTop: parseFloat(el.style.top) || node?.y || 0,
+            el,
+          };
+          return;
+        }
         try {
-          await onRuntimeClick(nodeId);
+          await onRuntimeClick(scopedId);
         } catch (err) {
           const rtCode = err?.data?.code;
           if (typeof rtCode === 'string' && rtCode.startsWith('E_RUNTIME_')) {
@@ -447,6 +494,15 @@ export function setupCanvasInteractions({
   });
 
   window.addEventListener('mousemove', e => {
+    if (state.mode === 'interact' && state.interactGesture) {
+      const ig = state.interactGesture;
+      if (ig.hasDrag && ig.el) {
+        const zoom = state.zoom || 1;
+        ig.el.style.left = `${Math.round(ig.origLeft + (e.clientX - ig.startClientX) / zoom)}px`;
+        ig.el.style.top = `${Math.round(ig.origTop + (e.clientY - ig.startClientY) / zoom)}px`;
+      }
+      return;
+    }
     if (!state.dragSession) {
       const el=e.target.closest?.('.studio-node');
       state.measureTarget=el ? {pageId:el.dataset.pageId,scopedId:el.dataset.scopedId} : null;
@@ -645,6 +701,35 @@ export function setupCanvasInteractions({
   });
 
   window.addEventListener('mouseup', async e => {
+    if (state.mode === 'interact' && state.interactGesture) {
+      const ig = state.interactGesture;
+      state.interactGesture = null;
+      const dxScreen = e.clientX - ig.startClientX;
+      const dyScreen = e.clientY - ig.startClientY;
+      const dist = Math.hypot(dxScreen, dyScreen);
+      const zoom = state.zoom || 1;
+      try {
+        if (dist < 6) {
+          if (ig.hasClick) await onRuntimeClick(ig.scopedId);
+        } else if (ig.hasDrag && onRuntimeDrag) {
+          await onRuntimeDrag(ig.scopedId, { dx: Math.round(dxScreen / zoom), dy: Math.round(dyScreen / zoom) });
+        } else if (ig.hasSwipe && dist >= 24 && onRuntimeSwipe) {
+          const direction = Math.abs(dxScreen) >= Math.abs(dyScreen)
+            ? (dxScreen < 0 ? 'left' : 'right')
+            : (dyScreen < 0 ? 'up' : 'down');
+          await onRuntimeSwipe(ig.scopedId, { direction });
+        } else if (ig.el && ig.hasDrag) {
+          ig.el.style.left = `${ig.origLeft}px`;
+          ig.el.style.top = `${ig.origTop}px`;
+        }
+      } catch (err) {
+        const rtCode = err?.data?.code;
+        if (typeof rtCode === 'string' && rtCode.startsWith('E_RUNTIME_')) {
+          showToast(`${err.message}${err.data.suggestion ? `；${err.data.suggestion}` : ''}`, 'warn', 4600);
+        }
+      }
+      return;
+    }
     if (!state.dragSession) return;
     const ds = state.dragSession;
     if (ds.pageId !== state.activePageId || ds.baseRevision !== state.appliedRevision) { cancelCanvasGesture(); return; }

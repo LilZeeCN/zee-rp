@@ -4,6 +4,7 @@ import { state } from './state.mjs';
 
 export function setupToolbarAndTabs({
   apiPost, dispatchCommands, dispatchHistoryAction, waitForCommands,
+  syncRuntimePanelTimers = null, clearRuntimeTimers = null,
   fitWorkspace, renderAll, renderInspector, renderSidebar, updateCanvasTransform,
   focusDiagnosticTarget, showProjectOperations, showProjectVersions,
 }) {
@@ -40,7 +41,9 @@ export function setupToolbarAndTabs({
       if (state.mode === 'interact') {
         const res = await apiPost('/api/runtime/reset', { startPageId: state.activePageId });
         state.runtimeState = res.state;
+        syncRuntimePanelTimers?.();
       } else if (prevMode === 'interact') {
+        clearRuntimeTimers?.();
         // 退出预览时清除服务端预览运行态，恢复设计态撤销/重做（T-D-1 配套出口）。
         try { await apiPost('/api/runtime/exit', {}); } catch {}
       }

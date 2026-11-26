@@ -10,7 +10,10 @@ import { computeDependencyClosure } from './project-bundle.mjs';
 
 export const CODE_EXPORTER_VERSION = '1.0.0';
 
-const SUPPORTED_EVENTS = new Set(['click', 'input', 'change', 'dragStart', 'drag', 'dragDrop']);
+const SUPPORTED_EVENTS = new Set([
+  'click', 'input', 'change', 'dragStart', 'drag', 'dragDrop',
+  'swipeLeft', 'swipeRight', 'swipeUp', 'swipeDown', 'load', 'panelStateChange', 'stateChange',
+]);
 const SUPPORTED_ACTION_TYPES = new Set([
   'link',
   'navigate',
@@ -706,7 +709,15 @@ function buildAppJs(bundlePayload) {
 
     reset(startPageId = null) {
       const pages = this.bundle.pages || [];
-      this.currentPageId = startPageId || pages[0]?.id || 'home';
+      let hashPage = null;
+      if (!startPageId && typeof location !== 'undefined' && typeof location.hash === 'string') {
+        const m = location.hash.match(/#p=([^&]+)/);
+        if (m) {
+          const decoded = decodeURIComponent(m[1]);
+          hashPage = pages.find(p => p.id === decoded || p.name === decoded)?.id || null;
+        }
+      }
+      this.currentPageId = startPageId || hashPage || pages[0]?.id || 'home';
       this.variables = {};
       for (const [k, v] of Object.entries(this.bundle.variables || {})) {
         this.variables[k] = v && typeof v === 'object' && 'value' in v ? v.value : v;
@@ -719,6 +730,11 @@ function buildAppJs(bundlePayload) {
       this.textOverrides = {};
       this.textFormulas = {};
       this.panelStates = {};
+      this.panelTimers = {};
+      if (this._timerHandles) {
+        for (const entry of this._timerHandles.values()) { try { clearInterval(entry.handle); } catch {} }
+      }
+      this._timerHandles = new Map();
       this.widgetPositions = {};
       this.dragStartPositions = {};
       this.datasets = {};
@@ -797,8 +813,56 @@ function buildAppJs(bundlePayload) {
           if (n.on?.click) collectFormulas(n.on.click, { pageId: pg.id, scopePrefix: this.nodeScope(n) });
         }
       }
+      this._triggerPageLoadEvents(this.currentPageId);
       this.render();
+      this._syncTimers();
       return this.getState();
+    }
+
+    _clearTimers() {
+      if (!this._timerHandles) return;
+      for (const entry of this._timerHandles.values()) { try { clearInterval(entry.handle); } catch {} }
+      this._timerHandles.clear();
+    }
+
+    _syncTimers() {
+      if (typeof window === 'undefined' || typeof setInterval !== 'function') return;
+      for (const [panelId, entry] of this._timerHandles.entries()) {
+        const t = this.panelTimers?.[panelId];
+        if (!t?.active || !(t.intervalMs > 0) || entry.intervalMs !== t.intervalMs) {
+          try { clearInterval(entry.handle); } catch {}
+          this._timerHandles.delete(panelId);
+        }
+      }
+      for (const [panelId, timer] of Object.entries(this.panelTimers || {})) {
+        if (!timer?.active || !(timer.intervalMs > 0) || this._timerHandles.has(panelId)) continue;
+        const ms = timer.intervalMs;
+        const handle = setInterval(() => {
+          if (!this.panelTimers?.[panelId]?.active) return;
+          this.advanceTime(ms);
+        }, ms);
+        this._timerHandles.set(panelId, { handle, intervalMs: ms });
+      }
+    }
+
+    _triggerPageLoadEvents(pageId) {
+      const pg = (this.bundle.pages || []).find(p => p.id === pageId);
+      if (!pg) return;
+      if (pg.on?.load) {
+        const before = this.interactionScope;
+        this.interactionScope = pg.id;
+        try { executePrototypeInteraction(this, pg.on.load, [], { declaredVariables: this.bundle.variables }); }
+        finally { this.interactionScope = before; }
+      }
+      for (const n of pg.nodes || []) {
+        if (n.panelOwnerId) continue;
+        if (n.on?.load) {
+          const before = this.interactionScope;
+          this.interactionScope = this.nodeScope(n);
+          try { executePrototypeInteraction(this, n.on.load, [], { declaredVariables: this.bundle.variables }); }
+          finally { this.interactionScope = before; }
+        }
+      }
     }
 
     getCurrentPage() {
@@ -1055,8 +1119,12 @@ function buildAppJs(bundlePayload) {
       const target = (this.bundle.pages || []).find(p => p.id === pageId || p.name === pageId);
       if (!target) throw new Error('未知页面: ' + pageId);
       this.currentPageId = target.id;
+      this.panelTimers = {};
+      this._clearTimers();
+      this._triggerPageLoadEvents(this.currentPageId);
       this.trace.push({ step: this.trace.length + 1, type: 'navigate', pageId: this.currentPageId });
       this.render();
+      this._syncTimers();
       return this.getState();
     }
 
@@ -1187,6 +1255,7 @@ function buildAppJs(bundlePayload) {
         executed,
       });
       this.render();
+      this._syncTimers();
       return this.getState();
     }
 
@@ -1274,7 +1343,135 @@ function buildAppJs(bundlePayload) {
       }
       this.trace.push({ step: this.trace.length + 1, type: 'drag', pageId: this.currentPageId, targetId: node.scopedId, dx, dy, executed });
       this.render();
+      this._syncTimers();
       return this.getState();
+    }
+
+    swipe(targetId, { direction = 'left' } = {}) {
+      const node = this.findNodeInPage(this.currentPageId, targetId);
+      if (!node) throw new Error('未找到滑动目标: ' + targetId);
+      if (!this.isNodeVisible(targetId)) throw new Error('滑动目标当前不可见: ' + targetId);
+      const dir = String(direction || 'left').toLowerCase();
+      const evMap = { left: 'swipeLeft', right: 'swipeRight', up: 'swipeUp', down: 'swipeDown' };
+      const evKey = evMap[dir] || 'swipeLeft';
+      const executed = [];
+      const isDisabled = Boolean(node.disabled) || ['disabled', 'loading'].includes(node.state);
+      const spec = node.on?.[evKey] || node.on?.[evKey.toLowerCase()];
+      if (!isDisabled && spec) {
+        const before = this.interactionScope;
+        this.interactionScope = this.nodeScope(node);
+        try {
+          executePrototypeInteraction(this, spec, executed, { declaredVariables: this.bundle.variables });
+        } finally {
+          this.interactionScope = before;
+        }
+      }
+      this.trace.push({ step: this.trace.length + 1, type: 'swipe', pageId: this.currentPageId, targetId: node.scopedId, direction: dir, executed });
+      this.render();
+      this._syncTimers();
+      return this.getState();
+    }
+
+    advanceTime(ms = 0) {
+      const delta = Math.max(0, Number(ms) || 0);
+      const executed = [];
+      for (const [panelId, timer] of Object.entries(this.panelTimers || {})) {
+        if (!timer?.active || !(timer.intervalMs > 0)) continue;
+        timer.elapsedMs += delta;
+        const ticks = Math.floor(timer.elapsedMs / timer.intervalMs);
+        if (ticks <= 0) continue;
+        timer.elapsedMs %= timer.intervalMs;
+        const node = this.findNodeInPage(this.currentPageId, panelId);
+        const states = node?.states || [];
+        if (!states.length) continue;
+        for (let t = 0; t < ticks; t++) {
+          const cur = this.panelStates[panelId] || node.activeStateId || states[0].id;
+          const idx = Math.max(0, states.findIndex(s => s.id === cur));
+          const nextIdx = timer.direction === 'previous'
+            ? (idx - 1 < 0 ? (timer.loop ? states.length - 1 : 0) : idx - 1)
+            : (idx + 1 >= states.length ? (timer.loop ? 0 : idx) : idx + 1);
+          const nextState = states[nextIdx].id;
+          this.panelStates[panelId] = nextState;
+          executed.push({ action: 'set-panel-state', panel: panelId, state: nextState, viaTimer: true });
+          const sc = node.on?.panelStateChange || node.on?.stateChange;
+          if (sc && nextState !== cur && !this._inPanelStateChange) {
+            this._inPanelStateChange = true;
+            const prev = this.interactionScope;
+            this.interactionScope = this.nodeScope(node);
+            try {
+              executePrototypeInteraction(this, sc, executed, { declaredVariables: this.bundle.variables });
+            } finally {
+              this.interactionScope = prev;
+              this._inPanelStateChange = false;
+            }
+          }
+        }
+      }
+      this.trace.push({ step: this.trace.length + 1, type: 'advanceTime', pageId: this.currentPageId, ms: delta, executed });
+      this.render();
+      this._syncTimers();
+      return this.getState();
+    }
+
+    observeForVerify() {
+      const pg = this.getCurrentPage();
+      const activeNodes = pg ? this.getActiveNodesForPage(pg.id) : [];
+      const boardEl = typeof document !== 'undefined' ? document.getElementById('studio-export-board') : null;
+      const br = boardEl ? boardEl.getBoundingClientRect() : null;
+      const bx = br ? br.left : 0;
+      const by = br ? br.top : 0;
+      const widgets = [];
+      for (const n of activeNodes) {
+        if (n.type === 'phone-shell' || n.repeaterTemplateOwner) continue;
+        const el = typeof document !== 'undefined'
+          ? document.querySelector('#studio-export-board [data-scoped-id="' + n.scopedId + '"]')
+          : null;
+        const r = el ? el.getBoundingClientRect() : null;
+        const vis = this.isNodeVisible(n.scopedId, pg.id);
+        const curText = this.getWidgetText(n.scopedId, { pageId: pg.id, scopePrefix: this.nodeScope(n) });
+        const curVal = n.scopedId in this.inputs ? String(this.inputs[n.scopedId] ?? '') : (el && 'value' in el ? String(el.value ?? '') : curText);
+        const checked = n.scopedId in this.checked ? Boolean(this.checked[n.scopedId]) : (n.type === 'checkbox' || n.type === 'radio' ? Boolean(n.checked) : null);
+        const panelState = n.type === 'dynamic-panel' ? (this.panelStates[n.scopedId] || n.activeStateId || n.states?.[0]?.id || null) : null;
+        const moved = this.widgetPositions?.[n.scopedId];
+        const x = r ? (r.left - bx) : (moved ? moved.x : n.x);
+        const y = r ? (r.top - by) : (moved ? moved.y : n.y);
+        const w = r ? r.width : n.w;
+        const h = r ? r.height : n.h;
+        widgets.push({
+          id: n.id,
+          scopedId: n.scopedId,
+          name: n.name || n.id,
+          label: n.name || n.id,
+          type: n.type,
+          text: curText,
+          value: curVal,
+          visible: Boolean(vis && (!r || (r.width > 0 && r.height > 0))),
+          enabled: !Boolean(n.disabled),
+          ...(checked !== null ? { checked } : {}),
+          ...(panelState !== null ? { panelState } : {}),
+          x,
+          y,
+          left: x,
+          top: y,
+          right: x + w,
+          bottom: y + h,
+          width: w,
+          height: h,
+          centerX: r ? (r.left + r.width / 2) : (bx + x + w / 2),
+          centerY: r ? (r.top + r.height / 2) : (by + y + h / 2),
+          ...(el?.id ? { inputId: el.id } : {}),
+        });
+      }
+      return {
+        ready: Boolean(pg),
+        animating: false,
+        page: pg?.name || pg?.id || null,
+        pageId: pg?.id || null,
+        url: typeof location !== 'undefined' ? location.href : '',
+        variables: structuredClone(this.variables),
+        widgets,
+        errors: [],
+      };
     }
     _setNodeVisibility(targetId, vis) {
       this.visibility[this.targetKey(targetId)] = vis;
@@ -1402,6 +1599,7 @@ function buildAppJs(bundlePayload) {
         selectedOptions: structuredClone(this.selectedOptions),
         selectedNodes: structuredClone(this.selectedNodes),
         panelStates: structuredClone(this.panelStates),
+        panelTimers: structuredClone(this.panelTimers || {}),
         datasets: visibleDatasets,
         traceLength: this.trace.length,
       };
@@ -1419,6 +1617,10 @@ function buildAppJs(bundlePayload) {
           this.click(step.target || step.click || step.id);
         } else if (step.action === 'drag') {
           this.drag(step.target || step.id, { dx: step.dx ?? 0, dy: step.dy ?? 0 });
+        } else if (step.action === 'swipe') {
+          this.swipe(step.target || step.id, { direction: step.direction || 'left' });
+        } else if (step.action === 'advanceTime') {
+          this.advanceTime(step.ms ?? 0);
         } else if (step.action === 'dataset') {
           this._executeDatasetAction(step, []);
           this.render();
@@ -1568,7 +1770,10 @@ function buildAppJs(bundlePayload) {
 
     _reflowText(boardEl, nodes) {
       const elements = new Map([...boardEl.querySelectorAll('[data-scoped-id]')].map(el => [el.dataset.scopedId, el]));
-      const bounds = new Map(nodes.map(n => [n.scopedId, { x: n.x, y: n.y, w: n.w, h: n.h }]));
+      const bounds = new Map(nodes.map(n => {
+        const moved = this.widgetPositions?.[n.scopedId];
+        return [n.scopedId, { x: moved ? moved.x : n.x, y: moved ? moved.y : n.y, w: n.w, h: n.h }];
+      }));
       const children = new Map();
       for (const n of nodes) {
         if (!children.has(n.parentScopedId)) children.set(n.parentScopedId, []);
@@ -1612,7 +1817,8 @@ function buildAppJs(bundlePayload) {
       };
       const position = (n, dx = 0, dy = 0) => {
         const b = bounds.get(n.scopedId), el = elements.get(n.scopedId), list = children.get(n.scopedId) || [];
-        if (el) { el.style.left = (n.x + dx) + 'px'; el.style.top = (n.y + dy) + 'px'; el.style.width = b.w + 'px'; el.style.height = b.h + 'px'; }
+        const moved = this.widgetPositions?.[n.scopedId];
+        if (el) { el.style.left = (moved ? moved.x : n.x + dx) + 'px'; el.style.top = (moved ? moved.y : n.y + dy) + 'px'; el.style.width = b.w + 'px'; el.style.height = b.h + 'px'; }
         const layout = n.sourceSizing?.layout, justify = n.sourceSizing?.justify || 'start', align = n.sourceSizing?.align || 'start';
         const row = layout === 'row', column = layout === 'column', axis = row ? 'w' : 'h';
         const delta = (row || column) ? list.reduce((sum, child) => sum + bounds.get(child.scopedId)[axis] - child[axis], 0) : 0;
@@ -1709,6 +1915,31 @@ function buildAppJs(bundlePayload) {
       });
     }
 
+    _findGestureHost(startNode, pg) {
+      if (!startNode || !pg) return null;
+      const byScoped = new Map(this.getActiveNodesForPage(pg.id).map(item => [item.scopedId, item]));
+      const hasOwnGesture = node => Boolean(
+        node?.on?.dragStart || node?.on?.drag || node?.on?.dragDrop ||
+        node?.on?.swipeLeft || node?.on?.swipeRight || node?.on?.swipeUp || node?.on?.swipeDown
+      );
+      let cur = startNode;
+      const seen = new Set();
+      while (cur && !seen.has(cur.scopedId)) {
+        seen.add(cur.scopedId);
+        if (hasOwnGesture(cur)) return cur;
+        let next = cur.parentScopedId ? byScoped.get(cur.parentScopedId) : null;
+        if (!next && cur.scopedId.includes('/')) {
+          const parts = cur.scopedId.split('/');
+          for (let k = parts.length - 1; k >= 2; k--) {
+            const cand = byScoped.get(parts.slice(0, k).join('/'));
+            if (cand && cand.scopedId !== cur.scopedId) { next = cand; break; }
+          }
+        }
+        cur = next;
+      }
+      return null;
+    }
+
     _createNodeElement(n, vis, rowContext) {
       const isBtn = n.type === 'button' && (n.hasSupportedInteraction || !n.unsupportedInteractions?.length);
       const tagName = n.type === 'input'
@@ -1730,6 +1961,9 @@ function buildAppJs(bundlePayload) {
       el.setAttribute('data-node-id', n.id);
       el.setAttribute('data-scoped-id', n.scopedId);
       el.setAttribute('data-node-type', n.type);
+      if (['input', 'combobox', 'listbox', 'checkbox', 'radio'].includes(n.type)) {
+        el.id = 'studio_dom_' + String(n.scopedId).replace(/[^A-Za-z0-9_-]/g, '_');
+      }
       if (n.role) el.setAttribute('data-role', n.role);
       if (n.unsupportedInteractions?.length) {
         el.setAttribute('data-unsupported-interaction', n.unsupportedInteractions.map(u => u.reason).join('; '));
@@ -1951,7 +2185,60 @@ function buildAppJs(bundlePayload) {
         }
       }
 
-      if ((n.hasSupportedInteraction && n.on?.click) || ((n.type === 'checkbox' || n.type === 'radio') && !n.disabled)) {
+      const ownHasDrag = Boolean(n.on?.dragStart || n.on?.drag || n.on?.dragDrop);
+      const ownHasSwipe = Boolean(n.on?.swipeLeft || n.on?.swipeRight || n.on?.swipeUp || n.on?.swipeDown);
+      const gestureHost = (!['input', 'combobox'].includes(n.type))
+        ? ((ownHasDrag || ownHasSwipe) ? n : this._findGestureHost(n, this.getCurrentPage()))
+        : null;
+      const hasDragEvent = Boolean(gestureHost && (gestureHost.on?.dragStart || gestureHost.on?.drag || gestureHost.on?.dragDrop));
+      const hasSwipeEvent = Boolean(gestureHost && (gestureHost.on?.swipeLeft || gestureHost.on?.swipeRight || gestureHost.on?.swipeUp || gestureHost.on?.swipeDown));
+      if (gestureHost && (hasDragEvent || hasSwipeEvent)) {
+        el.style.cursor = 'grab';
+        el.style.userSelect = 'none';
+        el.addEventListener('mousedown', downEvt => {
+          if (downEvt.button !== 0) return;
+          downEvt.stopPropagation();
+          const startX = downEvt.clientX;
+          const startY = downEvt.clientY;
+          const hostEl = gestureHost.scopedId === n.scopedId
+            ? el
+            : document.querySelector('#studio-export-board [data-scoped-id="' + gestureHost.scopedId + '"]');
+          const origLeft = parseFloat(hostEl?.style.left) || gestureHost.x || 0;
+          const origTop = parseFloat(hostEl?.style.top) || gestureHost.y || 0;
+          const onMove = moveEvt => {
+            if (hasDragEvent && hostEl) {
+              hostEl.style.left = Math.round(origLeft + (moveEvt.clientX - startX)) + 'px';
+              hostEl.style.top = Math.round(origTop + (moveEvt.clientY - startY)) + 'px';
+            }
+          };
+          const onUp = upEvt => {
+            window.removeEventListener('mousemove', onMove);
+            window.removeEventListener('mouseup', onUp);
+            const dx = Math.round(upEvt.clientX - startX);
+            const dy = Math.round(upEvt.clientY - startY);
+            const dist = Math.hypot(dx, dy);
+            const selfClick = (n.hasSupportedInteraction && n.on?.click) || ((n.type === 'checkbox' || n.type === 'radio') && !n.disabled);
+            const selfTargetId = rowContext && n.id.includes('__') ? n.id.split('__')[0] : n.scopedId;
+            const hostTargetId = rowContext && gestureHost.scopedId === n.scopedId && n.id.includes('__')
+              ? n.id.split('__')[0]
+              : gestureHost.scopedId;
+            if (dist < 4) {
+              if (selfClick) {
+                this.click(selfTargetId, rowContext);
+              } else if (gestureHost.scopedId !== n.scopedId && gestureHost.on?.click) {
+                this.click(hostTargetId, rowContext);
+              }
+            } else if (hasDragEvent) {
+              this.drag(hostTargetId, { dx, dy });
+            } else if (hasSwipeEvent && dist >= 24) {
+              const direction = Math.abs(dx) >= Math.abs(dy) ? (dx < 0 ? 'left' : 'right') : (dy < 0 ? 'up' : 'down');
+              this.swipe(hostTargetId, { direction });
+            }
+          };
+          window.addEventListener('mousemove', onMove);
+          window.addEventListener('mouseup', onUp);
+        });
+      } else if ((n.hasSupportedInteraction && n.on?.click) || ((n.type === 'checkbox' || n.type === 'radio') && !n.disabled)) {
         el.addEventListener('click', e => {
           e.stopPropagation();
           const targetId = rowContext && n.id.includes('__') ? n.id.split('__')[0] : n.scopedId;
@@ -2185,6 +2472,7 @@ export async function exportStudioDocumentToCode(
       domain: pg.domain || doc.domain || 'web',
       device: pg.device || null,
       board: pg.board,
+      ...(pg.on ? { on: pg.on } : {}),
       nodes: allNodes,
       repeaterTemplates,
       panelStateNodes,

@@ -1,8 +1,9 @@
 import { SCENARIO_STEP_SCHEMA } from './runtime.mjs';
 import { BROWSER_SCENARIO_STEP_SCHEMA } from './scenario-executors.mjs';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, resolve } from 'node:path';
 import { assertNotProtected, assertWritable, resolveWorkDir } from '../scripts/engine.mjs';
+import { importHtmlToRp1Spec, isHtmlInput } from '../scripts/html-import.mjs';
 import { exportPrototype, runWorkflow, verifyOfficialPreview, verifyStepItemsSchema } from '../scripts/authoring-workflow.mjs';
 import { INSTANCE_REGISTRY_PATH, startStudioServer } from './server.mjs';
 import { studioSourceFingerprint } from './source-fingerprint.mjs';
@@ -345,6 +346,7 @@ export const studioHandlers = {
     projectDir,
     cwd = null,
     sourcePath = null,
+    rp1 = null,
     name = 'Studio Project',
     domain = 'mobile',
     port = null,
@@ -357,6 +359,9 @@ export const studioHandlers = {
     if (!projectDir) {
       throw Object.assign(new Error('projectDir 参数必填'), { code: 'E_PROJECT_DIR_REQUIRED' });
     }
+    if (rp1 !== null && sourcePath !== null) {
+      throw Object.assign(new Error('studio_open_project 中 rp1 与 sourcePath 必须二选一'), { code: 'E_RP1_INPUT' });
+    }
     if (port !== null && port !== 0 && (port < 1024 || port > 65535)) {
       throw Object.assign(new Error('port 需为 0（由系统分配空闲端口）或 1024–65535'), { code: 'E_INVALID_PORT', requestedPort: port });
     }
@@ -364,11 +369,40 @@ export const studioHandlers = {
     const absDir = isAbsolute(projectDir) ? resolve(projectDir) : resolve(workDir, projectDir);
     assertNotProtected(absDir);
     assertWritable(join(absDir, 'document.json'));
-    const resolvedSourcePath = typeof sourcePath === 'string' && sourcePath.trim() && !sourcePath.trimStart().startsWith('{')
-      ? (isAbsolute(sourcePath) ? resolve(sourcePath) : resolve(workDir, sourcePath))
-      : sourcePath;
-    if (typeof resolvedSourcePath === 'string' && resolvedSourcePath && !resolvedSourcePath.trimStart().startsWith('{')) {
-      assertNotProtected(resolvedSourcePath);
+    let htmlImportSummary = null;
+    let resolvedSourcePath = null;
+    if (typeof sourcePath === 'string' && isHtmlInput(sourcePath)) {
+      const trimmed = sourcePath.trim();
+      const htmlTarget = /^(?:https?|file):\/\//i.test(trimmed)
+        ? trimmed
+        : (isAbsolute(trimmed) ? resolve(trimmed) : resolve(workDir, trimmed));
+      if (!/^https?:\/\//i.test(htmlTarget)) assertNotProtected(htmlTarget);
+      mkdirSync(absDir, { recursive: true });
+      const imported = await importHtmlToRp1Spec(htmlTarget, {
+        cwd: workDir,
+        assetsDir: join(absDir, 'assets'),
+        name: name && name !== 'Studio Project' ? name : undefined,
+        domain,
+      });
+      const importedSpecFile = join(absDir, '.imported-html.spec.json');
+      writeFileSync(importedSpecFile, JSON.stringify(imported.spec, null, 2) + '\n', 'utf8');
+      writeFileSync(join(absDir, '.imported-html.rp1'), imported.rp1Text, 'utf8');
+      resolvedSourcePath = importedSpecFile;
+      htmlImportSummary = imported.summary;
+    } else {
+      resolvedSourcePath = typeof sourcePath === 'string' && sourcePath.trim() && !sourcePath.trimStart().startsWith('{')
+        ? (isAbsolute(sourcePath) ? resolve(sourcePath) : resolve(workDir, sourcePath))
+        : sourcePath;
+      if (typeof resolvedSourcePath === 'string' && resolvedSourcePath && !resolvedSourcePath.trimStart().startsWith('{')) {
+        assertNotProtected(resolvedSourcePath);
+      }
+    }
+    if (typeof rp1 === 'string') {
+      if (!rp1.trim()) throw Object.assign(new Error('rp1 源码文本不能为空'), { code: 'E_RP1_SOURCE_EMPTY' });
+      mkdirSync(absDir, { recursive: true });
+      const inlineFile = join(absDir, '.initial-source.rp1');
+      writeFileSync(inlineFile, rp1.endsWith('\n') ? rp1 : `${rp1}\n`, 'utf8');
+      resolvedSourcePath = inlineFile;
     }
     lastActiveProjectDir = absDir;
     const respond = (body, extra = {}) => {
@@ -378,6 +412,7 @@ export const studioHandlers = {
       return {
         ...projectPayload({
           ...body,
+          ...(htmlImportSummary ? { htmlImport: htmlImportSummary } : {}),
           studioRuntime: {
             sourceFingerprint,
             diskFingerprint,
@@ -386,6 +421,7 @@ export const studioHandlers = {
           },
         }, { verbose, includeDoc, includeScene, maxBytes }),
         ...extra,
+        ...(htmlImportSummary ? { htmlImport: htmlImportSummary } : {}),
         openInstances: instanceSummary(),
       };
     };
@@ -593,6 +629,7 @@ export const studioHandlers = {
       const bv = await verifyOfficialPreview({
         rp: expRes.outRpPath,
         cwd: outputWorkDir,
+        engine: args.verifyEngine,
         steps: args.verifySteps,
         viewport: args.verifyViewport,
         virtualClock: args.virtualClock,
@@ -620,6 +657,15 @@ export const studioHandlers = {
         ...(args.async !== undefined ? { async: args.async, requestKey: args.requestKey } : {}),
       });
     }
+    if (format === 'rp1') {
+      const baseUrl = await resolveServerUrl(normalizedArgs);
+      const outRp1Path = resolveOut(args.outRp1Path || args.output || null);
+      guardOut(outRp1Path);
+      return callServerJson(baseUrl, '/api/export-rp1', 'POST', {
+        outRp1Path,
+        ...(args.baseRevision !== undefined ? { baseRevision: args.baseRevision } : {}),
+      });
+    }
     if (format === 'bundle') {
       return studioHandlers._bundle({
         ...normalizedArgs,
@@ -628,7 +674,7 @@ export const studioHandlers = {
         ...(args.targetProjectDir ? { targetProjectDir: resolveOut(args.targetProjectDir) } : {}),
       });
     }
-    throw Object.assign(new Error(`format 需要 rp / code / bundle,收到 ${format}`), { code: 'E_EXPORT_FORMAT' });
+    throw Object.assign(new Error(`format 需要 rp / code / bundle / rp1,收到 ${format}`), { code: 'E_EXPORT_FORMAT' });
   },
 
   // ---- 历史:撤销/重做/命名版本 一处管理 ----
@@ -702,7 +748,14 @@ export const studioHandlers = {
       return callServerJson(baseUrl, '/api/design/content-plan', 'POST', { pageId: args.pageId || null });
     }
     if (action === 'fix_plan') {
-      return callServerJson(baseUrl, '/api/design/fix-plan', 'POST', { pageId: args.pageId || null });
+      return callServerJson(baseUrl, '/api/design/fix-plan', 'POST', {
+        pageId: args.pageId || null,
+        ...(args.apply !== undefined ? { apply: Boolean(args.apply) } : {}),
+        ...(args.baseRevision !== undefined ? { baseRevision: args.baseRevision } : {}),
+        ...(args.idempotencyKey !== undefined ? { idempotencyKey: args.idempotencyKey } : {}),
+        ...(args.clientId !== undefined ? { clientId: args.clientId } : {}),
+        ...(args.label !== undefined ? { label: args.label } : {}),
+      });
     }
     if (action === 'explore') {
       return callServerJson(baseUrl, '/api/design/explore', 'POST', {
@@ -897,13 +950,14 @@ const connectionProperties = { url: { type: 'string' }, port: { type: 'integer' 
 export const studioTools = [
   {
     name: 'studio_open_project',
-    description: '打开或初始化自由画布工程目录(可选从 RP/1 JSON 或 .rp1 源码导入),启动或复用本机单端口 Studio 服务并返回画布上下文和 studioRuntime 指纹状态。支持相对路径+cwd/本地工作目录。这是每个工程的第一步。',
+    description: '打开或初始化自由画布工程目录(可选从 RP/1 JSON、.rp1 源码、内联 rp1 文本、存量 .rp 或 HTML/URL 导入),启动或复用本机单端口 Studio 服务并返回画布上下文和 studioRuntime 指纹状态。支持相对路径+cwd/本地工作目录。这是每个工程的第一步。',
     inputSchema: {
       type: 'object',
       properties: {
         projectDir: { type: 'string', minLength: 1 },
         cwd: { type: 'string', minLength: 1, description: '可选：解析相对 projectDir / sourcePath 时的本地工作目录。' },
-        sourcePath: { type: 'string' },
+        sourcePath: { type: 'string', description: '可选：.rp1 / .json / 存量 .rp / 本地 .html / URL（与 rp1 互斥）。' },
+        rp1: { type: 'string', minLength: 1, description: '可选：直接内联 RP/1 源码文本初始化画布工程（无需先写文件，与 sourcePath 互斥）。' },
         name: { type: 'string' },
         domain: { type: 'string', enum: ['mobile', 'web'] },
         port: { type: 'integer', minimum: 0, maximum: 65535, description: '监听端口(1024–65535)，或传 0 由系统分配空闲端口；省略时默认从 4310 起自动寻找空闲端口' },
@@ -1006,7 +1060,7 @@ export const studioTools = [
   },
   {
     name: 'studio_export',
-    description: '从当前权威快照导出三种产物（支持相对路径 + cwd）。format:rp——原生 .rp 与逐节点兼容报告（支持传 verify:true 一键调用本机 Axure 官方 HTML + 无头 Chrome 真机点击/滑动/拖动行为验收）；format:code——独立可运行 HTML/CSS/JS 代码工程包；format:bundle——自包含可迁移工程包。async:true 加 requestKey 返回持久句柄。',
+    description: '从当前权威快照导出产物（支持相对路径 + cwd）。format:rp——原生 .rp 与逐节点兼容报告（支持传 verify:true 一键行为验收）；format:rp1——反向导出可 diff/可继续编辑的 RP/1 .rp1 源码；format:code——独立可运行 HTML/CSS/JS 代码工程包；format:bundle——自包含可迁移工程包。async:true 加 requestKey 返回持久句柄。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1014,9 +1068,10 @@ export const studioTools = [
         port: { type: 'integer' },
         projectDir: { type: 'string' },
         cwd: { type: 'string', minLength: 1, description: '可选：解析相对输出路径时的本地工作目录。' },
-        format: { type: 'string', enum: ['rp', 'code', 'bundle'] },
+        format: { type: 'string', enum: ['rp', 'code', 'bundle', 'rp1'] },
         outRpPath: { type: 'string' },
-        output: { type: 'string', description: 'outRpPath（format:rp）或 outDir（format:code）的通用相对/绝对输出路径别名。' },
+        outRp1Path: { type: 'string', description: 'format:rp1 可选 .rp1 输出路径；省略时直接返回 rp1Text 文本' },
+        output: { type: 'string', description: 'outRpPath（format:rp）、outRp1Path（format:rp1）或 outDir（format:code）的通用相对/绝对输出路径别名。' },
         outReportPath: { type: 'string' },
         outDir: { type: 'string' },
         resetRegistration: { type: 'boolean' },
@@ -1026,7 +1081,8 @@ export const studioTools = [
         includeVersions: { type: 'boolean' },
         includeThumbnails: { type: 'boolean' },
         overwrite: { type: 'boolean' },
-        verify: { type: 'boolean', description: '仅 format:rp；true 时导出后自动调用本机 Axure 导出官方 HTML 并在无头 Chrome 中运行 verifySteps 行为断言。' },
+        verify: { type: 'boolean', description: '仅 format:rp；true 时导出后自动在无头 Chrome 中运行 verifySteps 行为断言（默认 auto 有本机 Axure 走官方导出，否则切 Studio 离线 HTML）。' },
+        verifyEngine: { type: 'string', enum: ['auto', 'official', 'studio-html'], description: '配合 verify:true 使用：验证引擎（默认 auto）。' },
         verifySteps: { type: 'array', minItems: 0, maxItems: 60, items: verifyStepItemsSchema },
         verifyViewport: { type: 'object', properties: { width: { type: 'integer', minimum: 320, maximum: 3840 }, height: { type: 'integer', minimum: 320, maximum: 2160 }, dpr: { type: 'number', minimum: 1, maximum: 3 } }, additionalProperties: false },
         virtualClock: { type: 'boolean', description: '配合 verify:true 使用：加速 >=200ms 定时器。' },
@@ -1084,7 +1140,7 @@ export const studioTools = [
   },
   {
     name: 'studio_design',
-    description: '设计质量层,action 词表分发:metrics——L1 视觉完成度代理指标(字阶/4px 栅格/留白/对比度/色相数)与反 slop 规则,阈值随 slopRules 返回,不返回审美总分;pixel_contrast——真实浏览器字形掩膜逐笔画对比度,描边/重叠/缺证据显式 unknown;anchors——把已认可页面提炼为排版配方锚点并对比偏离量(anchorAction:extract/approve/list/compare,语料是本地历史页面);content_plan——找出只有结构没有文案的槽位并给 applyWith 命令;fix_plan——把度量问题翻译成确定性修复命令(不自动提交);explore——批量设计变体按可复现判据收敛,或传 candidates/states 隔离预演 AI 自写构图,返回真实浏览器联系图;review——当前版本真实截图+机器检查,reviewId 提交 observations,compareWithReviewId 返回前后对照。评审不自评审美分、不代表用户验收。',
+    description: '设计质量层,action 词表分发:metrics——L1 视觉完成度代理指标(字阶/4px 栅格/留白/对比度/色相数)与反 slop 规则,阈值随 slopRules 返回,不返回审美总分;pixel_contrast——真实浏览器字形掩膜逐笔画对比度,描边/重叠/缺证据显式 unknown;anchors——把已认可页面提炼为排版配方锚点并对比偏离量(anchorAction:extract/approve/list/compare,语料是本地历史页面);content_plan——找出只有结构没有文案的槽位并给 applyWith 命令;fix_plan——把度量问题翻译成确定性修复命令(传 apply:true 且带 baseRevision 可单事务原子试跑校验并直接落盘);explore——批量设计变体按可复现判据收敛,或传 candidates/states 隔离预演 AI 自写构图,返回真实浏览器联系图;review——当前版本真实截图+机器检查,reviewId 提交 observations,compareWithReviewId 返回前后对照。评审不自评审美分、不代表用户验收。',
     inputSchema: {
       type: 'object',
       properties: {
@@ -1093,6 +1149,10 @@ export const studioTools = [
         projectDir: { type: 'string' },
         action: { type: 'string', enum: ['metrics', 'pixel_contrast', 'anchors', 'content_plan', 'fix_plan', 'explore', 'review'] },
         ...OPERATION_PROPERTIES,
+        apply: { type: 'boolean', description: 'fix_plan: true 时在校验乐观锁与阻塞项严格减少后单事务原子提交修复命令' },
+        idempotencyKey: { type: 'string', minLength: 1, description: 'fix_plan(apply:true) 幂等键' },
+        clientId: { type: 'string', description: 'fix_plan(apply:true) 客户端标识' },
+        label: { type: 'string', description: 'fix_plan(apply:true) 事务历史标签' },
         pageId: { type: 'string' },
         thresholds: { type: 'object' },
         pixelTruth: { type: 'boolean', description: 'metrics:默认真实浏览器像素测量;false 显式几何估算' },

@@ -385,17 +385,21 @@ function buildVerificationMap({ source, rp, runWorkflow }) {
 function findWidgetMatch(observation, symbol, target, { allowHidden = false, rowIndex = 0 } = {}) {
   const pool = observation.widgets ?? [];
   const candidates = symbol
-    ? pool.filter(w => [symbol.name, symbol.display, symbol.label].filter(Boolean).includes(w.name) && (allowHidden || w.visible))
-    : pool.filter(w => w.name === target && (allowHidden || w.visible));
+    ? pool.filter(w => {
+      const targetKeys = new Set([symbol.name, symbol.display, symbol.label, symbol.id, symbol.logicalId, ...(Array.isArray(symbol.aliases) ? symbol.aliases : [])].filter(Boolean));
+      const widgetKeys = [w.name, w.id, w.scopedId, w.label].filter(Boolean);
+      return widgetKeys.some(k => targetKeys.has(k)) && (allowHidden || w.visible);
+    })
+    : pool.filter(w => [w.name, w.id, w.scopedId, w.label].includes(target) && (allowHidden || w.visible));
   return { candidates, widget: candidates[rowIndex] };
 }
 
-function startStaticServer(rootDir) {
+function startStaticServer(rootDir, defaultEntry = 'start.html') {
   const realRoot = realpathSync(rootDir);
   const server = createServer((req, res) => {
     try {
       const reqPath = decodeURIComponent(new URL(req.url, 'http://127.0.0.1').pathname);
-      const relPath = reqPath === '/' ? 'start.html' : reqPath.replace(/^\/+/, '');
+      const relPath = reqPath === '/' ? defaultEntry : reqPath.replace(/^\/+/, '');
       const full = realpathSync(resolve(realRoot, relPath));
       if (!full.startsWith(realRoot + sep) || !statSync(full).isFile()) {
         res.writeHead(404).end();
@@ -410,15 +414,80 @@ function startStaticServer(rootDir) {
   return server;
 }
 
+export async function captureOfficialHtmlScreenshot({
+  htmlDir,
+  outPng,
+  viewport = { width: 1280, height: 900, dpr: 1 },
+  timeoutMs = 10000,
+} = {}) {
+  findChromeExecutable();
+  const server = startStaticServer(htmlDir);
+  let browser = null;
+  try {
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const port = server.address().port;
+    const url = `http://127.0.0.1:${port}/start.html`;
+    const vp = {
+      width: Math.min(3840, Math.max(320, Math.round(viewport?.width ?? 1280))),
+      height: Math.min(2160, Math.max(320, Math.round(viewport?.height ?? 900))),
+      dpr: viewport?.dpr ?? 1,
+    };
+    browser = await launchChrome({ headless: true, width: vp.width, height: vp.height, dpr: vp.dpr });
+    const page = await browser.openPage(url);
+    const obsExpr = `(${observeAxure.toString()})({ names: [], variables: [] })`;
+    await page.waitForFunction(`(() => { const r = ${obsExpr}; return Boolean(r && r.ready); })()`, { timeoutMs, pollMs: 50 });
+    await page.evaluate('document.fonts ? document.fonts.ready.catch(() => {}) : Promise.resolve()');
+    await new Promise(r => setTimeout(r, 80));
+    const png = await page.screenshot({ format: 'png' });
+    mkdirSync(dirname(outPng), { recursive: true });
+    writeFileSync(outPng, png);
+    return outPng;
+  } finally {
+    try { await browser?.close(); } catch {}
+    try { server.close(); server.closeAllConnections?.(); } catch {}
+  }
+}
+
+async function exportStudioHtmlForVerify({ rpPath, sourcePath, tempStageDir }) {
+  const { importToStudioDocument } = await import('../studio/document.mjs');
+  const { exportStudioDocumentToCode } = await import('../studio/export-code.mjs');
+  let docInput = sourcePath || rpPath;
+  if (rpPath) {
+    const studioDocFile = `${rpPath}.source/studio-document.json`;
+    if (existsSync(studioDocFile)) {
+      docInput = studioDocFile;
+    } else if (!sourcePath) {
+      const stemRp1 = rpPath.replace(/\.rp$/i, '.rp1');
+      if (existsSync(stemRp1)) {
+        docInput = stemRp1;
+      } else if (existsSync(`${rpPath}.baseline.json`)) {
+        try {
+          const base = JSON.parse(readFileSync(`${rpPath}.baseline.json`, 'utf8'));
+          if (base?.sourcePath && existsSync(base.sourcePath)) docInput = base.sourcePath;
+        } catch {}
+      }
+    }
+  }
+  const doc = importToStudioDocument(docInput, { projectDir: tempStageDir });
+  const htmlDir = join(tempStageDir, 'studio-html');
+  await exportStudioDocumentToCode(doc, { outDir: htmlDir, registerExport: false });
+  return { htmlDir, doc };
+}
+
 export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) {
+  const engine = input.engine ?? 'auto';
+  if (!['auto', 'official', 'studio-html'].includes(engine)) {
+    throw Object.assign(new Error(`未知 verify 引擎 "${engine}"，可选 auto / official / studio-html`), { code: 'E_VERIFY_INPUT' });
+  }
   const workDir = resolveWorkDir(input.cwd ?? input.projectDir);
   const rpPath = input.rp ? resolve(workDir, input.rp) : null;
   const htmlInputDir = input.html ? resolve(workDir, input.html) : null;
   const sourcePath = input.source ? resolve(workDir, input.source) : null;
   const screenshotPath = input.screenshot ? resolve(workDir, input.screenshot) : null;
   const storyboardPath = input.storyboard ? resolve(workDir, input.storyboard) : null;
-  if (!rpPath && !htmlInputDir) {
-    throw Object.assign(new Error('verify_prototype 需要至少提供 rp（已生成 .rp）或 html（官方 HTML 目录）之一。'), { code: 'E_VERIFY_INPUT' });
+  if (!rpPath && !htmlInputDir && !(engine === 'studio-html' && sourcePath)) {
+    throw Object.assign(new Error('verify_prototype 需要至少提供 rp（已生成 .rp）或 html（HTML 目录）之一（或传 engine:"studio-html" + source）。'), { code: 'E_VERIFY_INPUT' });
   }
   if (rpPath) assertNotProtected(rpPath);
   if (sourcePath) assertNotProtected(sourcePath);
@@ -443,11 +512,24 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
   };
   let tempStageDir = null;
   let activeHtmlDir = htmlInputDir;
+  let activeEngine = engine;
   let officialHtmlExported = false;
+  let studioHtmlExported = false;
+  let engineFallbackReason = null;
+
   if (activeHtmlDir) {
-    if (!existsSync(join(activeHtmlDir, 'start.html'))) {
+    const hasOfficial = existsSync(join(activeHtmlDir, 'start.html'));
+    const hasStudio = existsSync(join(activeHtmlDir, 'index.html'));
+    if (engine === 'official' && !hasOfficial) {
       throw Object.assign(new Error(`官方 HTML 目录缺少 start.html：${activeHtmlDir}`), { code: 'E_VERIFY_HTML' });
     }
+    if (engine === 'studio-html' && !hasStudio) {
+      throw Object.assign(new Error(`Studio HTML 目录缺少 index.html：${activeHtmlDir}`), { code: 'E_VERIFY_HTML' });
+    }
+    if (!hasOfficial && !hasStudio) {
+      throw Object.assign(new Error(`HTML 目录缺少 start.html 或 index.html：${activeHtmlDir}`), { code: 'E_VERIFY_HTML' });
+    }
+    activeEngine = hasOfficial && engine !== 'studio-html' ? 'official' : 'studio-html';
     findChromeExecutable();
   } else {
     findChromeExecutable();
@@ -459,19 +541,35 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
   const storyboardFrames = [];
   if (!activeHtmlDir) {
     tempStageDir = mkdtempSync(join(workDir, '.zee-verify-'));
-    const exportedHtml = join(tempStageDir, 'html');
-    const exp = await exportHtml({ rp: rpPath, output: exportedHtml, cwd: workDir });
-    if (exp.status !== 'completed') {
-      rmSync(tempStageDir, { recursive: true, force: true });
-      return {
-        status: 'failed',
-        evidence: 'axure-official-html-cdp',
-        verification: { officialHtmlExported: false, browserLoaded: false, behaviorVerified: false },
-        diagnostics: exp.diagnostics,
-      };
+    if (engine === 'studio-html') {
+      const studioExp = await exportStudioHtmlForVerify({ rpPath, sourcePath, tempStageDir });
+      activeHtmlDir = studioExp.htmlDir;
+      studioHtmlExported = true;
+      activeEngine = 'studio-html';
+    } else {
+      const exportedHtml = join(tempStageDir, 'html');
+      const exp = await exportHtml({ rp: rpPath, output: exportedHtml, cwd: workDir });
+      if (exp.status === 'completed') {
+        activeHtmlDir = exp.output;
+        officialHtmlExported = true;
+        activeEngine = 'official';
+      } else if (engine === 'official') {
+        rmSync(tempStageDir, { recursive: true, force: true });
+        return {
+          status: 'failed',
+          engine: 'official',
+          evidence: 'axure-official-html-cdp',
+          verification: { officialHtmlExported: false, browserLoaded: false, behaviorVerified: false },
+          diagnostics: exp.diagnostics,
+        };
+      } else {
+        engineFallbackReason = exp.diagnostics?.[0]?.message || '本机 Axure 官方 HTML 导出不可用，已自动切换 Studio 离线 HTML 引擎';
+        const studioExp = await exportStudioHtmlForVerify({ rpPath, sourcePath, tempStageDir });
+        activeHtmlDir = studioExp.htmlDir;
+        studioHtmlExported = true;
+        activeEngine = 'studio-html';
+      }
     }
-    activeHtmlDir = exp.output;
-    officialHtmlExported = true;
   }
 
   const extraNames = steps.flatMap(s => s.target ? [s.target] : []);
@@ -479,15 +577,22 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
   const names = map ? [...new Set([...mapNames, ...extraNames])] : [];
   const variables = [...new Set([...(map?.variables ?? []), ...steps.flatMap(s => s.expect?.variable ? [s.expect.variable] : [])])];
 
-  const observeExpr = `(${observeAxure.toString()})(${JSON.stringify({ names, variables })})`;
-  const server = startStaticServer(activeHtmlDir);
+  const observeExpr = activeEngine === 'official'
+    ? `(${observeAxure.toString()})(${JSON.stringify({ names, variables })})`
+    : `(() => window.__STUDIO_EXPORT_APP__ ? window.__STUDIO_EXPORT_APP__.observeForVerify() : { ready: false })()`;
+  const entryHtmlFile = activeEngine === 'official' ? 'start.html' : 'index.html';
+  const server = startStaticServer(activeHtmlDir, entryHtmlFile);
   let browser = null;
   let page = null;
   const history = [];
   const result = {
     status: 'completed',
-    evidence: 'axure-official-html-cdp',
-    verification: { officialHtmlExported, browserLoaded: false, behaviorVerified: false },
+    engine: activeEngine,
+    evidence: activeEngine === 'official' ? 'axure-official-html-cdp' : 'studio-html-cdp',
+    verification: activeEngine === 'official'
+      ? { officialHtmlExported, browserLoaded: false, behaviorVerified: false }
+      : { officialHtmlExported: false, studioHtmlExported, browserLoaded: false, behaviorVerified: false },
+    ...(engineFallbackReason ? { engineFallbackReason } : {}),
     passed: 0,
     total: steps.length,
     ...(rpPath ? { rp: rpPath } : {}),
@@ -499,7 +604,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
     const port = server.address().port;
-    const baseUrl = `http://127.0.0.1:${port}/start.html`;
+    const baseUrl = `http://127.0.0.1:${port}/${entryHtmlFile}`;
     let startUrl = baseUrl;
     const targetPageEntry = input.page
       ? map?.pages?.find(p => p.id === input.page || p.name === input.page)
@@ -662,7 +767,11 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       } else if (step.action === 'navigate') {
         const pageEntry = map?.pages?.find(p => p.id === step.page || p.name === step.page);
         const targetPageName = pageEntry?.name ?? step.page;
-        await page.navigate(`${baseUrl}#p=${encodeURIComponent(targetPageName)}`, timeoutMs);
+        if (activeEngine === 'studio-html') {
+          await page.evaluate(`window.__STUDIO_EXPORT_APP__.navigate(${JSON.stringify(step.page)})`);
+        } else {
+          await page.navigate(`${baseUrl}#p=${encodeURIComponent(targetPageName)}`, timeoutMs);
+        }
         await page.waitForFunction(`(() => { const r = ${observeExpr}; return Boolean(r && r.ready); })()`, { timeoutMs, pollMs: 50 });
       } else if (step.action !== 'expect') {
         throw Object.assign(new Error(`未知验收步骤动作 "${step.action}"`), { code: 'E_VERIFY_INPUT', stepIndex: i });

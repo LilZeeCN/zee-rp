@@ -21,7 +21,8 @@ import { expandSpec, pasteAxvg } from './axvg.mjs';
 import { createBlankProject } from './create-blank-project.mjs';
 import { writeNativeScene } from './native-scene.mjs';
 import { mergePages } from './merge-pages.mjs';
-import { authoringTools, isInlineRp1Text, recipes, recipeSource, runWorkflow, pythonEnvironment, exportPrototype, verifyOfficialPreview } from './authoring-workflow.mjs';
+import { authoringTools, captureOfficialHtmlScreenshot, isInlineRp1Text, recipes, recipeSource, runWorkflow, pythonEnvironment, exportPrototype, verifyOfficialPreview } from './authoring-workflow.mjs';
+import { importHtmlToRp1Spec, isHtmlInput } from './html-import.mjs';
 import { reviewImageStructure } from './image-structure.mjs';
 import { studioTools } from '../studio/mcp-adapter.mjs';
 
@@ -2232,7 +2233,224 @@ sys.exit(0 if res.get('ok') else 2)
   }
 }
 
-function generateFromImage({
+function validateFromImageRp1Out(output, outSourceRaw, emitRp1, explicitWorkDir) {
+  const rp1Out = outSourceRaw !== undefined
+    ? resolveInWork(outSourceRaw, explicitWorkDir)
+    : (emitRp1 ? output.replace(/\.rp$/i, '.rp1') : null);
+  if (rp1Out) {
+    assertNotProtected(rp1Out);
+    assertWritable(rp1Out);
+    if (pathExists(rp1Out)) {
+      throw Object.assign(new Error(`输出 .rp1 源码已存在，禁止覆盖：${rp1Out}`), { code: 'E_OUTPUT_EXISTS' });
+    }
+  }
+  return rp1Out;
+}
+
+function captureMacOsAxureWindow(stagedRp, autoCapPath) {
+  if (process.platform !== 'darwin') return null;
+  const swiftCap = `
+import AppKit
+import ApplicationServices
+let rp = CommandLine.arguments[1]
+let outPng = CommandLine.arguments[2]
+let title = URL(fileURLWithPath: rp).deletingPathExtension().lastPathComponent
+let p = Process()
+p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+p.arguments = ["-b", "com.axure.AxureRP9", rp]
+try p.run(); p.waitUntilExit()
+var winId: Int? = nil
+for _ in 0..<40 {
+    Thread.sleep(forTimeInterval: 0.25)
+    let all = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] ?? []
+    for w in all {
+        let owner = w[kCGWindowOwnerName as String] as? String ?? ""
+        let name = w[kCGWindowName as String] as? String ?? ""
+        if owner == "Axure RP 9" && name.contains(title) {
+            winId = w[kCGWindowNumber as String] as? Int
+            break
+        }
+    }
+    if winId != nil { break }
+}
+Thread.sleep(forTimeInterval: 0.7)
+if let wid = winId {
+    let cap = Process()
+    cap.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+    cap.arguments = ["-x", "-l", String(wid), outPng]
+    try cap.run(); cap.waitUntilExit()
+}
+if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.axure.AxureRP9" }) {
+    let axApp = AXUIElementCreateApplication(app.processIdentifier)
+    var v: CFTypeRef?
+    if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &v) == .success, let wins = v as? [AXUIElement] {
+        for w in wins {
+            var tv: CFTypeRef?
+            let wTitle = (AXUIElementCopyAttributeValue(w, kAXTitleAttribute as CFString, &tv) == .success ? (tv as? String) : nil) ?? ""
+            if wTitle.contains(title) {
+                var cb: CFTypeRef?
+                if AXUIElementCopyAttributeValue(w, kAXCloseButtonAttribute as CFString, &cb) == .success, let btn = cb {
+                    AXUIElementPerformAction(btn as! AXUIElement, kAXPressAction as CFString)
+                }
+            }
+        }
+    }
+}
+`;
+  spawnSync('/usr/bin/swift', ['-e', swiftCap, stagedRp, autoCapPath], { encoding: 'utf8' });
+  return pathExists(autoCapPath) ? autoCapPath : null;
+}
+
+function finalizeFromImageBuild(ctx, { previewImgPath, previewCaptureMode = null, previewFallbackReason = null }) {
+  const {
+    stagedRp, stagedBlank, output, rp1Out, page, effectiveScale, refSource,
+    traceSpec, rp9Spec, rp9Meta, structureReview, structureReviewPath,
+    structure, artifactDir, assetsDir, specPath, rp9SpecPath, axvgPath, rp9AxvgPath, rp,
+  } = ctx;
+  let stage = 'verify_diff';
+  let visualDiff = null;
+  if (refSource && pathExists(refSource)) {
+    const verifyArgs = [TRACE_PY, 'verify', specPath, '--source', refSource, '-o', artifactDir, '--scale', String(traceSpec.scale ?? effectiveScale)];
+    if (previewImgPath) verifyArgs.push('--preview', previewImgPath);
+    const verifyProc = spawnPythonSync(verifyArgs, { encoding: 'utf8' });
+    const verifyReportPath = join(artifactDir, 'diff-report.json');
+    if (pathExists(verifyReportPath)) {
+      visualDiff = JSON.parse(readFileSync(verifyReportPath, 'utf8'));
+    } else if (verifyProc.stdout) {
+      try { visualDiff = JSON.parse(procStdoutJson(verifyProc.stdout)); } catch {}
+    }
+  }
+
+  stage = 'output';
+  copyFileSync(stagedRp, output, constants.COPYFILE_EXCL);
+  let writtenRp1Source = null;
+  if (rp1Out) {
+    const decomp = spawnPythonSync(['-B', '-c', `
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from rp_decompile import decompile_rp
+res = decompile_rp(sys.argv[2])
+sys.stdout.write(res['dsl'])
+`, SCRIPTS_DIR, output], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+    if (decomp.status !== 0) {
+      throw Object.assign(new Error(`生成 .rp1 源码失败：${decomp.stderr || decomp.stdout || decomp.error?.message}`), { code: 'E_RP1_EMIT_FAILED' });
+    }
+    mkdirSync(dirname(rp1Out), { recursive: true });
+    writeFileSync(rp1Out, decomp.stdout, 'utf8');
+    writtenRp1Source = rp1Out;
+  }
+
+  const outSha256 = sha256Of(output);
+  const nativeWidgets = [...(rp.pages[0]?.widgets ?? []), ...(rp.containedWidgets ?? [])];
+  const childrenItems = rp9Spec.frames?.[0]?.children ?? [];
+  const sourceMap = childrenItems.map((it, idx) => {
+    const itemName = it.name || it.content || `${it.kind}-${idx + 1}`;
+    const matchedNative = nativeWidgets.find(nw => nw.name === itemName || (it.content && nw.text === it.content));
+    return {
+      id: it.id ?? `img_item_${idx + 1}`,
+      name: itemName,
+      kind: it.kind,
+      pageId: 'page_1',
+      pageName: rp.pages[0]?.name ?? page,
+      pointer: `/frames/0/children/${idx}`,
+      native: matchedNative ? [{ record: matchedNative.record ?? rp.pages[0]?.record, id: matchedNative.id }] : [],
+    };
+  });
+  const baselinePath = `${output}.baseline.json`;
+  const baselinePayload = {
+    schemaVersion: 'rp1-baseline/1',
+    originKind: 'image-trace-spec',
+    createdAt: new Date().toISOString(),
+    imagePath: refSource,
+    sourcePath: specPath,
+    sourceSha256: sha256Of(specPath),
+    ...(writtenRp1Source ? { rp1Source: writtenRp1Source } : {}),
+    rp9SpecPath,
+    axvgPath,
+    assetsDir,
+    savedAssets: rp9Meta.savedAssets ?? [],
+    outputRp: output,
+    rpSha256: outSha256,
+    scale: traceSpec.scale ?? effectiveScale,
+    version: 9,
+    pageName: rp.pages[0]?.name ?? page,
+    sourceMap,
+    reviewRegions: rp9Meta.reviewRegions ?? {},
+  };
+  writeFileSync(baselinePath, JSON.stringify(baselinePayload, null, 2) + '\n');
+  unlinkSync(stagedBlank);
+  unlinkSync(stagedRp);
+
+  return {
+    status: 'completed',
+    backend: 'rp9-native-scene',
+    version: 9,
+    output,
+    sha256: outSha256,
+    baseline: baselinePath,
+    ...(writtenRp1Source ? { rp1Source: writtenRp1Source } : {}),
+    page: { name: rp.pages[0]?.name ?? page, record: rp.pages[0]?.record ?? 2, written: rp.counts.widgets },
+    counts: rp.counts,
+    widgetCounts: rp9Meta.widgetCounts ?? {},
+    structureReview: { ...structureReview.summary, report: structureReviewPath, evidence: structureReview.evidence, nativeHierarchyChanged: false },
+    reviewRegions: rp9Meta.reviewRegions ?? {},
+    structure,
+    ...(previewCaptureMode ? { previewCaptureMode } : {}),
+    ...(previewFallbackReason ? { previewFallbackReason } : {}),
+    visualDiff: visualDiff ? {
+      comparisonSource: previewImgPath ? 'axure-preview-and-thin-page' : 'thin-page-render',
+      alignmentMode: previewImgPath ? 'auto_locate_canvas_1to1' : 'logical_1to1',
+      ...visualDiff,
+    } : null,
+    artifacts: {
+      directory: artifactDir,
+      assetsDir,
+      savedAssets: rp9Meta.savedAssets ?? [],
+      image: refSource,
+      spec: specPath,
+      rp9Spec: rp9SpecPath,
+      axvg: axvgPath,
+      rp9Axvg: rp9AxvgPath,
+      ...(writtenRp1Source ? { rp1Source: writtenRp1Source } : {}),
+      baseline: baselinePath,
+      diffImage: visualDiff?.outputs?.compareAndDiff ?? null,
+      hostCompareImage: visualDiff?.outputs?.axurePreviewCompare ?? null,
+    },
+    verification: {
+      recognized: true,
+      structure: true,
+      axureOpened: Boolean(previewCaptureMode === 'axure-gui-window-fallback'),
+      officialHtmlHeadless: Boolean(previewCaptureMode === 'axure-official-html-headless'),
+      guiEdited: false,
+      saveReopened: false,
+      preview: Boolean(previewImgPath),
+    },
+  };
+}
+
+function generateFromImageFailure(error, stage, artifactDir) {
+  const failure = {
+    status: 'failed',
+    stage,
+    code: error.code ?? `E_IMAGE_${stage.toUpperCase()}`,
+    message: error.message,
+    ...(error.diagnostics ? { diagnostics: error.diagnostics } : {}),
+    ...(artifactDir ? {
+      artifacts: {
+        directory: artifactDir,
+        spec: pathExists(join(artifactDir, 'trace.spec.json')) ? join(artifactDir, 'trace.spec.json') : null,
+        axvg: pathExists(join(artifactDir, 'trace.axvg.json')) ? join(artifactDir, 'trace.axvg.json') : null,
+        rp9Spec: pathExists(join(artifactDir, 'trace.rp9.spec.json')) ? join(artifactDir, 'trace.rp9.spec.json') : null,
+      },
+    } : {}),
+  };
+  if (artifactDir && pathExists(artifactDir)) {
+    writeFileSync(join(artifactDir, 'failure.json'), JSON.stringify(failure, null, 2) + '\n');
+  }
+  return failure;
+}
+
+function prepareFromImageBuild({
   image: imageArg,
   spec: specArg,
   output: requestedOutputRaw,
@@ -2246,6 +2464,8 @@ function generateFromImage({
   prefer = 'fail',
   preview = false,
   guiPaste = false,
+  emitRp1 = false,
+  outSource: outSourceRaw,
 }) {
   let stage = 'validation', artifactDir, output;
   try {
@@ -2259,6 +2479,7 @@ function generateFromImage({
     if (pathExists(requestedOutput)) {
       throw Object.assign(new Error(`输出 .rp 已存在，请使用新文件名：${requestedOutput}`), { code: 'E_OUTPUT_EXISTS' });
     }
+    const rp1Out = validateFromImageRp1Out(requestedOutput, outSourceRaw, emitRp1, explicitWorkDir);
     if (!imageArg && !specArg) {
       throw Object.assign(new Error('必须提供本地图片路径 image 或已有分层 spec。'), { code: 'E_INPUT_REQUIRED' });
     }
@@ -2284,12 +2505,14 @@ function generateFromImage({
       const drift = computeSyncStatus(resolvedBaseRp);
       if (drift.nativeChanged && prefer === 'fail') {
         return {
-          status: 'conflict',
-          stage: 'drift_check',
-          code: 'E_NATIVE_DRIFT_PROTECTED',
-          message: '目标 baseRp 存在未合并的原生改稿，拒绝在 prefer=fail 下重建覆盖；请先处理改稿或指定 prefer=source。',
-          baseRp: resolvedBaseRp,
-          syncStatus: drift,
+          done: {
+            status: 'conflict',
+            stage: 'drift_check',
+            code: 'E_NATIVE_DRIFT_PROTECTED',
+            message: '目标 baseRp 存在未合并的原生改稿，拒绝在 prefer=fail 下重建覆盖；请先处理改稿或指定 prefer=source。',
+            baseRp: resolvedBaseRp,
+            syncStatus: drift,
+          },
         };
       }
     }
@@ -2362,22 +2585,26 @@ function generateFromImage({
       stage = 'rp11_paste';
       if (!guiPaste) {
         return {
-          status: 'failed',
-          stage,
-          code: 'E_RP11_GUI_PASTE_REQUIRED',
-          message: 'RP11 原生格式使用 SQLite 单库，不支持离线直接写出二进制 .rp；已在 artifacts 中生成 RP11 专用 .axvg.json 与分层 spec，请在 Axure RP 11 打开目标工程后设置 guiPaste=true 或调用 rp_command({ command: "axvg paste", ... }) 放置。',
-          version: 11,
-          artifacts: { directory: artifactDir, assetsDir, image: imagePath, spec: specPath, axvg: axvgPath },
+          done: {
+            status: 'failed',
+            stage,
+            code: 'E_RP11_GUI_PASTE_REQUIRED',
+            message: 'RP11 原生格式使用 SQLite 单库，不支持离线直接写出二进制 .rp；已在 artifacts 中生成 RP11 专用 .axvg.json 与分层 spec，请在 Axure RP 11 打开目标工程后设置 guiPaste=true 或调用 rp_command({ command: "axvg paste", ... }) 放置。',
+            version: 11,
+            artifacts: { directory: artifactDir, assetsDir, image: imagePath, spec: specPath, axvg: axvgPath },
+          },
         };
       }
       const pasteResult = pasteAxvg(axvgPayload, { version: 11 });
       return {
-        status: 'completed',
-        backend: 'rp11-axvg-gui-paste',
-        version: 11,
-        pasteResult,
-        artifacts: { directory: artifactDir, assetsDir, image: imagePath, spec: specPath, axvg: axvgPath },
-        verification: { recognized: true, structure: false, axureOpened: true, guiEdited: false, saveReopened: false, preview: false },
+        done: {
+          status: 'completed',
+          backend: 'rp11-axvg-gui-paste',
+          version: 11,
+          pasteResult,
+          artifacts: { directory: artifactDir, assetsDir, image: imagePath, spec: specPath, axvg: axvgPath },
+          verification: { recognized: true, structure: false, axureOpened: true, guiEdited: false, saveReopened: false, preview: false },
+        },
       };
     }
 
@@ -2407,178 +2634,71 @@ function generateFromImage({
       throw Object.assign(new Error(`生成的二进制 .rp 结构检查未通过：${JSON.stringify(structure)}`), { code: 'E_STRUCTURE_FAILED' });
     }
 
-    stage = 'verify_diff';
     const refSource = imagePath || (traceSpec.reference && pathExists(traceSpec.reference) ? traceSpec.reference : null);
     const resolvedPreview = typeof preview === 'string' ? resolveInWork(preview, explicitWorkDir) : null;
-    let previewImgPath = resolvedPreview && pathExists(resolvedPreview) ? resolvedPreview : null;
-    if (!previewImgPath && preview === true && process.platform === 'darwin') {
-      const autoCapPath = join(artifactDir, 'host-window-capture.png');
-      const swiftCap = `
-import AppKit
-import ApplicationServices
-let rp = CommandLine.arguments[1]
-let outPng = CommandLine.arguments[2]
-let title = URL(fileURLWithPath: rp).deletingPathExtension().lastPathComponent
-let p = Process()
-p.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-p.arguments = ["-b", "com.axure.AxureRP9", rp]
-try p.run(); p.waitUntilExit()
-var winId: Int? = nil
-for _ in 0..<40 {
-    Thread.sleep(forTimeInterval: 0.25)
-    let all = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] ?? []
-    for w in all {
-        let owner = w[kCGWindowOwnerName as String] as? String ?? ""
-        let name = w[kCGWindowName as String] as? String ?? ""
-        if owner == "Axure RP 9" && name.contains(title) {
-            winId = w[kCGWindowNumber as String] as? Int
-            break
-        }
-    }
-    if winId != nil { break }
-}
-Thread.sleep(forTimeInterval: 0.7)
-if let wid = winId {
-    let cap = Process()
-    cap.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-    cap.arguments = ["-x", "-l", String(wid), outPng]
-    try cap.run(); cap.waitUntilExit()
-}
-if let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == "com.axure.AxureRP9" }) {
-    let axApp = AXUIElementCreateApplication(app.processIdentifier)
-    var v: CFTypeRef?
-    if AXUIElementCopyAttributeValue(axApp, kAXWindowsAttribute as CFString, &v) == .success, let wins = v as? [AXUIElement] {
-        for w in wins {
-            var tv: CFTypeRef?
-            let wTitle = (AXUIElementCopyAttributeValue(w, kAXTitleAttribute as CFString, &tv) == .success ? (tv as? String) : nil) ?? ""
-            if wTitle.contains(title) {
-                var cb: CFTypeRef?
-                if AXUIElementCopyAttributeValue(w, kAXCloseButtonAttribute as CFString, &cb) == .success, let btn = cb {
-                    AXUIElementPerformAction(btn as! AXUIElement, kAXPressAction as CFString)
-                }
-            }
-        }
-    }
-}
-`;
-      spawnSync('/usr/bin/swift', ['-e', swiftCap, stagedRp, autoCapPath], { encoding: 'utf8' });
-      if (pathExists(autoCapPath)) previewImgPath = autoCapPath;
-    }
-    let visualDiff = null;
-    if (refSource && pathExists(refSource)) {
-      const verifyArgs = [TRACE_PY, 'verify', specPath, '--source', refSource, '-o', artifactDir, '--scale', String(traceSpec.scale ?? effectiveScale)];
-      if (previewImgPath) verifyArgs.push('--preview', previewImgPath);
-      const verifyProc = spawnPythonSync(verifyArgs, { encoding: 'utf8' });
-      const verifyReportPath = join(artifactDir, 'diff-report.json');
-      if (pathExists(verifyReportPath)) {
-        visualDiff = JSON.parse(readFileSync(verifyReportPath, 'utf8'));
-      } else if (verifyProc.stdout) {
-        try { visualDiff = JSON.parse(procStdoutJson(verifyProc.stdout)); } catch {}
-      }
-    }
-
-    stage = 'output';
-    copyFileSync(stagedRp, output, constants.COPYFILE_EXCL);
-    const outSha256 = sha256Of(output);
-    const nativeWidgets = [...(rp.pages[0]?.widgets ?? []), ...(rp.containedWidgets ?? [])];
-    const childrenItems = rp9Spec.frames?.[0]?.children ?? [];
-    const sourceMap = childrenItems.map((it, idx) => {
-      const itemName = it.name || it.content || `${it.kind}-${idx + 1}`;
-      const matchedNative = nativeWidgets.find(nw => nw.name === itemName || (it.content && nw.text === it.content));
-      return {
-        id: it.id ?? `img_item_${idx + 1}`,
-        name: itemName,
-        kind: it.kind,
-        pageId: 'page_1',
-        pageName: rp.pages[0]?.name ?? page,
-        pointer: `/frames/0/children/${idx}`,
-        native: matchedNative ? [{ record: matchedNative.record ?? rp.pages[0]?.record, id: matchedNative.id }] : [],
-      };
-    });
-    const baselinePath = `${output}.baseline.json`;
-    const baselinePayload = {
-      schemaVersion: 'rp1-baseline/1',
-      originKind: 'image-trace-spec',
-      createdAt: new Date().toISOString(),
-      imagePath: refSource,
-      sourcePath: specPath,
-      sourceSha256: sha256Of(specPath),
-      rp9SpecPath,
-      axvgPath,
-      assetsDir,
-      savedAssets: rp9Meta.savedAssets ?? [],
-      outputRp: output,
-      rpSha256: outSha256,
-      scale: traceSpec.scale ?? effectiveScale,
-      version: 9,
-      pageName: rp.pages[0]?.name ?? page,
-      sourceMap,
-      reviewRegions: rp9Meta.reviewRegions ?? {},
-    };
-    writeFileSync(baselinePath, JSON.stringify(baselinePayload, null, 2) + '\n');
-    unlinkSync(stagedBlank);
-    unlinkSync(stagedRp);
-
+    const previewImgPath = resolvedPreview && pathExists(resolvedPreview) ? resolvedPreview : null;
     return {
-      status: 'completed',
-      backend: 'rp9-native-scene',
-      version: 9,
-      output,
-      sha256: outSha256,
-      baseline: baselinePath,
-      page: { name: rp.pages[0]?.name ?? page, record: rp.pages[0]?.record ?? 2, written: rp.counts.widgets },
-      counts: rp.counts,
-      widgetCounts: rp9Meta.widgetCounts ?? {},
-      structureReview: { ...structureReview.summary, report: structureReviewPath, evidence: structureReview.evidence, nativeHierarchyChanged: false },
-      reviewRegions: rp9Meta.reviewRegions ?? {},
-      structure,
-      visualDiff: visualDiff ? {
-        comparisonSource: previewImgPath ? 'axure-preview-and-thin-page' : 'thin-page-render',
-        alignmentMode: previewImgPath ? 'auto_locate_canvas_1to1' : 'logical_1to1',
-        ...visualDiff,
-      } : null,
-      artifacts: {
-        directory: artifactDir,
-        assetsDir,
-        savedAssets: rp9Meta.savedAssets ?? [],
-        image: refSource,
-        spec: specPath,
-        rp9Spec: rp9SpecPath,
-        axvg: axvgPath,
-        rp9Axvg: rp9AxvgPath,
-        baseline: baselinePath,
-        diffImage: visualDiff?.outputs?.compareAndDiff ?? null,
-        hostCompareImage: visualDiff?.outputs?.axurePreviewCompare ?? null,
-      },
-      verification: {
-        recognized: true,
-        structure: true,
-        axureOpened: Boolean(previewImgPath),
-        guiEdited: false,
-        saveReopened: false,
-        preview: Boolean(previewImgPath),
+      ctx: {
+        stagedRp, stagedBlank, output, rp1Out, page, effectiveScale, refSource, previewImgPath,
+        traceSpec, rp9Spec, rp9Meta, structureReview, structureReviewPath,
+        structure, artifactDir, assetsDir, specPath, rp9SpecPath, axvgPath, rp9AxvgPath, rp,
       },
     };
   } catch (error) {
-    const failure = {
-      status: 'failed',
-      stage,
-      code: error.code ?? `E_IMAGE_${stage.toUpperCase()}`,
-      message: error.message,
-      ...(error.diagnostics ? { diagnostics: error.diagnostics } : {}),
-      ...(artifactDir ? {
-        artifacts: {
-          directory: artifactDir,
-          spec: pathExists(join(artifactDir, 'trace.spec.json')) ? join(artifactDir, 'trace.spec.json') : null,
-          axvg: pathExists(join(artifactDir, 'trace.axvg.json')) ? join(artifactDir, 'trace.axvg.json') : null,
-          rp9Spec: pathExists(join(artifactDir, 'trace.rp9.spec.json')) ? join(artifactDir, 'trace.rp9.spec.json') : null,
-        },
-      } : {}),
-    };
-    if (artifactDir && pathExists(artifactDir)) {
-      writeFileSync(join(artifactDir, 'failure.json'), JSON.stringify(failure, null, 2) + '\n');
+    return { done: generateFromImageFailure(error, stage, artifactDir) };
+  }
+}
+
+function generateFromImage(options = {}) {
+  const prep = prepareFromImageBuild(options);
+  if (prep.done) return prep.done;
+  try {
+    let previewImgPath = prep.ctx.previewImgPath;
+    let previewCaptureMode = previewImgPath ? 'explicit-preview-file' : null;
+    if (!previewImgPath && options.preview === true && process.platform === 'darwin') {
+      previewImgPath = captureMacOsAxureWindow(prep.ctx.stagedRp, join(prep.ctx.artifactDir, 'host-window-capture.png'));
+      if (previewImgPath) previewCaptureMode = 'axure-gui-window-fallback';
     }
-    return failure;
+    return finalizeFromImageBuild(prep.ctx, { previewImgPath, previewCaptureMode });
+  } catch (error) {
+    return generateFromImageFailure(error, 'output', prep.ctx.artifactDir);
+  }
+}
+
+async function generateFromImageAsync(options = {}) {
+  const prep = prepareFromImageBuild(options);
+  if (prep.done) return prep.done;
+  try {
+    let previewImgPath = prep.ctx.previewImgPath;
+    let previewCaptureMode = previewImgPath ? 'explicit-preview-file' : null;
+    let previewFallbackReason = null;
+    if (!previewImgPath && options.preview === true) {
+      const htmlDir = join(prep.ctx.artifactDir, 'official-html');
+      const autoCapPath = join(prep.ctx.artifactDir, 'headless-official-preview.png');
+      const exp = await exportPrototype({ rp: prep.ctx.stagedRp, output: htmlDir, cwd: prep.ctx.artifactDir });
+      if (exp.status === 'completed') {
+        try {
+          const frame0 = prep.ctx.traceSpec?.frames?.[0];
+          const vp = frame0?.w && frame0?.h ? { width: Math.round(frame0.w), height: Math.round(frame0.h), dpr: 1 } : undefined;
+          await captureOfficialHtmlScreenshot({ htmlDir: exp.output, outPng: autoCapPath, viewport: vp });
+          if (pathExists(autoCapPath)) {
+            previewImgPath = autoCapPath;
+            previewCaptureMode = 'axure-official-html-headless';
+          }
+        } catch (err) {
+          previewFallbackReason = err.message;
+        }
+      } else {
+        previewFallbackReason = exp.diagnostics?.[0]?.message || 'official html export unavailable';
+      }
+      if (!previewImgPath && process.platform === 'darwin') {
+        previewImgPath = captureMacOsAxureWindow(prep.ctx.stagedRp, join(prep.ctx.artifactDir, 'host-window-capture.png'));
+        if (previewImgPath) previewCaptureMode = 'axure-gui-window-fallback';
+      }
+    }
+    return finalizeFromImageBuild(prep.ctx, { previewImgPath, previewCaptureMode, previewFallbackReason });
+  } catch (error) {
+    return generateFromImageFailure(error, 'output', prep.ctx.artifactDir);
   }
 }
 
@@ -2924,7 +3044,7 @@ const sessionHandlers = {
     return runCommandPayload(cmd, commandInput, { cwd: cwd ?? projectDir });
   },
   sync_prototype: syncPrototype,
-  generate_from_image: generateFromImage,
+  generate_from_image: generateFromImageAsync,
 };
 
 // ---- 意图级工具的 MCP 定义（校验复用本文件 validateInput）----
@@ -3030,8 +3150,8 @@ export const sessionTools = [
         variables: { oneOf: [{ type: 'object' }, { type: 'array', items: { type: 'object' } }] },
         pages: { type: 'array', minItems: 1, items: { type: 'object', properties: { id: { type: 'string', minLength: 1 }, name: { type: 'string' }, domain: { type: 'string', enum: ['mobile', 'web', 'doc', 'test'] }, device: { type: 'string' }, shell: { oneOf: [{ type: 'boolean' }, { type: 'string' }] }, canvas: { oneOf: [{ type: 'array', minItems: 2, maxItems: 2, items: { type: 'number' } }, { type: 'object' }] }, root: { type: 'object' }, master: { type: 'string' }, slot: { type: 'object' } }, required: ['id'] } },
       }, required: ['pages'] }] },
-      source: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径（.rp1 或 .json），与 spec/rp1 二选一（别名 sourcePath）。' },
-      sourcePath: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径（同 source）。' },
+      source: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径（.rp1 或 .json）或本地 .html / http(s) URL（自动用无头 Chrome 提取 DOM/样式/表单/图片并生成可编辑 .rp 与伴随 .rp1）；与 spec/rp1 二选一（别名 sourcePath）。' },
+      sourcePath: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径或 HTML/URL（同 source）。' },
       output: { type: 'string', minLength: 1, description: '输出 .rp 路径（绝对路径，或基于 cwd/projectDir/当前工作目录解析的相对路径；传 "auto" 时按源码或工作目录自动生成不重名 .rp 路径）。' },
       cwd: { type: 'string', minLength: 1, description: '可选：解析相对路径与 output="auto" 时的本地工作目录（别名 projectDir）。' },
       projectDir: { type: 'string', minLength: 1, description: '可选：解析相对路径时的本地工作目录（同 cwd）。' },
@@ -3046,52 +3166,135 @@ export const sessionTools = [
       baseRp: { type: 'string', minLength: 1, description: '可选：已有 .rp 路径；若检测到原生改稿则自动走三方合并而非静默覆盖。' },
       prefer: { type: 'string', enum: ['fail', 'source', 'native'], description: '当 baseRp 有原生改稿且出现同属性冲突时的策略，默认 fail。' },
       resolutions: { type: 'object', description: '可选：按冲突键（logicalId:prop 或 pointer:prop）指定 source/native/{value}。' },
-      verify: { type: 'boolean', description: 'true 时生成完成后自动调用本机 Axure 导出官方 HTML 并在无头 Chrome 中运行内联 verify: 或 verifySteps 行为断言。' },
+      verify: { type: 'boolean', description: 'true 时生成完成后自动运行无头 Chrome 行为验收（有本机 Axure 时优先导出官方 HTML，跨平台/无 Axure 或 verifyEngine="studio-html" 时走 Studio 离线 HTML 引擎）。' },
+      verifyEngine: { type: 'string', enum: ['auto', 'official', 'studio-html'], description: '配合 verify:true 使用：验证引擎（默认 auto）。' },
       verifySteps: { type: 'array', minItems: 0, maxItems: 60, description: '可选：配合 verify:true 传入的行为验收步骤；省略时自动读取 .rp1 中的 verify: 区块。' },
       verifyViewport: { type: 'object', properties: { width: { type: 'integer', minimum: 320, maximum: 3840 }, height: { type: 'integer', minimum: 320, maximum: 2160 }, dpr: { type: 'number', minimum: 1, maximum: 3 } }, additionalProperties: false },
       virtualClock: { type: 'boolean', description: '配合 verify:true 使用：加速 >=200ms 定时器，使 advanceTime 在毫秒内完成轮播计时验收。' },
       includeStoryboard: { type: 'boolean', description: '配合 verify:true 使用：在回包中附带每步交互与状态判定的横向关键帧拼图 PNG。' },
     }, required: ['output'], additionalProperties: false },
-    handler: ({ includeImage, verify, verifySteps, verifyViewport, virtualClock, includeStoryboard, ...input }) => {
-      const result = generatePrototype(input);
-      if (result.status !== 'completed') return result;
-      const images = [];
-      if (includeImage) {
-        const path = result.contactSheet;
-        try {
-          if (path && lstatSync(path).size <= 1024 * 1024) {
-            images.push({ mimeType: 'image/png', data: readFileSync(path).toString('base64') });
-            result.previewImage = 'attached';
-          } else {
+    handler: ({ includeImage, verify, verifyEngine, verifySteps, verifyViewport, virtualClock, includeStoryboard, ...input }) => {
+      const rawHtmlCandidate = input.source ?? input.sourcePath;
+      const htmlMode = isHtmlInput(rawHtmlCandidate);
+      if (!verify && !htmlMode) {
+        const result = generatePrototype(input);
+        if (result.status !== 'completed') return result;
+        const images = [];
+        if (includeImage) {
+          const path = result.contactSheet;
+          try {
+            if (path && lstatSync(path).size <= 1024 * 1024) {
+              images.push({ mimeType: 'image/png', data: readFileSync(path).toString('base64') });
+              result.previewImage = 'attached';
+            } else {
+              result.previewImage = 'use-preview-paths';
+            }
+          } catch {
             result.previewImage = 'use-preview-paths';
           }
-        } catch {
-          result.previewImage = 'use-preview-paths';
         }
-      }
-      if (!verify) {
         return images.length ? { ...result, mcpImages: images } : result;
       }
       return (async () => {
-        const bv = await verifyOfficialPreview({
-          rp: result.output,
-          source: result.source ?? input.source ?? input.sourcePath,
-          cwd: input.cwd,
-          projectDir: input.projectDir,
-          steps: verifySteps,
-          viewport: verifyViewport,
-          virtualClock,
-          includeStoryboard,
-        }, { runWorkflow, exportHtml: exportPrototype });
-        const { mcpImages: verifyImgs, ...bvSummary } = bv;
-        const allImgs = [...images, ...(verifyImgs ?? [])].slice(0, 4);
-        return {
-          ...result,
-          status: bv.status === 'completed' ? 'completed' : 'failed',
-          behaviorVerification: bvSummary,
-          ...(bv.status !== 'completed' ? { diagnostics: bv.diagnostics } : {}),
-          ...(allImgs.length ? { mcpImages: allImgs } : {}),
-        };
+        let stageDir = null;
+        let htmlImportSummary = null;
+        let genInput = input;
+        let importedRp1Text = null;
+        let importedAssets = [];
+        try {
+          if (htmlMode) {
+            const workDir = resolveWorkDir(input.cwd ?? input.projectDir);
+            const trimmed = String(rawHtmlCandidate).trim();
+            const htmlTarget = /^(?:https?|file):\/\//i.test(trimmed)
+              ? trimmed
+              : (isAbsolute(trimmed) ? resolve(trimmed) : resolve(workDir, trimmed));
+            if (!/^https?:\/\//i.test(htmlTarget)) assertNotProtected(htmlTarget);
+            stageDir = mkdtempSync(join(workDir, '.zee-html-gen-'));
+            const stageAssetsDir = join(stageDir, 'assets');
+            const imported = await importHtmlToRp1Spec(htmlTarget, {
+              cwd: workDir,
+              assetsDir: stageAssetsDir,
+              viewport: verifyViewport || null,
+            });
+            htmlImportSummary = imported.summary;
+            importedRp1Text = imported.rp1Text;
+            importedAssets = imported.assets || [];
+            const stagedRp1 = join(stageDir, 'imported.rp1');
+            writeFileSync(stagedRp1, imported.rp1Text, 'utf8');
+            genInput = { ...input, source: stagedRp1, sourcePath: undefined };
+          }
+
+          const result = generatePrototype(genInput);
+          if (result.status !== 'completed') return result;
+
+          if (htmlMode) {
+            const companionRp1 = result.output.replace(/\.rp$/i, '.rp1');
+            if (stageDir && existsSync(join(stageDir, 'assets')) && importedAssets.length) {
+              const outAssetsDir = join(dirname(result.output), 'assets');
+              assertWritable(join(outAssetsDir, '.keep'));
+              mkdirSync(outAssetsDir, { recursive: true });
+              for (const relAsset of importedAssets) {
+                const srcA = join(stageDir, relAsset);
+                const dstA = join(dirname(result.output), relAsset);
+                if (existsSync(srcA) && !existsSync(dstA)) copyFileSync(srcA, dstA);
+              }
+            }
+            if (!pathExists(companionRp1) || input.overwrite) {
+              assertWritable(companionRp1);
+              writeFileSync(companionRp1, importedRp1Text, 'utf8');
+              result.source = companionRp1;
+              if (result.baseline && pathExists(result.baseline)) {
+                try {
+                  const bm = JSON.parse(readFileSync(result.baseline, 'utf8'));
+                  bm.sourcePath = companionRp1;
+                  bm.sourceSha256 = sha256Of(companionRp1);
+                  writeFileSync(result.baseline, JSON.stringify(bm, null, 2) + '\n');
+                } catch {}
+              }
+            }
+            if (htmlImportSummary) result.htmlImport = htmlImportSummary;
+          }
+
+          const images = [];
+          if (includeImage) {
+            const path = result.contactSheet;
+            try {
+              if (path && lstatSync(path).size <= 1024 * 1024) {
+                images.push({ mimeType: 'image/png', data: readFileSync(path).toString('base64') });
+                result.previewImage = 'attached';
+              } else {
+                result.previewImage = 'use-preview-paths';
+              }
+            } catch {
+              result.previewImage = 'use-preview-paths';
+            }
+          }
+          if (!verify) {
+            return images.length ? { ...result, mcpImages: images } : result;
+          }
+          const bv = await verifyOfficialPreview({
+            rp: result.output,
+            source: result.source ?? genInput.source ?? genInput.sourcePath,
+            cwd: input.cwd,
+            projectDir: input.projectDir,
+            engine: verifyEngine,
+            steps: verifySteps,
+            viewport: verifyViewport,
+            virtualClock,
+            includeStoryboard,
+          }, { runWorkflow, exportHtml: exportPrototype });
+          const { mcpImages: verifyImgs, ...bvSummary } = bv;
+          const allImgs = [...images, ...(verifyImgs ?? [])].slice(0, 4);
+          return {
+            ...result,
+            status: bv.status === 'completed' ? 'completed' : 'failed',
+            behaviorVerification: bvSummary,
+            ...(bv.status !== 'completed' ? { diagnostics: bv.diagnostics } : {}),
+            ...(allImgs.length ? { mcpImages: allImgs } : {}),
+          };
+        } finally {
+          if (stageDir) rmSync(stageDir, { recursive: true, force: true });
+        }
       })();
     },
   },
@@ -3149,7 +3352,9 @@ export const sessionTools = [
       },
       baseRp: { type: 'string', minLength: 1, description: '可选：上次生成的 .rp 路径；若检测到已有原生改稿且 prefer=fail，则拒绝静默覆盖。' },
       prefer: { type: 'string', enum: ['fail', 'source', 'native'], description: '当 baseRp 有原生改稿时的保护策略，默认 fail。' },
-      preview: { oneOf: [{ type: 'boolean' }, { type: 'string', minLength: 1 }], description: '可选：传入真实 Axure 预览截图路径（或布尔值）进行宿主预览与薄页/原图的像素差分。' },
+      preview: { oneOf: [{ type: 'boolean' }, { type: 'string', minLength: 1 }], description: '可选：传入真实 Axure 预览截图路径，或 true（优先走无弹窗本机 Axure 官方 HTML + 无头 Chrome 截取 1:1 真实渲染做差分）。' },
+      emitRp1: { type: 'boolean', description: '可选：true 时同步将重建后的可编辑页面导出为伴随 .rp1 源码（默认 <output 去.rp>.rp1）。' },
+      outSource: { type: 'string', minLength: 1, description: '可选：显式指定输出的 .rp1 源码路径（传此项时自动生成 .rp1，禁止覆盖已有文件）。' },
       guiPaste: { type: 'boolean', description: '当 version=11 时是否立即执行 Axure RP 11 GUI 粘贴，默认 false。' },
     }, required: ['output'], additionalProperties: false },
     handler: sessionHandlers.generate_from_image,

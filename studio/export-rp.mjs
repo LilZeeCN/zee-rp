@@ -11,7 +11,7 @@ import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
 import {nodePropertyCapability,STUDIO_SOURCE_ONLY_MACROS} from './node-capabilities.mjs';
 import { normalizeVectorNodeSpec, buildRp9ControlPointsForSubpaths } from './vector-paths.mjs';
 import { buildInteractiveRp } from '../scripts/proto.mjs';
-import { pythonInvocation } from '../scripts/python.mjs';
+import { pythonInvocation, spawnPythonSync } from '../scripts/python.mjs';
 import { setWidgetRichText } from '../scripts/set-widget-richtext.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
 import { readRecords, encodeRecord, replaceRecord } from '../scripts/rp-records.mjs';
@@ -1432,6 +1432,156 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
   return decorateExportNode(out, node);
 }
 
+function prepareStudioExportPages(doc, { projectDir = null } = {}) {
+  const snapshotDoc = structuredClone(doc);
+  const scene = resolveDocumentScene(snapshotDoc, { projectDir });
+  const exportPages = scene.pages.map(pg => ({ ...pg, rootTree: structuredClone(pg.rootTree) }));
+  const inlineDatasets = {};
+  const inlineOwners = {};
+  const collectInline = (node, pageId) => {
+    if (node.type === 'repeater') {
+      const name = repeaterDatasetName(node);
+      if (!snapshotDoc.datasets?.[name]) {
+        const inline = repeaterInlineRows(node);
+        const rows = inline.length ? inline : (node.rows || []);
+        if (inlineDatasets[name] && canonicalJson(inlineDatasets[name].rows) !== canonicalJson(rows)) {
+          throw Object.assign(
+            new Error(`内联列表数据名称冲突：${inlineOwners[name]}与${pageId}/${node.id}。请为不同列表声明不同dataset/source名称。`),
+            { code: 'E_EXPORT_DATASET_COLLISION', nodeId: `${pageId}/${node.id}`, field: 'dataset' }
+          );
+        }
+        inlineDatasets[name] = { rows: structuredClone(rows) };
+        inlineOwners[name] = `${pageId}/${node.id}`;
+      }
+    }
+    for (const child of node.children || []) collectInline(child, pageId);
+    for (const state of node.states || []) if (state.root) collectInline(state.root, pageId);
+    if (node.template) collectInline(node.template, pageId);
+  };
+  for (const page of exportPages) collectInline(page.rootTree, page.id);
+  return { snapshotDoc, scene, exportPages, inlineDatasets };
+}
+
+function assembleStudioRp1Spec(snapshotDoc, exportPages, inlineDatasets) {
+  const compatEntries = [];
+  const resolvedPages = exportPages.map(pgScene => {
+    const datasetToRepeaterId = new Map();
+    const repeaterKeyById = new Map();
+    const datasetRowsByName = new Map();
+    let defaultRepeaterId = null;
+    const scanRepeaters = nd => {
+      if (!nd || typeof nd !== 'object') return;
+      if (nd.type === 'repeater') {
+        const dsName = repeaterDatasetName(nd);
+        if (!datasetToRepeaterId.has(dsName)) datasetToRepeaterId.set(dsName, nd.id);
+        repeaterKeyById.set(nd.id, nd.key || 'id');
+        if (!defaultRepeaterId) defaultRepeaterId = nd.id;
+        if (!datasetRowsByName.has(dsName)) {
+          const declared = snapshotDoc.datasets?.[dsName];
+          const inline = repeaterInlineRows(nd);
+          const rows = Array.isArray(declared) ? declared : (declared?.rows || inline);
+          datasetRowsByName.set(dsName, rows);
+        }
+      }
+      for (const ch of nd.children || []) scanRepeaters(ch);
+      for (const st of nd.states || []) if (st.root) scanRepeaters(st.root);
+    };
+    scanRepeaters(pgScene.rootTree);
+    const exportCtx = {
+      datasetToRepeaterId,
+      repeaterKeyById,
+      defaultRepeaterId,
+      datasetRowsByName,
+      palette: { ...(snapshotDoc.palette || {}), ...(snapshotDoc.tokens?.colors || {}) },
+    };
+    const isPhoneShell = pgScene.rootTree?.type === 'phone-shell';
+    return {
+      id: pgScene.id,
+      name: pgScene.name,
+      ...(pgScene.device ? { device: pgScene.device } : {}),
+      ...(isPhoneShell ? {} : { canvas: { w: pgScene.board.screenW, h: pgScene.board.screenH } }),
+      root: resolvedTreeToRp1Node(pgScene.rootTree, pgScene.id, compatEntries, { exportCtx }),
+    };
+  });
+
+  const cleanPalette = {};
+  for (const [k, v] of Object.entries(snapshotDoc.palette || snapshotDoc.tokens?.colors || {})) {
+    if (typeof v === 'string' && /^#[0-9A-Fa-f]{6}/.test(v)) {
+      cleanPalette[k] = v.slice(0, 7);
+    }
+  }
+
+  const cleanDatasets = {};
+  for (const [dsName, dsVal] of Object.entries({ ...inlineDatasets, ...(snapshotDoc.datasets || {}) })) {
+    const rawRows = Array.isArray(dsVal) ? dsVal : (dsVal?.rows || []);
+    if (!rawRows.length) continue; // compiler cannot infer a model for empty rows; emitting one fails compile
+    cleanDatasets[dsName] = {
+      rows: rawRows.map(r => {
+        const rowOut = {};
+        for (const [rk, rv] of Object.entries(r || {})) {
+          if (!rk.startsWith('_')) rowOut[rk] = rv;
+        }
+        return rowOut;
+      }),
+    };
+  }
+
+  const RP1_THEMES = new Set(['enterprise-light', 'modern-dark', 'cobalt-pro', 'mobile-lowfi', 'mobile-hifi', 'aurora-glass', 'editorial-warm', 'cyber-neon']);
+  const exportSpec = {
+    language: 'rp/1',
+    target: snapshotDoc.target || 9,
+    name: snapshotDoc.name,
+    domain: ['mobile', 'web', 'doc', 'test'].includes(snapshotDoc.domain) ? snapshotDoc.domain : 'mobile',
+    theme: RP1_THEMES.has(snapshotDoc.theme) ? snapshotDoc.theme : 'mobile-hifi',
+    palette: cleanPalette,
+    ...(Object.keys(snapshotDoc.variables || {}).length ? { variables: structuredClone(snapshotDoc.variables) } : {}),
+    ...(Object.keys(cleanDatasets).length ? { datasets: cleanDatasets } : {}),
+    pages: resolvedPages,
+  };
+  return { compatEntries, cleanPalette, exportSpec };
+}
+
+export function buildStudioRp1Spec(doc, { projectDir = null } = {}) {
+  const { snapshotDoc, scene, exportPages, inlineDatasets } = prepareStudioExportPages(doc, { projectDir });
+  const { compatEntries, cleanPalette, exportSpec } = assembleStudioRp1Spec(snapshotDoc, exportPages, inlineDatasets);
+  return { snapshotDoc, scene, exportPages, compatEntries, cleanPalette, exportSpec };
+}
+
+export async function exportStudioDocumentToRp1(doc, { projectDir = null, outRp1Path = null } = {}) {
+  const absOutRp1 = outRp1Path ? resolve(outRp1Path) : null;
+  if (absOutRp1) assertNotProtected(absOutRp1);
+  const { snapshotDoc, exportSpec, compatEntries } = buildStudioRp1Spec(doc, { projectDir });
+  const proc = spawnPythonSync(['-B', '-c', `
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from rp_dsl import spec_to_dsl
+spec = json.loads(sys.stdin.read())
+sys.stdout.write(spec_to_dsl(spec))
+`, join(ROOT, 'scripts')], {
+    input: JSON.stringify(exportSpec),
+    encoding: 'utf8',
+    maxBuffer: 32 * 1024 * 1024,
+  });
+  if (proc.status !== 0) {
+    throw Object.assign(new Error(`Studio 导出 .rp1 失败：${proc.stderr || proc.stdout || proc.error?.message}`), { code: 'E_EXPORT_RP1_FAILED' });
+  }
+  const rp1Text = proc.stdout;
+  if (absOutRp1) {
+    mkdirSync(dirname(absOutRp1), { recursive: true });
+    writeFileSync(absOutRp1, rp1Text, 'utf8');
+  }
+  return {
+    ok: true,
+    format: 'rp1',
+    outRp1Path: absOutRp1,
+    rp1Text,
+    pageCount: exportSpec.pages.length,
+    revision: snapshotDoc.revision,
+    contentHash: snapshotDoc.contentHash,
+    compatSummary: { entriesCount: compatEntries.length },
+  };
+}
+
 export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPath, outReportPath = null } = {}) {
   if (!outRpPath) {
     throw Object.assign(new Error('outRpPath is required'), { code: 'E_EXPORT_PATH_REQUIRED' });
@@ -1441,103 +1591,12 @@ export async function exportStudioDocumentToRp(doc, { projectDir = null, outRpPa
   mkdirSync(dirname(absOutRp), { recursive: true });
 
   // Lock snapshot of document at current revision
-  const snapshotDoc = structuredClone(doc);
-  const scene = resolveDocumentScene(snapshotDoc, { projectDir });
+  const { snapshotDoc, scene, exportPages, inlineDatasets } = prepareStudioExportPages(doc, { projectDir });
 
   const workDir = mkdtempSync(join(tmpdir(), 'zee-studio-export-'));
   try {
-    const exportPages = scene.pages.map(pg => ({ ...pg, rootTree: structuredClone(pg.rootTree) }));
-    const inlineDatasets={},inlineOwners={};
-    const collectInline=(node,pageId)=>{
-      if(node.type==='repeater'){
-        const name=repeaterDatasetName(node);
-        if(!snapshotDoc.datasets?.[name]){
-          const inline=repeaterInlineRows(node);
-          const rows=inline.length?inline:(node.rows||[]);
-          if(inlineDatasets[name]&&canonicalJson(inlineDatasets[name].rows)!==canonicalJson(rows))throw Object.assign(new Error(`内联列表数据名称冲突：${inlineOwners[name]}与${pageId}/${node.id}。请为不同列表声明不同dataset/source名称。`),{code:'E_EXPORT_DATASET_COLLISION',nodeId:`${pageId}/${node.id}`,field:'dataset'});
-          inlineDatasets[name]={rows:structuredClone(rows)};
-          inlineOwners[name]=`${pageId}/${node.id}`;
-        }
-      }
-      for(const child of node.children||[])collectInline(child,pageId);for(const state of node.states||[])if(state.root)collectInline(state.root,pageId);if(node.template)collectInline(node.template,pageId);
-    };
-    for(const page of exportPages)collectInline(page.rootTree,page.id);
     const effectAssets = await rasterizeStudioPaint(exportPages, { workDir, projectDir, colors: snapshotDoc.tokens?.colors || snapshotDoc.palette || {} });
-    const compatEntries = [];
-    const resolvedPages = exportPages.map(pgScene => {
-      const datasetToRepeaterId = new Map();
-      const repeaterKeyById = new Map();
-      const datasetRowsByName = new Map();
-      let defaultRepeaterId = null;
-      const scanRepeaters = nd => {
-        if (!nd || typeof nd !== 'object') return;
-        if (nd.type === 'repeater') {
-          const dsName = repeaterDatasetName(nd);
-          if (!datasetToRepeaterId.has(dsName)) datasetToRepeaterId.set(dsName, nd.id);
-          repeaterKeyById.set(nd.id, nd.key || 'id');
-          if (!defaultRepeaterId) defaultRepeaterId = nd.id;
-          if (!datasetRowsByName.has(dsName)) {
-            const declared = snapshotDoc.datasets?.[dsName];
-            const inline = repeaterInlineRows(nd);
-            const rows = Array.isArray(declared) ? declared : (declared?.rows || inline);
-            datasetRowsByName.set(dsName, rows);
-          }
-        }
-        for (const ch of nd.children || []) scanRepeaters(ch);
-        for (const st of nd.states || []) if (st.root) scanRepeaters(st.root);
-      };
-      scanRepeaters(pgScene.rootTree);
-      const exportCtx = {
-        datasetToRepeaterId,
-        repeaterKeyById,
-        defaultRepeaterId,
-        datasetRowsByName,
-        palette: { ...(snapshotDoc.palette || {}), ...(snapshotDoc.tokens?.colors || {}) },
-      };
-      const isPhoneShell = pgScene.rootTree?.type === 'phone-shell';
-      return {
-        id: pgScene.id,
-        name: pgScene.name,
-        ...(pgScene.device ? { device: pgScene.device } : {}),
-        ...(isPhoneShell ? {} : { canvas: { w: pgScene.board.screenW, h: pgScene.board.screenH } }),
-        root: resolvedTreeToRp1Node(pgScene.rootTree, pgScene.id, compatEntries, { exportCtx }),
-      };
-    });
-
-    const cleanPalette = {};
-    for (const [k, v] of Object.entries(snapshotDoc.palette || snapshotDoc.tokens?.colors || {})) {
-      if (typeof v === 'string' && /^#[0-9A-Fa-f]{6}/.test(v)) {
-        cleanPalette[k] = v.slice(0, 7);
-      }
-    }
-
-    const cleanDatasets = {};
-    for (const [dsName, dsVal] of Object.entries({...inlineDatasets,...(snapshotDoc.datasets || {})})) {
-      const rawRows = Array.isArray(dsVal) ? dsVal : (dsVal?.rows || []);
-      if (!rawRows.length) continue; // compiler cannot infer a model for empty rows; emitting one fails compile
-      cleanDatasets[dsName] = {
-        rows: rawRows.map(r => {
-          const rowOut = {};
-          for (const [rk, rv] of Object.entries(r || {})) {
-            if (!rk.startsWith('_')) rowOut[rk] = rv;
-          }
-          return rowOut;
-        }),
-      };
-    }
-
-    const RP1_THEMES = new Set(['enterprise-light', 'modern-dark', 'cobalt-pro', 'mobile-lowfi', 'mobile-hifi', 'aurora-glass', 'editorial-warm', 'cyber-neon']);
-    const exportSpec = {
-      language: 'rp/1',
-      target: snapshotDoc.target || 9,
-      name: snapshotDoc.name,
-      domain: ['mobile', 'web', 'doc', 'test'].includes(snapshotDoc.domain) ? snapshotDoc.domain : 'mobile',
-      theme: RP1_THEMES.has(snapshotDoc.theme) ? snapshotDoc.theme : 'mobile-hifi',
-      palette: cleanPalette,
-      ...(Object.keys(snapshotDoc.variables || {}).length ? { variables: structuredClone(snapshotDoc.variables) } : {}),
-      ...(Object.keys(cleanDatasets).length ? { datasets: cleanDatasets } : {}),
-      pages: resolvedPages,
-    };
+    const { compatEntries, cleanPalette, exportSpec } = assembleStudioRp1Spec(snapshotDoc, exportPages, inlineDatasets);
     const crossPageTextState = preserveCrossPageText(exportSpec);
 
     // Copy project assets into workDir/assets so proto.py compile can package them

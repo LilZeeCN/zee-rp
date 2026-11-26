@@ -104,3 +104,95 @@ for (const [name, fn] of checks) {
   try { rmSync(dir, { recursive: true, force: true }); } catch {}
 }
 });
+
+test('修复计划 apply:true 单事务原子自愈、乐观锁与可撤销回滚', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-fixplan-apply-'));
+  try {
+    const open = await studioHandlers.studio_open_project({ projectDir: dir, name: '自愈原子应用', domain: 'web', port: 0 });
+    const built = await studioHandlers.studio_apply_commands({
+      projectDir: dir,
+      baseRevision: open.appliedRevision,
+      idempotencyKey: 'fix-apply-seed',
+      commands: [
+        { type: 'addNode', pageId: 'home', node: { id: 'r1', type: 'repeater', x: 40, y: 47, w: 400, h: 200, rowHeight: 40, rows: [{ id: '1' }] } },
+        { type: 'addNode', pageId: 'home', node: { id: 't1', type: 'label', text: '季度复盘', x: 40, y: 300, w: 500, h: 232, fontSize: 24, fontWeight: 700, color: '#111827' } },
+      ],
+    });
+    assert.equal(built.ok, true);
+
+    const stale = await studioHandlers.studio_design({
+      projectDir: dir,
+      action: 'fix_plan',
+      pageId: 'home',
+      apply: true,
+      baseRevision: Math.max(0, built.appliedRevision - 1),
+      idempotencyKey: 'fix-apply-stale',
+    });
+    assert.equal(stale.ok, false);
+    assert.equal(stale.code, 'E_STALE_REVISION');
+
+    const res = await studioHandlers.studio_design({
+      projectDir: dir,
+      action: 'fix_plan',
+      pageId: 'home',
+      apply: true,
+      baseRevision: built.appliedRevision,
+      idempotencyKey: 'fix-apply-once',
+    });
+    assert.equal(res.ok, true);
+    assert.equal(res.applied, true);
+    assert.equal(res.appliedRevision, built.appliedRevision + 1);
+    assert.ok(res.actualAfter.blocking.length < res.projected.before.blocking.length);
+
+    const replay = await studioHandlers.studio_design({
+      projectDir: dir,
+      action: 'fix_plan',
+      pageId: 'home',
+      apply: true,
+      baseRevision: built.appliedRevision,
+      idempotencyKey: 'fix-apply-once',
+    });
+    assert.equal(replay.ok, true);
+    assert.equal(replay.idempotentReplay, true);
+    assert.equal(replay.appliedRevision, res.appliedRevision);
+
+    const undone = await studioHandlers.studio_history({ projectDir: dir, action: 'undo', expectedRevision: res.appliedRevision });
+    assert.equal(undone.ok, true);
+    assert.equal(undone.appliedRevision, res.appliedRevision + 1);
+  } finally {
+    await closeInProcessStudioServer();
+    try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+});
+
+test('修复计划 apply:true 在无可确定性修复命令时跳过空事务', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'zee-fixplan-noop-'));
+  try {
+    const open = await studioHandlers.studio_open_project({ projectDir: dir, name: '无需修复', domain: 'web', port: 0 });
+    const built = await studioHandlers.studio_apply_commands({
+      projectDir: dir,
+      baseRevision: open.appliedRevision,
+      idempotencyKey: 'fix-clean-seed',
+      commands: [
+        { type: 'addNode', pageId: 'home', node: { id: 'h1', type: 'label', text: '规范标题', x: 40, y: 40, w: 320, h: 40, fontSize: 24, fontWeight: 700, color: '#111827' } },
+        { type: 'addNode', pageId: 'home', node: { id: 'btn1', type: 'button', text: '主要操作', role: 'primary-action', x: 40, y: 96, w: 140, h: 44, fill: '#2563EB', color: '#FFFFFF', fontSize: 16 } },
+      ],
+    });
+    assert.equal(built.ok, true);
+    const emptySkip = await studioHandlers.studio_design({
+      projectDir: dir,
+      action: 'fix_plan',
+      pageId: 'home',
+      apply: true,
+      baseRevision: built.appliedRevision,
+      idempotencyKey: 'fix-apply-clean-noop',
+    });
+    assert.equal(emptySkip.ok, true);
+    assert.equal(emptySkip.applied, false);
+    assert.equal(emptySkip.appliedRevision, built.appliedRevision);
+    assert.ok(emptySkip.applySkippedReason);
+  } finally {
+    await closeInProcessStudioServer();
+    try { rmSync(dir, { recursive: true, force: true }); } catch {}
+  }
+});

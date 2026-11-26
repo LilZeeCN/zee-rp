@@ -6,11 +6,13 @@ import { lintDocumentInteractions } from './interaction-lint.mjs';
 export const SCENARIO_STEP_SCHEMA = {
   type: 'object', additionalProperties: false,
   properties: {
-    action: { type: 'string', enum: ['navigate', 'input', 'click', 'drag', 'dataset', 'expect', 'assert'] },
+    action: { type: 'string', enum: ['navigate', 'input', 'click', 'drag', 'swipe', 'advanceTime', 'dataset', 'expect', 'assert'] },
     target: { type: 'string' }, id: { type: 'string' }, page: { type: 'string' },
     goto: { type: 'string' }, fill: { type: 'string' }, click: { type: 'string' },
     value: {}, text: { type: 'string' },
     dx: { type: 'number' }, dy: { type: 'number' },
+    direction: { type: 'string', enum: ['left', 'right', 'up', 'down'] },
+    ms: { type: 'number', minimum: 0 },
     dataset: { type: 'string' }, repeater: { type: 'string' },
     op: { type: 'string', enum: ['select', 'toggle-select', 'add', 'update', 'delete', 'filter', 'sort', 'page'] },
     row: { type: 'object' }, patch: { type: 'object' }, rowId: {}, clearOthers: { type: 'boolean' },
@@ -54,6 +56,7 @@ export class StudioRuntimeSession {
     this.textOverrides = {};
     this.textFormulas = {};
     this.panelStates = {};
+    this.panelTimers = {};
     this.widgetPositions = {};
     this.dragStartPositions = {};
     this.datasets = {};
@@ -82,8 +85,39 @@ export class StudioRuntimeSession {
     for (const pg of pages) {
       this._initTreeState(pg.root, pg.id);
     }
+    this._triggerPageLoadEvents(this.currentPageId);
 
     return this.getState();
+  }
+
+  _triggerPageLoadEvents(pageId) {
+    const pg = this.docSnapshot.pages.find(p => p.id === pageId);
+    if (!pg) return;
+    const walkLoad = (node, scopePrefix) => {
+      if (!node || typeof node !== 'object') return;
+      const spec = node.on?.load || node.interactions?.load;
+      if (spec) {
+        const before = this.interactionScope;
+        this.interactionScope = scopePrefix;
+        try {
+          executePrototypeInteraction(this, spec, [], { declaredVariables: this.docSnapshot.variables });
+        } finally {
+          this.interactionScope = before;
+        }
+      }
+      for (const ch of node.children || []) walkLoad(ch, scopePrefix);
+    };
+    const pageSpec = pg.on?.load || pg.interactions?.load;
+    if (pageSpec) {
+      const before = this.interactionScope;
+      this.interactionScope = pg.id;
+      try {
+        executePrototypeInteraction(this, pageSpec, [], { declaredVariables: this.docSnapshot.variables });
+      } finally {
+        this.interactionScope = before;
+      }
+    }
+    if (pg.root) walkLoad(pg.root, pg.id);
   }
 
   _initTreeState(node, pageId, scopePrefix = pageId) {
@@ -572,6 +606,8 @@ export class StudioRuntimeSession {
       throw Object.assign(new Error(`未知页面: "${pageId}"`), { code: 'E_RUNTIME_PAGE_NOT_FOUND' });
     }
     this.currentPageId = targetPage.id;
+    this.panelTimers = {};
+    this._triggerPageLoadEvents(this.currentPageId);
     this.trace.push({
       step: this.trace.length + 1,
       type: 'navigate',
@@ -741,6 +777,89 @@ export class StudioRuntimeSession {
     return this.getState();
   }
 
+  swipe(targetId, { direction = 'left' } = {}) {
+    const entry = this.findNodeEntry(this.currentPageId, targetId);
+    const node = entry?.node;
+    if (!node) {
+      throw Object.assign(new Error(`当前页面 "${this.currentPageId}" 中未找到滑动目标 "${targetId}"`), { code: 'E_RUNTIME_NODE_NOT_FOUND', pageId: this.currentPageId, targetId });
+    }
+    if (!this.isNodeVisible(targetId)) {
+      throw Object.assign(new Error(`滑动目标 ${targetId} 当前不可见`), { code: 'E_RUNTIME_NODE_HIDDEN', targetId });
+    }
+    const dir = String(direction || 'left').toLowerCase();
+    const evMap = { left: 'swipeLeft', right: 'swipeRight', up: 'swipeUp', down: 'swipeDown' };
+    const evKey = evMap[dir] || 'swipeLeft';
+    const executed = [];
+    const isDisabled = Boolean(node.disabled) || ['disabled', 'loading'].includes(node.state);
+    const spec = node.on?.[evKey] || node.interactions?.[evKey] || node.on?.[evKey.toLowerCase()];
+    if (!isDisabled && spec) {
+      const previousScope = this.interactionScope;
+      this.interactionScope = entry.scopePrefix;
+      try {
+        executePrototypeInteraction(this, spec, executed, { declaredVariables: this.docSnapshot.variables });
+      } finally {
+        this.interactionScope = previousScope;
+      }
+    }
+    this.trace.push({
+      step: this.trace.length + 1,
+      type: 'swipe',
+      pageId: this.currentPageId,
+      targetId: entry.scopedId,
+      direction: dir,
+      executed,
+      variables: structuredClone(this.variables),
+    });
+    return this.getState();
+  }
+
+  advanceTime(ms = 0) {
+    const delta = Math.max(0, Number(ms) || 0);
+    const executed = [];
+    for (const [panelId, timer] of Object.entries(this.panelTimers || {})) {
+      if (!timer?.active || !(timer.intervalMs > 0)) continue;
+      timer.elapsedMs += delta;
+      const ticks = Math.floor(timer.elapsedMs / timer.intervalMs);
+      if (ticks <= 0) continue;
+      timer.elapsedMs %= timer.intervalMs;
+      const entry = this.findNodeEntry(this.currentPageId, panelId);
+      const node = entry?.node;
+      const states = node?.states || [];
+      if (!states.length) continue;
+      for (let t = 0; t < ticks; t++) {
+        const cur = this.panelStates[panelId] || node.activeState || states[0].id;
+        const idx = Math.max(0, states.findIndex(s => s.id === cur));
+        const nextIdx = timer.direction === 'previous'
+          ? (idx - 1 < 0 ? (timer.loop ? states.length - 1 : 0) : idx - 1)
+          : (idx + 1 >= states.length ? (timer.loop ? 0 : idx) : idx + 1);
+        const nextState = states[nextIdx].id;
+        this.panelStates[panelId] = nextState;
+        executed.push({ action: 'set-panel-state', panel: panelId, state: nextState, viaTimer: true });
+        const sc = node.on?.panelStateChange || node.on?.stateChange || node.interactions?.panelStateChange;
+        if (sc && nextState !== cur && !this._inPanelStateChange) {
+          this._inPanelStateChange = true;
+          const prev = this.interactionScope;
+          this.interactionScope = entry.scopePrefix;
+          try {
+            executePrototypeInteraction(this, sc, executed, { declaredVariables: this.docSnapshot.variables });
+          } finally {
+            this.interactionScope = prev;
+            this._inPanelStateChange = false;
+          }
+        }
+      }
+    }
+    this.trace.push({
+      step: this.trace.length + 1,
+      type: 'advanceTime',
+      pageId: this.currentPageId,
+      ms: delta,
+      executed,
+      variables: structuredClone(this.variables),
+    });
+    return this.getState();
+  }
+
   _executeDatasetAction(act, executed) {
     const dsName = act.dataset || act.repeater || Object.keys(this.datasets)[0];
     if (!dsName || !this.datasets[dsName]) return;
@@ -879,10 +998,10 @@ export class StudioRuntimeSession {
       const allowed = new Set(Object.keys(SCENARIO_STEP_SCHEMA.properties));
       const unknown = Object.keys(step).find(k => !allowed.has(k));
       if (unknown) return invalid(i, `未知步骤字段 ${unknown}；动作使用 action，断言使用 expect`);
-      if (step.action !== undefined && !['navigate', 'input', 'click', 'drag', 'dataset', 'expect', 'assert'].includes(step.action)) return invalid(i, `未知 action: ${step.action}`);
+      if (step.action !== undefined && !['navigate', 'input', 'click', 'drag', 'swipe', 'advanceTime', 'dataset', 'expect', 'assert'].includes(step.action)) return invalid(i, `未知 action: ${step.action}`);
       if ((step.action === 'expect' || step.action === 'assert') && !step.expect) return invalid(i, 'expect/assert 动作需要 expect 断言');
       if (step.action === 'dataset' && !['select', 'toggle-select', 'add', 'update', 'delete', 'filter', 'sort', 'page'].includes(step.op)) return invalid(i, 'dataset 动作需要受支持的 op');
-      if (step.action && ['click', 'input', 'drag'].includes(step.action) && !(step.target || step.id || step.fill || step.click)) return invalid(i, '动作缺少 target');
+      if (step.action && ['click', 'input', 'drag', 'swipe'].includes(step.action) && !(step.target || step.id || step.fill || step.click)) return invalid(i, '动作缺少 target');
       if (step.expect !== undefined) {
         if (!step.expect || typeof step.expect !== 'object' || Array.isArray(step.expect) || !Object.keys(step.expect).length) return invalid(i, 'expect 必须含至少一条断言');
         for (const [key, value] of Object.entries(step.expect)) {
@@ -916,6 +1035,10 @@ export class StudioRuntimeSession {
         this.click(step.target || step.click || step.id);
       } else if (step.action === 'drag') {
         this.drag(step.target || step.id, { dx: step.dx ?? 0, dy: step.dy ?? 0 });
+      } else if (step.action === 'swipe') {
+        this.swipe(step.target || step.id, { direction: step.direction || 'left' });
+      } else if (step.action === 'advanceTime') {
+        this.advanceTime(step.ms ?? 0);
       } else if (step.action === 'dataset') {
         const executed = [];
         this._executeDatasetAction(step, executed);
@@ -1198,6 +1321,7 @@ export class StudioRuntimeSession {
       selectedOptions: structuredClone(this.selectedOptions),
       selectedNodes: structuredClone(this.selectedNodes),
       panelStates: structuredClone(this.panelStates),
+      panelTimers: structuredClone(this.panelTimers || {}),
       widgetPositions: structuredClone(this.widgetPositions),
       visibility: structuredClone(this.visibility),
       datasets: visibleDatasets,

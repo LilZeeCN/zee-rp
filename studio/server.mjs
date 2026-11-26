@@ -20,7 +20,7 @@ import {
   _captureScreenshot,
 } from './server-capture.mjs';
 import { StudioRuntimeSession } from './runtime.mjs';
-import { exportStudioDocumentToRp } from './export-rp.mjs';
+import { exportStudioDocumentToRp, exportStudioDocumentToRp1 } from './export-rp.mjs';
 import { getComponentContracts } from './component-contracts.mjs';
 import { getDesignContext } from './design-context.mjs';
 import { queryAuthoringNodes } from './authoring-query.mjs';
@@ -194,6 +194,7 @@ const ROUTE_HANDLERS = {
   'POST /api/design/review': 'routePostDesignReview',
   'POST /api/operations': 'routePostOperations',
   'POST /api/export-rp': 'routePostExportRp',
+  'POST /api/export-rp1': 'routePostExportRp1',
   'POST /api/export-code': 'routePostExportCode',
   'POST /api/sync-native': 'routePostSyncNative',
   'POST /api/project/bundle': 'routePostProjectBundle',
@@ -1047,7 +1048,7 @@ export class StudioServer {
                 : '没有可确定性修复的路径，需要人工判断',
         }));
 
-        return sendJson(res, 200, {
+        const baseResponse = {
           ...plan,
           commands: kept,
           rejected,
@@ -1059,7 +1060,108 @@ export class StudioServer {
           },
           verified: true,
           verificationBasis: 'geometry',
-        });
+        };
+        if (body.apply !== true) {
+          return sendJson(res, 200, baseResponse);
+        }
+
+        const prevIdempotent = body.idempotencyKey
+          ? this.store.idempotencyMap?.get(String(body.idempotencyKey))
+          : null;
+        if (prevIdempotent) {
+          if (prevIdempotent.result?.source === 'fix_plan_apply') {
+            return sendJson(res, 200, { ...structuredClone(prevIdempotent.result), ok: true, idempotentReplay: true });
+          }
+          return sendJson(res, 409, {
+            ok: false,
+            code: 'E_IDEMPOTENCY_CONFLICT',
+            idempotencyKey: String(body.idempotencyKey),
+            originalRevision: prevIdempotent.revision,
+            message: `幂等键 "${body.idempotencyKey}" 已被用于其他操作，请使用新的幂等键`,
+          });
+        }
+
+        if (body.baseRevision !== undefined && body.baseRevision !== null && Number(body.baseRevision) !== this.store.appliedRevision) {
+          return sendJson(res, 409, {
+            ok: false,
+            code: 'E_STALE_REVISION',
+            message: `文档已推进至 r${this.store.appliedRevision}，请刷新后再提交 fix_plan 自动应用`,
+            appliedRevision: this.store.appliedRevision,
+            durableRevision: this.store.durableRevision,
+            currentRevision: this.store.appliedRevision,
+            requestedBaseRevision: Number(body.baseRevision),
+          });
+        }
+
+        if (kept.length === 0) {
+          return sendJson(res, 200, {
+            ...baseResponse,
+            applied: false,
+            appliedRevision: this.store.appliedRevision,
+            durableRevision: this.store.durableRevision,
+            applySkippedReason: '没有通过试跑验证的确定性修复命令可提交',
+          });
+        }
+
+        const reqBaseRev = body.baseRevision ?? this.store.appliedRevision;
+        const applyKey = body.idempotencyKey || `fix-plan-${pageId}-r${reqBaseRev}-${Date.now().toString(36)}`;
+        const txResult = this.persistence.commit(this.store, beforeCommit => this.store.applyTransaction({
+          baseRevision: reqBaseRev,
+          idempotencyKey: applyKey,
+          source: 'fix_plan_apply',
+          clientId: body.clientId || 'mcp-ai',
+          pageId,
+          label: body.label || `fix_plan auto-apply (${kept.length})`,
+          commands: kept,
+        }, { beforeCommit }));
+
+        if (!txResult.ok) {
+          const status = txResult.code === 'E_STALE_REVISION' || txResult.code === 'E_IDEMPOTENCY_CONFLICT' ? 409 : 400;
+          return sendJson(res, status, {
+            ...txResult,
+            appliedRevision: this.store.appliedRevision,
+            durableRevision: this.store.durableRevision,
+            renderedRevision: this.renderedRevision,
+          });
+        }
+
+        if (!txResult.idempotentReplay) {
+          this.scene = txResult.scene || resolveDocumentScene(this.store.doc, { projectDir: this.projectDir });
+          this.store.lastScene = this.scene;
+          this.runtimeSession = null;
+          this.broadcastSse({
+            type: 'revision',
+            affectedNodeIds: txResult.affectedNodeIds || [],
+            directAffectedNodeIds: txResult.directAffectedNodeIds || [],
+            transitiveImpact: txResult.transitiveImpact || null,
+            semanticDiff: txResult.semanticDiff || null,
+            humanReadableSummary: txResult.humanReadableSummary || null,
+            diagnostics: txResult.diagnostics || [],
+            ...this.buildContextPayload(),
+          });
+        }
+
+        const updatedPage = this.scene.pages.find(p => p.id === pageId) || page;
+        const afterMetrics = computeDesignMetrics(updatedPage, { doc: this.store.doc });
+        const applyPayload = {
+          ...baseResponse,
+          applied: true,
+          source: 'fix_plan_apply',
+          idempotentReplay: Boolean(txResult.idempotentReplay),
+          txId: txResult.txId,
+          appliedRevision: this.store.appliedRevision,
+          durableRevision: this.store.durableRevision,
+          renderedRevision: this.renderedRevision,
+          actualAfter: {
+            verdict: afterMetrics.l1.verdict,
+            blocking: afterMetrics.l1.blocking.map(b => b.check),
+          },
+        };
+        if (this.store.idempotencyMap?.has(applyKey)) {
+          const rec = this.store.idempotencyMap.get(applyKey);
+          rec.result = structuredClone(applyPayload);
+        }
+        return sendJson(res, 200, applyPayload);
   }
 
   async routePostDesignExplore(req, res, { parsedUrl, pathname }) {
@@ -1113,6 +1215,16 @@ export class StudioServer {
           outReportPath: body.outReportPath,
         });
         sendJson(res, 200, expRes);
+        return;
+  }
+
+  async routePostExportRp1(req, res, { parsedUrl, pathname }) {
+        const body = await readJsonBody(req);
+        if (body.baseRevision !== undefined && body.baseRevision !== this.store.appliedRevision) {
+          throw Object.assign(new Error('导出版本已变化，请重新确认'), { code: 'E_OPERATION_STALE' });
+        }
+        const rp1Res = await this.exportRp1({ outRp1Path: body.outRp1Path || null });
+        sendJson(res, 200, rp1Res);
         return;
   }
 
@@ -1260,6 +1372,21 @@ export class StudioServer {
         }
         if (sub === 'click') {
           const st = this.runtimeSession.click(body.targetId);
+          sendJson(res, 200, { ok: true, state: st, designContentHash: this.store.doc.contentHash });
+          return;
+        }
+        if (sub === 'drag') {
+          const st = this.runtimeSession.drag(body.targetId, { dx: Number(body.dx) || 0, dy: Number(body.dy) || 0 });
+          sendJson(res, 200, { ok: true, state: st, designContentHash: this.store.doc.contentHash });
+          return;
+        }
+        if (sub === 'swipe') {
+          const st = this.runtimeSession.swipe(body.targetId, { direction: body.direction || 'left' });
+          sendJson(res, 200, { ok: true, state: st, designContentHash: this.store.doc.contentHash });
+          return;
+        }
+        if (sub === 'tick') {
+          const st = this.runtimeSession.advanceTime(Number(body.ms) || 0);
           sendJson(res, 200, { ok: true, state: st, designContentHash: this.store.doc.contentHash });
           return;
         }
@@ -1458,6 +1585,13 @@ export class StudioServer {
       projectDir: this.projectDir,
       outRpPath: resolvedOutRp,
       outReportPath: resolvedOutReport,
+    });
+  }
+
+  async exportRp1({ outRp1Path = null } = {}) {
+    return exportStudioDocumentToRp1(this.store.doc, {
+      projectDir: this.projectDir,
+      outRp1Path,
     });
   }
 

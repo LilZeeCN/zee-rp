@@ -106,7 +106,7 @@ export function normalizeInteractionSpec(spec) {
   const dataFields = ['dataset','repeater','op','rowId','clearOthers','row','patch','requireNonEmpty','onEmptyShow','onEmptySelectionShow','query','field','operator','order','page'];
   const knownFields = ({show:['target'],hide:['target'],toggle:['target'],'set-text':['target','value','text'],
     'set-var':['name','variable','value','expr'],'set-variable':['name','variable','value','expr'],
-    'set-panel-state':['target','panel','state'],
+    'set-panel-state':['target','panel','state','mode','loop','repeat','repeatInterval','repeatSkipFirst','enterAnimation','exitAnimation','duration'],
     'set-check':['target','checked','value'],
     'set-selected':['target','selected','value'],
     'set-option':['target','value','option','selected'],
@@ -122,7 +122,10 @@ export function normalizeInteractionSpec(spec) {
   }
   if (out.target !== undefined) out.target = target(out.target);
   if (out.panel !== undefined) out.panel = target(out.panel);
-  if (out.type === 'set-panel-state' && !out.target && out.panel) { out.target = out.panel; delete out.panel; }
+  if (out.type === 'set-panel-state') {
+    if (!out.target && out.panel) { out.target = out.panel; delete out.panel; }
+    if (out.state === undefined && out.mode !== undefined) { out.state = out.mode; delete out.mode; }
+  }
   for (const key of ['show', 'hide']) if (out[key] !== undefined) out[key] = Array.isArray(out[key]) ? out[key].map(target) : target(out[key]);
   if (['show', 'hide', 'toggle', 'set-text', 'set-panel-state', 'set-check', 'set-selected', 'set-option', 'move'].includes(out.type) && !out.target) fail(`${out.type} 缺少target`, 'target');
   if (out.type === 'set-check') {

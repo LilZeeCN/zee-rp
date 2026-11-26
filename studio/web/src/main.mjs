@@ -29,9 +29,11 @@ const inspectorActions = {
   dispatchCommands,
   renderAll,
   async resetRuntimePreview() {
+    clearRuntimeTimers();
     const result = await apiPost('/api/runtime/reset', { startPageId: state.activePageId });
     state.runtimeState = result.state;
     renderRuntimePreview();
+    syncRuntimePanelTimers();
   },
 };
 const sidebarActions = { dispatchCommands, fitWorkspace, renderAll, renderSelection, selectPage };
@@ -86,6 +88,47 @@ function renderAll() {
   publishSelection();
 }
 
+const runtimeTimerHandles = new Map();
+
+function clearRuntimeTimers() {
+  for (const entry of runtimeTimerHandles.values()) {
+    clearInterval(entry.id);
+  }
+  runtimeTimerHandles.clear();
+}
+
+function syncRuntimePanelTimers() {
+  if (state.mode !== 'interact') {
+    clearRuntimeTimers();
+    return;
+  }
+  const activeTimers = state.runtimeState?.panelTimers || {};
+  for (const [panelId, entry] of runtimeTimerHandles.entries()) {
+    const t = activeTimers[panelId];
+    if (!t?.active || !(t.intervalMs > 0) || entry.intervalMs !== t.intervalMs) {
+      clearInterval(entry.id);
+      runtimeTimerHandles.delete(panelId);
+    }
+  }
+  for (const [panelId, timer] of Object.entries(activeTimers)) {
+    if (!timer?.active || !(timer.intervalMs > 0) || runtimeTimerHandles.has(panelId)) continue;
+    const ms = timer.intervalMs;
+    const id = setInterval(async () => {
+      if (state.mode !== 'interact' || !state.runtimeState?.panelTimers?.[panelId]?.active) {
+        clearRuntimeTimers();
+        return;
+      }
+      try {
+        const res = await apiPost('/api/runtime/tick', { ms });
+        state.runtimeState = res.state;
+        renderRuntimePreview();
+        syncRuntimePanelTimers();
+      } catch {}
+    }, ms);
+    runtimeTimerHandles.set(panelId, { id, intervalMs: ms });
+  }
+}
+
 function renderRuntimePreview() {
   renderCanvasStage();
   renderInspector();
@@ -96,6 +139,23 @@ async function onRuntimeClick(targetId) {
   state.runtimeState = result.state;
   state.activePageId = result.state.currentPageId;
   renderRuntimePreview();
+  syncRuntimePanelTimers();
+}
+
+async function onRuntimeDrag(targetId, { dx = 0, dy = 0 } = {}) {
+  const result = await apiPost('/api/runtime/drag', { targetId, dx, dy });
+  state.runtimeState = result.state;
+  state.activePageId = result.state.currentPageId;
+  renderRuntimePreview();
+  syncRuntimePanelTimers();
+}
+
+async function onRuntimeSwipe(targetId, { direction = 'left' } = {}) {
+  const result = await apiPost('/api/runtime/swipe', { targetId, direction });
+  state.runtimeState = result.state;
+  state.activePageId = result.state.currentPageId;
+  renderRuntimePreview();
+  syncRuntimePanelTimers();
 }
 
 async function selectPage(pageId) {
@@ -106,7 +166,10 @@ async function selectPage(pageId) {
     try {
       const result = await apiPost('/api/runtime/navigate', { pageId });
       state.runtimeState = result.state;
+      syncRuntimePanelTimers();
     } catch {}
+  } else {
+    clearRuntimeTimers();
   }
   renderAll();
   revealActiveArtboard();
@@ -118,7 +181,8 @@ function focusDiagnosticTarget(location, binding) {
 
 async function bootstrap() {
   setupCanvasInteractions({
-    cancelCanvasGesture, commitInlineTextEditor, dispatchCommands, dispatchHistoryAction, onRuntimeClick,
+    cancelCanvasGesture, commitInlineTextEditor, dispatchCommands, dispatchHistoryAction,
+    onRuntimeClick, onRuntimeDrag, onRuntimeSwipe,
     refreshSnapshot, renderAll, renderCanvasStage, renderSelection, revealActiveArtboard, updateCanvasTransform,
   });
   document.addEventListener('visibilitychange', () => {
@@ -131,7 +195,7 @@ async function bootstrap() {
     }
   });
   setupToolbarAndTabs({
-    apiPost, dispatchCommands, dispatchHistoryAction, waitForCommands,
+    apiPost, dispatchCommands, dispatchHistoryAction, waitForCommands, syncRuntimePanelTimers, clearRuntimeTimers,
     fitWorkspace, renderAll, renderInspector, renderSidebar, updateCanvasTransform, focusDiagnosticTarget,
     showProjectOperations: () => showProjectOperations({ apiPost, focusDiagnosticTarget }),
     showProjectVersions: () => showProjectVersions({ apiPost, applyServerSnapshot }),

@@ -1,8 +1,19 @@
 # HTML 复刻工作流
 
-目标：给定 HTML 文件（或 URL），在 Axure 产出结构对应的可编辑原型。核心方法：**在浏览器里 dump 可见元素的几何与样式，映射成 Axvg spec**，而不是肉眼猜。
+目标：给定本地 `.html`/`.htm` 文件或 `http(s)://` URL，在 Axure 产出结构对应的可编辑原型（`.rp1` / Studio 画布 / 原生 `.rp`）。
 
-## 第 1 步：dump 布局
+## 首选：一键无头 Chrome MCP 自动导入
+
+内置无头 Chrome CDP（[`scripts/html-import.mjs`](../scripts/html-import.mjs)）可直接抓取真实计算样式、盒模型坐标、透明壳层折叠、原生表单控件（`<input>` / `<textarea>` / `<select>` / `checkbox` / `radio`）、渐变/圆角/单边边框/阴影与内联 `<img>`/`<svg>` 位图资源：
+
+- **导入自由画布继续视觉打磨**：调用 `studio_open_project({ projectDir, cwd, sourcePath: "page.html" })`（或传 `https://...` URL），工程目录下会保留 `.imported-html.rp1` 与 `.imported-html.spec.json`，可直接用 `studio_design(action:"fix_plan", apply:true)`、`studio_command` 与 `studio_export({ format: "rp" | "rp1" | "code" })`。
+- **一步直接生成原生 `.rp` + 伴随 `.rp1`**：调用 `generate_prototype({ source: "page.html", output: "app.rp", verify: true, verifyEngine: "auto" })`（同时支持 `cwd` 与 `verifyEngine: "studio-html"` 跨平台无 Axure 自验）。
+
+---
+
+## 备选底层手工路径：浏览器 dump → Axvg
+
+若目标页面需要人工登录态或仅做静态视觉草稿，可在浏览器控制台注入以下 JS 获取 `window.__dump` 后映射为 Axvg spec。
 
 使用当前任务指定或默认的浏览器打开 HTML（file:// 路径或本地服务均可），在所用浏览器工具允许时执行以下 JS。结果会存到 `window.__dump` 并在控制台打印复制：
 
