@@ -1,12 +1,6 @@
 #!/usr/bin/env node
-// proto.mjs v3.0 全量回归测试：
-// 1. 词法原子保护 + CJK 避头尾 (Kinsoku Shori) 断行引擎
-// 2. PingFang.ttc 零墨水高度缺字检测器 (no_missing_glyphs)
-// 3. 1:1 代理-宿主水平文本内边距校准 (bg-box-* + 10px inset)
-// 4. 完整原语契约 (button / input / divider / badge / card / label size&weight&content 别名)
-// 5. 零静默失败 Schema 校验器 (未知 type 报错 + 未知属性近似建议)
-// 6. 自动同行等高卡片求解器 + 2D 容器溢出/兄弟碰撞证明器 (no_container_overflow / no_box_overlap)
-// 运行：node test/proto-v21-check.mjs
+import test from 'node:test';
+import assert from 'node:assert/strict';
 import { readFileSync, writeFileSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, resolve } from 'node:path';
@@ -24,11 +18,6 @@ const PROTO = join(ROOT, 'scripts', 'proto.mjs');
 const LAB = join(ROOT, 'examples', 'lab-mobile-lowfi.proto.json');
 const INTERACTIVE = join(ROOT, 'examples', 'mobile-lostfound.proto.json');
 
-let passed = 0, failed = 0;
-function ok(name, cond, detail = '') {
-  if (cond) { passed++; console.log(`PASS  ${name}`); }
-  else { failed++; console.log(`FAIL  ${name} ${detail}`); }
-}
 function compile(specPath, outDir, extra = [], allowFail = false) {
   const r = spawnSync(process.execPath, [PROTO, 'compile', '--spec', specPath, '--out-dir', outDir, ...extra], {
     encoding: 'utf8',
@@ -48,8 +37,15 @@ function findPage(plan, key) {
   return plan.pages.find(p => p.slug === key);
 }
 
-const tmp = mkdtempSync(join(tmpdir(), 'proto-v30-check-'));
-try {
+test('proto v3.0 layout, typography, kinsoku, schema, and Knuth-Plass contracts', () => {
+  let passed = 0, failed = 0;
+  const failures = [];
+  function ok(name, cond, detail = '') {
+    if (cond) { passed++; }
+    else { failed++; failures.push(`${name}${detail ? ` ${detail}` : ''}`); }
+  }
+  const tmp = mkdtempSync(join(tmpdir(), 'proto-v30-check-'));
+  try {
   // 1) 课设静态模板：button 原语 + 词法断行 + 避头尾 + 零缺字 + 1:1 左内边距
   const labOut = join(tmp, 'lab');
   const lab = compile(LAB, labOut);
@@ -464,9 +460,9 @@ print(json.dumps({
   ok('Knuth-Plass DP 最优断行平方参差度代价值严格优于 Greedy 贪心断行且消除孤字行',
     kpRes.dp_cost < kpRes.greedy_cost && kpRes.dp_no_orphan && kpRes.chars_preserved,
     JSON.stringify(kpRes));
-} finally {
-  rmSync(tmp, { recursive: true, force: true });
-}
-
-console.log(`\n${passed} passed, ${failed} failed`);
-process.exit(failed ? 1 : 0);
+  } finally {
+    rmSync(tmp, { recursive: true, force: true });
+  }
+  assert.equal(failed, 0, `${failures.length} check(s) failed: ${failures.join(' | ')}`);
+  assert.ok(passed > 0);
+});

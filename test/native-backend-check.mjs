@@ -1,3 +1,4 @@
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { randomBytes } from 'node:crypto';
@@ -19,14 +20,11 @@ import { mergePages } from '../scripts/merge-pages.mjs';
 import { pythonInvocation } from '../scripts/python.mjs';
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const work = mkdtempSync(join(tmpdir(), 'rp-native-test-'));
 const spawn = childProcess.spawnSync;
 const spawnPy = (args, options) => {
   const invocation = pythonInvocation(args);
   return childProcess.spawnSync(invocation.command, invocation.args, options);
 };
-let checks = 0;
-const check = (label, fn) => { fn(); checks++; console.log(`PASS ${label}`); };
 function withEnvironment(changes, run) {
   const previous = Object.entries(changes).map(([name, value]) => {
     const old = process.env[name];
@@ -42,7 +40,12 @@ function withEnvironment(changes, run) {
     }
   }
 }
-try {
+
+test('native backend contracts: zero subprocesses, interactions, forms, and batch baseline', () => {
+  const work = mkdtempSync(join(tmpdir(), 'rp-native-test-'));
+  let checks = 0;
+  const check = (_label, fn) => { fn(); checks++; };
+  try {
   const reports = [];
   for (const name of ['booking', 'approval', 'inventory', 'survey', 'course', 'visual']) {
     const bundle = join(work, name);
@@ -386,5 +389,6 @@ try {
     assert.ok(btnWidget.interactions.some(ix => ix.event === 'OnClick'));
     assert.ok(btnWidget.interactions.some(ix => ix.event === 'OnMouseOver'));
   });
-  console.log(JSON.stringify({ ok: true, checks, reports }, null, 2));
-} finally { childProcess.spawnSync = spawn; syncBuiltinESMExports(); rmSync(work, { recursive: true, force: true }); }
+  assert.ok(checks > 0);
+  } finally { childProcess.spawnSync = spawn; syncBuiltinESMExports(); rmSync(work, { recursive: true, force: true }); }
+});

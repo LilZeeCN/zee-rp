@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+// 特殊形态保留理由（gaps #7）：可独立命令行执行的 .rp 二进制语义诊断器，同时导出 validateSemantics/validateRecord 供多套测试复用。
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { readRecords, readManifest } from '../scripts/rp-records.mjs';

@@ -1,4 +1,5 @@
 // Positive workflow regressions from the third external report, through real stdio MCP.
+// 特殊形态保留理由（gaps #7）：单会话 MCP stdio 顺序客户端第三轮报告回归，末尾输出 JSON 结构化汇总。
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';

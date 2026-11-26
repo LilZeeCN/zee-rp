@@ -1,3 +1,4 @@
+// 特殊形态保留理由（gaps #7）：私有基线单会话 MCP stdio 顺序客户端历史回归（有私有样本时运行）。
 import { fixturePath, hasPrivateFixtures } from './native-inputs.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';

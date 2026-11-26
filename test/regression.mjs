@@ -1,4 +1,5 @@
 // Public, zero-dependency checks: no Axure installation or private workspace required.
+// 特殊形态保留理由（gaps #7）：公开零依赖主回归聚合器（npm test），负责串行调度设计度量套件并向 CI 输出机器 JSON 汇总。
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';

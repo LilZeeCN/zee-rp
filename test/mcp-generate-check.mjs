@@ -1,4 +1,5 @@
 // End-to-end client: generation and editing use only the public MCP transport.
+// 特殊形态保留理由（gaps #7）：单会话 MCP stdio 顺序客户端生成与改稿回归，末尾输出 JSON 结构化汇总。
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';

@@ -73,7 +73,7 @@ page #notes name="手记" device=iphone-17-pro
 | **浏览器** | 运行拖拽/滑动/定时切态预览；免装 Axure 即可用 `verify_prototype(engine:"studio-html")` 真机验收 |
 | **网页 / 截图** | 直接传本地 `.html` 或 `http(s)://` URL 给 `studio_open_project` / `generate_prototype`，一步提取排版与表单进画布 |
 
-[原生导出与回填](docs/studio-native-roundtrip.md)　↗　[HTML / URL 导入](references/html-workflow.md)　↗　[代码导出](docs/studio-code-export.md)　↗　[40 秒流程动画](https://github.com/LilZeeCN/zee-rp/releases/download/v0.2.1/zee-rp-zhixu-1080p60.mp4)
+[原生导出与回填](docs/studio-native-roundtrip.md)　↗　[HTML / URL 导入](references/html-workflow.md)　↗　[代码导出](docs/studio-code-export.md)　↗　[盲测实录](docs/blind-test-t01-20261126.md)　↗　[缺口台账](docs/gaps.md)　↗　[40 秒流程动画](https://github.com/LilZeeCN/zee-rp/releases/download/v0.2.1/zee-rp-zhixu-1080p60.mp4)
 
 <br>
 

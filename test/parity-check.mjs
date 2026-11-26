@@ -1,4 +1,5 @@
 // 对拍与安全测试：bin/axure.mjs（经引擎透传）vs 直接 node scripts/<script>.mjs 的 stdout 逐字节 / 产物 SHA-256 对拍
+// 特殊形态保留理由（gaps #7）：CLI 与内核脚本双路字节级对拍及 67 个内核脚本 SHA-256 指纹校验器（直接按 PASS/FAIL 行汇报）。
 // （duplicate-page 例外：该工具 randomBytes(16) 生成新页 GUID 非确定，改用 rp-read 摘要规范化等价）；
 // 安全负例（受保护成品红线、AXURE_WRITE_ROOT 白名单）与存量零改动回归。直接断言脚本（不用 node:test）：
 // 每个断言一行 PASS/FAIL，全过 exit 0。可重复运行：工作目录 /tmp/axure-parity-<随机>/，跑前先清理。

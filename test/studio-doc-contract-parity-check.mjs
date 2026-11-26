@@ -8,7 +8,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { studioTools } from '../studio/mcp-adapter.mjs';
@@ -27,6 +27,7 @@ const ACTIVE_DOC_PATHS = [
   'docs/studio-native-roundtrip.md',
   'docs/architecture.md',
   'docs/gaps.md',
+  'docs/blind-test-t01-20261126.md',
   'references/mcp-prototype.md',
   'references/authoring-workflow.md',
   'references/custom-styles.md',
@@ -102,4 +103,17 @@ test('SKILL.md、authoring-help、公开 schema 与现行文档零旧工具名�
       }
     }
   }
+});
+
+test('测试双轨收口守卫（gaps #7）：test/*.mjs 全部归属 node:test、导出模块或显式标注的特殊形态运行器', () => {
+  const testDir = join(ROOT, 'test');
+  const uncategorized = [];
+  for (const name of readdirSync(testDir).filter(f => f.endsWith('.mjs')).sort()) {
+    const content = readFileSync(join(testDir, name), 'utf8');
+    const isNodeTest = /from ['"]node:test['"]/.test(content);
+    const isExportedModule = /^\s*export\s+/m.test(content);
+    const hasSpecialHeader = content.slice(0, 600).includes('特殊形态保留理由（gaps #7）');
+    if (!isNodeTest && !isExportedModule && !hasSpecialHeader) uncategorized.push(name);
+  }
+  assert.deepEqual(uncategorized, [], `发现未归类的旧式测试脚本，请迁至 node:test 或在文件头注明特殊形态保留理由（gaps #7）: ${uncategorized.join(', ')}`);
 });

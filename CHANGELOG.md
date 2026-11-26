@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- 三家独立外部大模型（`GPT-6` / `GLM-5.4` / `Claude Sonnet`，`readImplementation: false`）在公开 MCP 工具面上 **3/3 `completed`** 通关 `T01`（L1 0 阻塞、原生 RP9 三零通过，详见 `docs/blind-test-t01-20261126.md`），正式关闭 `docs/gaps.md` #1；随同两波修复彻底清除全部 12 项盲测暴露摩擦（`expect.text` `{ contains }` 与相近 `nodeId` 提示、`explore.states` 单传与 6 态 `label`、`column`/`row`/`stack`/`grid` 别名、单 `else` 展平、402 满画板栅格豁免、`column` `h:"fill"` 剩余高、写入实时 `W_BOARD_OVERFLOW`/`W_LINE_HEIGHT_FLOOR` 诊断、`review.assessment` 对齐 `l1BlockingCount`、单行 `hug` 标签 `.rp` 导出安全宽度余量与错误提示分流）。
+- 新增本地 `.html` 与 `http(s)://` URL 导入（`scripts/html-import.mjs`）、跨平台免 Axure 浏览器验收引擎 `verify_prototype(engine:"studio-html")`、Studio 原生拖拽/滑动/定时预览闭环（关闭 `docs/gaps.md` #18）、`fix_plan(apply:true)` 原子自愈、`generate_from_image` `autoFix`/`verify` 以及 `zee-rp doctor` 3 秒环境自检。
+- 关闭 `docs/gaps.md` #7（测试双轨清零）：分 3 批完成 29 个独立测试脚本向 `node:test` 的迁移，为其余真实特殊形态运行器标注保留理由并在 `test:studio-parity` 加入 `test/*.mjs` 永久合规守卫；当前 `docs/gaps.md` 全部工程缺口清零。
+
 - 修复 Axure 宿主生命周期：只关闭本次作业窗口，使用「文件 → 关闭」前再次确认目标窗口拥有焦点。
   窗口名单去除授权后缀及重复项，所有 AppleScript 调用都有超时。作业失败或取消时异步清理已确认打开的副本，
   打开状态待确认时保留副本。

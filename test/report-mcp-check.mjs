@@ -1,4 +1,5 @@
 // Real MCP transport regressions, including the original five-page autoHeal case.
+// 特殊形态保留理由（gaps #7）：单会话 MCP stdio 顺序客户端外部报告回归，末尾输出 JSON 结构化汇总。
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';

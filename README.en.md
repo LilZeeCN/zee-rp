@@ -73,7 +73,7 @@ Generate a native **`.rp`** and continue editing supported text, controls and la
 | **The browser** | Drag/swipe/timer previews; run cross-platform Chrome verification without Axure via `verify_prototype(engine:"studio-html")` |
 | **HTML / URL / Image** | Pass local `.html`, `http(s)://` URLs or UI screenshots to `studio_open_project` / `generate_prototype` / `generate_from_image` |
 
-[Native export and sync](docs/studio-native-roundtrip.md)　↗　[HTML / URL import](references/html-workflow.md)　↗　[Code export](docs/studio-code-export.md)　↗　[40-second workflow animation](https://github.com/LilZeeCN/zee-rp/releases/download/v0.2.1/zee-rp-zhixu-1080p60.mp4)
+[Native export and sync](docs/studio-native-roundtrip.md)　↗　[HTML / URL import](references/html-workflow.md)　↗　[Code export](docs/studio-code-export.md)　↗　[Blind test report](docs/blind-test-t01-20261126.md)　↗　[Gaps ledger](docs/gaps.md)　↗　[40-second workflow animation](https://github.com/LilZeeCN/zee-rp/releases/download/v0.2.1/zee-rp-zhixu-1080p60.mp4)
 
 <br>
 

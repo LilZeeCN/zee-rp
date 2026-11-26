@@ -1,3 +1,4 @@
+import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -14,13 +15,7 @@ import { setWidgetRichText } from '../scripts/set-widget-richtext.mjs';
 import { callCommandTool } from '../scripts/mcp-tools.mjs';
 
 const root = dirname(dirname(fileURLToPath(import.meta.url)));
-const work = mkdtempSync(join(tmpdir(), 'zee-rp-native-'));
 const sha = bytes => createHash('sha256').update(bytes).digest('hex');
-const results = [];
-function check(name, action) {
-  try { action(); results.push({ name, passed: true }); console.log(`PASS  ${name}`); }
-  catch (error) { results.push({ name, passed: false, detail: error.message }); console.log(`FAIL  ${name} — ${error.message}`); }
-}
 function cli(args) {
   const result = spawnSync(process.execPath, [join(root, 'bin/axure.mjs'), ...args], { encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr); return result;
@@ -31,7 +26,11 @@ function healthy(bytes) {
   assert.equal(rp.records.unparseable, 0); assert.equal(rp.counts.danglingRefs, 0); assert.equal(rp.counts.problems, 0);
   return rp;
 }
-try {
+
+test('native CLI & MCP offline contracts', () => {
+  const work = mkdtempSync(join(tmpdir(), 'zee-rp-native-'));
+  const check = (_name, action) => action();
+  try {
   // Missing native prerequisites fail the command; they never count as passing tests.
   const demo = buildNativeDemo(join(work, 'demo'));
   const source = join(demo.output, demo.source), bytes = readFileSync(source), before = sha(bytes);
@@ -139,7 +138,5 @@ try {
     assert.throws(() => setWidgetRichText(bytes, {page,widget:'StatusBanner',paragraphs:[{lineSpacing:-1,runs:[{text:'bad'}]}]}), /lineSpacing/);
     assert.equal(sha(readFileSync(source)), before);
   });
-} finally { rmSync(work, { recursive: true, force: true }); }
-const failed = results.filter(r => !r.passed).length;
-console.log(JSON.stringify({ evidence:'offline-only', total:results.length, passed:results.length-failed, failed }));
-process.exitCode = failed ? 1 : 0;
+  } finally { rmSync(work, { recursive: true, force: true }); }
+});

@@ -1,3 +1,4 @@
+// 特殊形态保留理由（gaps #7）：私有基线单会话 MCP stdio 顺序客户端研究回归（test:historical-mcp）。
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
