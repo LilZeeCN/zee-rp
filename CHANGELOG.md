@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- 未知 Tag 无损透传（离线结构级验证）：`parsePayload` 遇到未识别的 Tag 码时，把 7 种候选布局（无载荷、1/2/4/8 字节、dict、list）逐个代入重解析整条记录，只有恰好解析到末尾、通过四条结构判据且结论唯一时才采信，其余照旧报错。不透明布局的载荷原样写回，透明容器的子节点可照常修改。容器计数先校验再分配，坏计数报错而不是进程 OOM。新增 `npm run test:protocol` 并接入两个 CI 工作流。
+- 记录一条原生反例：manifest 不可压缩时不能回退为纯字面量 LZ4 block——Axure（K4os.Compression.LZ4 分块流）的 RP9 / RP11 加载器都拒绝这种文件，所以保持报错。
+
 ## 0.3.0 — 2026-11-27
 
 可直接安装，不必克隆仓库：`npx -y github:LilZeeCN/zee-rp doctor` 或 `npm i -g github:LilZeeCN/zee-rp`（MCP：`npx -y github:LilZeeCN/zee-rp mcp`）。相比 0.2.1（107 个提交）：Studio 自由画布、官方 HTML 导出与无头 Chrome 验收、RP/1 原生交互程序（条件、循环、过程、同页异步任务）、Windows 适配、HTML/URL 导入，以及三家外部模型的冷启动盲测收口。安装仍需 Node 18+ 与 Python 3.10+；原生 `.rp` 生成另需本机 Axure 与空白工程模板。

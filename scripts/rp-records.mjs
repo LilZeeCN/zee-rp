@@ -67,6 +67,9 @@ export function encodeManifest(header, value) {
   }
   sequence(anchor, raw.length, 0, 0);
   const block = Buffer.from(bytes);
+  // 这里必须报错，不能改成写“纯字面量 LZ4 block”：Axure 用 K4os.Compression.LZ4 的分块流读取 manifest，
+  // 实测 RP9 与 RP11 的加载器都对纯字面量块抛 EndOfStreamException（AcquireNextChunk），文件打不开。
+  // 真实形态的 manifest 里 JSON 结构总能压短几个字节，正常走不到这里。
   if (block.length >= raw.length) throw new Error('Manifest requires an uncompressed-chunk encoding; not yet supported');
   const varuint = n => {
     const bytes = [];

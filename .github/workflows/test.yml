@@ -22,6 +22,7 @@ jobs:
         run: test -x /usr/bin/google-chrome
       - run: npm test
       - run: npm run test:bin
+      - run: npm run test:protocol
       - run: npm run test:styles
       - run: npm run test:mcp-export
       - run: npm run test:sync
