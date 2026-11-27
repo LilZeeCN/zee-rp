@@ -83,6 +83,16 @@ Generate a native **`.rp`** and continue editing supported text, controls and la
 
 Install **Node.js 18+** and **Python 3.10+**. Native generation additionally needs local Axure resources and your own single-page blank project saved in RP9.
 
+### One-command install (straight from GitHub)
+
+```sh
+npx -y github:LilZeeCN/zee-rp doctor                 # no clone needed: checks Node / Python / Chrome / template
+npm i -g github:LilZeeCN/zee-rp                      # or install the CLI, then run zee-rp
+zee-rp doctor                                        # check Node / Python / Chrome / template readiness
+```
+
+Install the Python dependencies once: `python3 -m pip install pillow numpy jsonschema` (screenshot reconstruction also needs SciPy). Pin a version with `github:LilZeeCN/zee-rp#v0.3.0`.
+
 ### macOS
 
 ```sh
@@ -130,7 +140,21 @@ Open `output/mobile-cards.rp` in Axure RP9 to edit it.
 <details>
 <summary><b>Connect your MCP client</b> · Expand configuration</summary>
 
-Replace the absolute paths with your installation, Python environment and RP9 blank project:
+Without cloning, let npx fetch the package from GitHub (`zee-rp mcp` and `zee-rp-mcp` are equivalent):
+
+```json
+{
+  "mcpServers": {
+    "zee-rp": {
+      "command": "npx",
+      "args": ["-y", "github:LilZeeCN/zee-rp", "mcp"],
+      "env": { "AXURE_BLANK_TEMPLATE_RP9": "/absolute/path/my-rp9-blank.rp" }
+    }
+  }
+}
+```
+
+When running from source, replace the absolute paths with your installation, Python environment and RP9 blank project:
 
 ```json
 {

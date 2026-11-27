@@ -1,6 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-11-27
+
+可直接安装，不必克隆仓库：`npx -y github:LilZeeCN/zee-rp doctor` 或 `npm i -g github:LilZeeCN/zee-rp`（MCP：`npx -y github:LilZeeCN/zee-rp mcp`）。相比 0.2.1（107 个提交）：Studio 自由画布、官方 HTML 导出与无头 Chrome 验收、RP/1 原生交互程序（条件、循环、过程、同页异步任务）、Windows 适配、HTML/URL 导入，以及三家外部模型的冷启动盲测收口。安装仍需 Node 18+ 与 Python 3.10+；原生 `.rp` 生成另需本机 Axure 与空白工程模板。
+- 修复用 npm 或 npx 安装后 `zee-rp` / `zee-rp-mcp` 无法执行：`bin/axure.mjs` 与 `bin/mcp.mjs` 缺少 shebang，操作系统无法把它们当程序启动（自 0.2.0 暴露 bin 映射起存在，首次做隔离安装冒烟时发现）。新增 `npm run test:bin` 守住每个 bin 入口的 shebang 与直接执行，并接入两个 CI 工作流；CLI 帮助文案改为 `zee-rp <command>`。
+- 门禁修复：`test:parity` 的内核脚本指纹检查改为与 `npm test` 同一条规则（按 `scripts/*.mjs` 推导，删除会漂移的数量常量 `test/baseline-policy.json`）；`test:authoring` 的配方数量断言取自配方表本身。两者此前在 `main` 上均为红，且都不在 CI 里。
 
 - 三家独立外部大模型（`GPT-6` / `GLM-5.4` / `Claude Sonnet`，`readImplementation: false`）在公开 MCP 工具面上 **3/3 `completed`** 通关 `T01`（L1 0 阻塞、原生 RP9 三零通过，详见 `docs/blind-test-t01-20261126.md`），正式关闭 `docs/gaps.md` #1；随同两波修复彻底清除全部 12 项盲测暴露摩擦（`expect.text` `{ contains }` 与相近 `nodeId` 提示、`explore.states` 单传与 6 态 `label`、`column`/`row`/`stack`/`grid` 别名、单 `else` 展平、402 满画板栅格豁免、`column` `h:"fill"` 剩余高、写入实时 `W_BOARD_OVERFLOW`/`W_LINE_HEIGHT_FLOOR` 诊断、`review.assessment` 对齐 `l1BlockingCount`、单行 `hug` 标签 `.rp` 导出安全宽度余量与错误提示分流）。
 - 新增本地 `.html` 与 `http(s)://` URL 导入（`scripts/html-import.mjs`）、跨平台免 Axure 浏览器验收引擎 `verify_prototype(engine:"studio-html")`、Studio 原生拖拽/滑动/定时预览闭环（关闭 `docs/gaps.md` #18）、`fix_plan(apply:true)` 原子自愈、`generate_from_image` `autoFix`/`verify` 以及 `zee-rp doctor` 3 秒环境自检。

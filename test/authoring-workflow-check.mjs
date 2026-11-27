@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { spawnPythonSync } from '../scripts/python.mjs';
+import { recipes } from '../scripts/authoring-workflow.mjs';
 
 const root = process.env.AXURE_TEST_ROOT ?? resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const keep = process.env.AXURE_AUTHORING_OUTPUT;
@@ -55,7 +56,8 @@ try {
   });
   await check('recipe discovery provides complete scenarios without expanding source by default', async () => {
     const found = await request('prototype_recipe', {});
-    assert.equal(found.recipes.length, 5);
+    // 期望值取自配方表本身：新增配方时不再需要同步改这里
+    assert.equal(found.recipes.length, recipes.length);
     assert(found.recipes.every(r => existsSync(r.source) && r.scenario && r.customize.length));
     assert(!JSON.stringify(found).includes('sourceText'));
   });

@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { listMcpTools, callCommandTool, jobTools, validateInput, MCP_PROFILES, resolveMcpProfile } from '../scripts/mcp-tools.mjs';
 import { JobManager } from '../scripts/jobs.mjs';
 import { mcpInstructions, packageVersion } from '../scripts/authoring-workflow.mjs';

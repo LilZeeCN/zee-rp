@@ -1,5 +1,5 @@
 // 对拍与安全测试：bin/axure.mjs（经引擎透传）vs 直接 node scripts/<script>.mjs 的 stdout 逐字节 / 产物 SHA-256 对拍
-// 特殊形态保留理由（gaps #7）：CLI 与内核脚本双路字节级对拍及 67 个内核脚本 SHA-256 指纹校验器（直接按 PASS/FAIL 行汇报）。
+// 特殊形态保留理由（gaps #7）：CLI 与内核脚本双路字节级对拍及 scripts/*.mjs 内核脚本 SHA-256 指纹校验器（直接按 PASS/FAIL 行汇报）。
 // （duplicate-page 例外：该工具 randomBytes(16) 生成新页 GUID 非确定，改用 rp-read 摘要规范化等价）；
 // 安全负例（受保护成品红线、AXURE_WRITE_ROOT 白名单）与存量零改动回归。直接断言脚本（不用 node:test）：
 // 每个断言一行 PASS/FAIL，全过 exit 0。可重复运行：工作目录 /tmp/axure-parity-<随机>/，跑前先清理。
@@ -7,7 +7,7 @@
 // 可用 AXURE_BASELINE_SHAS 覆盖；本测试不读写受保护成品本身，只把其路径当作被拒绝的参数值。
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { resolveBlankTemplate } from '../scripts/blank-template.mjs';
@@ -22,7 +22,6 @@ const ASSET_SPEC = join(SKILL, 'assets', 'dashboard-example.spec.json');
 const PROTECTED = '/zee-rp-test-protected/final.rp';
 process.env.AXURE_PROTECTED_PATHS = PROTECTED;
 const BASELINE = process.env.AXURE_BASELINE_SHAS || join(SKILL, 'test', 'baseline-shas.json');
-const EXPECTED_SCRIPT_COUNT = JSON.parse(readFileSync(join(SKILL, 'test', 'baseline-policy.json'), 'utf8')).expectedScriptCount;
 
 const results = [];
 function ok(name, passed, detail = '') {
@@ -229,12 +228,18 @@ for (const rel of ['scripts/registry.mjs', 'scripts/engine.mjs', 'bin/axure.mjs'
     const mismatched = names.filter(n => {
       try { return sha256(join(SCRIPTS, n)) !== baseline[n]; } catch { return true; }
     });
-    passed = names.length === EXPECTED_SCRIPT_COUNT && mismatched.length === 0;
-    detail = `清单 ${names.length} 项${mismatched.length ? `，不符：${mismatched.join('、')}` : ''}`;
+    // 默认清单必须覆盖 scripts/ 下的全部内核脚本（与 npm test 的指纹检查同一条规则，不再另存数量常量）；
+    // 用 AXURE_BASELINE_SHAS 换成历史冻结清单时只核对已登记项。
+    const kernel = process.env.AXURE_BASELINE_SHAS ? [] : readdirSync(SCRIPTS).filter(f => f.endsWith('.mjs'));
+    const unregistered = kernel.filter(n => !Object.hasOwn(baseline, n));
+    passed = unregistered.length === 0 && mismatched.length === 0;
+    detail = `清单 ${names.length} 项`
+      + (unregistered.length ? `，未登记：${unregistered.join('、')}` : '')
+      + (mismatched.length ? `，不符：${mismatched.join('、')}` : '');
   } catch (error) {
     detail = `baseline 读取失败：${error.message}`;
   }
-  ok(`回归 ${EXPECTED_SCRIPT_COUNT} 个内核脚本 SHA-256 与当前 baseline-shas.json 逐一相等`, passed, detail);
+  ok('回归 scripts/*.mjs 内核脚本全部登记且 SHA-256 与 baseline-shas.json 逐一相等', passed, detail);
 }
 
 const failed = results.filter(p => !p).length;

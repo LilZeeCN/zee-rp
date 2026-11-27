@@ -1,9 +1,25 @@
 {
   "name": "zee-rp",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": false,
   "type": "module",
-  "description": "Screenshot reconstruction, RP/1 compilation, and native Axure RP tooling",
+  "description": "AI-native engine and MCP server to read, surgically edit, and generate editable Axure (.rp) prototypes",
+  "homepage": "https://github.com/LilZeeCN/zee-rp#readme",
+  "bugs": {
+    "url": "https://github.com/LilZeeCN/zee-rp/issues"
+  },
+  "keywords": [
+    "axure",
+    "rp",
+    "prototype",
+    "mcp",
+    "mcp-server",
+    "ai-agents",
+    "design-tools",
+    "reverse-engineering",
+    "rp1",
+    "cli"
+  ],
   "bin": {
     "zee-rp": "./bin/axure.mjs",
     "zee-rp-mcp": "./bin/mcp.mjs"
@@ -16,6 +32,7 @@
     "test": "node test/regression.mjs",
     "test:native": "node --test test/native-check.mjs",
     "test:parity": "node test/parity-check.mjs",
+    "test:bin": "node --test test/npm-bin-check.mjs",
     "test:mcp": "node test/mcp-check.mjs",
     "test:historical": "node test/research-regression.mjs",
     "test:historical-mcp": "node test/research-mcp-check.mjs",
@@ -351,7 +368,6 @@
     "studio/web/styles.css",
     "test/authoring-benchmark.mjs",
     "test/authoring-workflow-check.mjs",
-    "test/baseline-policy.json",
     "test/baseline-shas.json",
     "test/check-semantics.mjs",
     "test/clone-connector-check.mjs",
@@ -390,6 +406,7 @@
     "test/page-link-check.mjs",
     "test/panel-master-check.mjs",
     "test/parity-check.mjs",
+    "test/npm-bin-check.mjs",
     "test/proto-v21-check.mjs",
     "test/regression.mjs",
     "test/report-mcp-check.mjs",

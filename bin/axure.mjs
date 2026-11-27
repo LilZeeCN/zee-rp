@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // 统一 CLI 入口：node bin/axure.mjs <command> [args...] → 经 AxureSession 透传执行 scripts/ 存量脚本。
 // --help 列注册表全部命令与一句话用途；<command> --help 显示该命令 usage；退出码透传子进程退出码。
 // 命令名解析只消费 argv[0] 一个词，但先按两词再按一词查注册表——axvg 三个子命令在注册表里各占一条
@@ -30,7 +31,8 @@ function commandList() {
 }
 
 if (argv.length === 0 || argv[0] === '--help' || argv[0] === '-h') {
-  console.log(`用法: node bin/axure.mjs <command> [args...]\n\n可用命令（node bin/axure.mjs <command> --help 看脚本原生 usage）：\n${commandList()}`);
+  // npm 安装后命令是 zee-rp；从源码运行时等价于 node bin/axure.mjs。
+  console.log(`用法: zee-rp <command> [args...]\n\n可用命令（zee-rp <command> --help 看脚本原生 usage；从源码运行时把 zee-rp 换成 node bin/axure.mjs）：\n${commandList()}`);
   process.exit(0);
 }
 
@@ -48,7 +50,7 @@ if (!resolved) {
 
 const args = argv.slice(1); // 只消费命令词本身，其余参数原样转发
 if (args.includes('--help') || args.includes('-h')) {
-  console.log(`${resolved.command} — ${resolved.summary}\n透传用法: node bin/axure.mjs ${resolved.command} [脚本原参数...]\n脚本 usage: ${resolved.usage}`);
+  console.log(`${resolved.command} — ${resolved.summary}\n透传用法: zee-rp ${resolved.command} [脚本原参数...]\n脚本 usage: ${resolved.usage}`);
   process.exit(0);
 }
 

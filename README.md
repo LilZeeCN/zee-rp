@@ -83,6 +83,16 @@ page #notes name="手记" device=iphone-17-pro
 
 准备 **Node.js 18+** 和 **Python 3.10+**。原生生成另需本机 Axure，以及你自己在 RP9 中保存的单页空白工程。
 
+### 一条命令安装（直接来自 GitHub）
+
+```sh
+npx -y github:LilZeeCN/zee-rp doctor                 # 不克隆仓库，先自检 Node / Python / Chrome / 模板
+npm i -g github:LilZeeCN/zee-rp                      # 或安装命令行：之后直接用 zee-rp
+zee-rp doctor                                        # 自检 Node / Python / Chrome / 模板就绪状态
+```
+
+Python 依赖只需装一次：`python3 -m pip install pillow numpy jsonschema`（截图重建另需 SciPy）。固定版本用 `github:LilZeeCN/zee-rp#v0.3.0`。
+
 ### macOS
 
 ```sh
@@ -130,7 +140,21 @@ node scripts/proto.mjs generate --spec examples/authoring/mobile-cards.rp1 --out
 <details>
 <summary><b>连接你的 MCP 客户端</b> · 展开配置</summary>
 
-将下面的绝对路径换成自己的安装目录、Python 环境和 RP9 空白工程：
+不克隆仓库时，让 npx 直接从 GitHub 取包（`zee-rp-mcp` 与 `zee-rp mcp` 等价）：
+
+```json
+{
+  "mcpServers": {
+    "zee-rp": {
+      "command": "npx",
+      "args": ["-y", "github:LilZeeCN/zee-rp", "mcp"],
+      "env": { "AXURE_BLANK_TEMPLATE_RP9": "/absolute/path/my-rp9-blank.rp" }
+    }
+  }
+}
+```
+
+从源码运行时，将下面的绝对路径换成自己的安装目录、Python 环境和 RP9 空白工程：
 
 ```json
 {
