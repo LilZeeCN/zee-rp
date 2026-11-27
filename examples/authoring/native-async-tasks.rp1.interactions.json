@@ -1,0 +1,231 @@
+{
+  "program": {
+    "page": "tasks",
+    "targets": {
+      "primary": "out_a",
+      "secondary": "out_b"
+    },
+    "on": {
+      "start_a": {
+        "click": [
+          {
+            "start": "timerA",
+            "with": {
+              "label": "A",
+              "left": 750
+            }
+          }
+        ]
+      },
+      "restart_a": {
+        "click": [
+          {
+            "start": "timerA",
+            "with": {
+              "label": "R",
+              "left": 500
+            }
+          }
+        ]
+      },
+      "stop_a": {
+        "click": [
+          {
+            "cancel": "timerA"
+          },
+          {
+            "set": {
+              "@primary": "已停止"
+            }
+          }
+        ]
+      },
+      "start_b": {
+        "click": [
+          {
+            "start": "timerB",
+            "with": {
+              "label": "B",
+              "left": 1000
+            }
+          }
+        ]
+      },
+      "retry_b": {
+        "click": [
+          {
+            "start": "timerB",
+            "with": {
+              "label": "Z",
+              "left": 500
+            }
+          }
+        ]
+      }
+    },
+    "tasks": {
+      "timerA": {
+        "locals": {
+          "channel": {
+            "type": "text",
+            "value": "A"
+          },
+          "label": {
+            "type": "text",
+            "value": ""
+          },
+          "left": {
+            "type": "number",
+            "value": 0
+          },
+          "deadline": {
+            "type": "number",
+            "value": 0
+          }
+        },
+        "do": [
+          {
+            "set": {
+              "$deadline": "=nowMs() + $left"
+            }
+          },
+          {
+            "call": "publish"
+          },
+          {
+            "while": "$left > 0",
+            "limit": 6,
+            "intervalMs": 250,
+            "do": [
+              {
+                "call": "tick"
+              }
+            ]
+          }
+        ]
+      },
+      "timerB": {
+        "locals": {
+          "channel": {
+            "type": "text",
+            "value": "B"
+          },
+          "label": {
+            "type": "text",
+            "value": ""
+          },
+          "left": {
+            "type": "number",
+            "value": 0
+          },
+          "deadline": {
+            "type": "number",
+            "value": 0
+          }
+        },
+        "do": [
+          {
+            "set": {
+              "$deadline": "=nowMs() + $left"
+            }
+          },
+          {
+            "call": "publish"
+          },
+          {
+            "repeat": "=$left / 250",
+            "do": [
+              {
+                "wait": 250
+              },
+              {
+                "call": "tick"
+              }
+            ]
+          }
+        ],
+        "policy": "ignore"
+      }
+    },
+    "routines": {
+      "tick": [
+        {
+          "set": {
+            "$left": "=$deadline - nowMs()"
+          }
+        },
+        {
+          "call": "publish"
+        }
+      ],
+      "publish": [
+        {
+          "match": "$channel",
+          "cases": {
+            "A": [
+              {
+                "set": {
+                  "@primary": "=concat($label, ':', text($left))"
+                }
+              }
+            ],
+            "B": [
+              {
+                "set": {
+                  "@secondary": "=concat($label, ':', text($left))"
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "steps": [
+    {"action": "click", "target": "tasks/start_a"},
+    {"action": "expect", "target": "tasks/out_a", "expect": {"text": "A:750"}},
+    {"action": "advanceTime", "ms": 100},
+    {"action": "click", "target": "tasks/start_b"},
+    {"action": "expect", "target": "tasks/out_b", "expect": {"text": "B:1000"}},
+    {"action": "advanceTime", "ms": 150},
+    {"action": "expect", "target": "tasks/out_a", "expect": {"text": "A:500"}},
+    {"action": "expect", "target": "tasks/out_b", "expect": {"text": "B:1000"}},
+    {"action": "advanceTime", "ms": 50},
+    {"action": "click", "target": "tasks/restart_a"},
+    {"action": "expect", "target": "tasks/out_a", "expect": {"text": "R:500"}},
+    {"action": "advanceTime", "ms": 50},
+    {"action": "expect", "target": "tasks/out_b", "expect": {"text": "B:750"}},
+    {"action": "click", "target": "tasks/retry_b"},
+    {"action": "expect", "target": "tasks/out_b", "expect": {"text": "B:750"}},
+    {"action": "advanceTime", "ms": 150},
+    {"action": "expect", "target": "tasks/out_a", "expect": {"text": "R:500"}},
+    {"action": "advanceTime", "ms": 50},
+    {"action": "expect", "target": "tasks/out_a", "expect": {"text": "R:250"}},
+    {"action": "click", "target": "tasks/stop_a"},
+    {"action": "expect", "target": "tasks/out_a", "expect": {"text": "已停止"}},
+    {"action": "advanceTime", "ms": 50},
+    {"action": "expect", "target": "tasks/out_b", "expect": {"text": "B:500"}},
+    {"action": "click", "target": "tasks/start_a"},
+    {"action": "expect", "target": "tasks/out_a", "expect": {"text": "A:750"}},
+    {"action": "advanceTime", "ms": 200},
+    {"action": "expect", "target": "tasks/out_a", "expect": {"text": "A:750"}},
+    {"action": "advanceTime", "ms": 50},
+    {"action": "expect", "target": "tasks/out_a", "expect": {"text": "A:500"}},
+    {"action": "expect", "target": "tasks/out_b", "expect": {"text": "B:250"}},
+    {"action": "advanceTime", "ms": 250},
+    {"action": "expect", "target": "tasks/out_a", "expect": {"text": "A:250"}},
+    {"action": "expect", "target": "tasks/out_b", "expect": {"text": "B:0"}},
+    {"action": "click", "target": "tasks/retry_b"},
+    {"action": "expect", "target": "tasks/out_b", "expect": {"text": "Z:500"}},
+    {"action": "advanceTime", "ms": 250},
+    {"action": "expect", "target": "tasks/out_a", "expect": {"text": "A:0"}},
+    {"action": "expect", "target": "tasks/out_b", "expect": {"text": "Z:250"}},
+    {"action": "advanceTime", "ms": 250},
+    {"action": "expect", "target": "tasks/out_b", "expect": {"text": "Z:0"}},
+    {"action": "click", "target": "tasks/start_a"},
+    {"action": "advanceTime", "ms": 100},
+    {"action": "click", "target": "tasks/stop_a"},
+    {"action": "advanceTime", "ms": 400},
+    {"action": "expect", "target": "tasks/out_a", "expect": {"text": "已停止"}}
+  ]
+}

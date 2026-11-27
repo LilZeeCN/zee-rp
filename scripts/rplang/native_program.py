@@ -1,5 +1,6 @@
 """Lower ordered business logic to editable RP9 event graphs."""
 from copy import deepcopy
+from dataclasses import dataclass
 from hashlib import sha256
 import json
 import re
@@ -56,13 +57,15 @@ def _localize(node, names, targets, field=None):
             if field == "set" and key.startswith(("$", "@")):
                 aliases = names if key.startswith("$") else targets
                 return key[0] + aliases.get(key[1:], key[1:])
+            if field == "set" and key.startswith("var."):
+                return "var." + names.get(key[4:], key[4:])
             return key
         return {key_of(key): _localize(value, names, targets, key) for key, value in node.items()}
     if not isinstance(node, str):
         return node
     if field == "variable" and node.startswith("$"):
         return "$" + names.get(node[1:], node[1:])
-    if field in {"variable", "globalVariable"}:
+    if field in {"variable", "var", "globalVariable", "set-variable"}:
         return names.get(node, node)
     if field in {"target", "widget", "panel", "repeater", "widgetPath", "ref"}:
         return targets.get(node, node)
@@ -83,11 +86,25 @@ def _both(left, right):
     return {"op": "&&", "left": _expr(left), "right": _expr(right)}
 
 
+@dataclass
+class Task:
+    source: str
+    policy: str
+    body: list
+    names: dict
+    defaults: dict
+    # The stored value is idle (0), executing (-1), or a parked continuation (>0).
+    resume: str
+    deadline: str
+    entry: dict | None = None
+    wake: dict | None = None
+
+
 class ProgramLowering:
     def __init__(self, spec, program, *, path, shared):
         self.spec = spec
         self.path = path
-        fields(program, {"page", "on", "bind", "routines", "locals", "targets"}, self.path)
+        fields(program, {"page", "on", "bind", "routines", "locals", "targets", "tasks"}, self.path)
         self.program = program
         page_id = program.get("page")
         matches = [page for page in spec.get("pages", []) if page.get("id") == page_id]
@@ -115,23 +132,15 @@ class ProgramLowering:
         self.prefix = "rp1flow_" + sha256(page_id.encode()).hexdigest()[:10]
         self.triggers = []
         self.entries = []
-        local_defs = program.get("locals", {})
-        if not isinstance(local_defs, dict):
-            fail("E_PROGRAM_VARIABLE", ptr(path, "locals"), "Expected a map of local variable declarations")
-        local_names = {}
-        for name, definition in local_defs.items():
-            origin = ptr(ptr(path, "locals"), name)
-            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
-                fail("E_PROGRAM_VARIABLE", origin, "Expected a variable identifier")
-            private = f"{self.prefix}_local_{name}"
-            self.add_variable(private, definition, origin)
-            local_names[name] = private
+        local_names = self.local_variables(program.get("locals", {}), f"{self.prefix}_local", ptr(path, "locals"))
         self.target_names = program.get("targets", {})
         if not isinstance(self.target_names, dict) or any(not isinstance(value, str) for value in self.target_names.values()):
             fail("E_PROGRAM_TARGET", ptr(path, "targets"), "For RP/1 source, targets maps aliases to widget IDs")
-        self.routines = _localize({**shared, **routines}, local_names, self.target_names)
+        self.raw_routines = {**shared, **routines}
+        self.routines = _localize(self.raw_routines, local_names, self.target_names)
         self.routine_paths = {name: ptr(ptr(path, "routines") if name in routines else "/sharedRoutines", name)
                               for name in self.routines}
+        self.tasks = self.declare_tasks(program.get("tasks", {}), local_names)
         for key in ("on", "bind"):
             if key in program:
                 self.program[key] = _localize(program[key], local_names, self.target_names)
@@ -139,6 +148,43 @@ class ProgramLowering:
         self.busy = f"{self.prefix}_busy" if self.asynchronous else None
         if self.busy:
             self.add_variable(self.busy, {"type": "number", "value": 0}, path)
+
+    def local_variables(self, declarations, prefix, source):
+        if not isinstance(declarations, dict):
+            fail("E_PROGRAM_VARIABLE", source, "Expected a map of local variable declarations")
+        names = {}
+        for name, definition in declarations.items():
+            origin = ptr(source, name)
+            if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
+                fail("E_PROGRAM_VARIABLE", origin, "Expected a variable identifier")
+            private = f"{prefix}_{name}"
+            self.add_variable(private, definition, origin)
+            names[name] = private
+        return names
+
+    def declare_tasks(self, declarations, page_names):
+        source = ptr(self.path, "tasks")
+        if not isinstance(declarations, dict):
+            fail("E_PROGRAM_TASK", source, "Expected a map of named tasks")
+        tasks = {}
+        for name, task in declarations.items():
+            at = ptr(source, name)
+            fields(task, {"policy", "locals", "do"}, at)
+            policy = task.get("policy", "restart")
+            if policy not in ("restart", "ignore"):
+                fail("E_PROGRAM_TASK_POLICY", ptr(at, "policy"), "Choose restart or ignore")
+            body = task.get("do")
+            if not isinstance(body, list) or not body:
+                fail("E_PROGRAM_BLOCK", ptr(at, "do"), "Expected a nonempty task body")
+            prefix = f"{self.prefix}_task_{sha256(name.encode()).hexdigest()[:10]}"
+            definitions = task.get("locals", {})
+            names = self.local_variables(definitions, f"{prefix}_local", ptr(at, "locals"))
+            resume = f"{prefix}_resume"
+            self.add_variable(resume, {"type": "number", "value": 0}, at)
+            tasks[name] = Task(at, policy, body, {**page_names, **names},
+                               {key: (variable, definitions[key]["value"]) for key, variable in names.items()},
+                               resume, f"{prefix}_deadline")
+        return tasks
 
     def index(self, node):
         if not isinstance(node, dict):
@@ -207,7 +253,38 @@ class ProgramLowering:
         self.variables.append({"name": name, "limit": numeric_limit, "sourcePointer": source})
         return name
 
-    def block(self, statements, source, following=(), stack=(), in_repeat=False, depth=0):
+    def start_task(self, task, overrides, source):
+        if not isinstance(overrides, dict) or any(key not in task.defaults for key in overrides):
+            fail("E_PROGRAM_TASK_LOCAL", ptr(source, "with"), "Only declared task locals can be initialized")
+        if task.entry is None:
+            task.entry = self.reserve_callback(task.source)
+            body = _localize(task.body, task.names, self.target_names)
+            finish = [{"set": {f"${task.resume}": 0}}]
+            task.entry["on"] = {"click": self.block(body, ptr(task.source, "do"), finish, task=task)}
+        assignments = {f"${variable}": overrides.get(name, {"_program_literal": default})
+                       for name, (variable, default) in task.defaults.items()}
+        start = [{"set": {f"${task.resume}": -1, **assignments}}, self.jump(task.entry)]
+        launch = self.reserve_callback(source)
+        condition = f"${task.resume} == 0" if task.policy == "ignore" else f"${task.resume} >= 0"
+        launch["on"] = {"click": {"cases": [{"when": condition, "actions": start}]}}
+        return self.jump(launch)
+
+    def suspend(self, task, ms, actions, source):
+        if task.wake is None:
+            self.add_variable(task.deadline, {"type": "number", "value": 0}, task.source)
+            task.wake = self.reserve_callback(task.source)
+            task.wake["on"] = {"click": {"cases": [{
+                "when": f"${task.resume} > 0 && nowMs() >= ${task.deadline}",
+                "actions": [{"_program_resume": task.resume}],
+            }]}}
+        resume, = self.continuation(actions, source)
+        # The delayed tail only signals a wakeup. The wake case reads and
+        # consumes whichever continuation is currently due for this task.
+        return [{"set": {f"${task.deadline}": f"=nowMs() + {ms}"}},
+                {"_program_park": resume["target"]["ref"], "variable": task.resume},
+                {"type": "wait", "ms": ms}, self.jump(task.wake)]
+
+    def block(self, statements, source, following=(), stack=(), in_repeat=False, depth=0, task=None):
         if depth >= 24:
             fail("E_PROGRAM_DEPTH", source, "Program nesting exceeds 24 levels")
         if not isinstance(statements, list) or not statements:
@@ -230,10 +307,12 @@ class ProgramLowering:
                 if name in stack:
                     fail("E_PROGRAM_RECURSION", ptr(at, "call"), "Routine cycle: " + " → ".join((*stack, name)))
                 tail = next_block[0]["target"]["ref"] if next_block else None
-                key = (name, tail, in_repeat)
+                key = (task.resume if task else None, name, tail, in_repeat)
                 if key not in self.routine_entries:
                     origin = self.routine_paths[name]
-                    body = self.block(self.routines[name], origin, next_block, (*stack, name), in_repeat, depth + 1)
+                    routine_body = (_localize(self.raw_routines[name], task.names, self.target_names)
+                                    if task else self.routines[name])
+                    body = self.block(routine_body, origin, next_block, (*stack, name), in_repeat, depth + 1, task)
                     routine = self.reserve_callback(origin)
                     routine["on"] = {"click": body}
                     self.routine_entries[key] = routine
@@ -241,8 +320,8 @@ class ProgramLowering:
             elif "if" in step:
                 fields(step, {"if", "then", "else"}, at)
                 branch = self.reserve_callback(at)
-                yes = self.block(step.get("then"), ptr(at, "then"), next_block, stack, in_repeat, depth + 1)
-                no = self.block(step["else"], ptr(at, "else"), next_block, stack, in_repeat, depth + 1) if "else" in step else next_block
+                yes = self.block(step.get("then"), ptr(at, "then"), next_block, stack, in_repeat, depth + 1, task)
+                no = self.block(step["else"], ptr(at, "else"), next_block, stack, in_repeat, depth + 1, task) if "else" in step else next_block
                 cases = [{"when": step["if"], "actions": yes}]
                 if no:
                     cases.append({"else": True, "actions": no})
@@ -255,9 +334,9 @@ class ProgramLowering:
                     fail("E_PROGRAM_MATCH", at, "Match needs a text expression and a nonempty value-to-actions map")
                 branch = self.reserve_callback(at)
                 compiled = [{"when": {"op": "==", "left": {"expr": step["match"]}, "right": {"expr": json.dumps(key, ensure_ascii=False)}},
-                             "actions": self.block(body, ptr(ptr(at, "cases"), key), next_block, stack, in_repeat, depth + 1)}
+                             "actions": self.block(body, ptr(ptr(at, "cases"), key), next_block, stack, in_repeat, depth + 1, task)}
                             for key, body in cases.items()]
-                fallback = self.block(step["else"], ptr(at, "else"), next_block, stack, in_repeat, depth + 1) if "else" in step else next_block
+                fallback = self.block(step["else"], ptr(at, "else"), next_block, stack, in_repeat, depth + 1, task) if "else" in step else next_block
                 if fallback:
                     compiled.append({"else": True, "actions": fallback})
                 branch["on"] = {"click": {"cases": compiled}}
@@ -281,13 +360,14 @@ class ProgramLowering:
                 self.async_loops += int(yielding)
                 loop = self.reserve_callback(at)
                 repeat = [self.jump(loop)]
-                body = self.block(step.get("do"), ptr(at, "do"), repeat, stack, not yielding, depth + 1)
+                body = self.block(step.get("do"), ptr(at, "do"), repeat, stack, not yielding, depth + 1, task)
                 iteration = [{"set": {f"${counter}": f"=${counter} - 1"}}]
                 if yielding:
-                    iteration.append({"type": "wait", "ms": interval or 0})
+                    body = (self.suspend(task, interval or 0, body, at) if task else
+                            [{"type": "wait", "ms": interval or 0}, *body])
                 iteration.extend(body)
-                finished = self.block(step["then"], ptr(at, "then"), next_block, stack, in_repeat, depth + 1) if "then" in step else next_block
-                failed = self.block(step["else"], ptr(at, "else"), next_block, stack, in_repeat, depth + 1) if "else" in step else next_block
+                finished = self.block(step["then"], ptr(at, "then"), next_block, stack, in_repeat, depth + 1, task) if "then" in step else next_block
+                failed = self.block(step["else"], ptr(at, "else"), next_block, stack, in_repeat, depth + 1, task) if "else" in step else next_block
                 if counted:
                     cases = [{"when": f"${counter} > 0", "actions": iteration}]
                     if finished:
@@ -309,6 +389,25 @@ class ProgramLowering:
                         cases.append({"else": True, "actions": finished})
                     actions = [{"set": {f"${counter}": limit}}, self.jump(loop)]
                 loop["on"] = {"click": {"cases": cases}}
+            elif "start" in step or "cancel" in step:
+                command = "start" if "start" in step else "cancel"
+                fields(step, {"start", "with"} if command == "start" else {"cancel"}, at)
+                name = step[command]
+                if task:
+                    fail("E_PROGRAM_TASK_SCOPE", at, "Start and cancel tasks in page event handlers")
+                if not isinstance(name, str) or name not in self.tasks:
+                    fail("E_PROGRAM_TASK", ptr(at, command), f"Unknown task {name!r}")
+                flow = self.tasks[name]
+                if command == "start":
+                    actions.insert(0, self.start_task(flow, step.get("with", {}), at))
+                else:
+                    actions.insert(0, {"set": {f"${flow.resume}": 0}})
+            elif task and ("wait" in step or step.get("type") == "wait"):
+                fields(step, {"wait"} if "wait" in step else {"type", "ms"}, at)
+                ms = step.get("wait", step.get("ms"))
+                if type(ms) is not int or not 0 <= ms <= 2147483647:
+                    fail("E_PROGRAM_TASK_WAIT", at, "Wait must be a nonnegative integer in milliseconds")
+                actions = self.suspend(task, ms, actions, at)
             else:
                 if in_repeat and ("wait" in step or step.get("type") in {"wait", "raise-event"}):
                     fail("E_PROGRAM_LOOP_ACTION", at, "Repeat bodies must complete synchronously")
@@ -330,7 +429,7 @@ class ProgramLowering:
         declarations = node.setdefault("on", {})
         if any(EVENTS.get(key, key) == native for key in declarations):
             fail("E_PROGRAM_EVENT", source, f"{event!r} already exists on {target!r}")
-        if self.busy:
+        if self.busy and (not self.tasks or _uses_wait(statements, self.routines)):
             lock = {"set": {f"${self.busy}": 1}}
             release = {"set": {f"${self.busy}": 0}}
             body = self.block(statements, source, [release])
@@ -340,7 +439,7 @@ class ProgramLowering:
         self.entries.append((declarations, event))
         self.triggers.append({"widget": target, "event": native, "sourcePointer": source})
 
-    def reset_on_load(self):
+    def reset_on_load(self, slots):
         declarations = self.page.setdefault("on", {})
         # Existing source load handlers may declare the canonical event or its
         # normal RP/1 shorthand. The reset precedes both, including conditional cases.
@@ -348,7 +447,7 @@ class ProgramLowering:
         payload = declarations.get(load)
         if payload is None:
             payload = self.page.pop("onLoad", [])
-        reset = {"actions": [{"set": {f"${self.busy}": 0}}]}
+        reset = {"actions": [{"set": {f"${slot}": 0 for slot in slots}}]}
         if isinstance(payload, dict) and "cases" in payload:
             declarations[load] = {"_program_groups": True, "cases": [reset, *payload["cases"]]}
         elif payload:
@@ -403,13 +502,16 @@ class ProgramLowering:
         def actions_of(payload):
             return payload if isinstance(payload, list) else [action for case in payload["cases"] for action in case["actions"]]
 
-        pending = [target(a) for declarations, event in self.entries for a in actions_of(declarations[event])]
+        def edge(action):
+            return action.get("_program_park") or target(action)
+
+        pending = [edge(a) for declarations, event in self.entries for a in actions_of(declarations[event])]
         live = set()
         while pending:
             name = pending.pop()
             if name in self.nodes and name not in live:
                 live.add(name)
-                pending.extend(target(a) for a in actions_of(self.nodes[name]["on"]["click"]))
+                pending.extend(edge(a) for a in actions_of(self.nodes[name]["on"]["click"]))
         self.root["children"] = [child for child in self.root["children"] if child.get("id") not in self.nodes]
         if not live:
             self.callbacks = {}
@@ -426,6 +528,11 @@ class ProgramLowering:
                 name = target(action)
                 if name in position:
                     out.extend(({"set": {f"${pc}": position[name]}}, self.jump(driver)))
+                elif "_program_park" in action:
+                    out.append({"set": {f"${action['variable']}": position[action["_program_park"]]}})
+                elif "_program_resume" in action:
+                    slot = action["_program_resume"]
+                    out.extend(({"set": {f"${pc}": {"variable": slot}, f"${slot}": -1}}, self.jump(driver)))
                 else:
                     out.append(action)
             return out
@@ -472,9 +579,12 @@ class ProgramLowering:
         if not self.triggers:
             fail("E_PROGRAM_EVENT", self.path, "The program needs at least one event binding")
         original_callbacks = self.optimize()
-        if self.busy:
-            self.reset_on_load()
+        active_tasks = {name: task for name, task in self.tasks.items() if task.entry is not None}
+        reset_slots = ([self.busy] if self.busy else []) + [task.resume for task in active_tasks.values()]
+        if reset_slots:
+            self.reset_on_load(reset_slots)
         return self.spec, {"page": self.page["id"], "triggers": self.triggers, "callbacks": self.callbacks,
                            "loopCount": self.loops, "asyncLoopCount": self.async_loops, "reentry": "skip-while-active" if self.busy else None,
                            "unoptimizedCallbackCount": original_callbacks, "counters": self.variables,
-                           "generatedVariables": self.generated_variables, "routines": list(self.routines)}
+                           "generatedVariables": self.generated_variables, "resetSlots": reset_slots, "routines": list(self.routines),
+                           "tasks": [{"name": name, "policy": task.policy} for name, task in active_tasks.items()]}

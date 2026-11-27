@@ -1,0 +1,13 @@
+rp/1 target=9 name="并行原生倒计时" domain=web theme=enterprise-light
+page #tasks name="并行倒计时" canvas=[540,296]
+  box #root [540x296] layout=stack
+    label #title "并行倒计时" [215x42] x=24 y=20 fontSize=25
+    label #label_a "任务 A" [130x32] x=24 y=78
+    label #out_a "就绪" [230x44] x=24 y=112 fontSize=24
+    button #start_a "启动 A" [142x40] x=24 y=174
+    button #restart_a "重启 A" [142x40] x=24 y=230
+    button #stop_a "停止 A" [98x40] x=174 y=230
+    label #label_b "任务 B" [130x32] x=280 y=78
+    label #out_b "就绪" [230x44] x=280 y=112 fontSize=24
+    button #start_b "启动 B" [142x40] x=280 y=174
+    button #retry_b "再次启动 B" [142x40] x=280 y=230

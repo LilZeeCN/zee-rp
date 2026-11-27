@@ -33,7 +33,7 @@
 - `repeat / limit / do / then / else` 在入口计算一次次数。次数必须是 0 到 `limit` 之间的整数。零次直接执行 `then`，非法次数执行 `else`。
 - `while / limit / do / then / else` 在每次迭代开始前重新判断条件。条件为假执行 `then`。用完次数且条件仍为真时执行 `else`。
 - 两种循环的 `limit` 默认 32，最大 1024。超过 32 次或循环体中有等待动作时，编译器自动在每轮让出执行。传入 `intervalMs`（1 到 30000）可让每轮执行前等待指定毫秒数。定时逻辑可以直接写在循环里。
-- 有等待的页面程序采用单次运行语义。执行期间重复触发该程序会跳过，`bind` 在获得执行权后才写入参数。程序完成或重新载入页面后可以再次触发。
+- 页面事件中直接写入的旧式等待沿用单次运行语义。需要在同一页面同时运行、取消或重启多个流程时，用 `tasks` 定义具名任务。
 - `bind` 将一组元件与参数绑定到同一过程。计算器的 10 个数字键共用一个数字过程，四个运算键共用一个过程。
 - `fixed(value, digits)` 按小数位格式化，`number(fixed(value, digits))` 可用于继续计算。 `nowMs()` 读取 Axure 的毫秒时间。浏览器的 `advanceTime` 可以精确验收它。
 - 构建计划记录从生成的交互到程序的指针，Axure Case 名也标出程序出处。详细源文件留在输出旁，以便审阅或改稿。
@@ -41,6 +41,37 @@
 ```json
 {"recipe":"native-calculator","output":"calculator.rp","verify":true}
 ```
+
+## 同页异步任务
+
+每个任务名对应一个独立的运行状态。用 `start` 启动任务，用 `with` 覆盖本次启动的 `locals` 初值。执行到等待点时，其他任务和页面按钮可以继续工作。调用同一个 `routine` 时，各任务读取自己的局部变量。页级 `locals` 与 RP/1 全局变量可用来显式共享状态。
+
+```json
+{
+  "page": "demo",
+  "tasks": {
+    "timer": {
+      "policy": "restart",
+      "locals": {"label": {"type": "text", "value": "就绪"}},
+      "do": [{"wait": 250}, {"set": {"@status": "=$label"}}]
+    },
+    "refresh": {
+      "policy": "ignore",
+      "do": [{"wait": 150}, {"set": {"@refreshed": "刷新完成"}}]
+    }
+  },
+  "on": {
+    "start": {"click": [{"start": "timer", "with": {"label": "到期"}}]},
+    "stop": {"click": [{"cancel": "timer"}, {"set": {"@status": "已停止"}}]},
+    "reload": {"click": [{"start": "refresh"}]}
+  }
+}
+```
+
+- `restart` 是默认策略，重新启动时用新参数和局部初值替换正在等待的那次运行。`ignore` 在任务运行期间跳过重复启动，同时保留当前参数。
+- `cancel` 可在页面事件中使该任务之后的等待恢复失效。停止事件可直接设置提示文字或按钮状态。其他任务保持各自的运行进度。
+- 任务可使用 `wait`、带间隔的 `repeat` / `while` 和普通 RP/1 动作。等待之后只发出唤醒信号，调度器按当前任务的截止时间取下一段动作。旧一轮留下的信号无法执行旧动作。全部任务共用一个隐藏元件。
+- 用 `generate_prototype({recipe: "native-async-tasks", output: "tasks.rp", verify: true})` 运行完整示例。也可把同一份程序通过 `rp_command(add-interaction)` 写入已有 RP9 项目。
 
 ## 多页复用与现有模板
 
@@ -128,6 +159,7 @@
 | --- | --- |
 | `native-calculator` | 按键表驱动连续四则运算，带十进制舍入和除零恢复。 |
 | `native-countdown` | 双态面板提供节拍，`Now.getTime()` 计算剩余毫秒。验收精确推进到 1250、250、0 ms，覆盖启动、停止和重启。 |
+| `native-async-tasks` | 两个倒计时同页并行，共用更新过程。验收覆盖参数隔离、运行中重启、取消、忽略重复启动、旧等待到期和取消后再次启动。 |
 | `native-loop` | 一个 repeat 块表达最多 32 步累乘。验收覆盖 99³、2⁵、2³²、零次、非整数和次数超限。 |
 | `native-blur-form` | 两个字段各自失焦时触发同一验证事件。提交按钮复用验证。验收覆盖必填、两次输入不一致和纠正后通过。 |
 

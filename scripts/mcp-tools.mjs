@@ -1488,7 +1488,7 @@ function summarizeNativePrograms(program) {
   const one = page => ({ page: page.page, routineCount: page.routines.length,
     triggerCount: page.triggers.length, callbackCount: Object.keys(page.callbacks).length,
     unoptimizedCallbackCount: page.unoptimizedCallbackCount, loopCount: page.loopCount,
-    asyncLoopCount: page.asyncLoopCount, reentry: page.reentry });
+    asyncLoopCount: page.asyncLoopCount, reentry: page.reentry, ...(page.tasks?.length ? { tasks: page.tasks } : {}) });
   return program.pages ? { pages: program.pages.map(one) } : one(program);
 }
 
@@ -3486,7 +3486,7 @@ export const sessionTools = [
       }, required: ['pages'] }] },
       source: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径（.rp1 或 .json）或本地 .html / http(s) URL（自动用无头 Chrome 提取 DOM/样式/表单/图片并生成可编辑 .rp 与伴随 .rp1）；与 spec/rp1 二选一（别名 sourcePath）。' },
       sourcePath: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径或 HTML/URL（同 source）。' },
-      program: { type: 'object', description: '可选 RP9 交互程序。page 选择页面，on 绑定事件，targets 声明目标别名，locals 声明页内状态，routines 与 call 复用过程，bind 批量绑定参数。支持 if、match、有界 repeat / while 与 intervalMs。' },
+      program: { type: 'object', description: '可选 RP9 交互程序。page 选择页面，on 绑定事件，targets 声明目标别名，locals 声明页内状态，routines 与 call 复用过程，bind 批量绑定参数。tasks 定义并行原生任务，可用 start / with、cancel，以及 restart / ignore 重入策略。支持 if、match、有界 repeat / while 与 intervalMs。' },
       programs: { type: 'array', minItems: 1, items: { type: 'object' }, description: '多个页面的程序，在同一份 RP 中一次编译，可使用 sharedRoutines。' },
       sharedRoutines: { type: 'object', description: '各页面按自己的元件与局部变量编译的过程库。' },
       output: { type: 'string', minLength: 1, description: '输出 .rp 路径（绝对路径，或基于 cwd/projectDir/当前工作目录解析的相对路径；传 "auto" 时按源码或工作目录自动生成不重名 .rp 路径）。' },

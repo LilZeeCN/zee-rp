@@ -676,6 +676,8 @@
     "scripts/native-program-patch.mjs",
     "scripts/interaction-lint.mjs",
     "docs/native-interaction-workflow.md",
+    "examples/authoring/native-async-tasks.rp1",
+    "examples/authoring/native-async-tasks.rp1.interactions.json",
     "examples/authoring/native-countdown.rp1",
     "examples/authoring/native-countdown.rp1.interactions.json",
     "examples/authoring/native-loop.rp1",

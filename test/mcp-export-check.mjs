@@ -414,3 +414,47 @@ page #gamma name="Gamma" canvas=[380,280]
     assert.equal(repeated.passed, steps.length);
   });
 });
+
+test('same-page native tasks restart and cancel without resuming an old continuation', {
+  skip: !verifyHost && 'Set AXURE_MCP_EXPORT_HOST=1 on a verified macOS Axure host.',
+}, async () => {
+  await session(async ({ call, work }) => {
+    const recipe = 'native-async-tasks';
+    const generated = await call('generate_prototype', { recipe, output: 'async-tasks.rp', verify: true });
+    assert.equal(generated.nativeProgram.callbackCount, 1);
+    assert.equal(generated.nativeProgram.asyncLoopCount, 2);
+    assert.deepEqual(generated.nativeProgram.tasks, [
+      { name: 'timerA', policy: 'restart' }, { name: 'timerB', policy: 'ignore' },
+    ]);
+    assert.equal(generated.behaviorVerification.passed, generated.verifySteps.length);
+    assert.equal(generated.behaviorVerification.interactionCompilation.errorCount, 0);
+    const { program, steps } = JSON.parse(readFileSync(generated.interactionSource, 'utf8'));
+    const layout = await call('generate_prototype', {
+      rp1: readFileSync(join(root, 'examples/authoring', recipe + '.rp1'), 'utf8'),
+      output: 'existing-timer-layout.rp',
+      program: { page: 'tasks', on: { $page: { load: [{ set: { '@title': '已有载入事件' } }] } } },
+    });
+    const patch = await call('rp_command', { command: 'add-interaction', params: {
+      source: layout.output, output: 'patched-async-tasks.rp', preflight: 'official', program,
+    } });
+    assert.equal(patch.official.status, 'passed');
+    assert.deepEqual(patch.structure, { unparseable: 0, danglingRefs: 0, problems: 0 });
+    assert.equal(patch.nativeProgram.pages[0].callbackCount, 1);
+    const patchSteps = [{ action: 'expect', target: 'tasks/title', expect: { text: '已有载入事件' } }, ...steps];
+    const replay = await call('verify_prototype', { rp: patch.output, engine: 'official', steps: patchSteps });
+    assert.equal(replay.passed, patchSteps.length);
+    const updated = await call('rp_command', { command: 'add-interaction', params: {
+      source: patch.output, output: 'updated-async-tasks.rp', replaceEvent: true, preflight: 'static', program,
+    } });
+    assert.equal(updated.after.widgets, updated.before.widgets);
+    assert.equal(updated.after.interactions, updated.before.interactions);
+    const reopened = await call('rp_inspect', { path: updated.output, view: 'interactions', page: '并行倒计时' });
+    const pageEvents = reopened.items.find(item => item.kind === 'page').interactions;
+    const load = pageEvents.find(ix => ix.event === 'OnLoad');
+    assert.equal(load.cases.length, 2);
+    if (evidence) {
+      writeFileSync(join(work, 'generated-verification.json'), JSON.stringify(generated.behaviorVerification, null, 2) + '\n');
+      writeFileSync(join(work, 'patched-verification.json'), JSON.stringify(replay, null, 2) + '\n');
+    }
+  });
+});

@@ -2864,7 +2864,9 @@ class Frontend:
         return max(matches, key=lambda x: len(x[0])) if matches else (None, None)
 
     def runtime(self, value, scope, path, expected=None, row=None):
-        if isinstance(value, str):
+        if isinstance(value, dict) and set(value) == {"_program_literal"}:
+            value = value["_program_literal"]
+        elif isinstance(value, str):
             if "${" in value:
                 parsed = self.expression(parse_template_string(value, path), {}, path)
                 return self.runtime(parsed, scope, path, expected=expected, row=row)

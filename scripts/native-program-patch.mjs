@@ -140,6 +140,11 @@ export function patchNativeProgram(file, document, input, base, baseline, compil
   for (const pageProgram of compiled.program.pages) {
     const id = pageProgram.page, page = actualById.get(id);
     const pageKey = pageKeyOf(document, page);
+    const previous = managed[pageKey];
+    const legacyReset = previous?.resetInstalled
+      ? previous.variableNames?.find(name => /^rp1flow_[a-f0-9]{10}_busy$/.test(name))
+      : undefined;
+    let installedResets = new Set(previous?.resetSlots ?? (legacyReset ? [legacyReset] : []));
     const aliases = anchors.get(id);
     const driver = driverNames.get(id);
     if (driver) {
@@ -175,22 +180,25 @@ export function patchNativeProgram(file, document, input, base, baseline, compil
         const key = `${w?.guid ?? 'page'}:${ix.event}`;
         const resetOnly = !w && pageProgram.triggers.some(t => t.event === ix.event && t.resetOnly);
         if (!generated && !resetOnly) keys.push(key);
-        if (resetOnly && managed[pageKey]?.resetInstalled) continue;
+        if (resetOnly && pageProgram.resetSlots.every(slot => installedResets.has(slot))) continue;
         const existing = priorEvents.some(event => event.event === ix.event);
         if (existing && !resetOnly && !input.replaceEvent) {
           throw problem('E_PROGRAM_EVENT_EXISTS', `「${page.name}」的 ${w?.name || interaction.trigger} 已有 ${ix.event}，请指定 replaceEvent。`);
         }
         items.push({ target: owner, interactions: [translateActions({ ...ix, cases }, bindings)], prependEvent: resetOnly && existing,
           replaceEvent: !resetOnly && Boolean(input.replaceEvent) });
+        if (!w && ix.event === 'OnLoad') {
+          if (!resetOnly) installedResets = new Set();
+          for (const slot of pageProgram.resetSlots) installedResets.add(slot);
+        }
       }
     }
-    const previous = managed[pageKey];
     if (previous?.keys.some(key => !keys.includes(key))) {
       throw problem('E_PROGRAM_PARTIAL_REPLACE', `页面「${page.name}」重新编译时需包含已安装的事件入口。`);
     }
     managed[pageKey] = { keys, pageId: id, driverGuid: driver?.guid ?? previous?.driverGuid ?? null,
       variableNames: [...new Set([...(previous?.variableNames ?? []), ...pageProgram.generatedVariables])],
-      resetInstalled: previous?.resetInstalled || pageProgram.triggers.some(t => t.resetOnly) };
+      resetSlots: [...installedResets] };
   }
   const candidate = addInteractionsBatch(bytes, items, { widgetIdentities: widgets });
   return { ...candidate, program: compiled.program, sourceMap: [...mappedSymbols.values()], programBindings: managed };

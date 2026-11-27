@@ -2,7 +2,7 @@
 
 ## 原生交互程序
 
-`generate_prototype(programs)` 与 `rp_command(add-interaction, params.programs)` 共用 RP9 编译器。支持多页在同一 .rp 中编译、跨页复用过程、页内私有变量、通过 GUID 给独立 RP9 模板增量写入、有界异步 `repeat` / `while` 和忙时跳过重复触发。简单流程内联到业务元件，复杂流程每页最多一个隐藏调度元件。计算器、毫秒倒计时与失焦表单在同一 RP9 中通过 63 步官方浏览器验收。见[原生交互工作流](../docs/native-interaction-workflow.md)。
+`generate_prototype(programs)` 与 `rp_command(add-interaction, params.programs)` 共用 RP9 编译器。支持多页编译、共享过程、通过 GUID 给独立 RP9 模板增量写入及有界异步循环。具名 `tasks` 支持同页并行、独立参数和局部变量、取消及 `restart` / `ignore` 重入策略。简单流程内联到业务元件，所有复杂流程每页共用一个隐藏调度元件。计算器、毫秒倒计时与失焦表单在同一 RP9 中通过 63 步官方浏览器验收。并行倒计时示例通过取消、重启、旧唤醒和同页任务隔离测试。见[原生交互工作流](../docs/native-interaction-workflow.md)。
 
 ## 原生交互预检与匿名交付
 

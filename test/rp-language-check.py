@@ -72,6 +72,35 @@ class LanguageContract(unittest.TestCase):
             lower_native_program(sugar_fixture(), program)
         self.assertEqual(repeat.exception.diagnostic["pointer"], "/program/routines/check/0/limit")
 
+    def test_program_task_errors_point_to_the_task_or_trigger(self):
+        from rplang.native_program import lower_native_program
+        program = {
+            "page": "main",
+            "tasks": {"job": {"locals": {"value": {"type": "text", "value": "initial"}},
+                              "do": [{"wait": 10}, {"set": {"@status": "=$value"}}]}},
+            "on": {"apply": {"click": [{"start": "job", "with": {"value": "updated"}}]}},
+        }
+        lowered, report = lower_native_program(sugar_fixture(), program)
+        compile_language(lowered)
+        self.assertEqual(report["tasks"], [{"name": "job", "policy": "restart"}])
+        self.assertEqual(len(report["callbacks"]), 1)
+        for key, value, code in [
+            ("policy", "overlap", "E_PROGRAM_TASK_POLICY"),
+            ("do", [{"cancel": "job"}], "E_PROGRAM_TASK_SCOPE"),
+            ("do", [{"wait": -1}], "E_PROGRAM_TASK_WAIT"),
+        ]:
+            with self.subTest(value=value):
+                bad = copy.deepcopy(program)
+                bad["tasks"]["job"][key] = value
+                with self.assertRaises(LanguageError) as rejected:
+                    lower_native_program(sugar_fixture(), bad)
+                self.assertEqual(rejected.exception.diagnostic["code"], code)
+                self.assertTrue(rejected.exception.diagnostic["pointer"].startswith("/program/tasks/job/"))
+        program["on"]["apply"]["click"][0]["with"] = {"unexpected": "x"}
+        with self.assertRaises(LanguageError) as rejected:
+            lower_native_program(sugar_fixture(), program)
+        self.assertEqual(rejected.exception.diagnostic["pointer"], "/program/on/apply/click/0/with")
+
     def test_native_timers_and_gestures_in_reference_runtime(self):
         from rp_language_cli import read_source
         spec = read_source(ROOT / "examples/rp-language/native-gestures.rp1")
