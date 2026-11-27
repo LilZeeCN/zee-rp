@@ -17,7 +17,8 @@ import { setWidgetNames } from './name-widget.mjs';
 import { listCustomStyles, renameCustomStyle, rebindWidgets, widgetSelector } from './custom-styles.mjs';
 import { EVENTS, addInteractionsBatch, loadBaselineMap, resolveBaselineTarget } from './ix-actions.mjs';
 import { lintInteractionSpecs, lintNativeInteractions } from './interaction-lint.mjs';
-import { nativeWidgetIdentities, officialIdOf, saveIdentityBaseline } from './native-widget-identity.mjs';
+import { bindNativeSymbols, nativeWidgetIdentities, officialIdOf, readSourceBaseline, saveIdentityBaseline } from './native-widget-identity.mjs';
+import { patchNativeProgram } from './native-program-patch.mjs';
 import { compilePrototype, buildInteractiveRp, reportPrototypeProgress } from './proto.mjs';
 import { expandSpec, pasteAxvg } from './axvg.mjs';
 import { createBlankProject } from './create-blank-project.mjs';
@@ -230,13 +231,18 @@ async function runInteractionCommand(input, cwd, dryRun) {
   const baselinePath = findBaselineForRp(source, input.baseline && resolve(workDir, input.baseline), state);
   if (input.baseline && !pathExists(resolve(workDir, input.baseline))) throw new Error(`找不到指定基线：${input.baseline}`);
   const baseline = loadBaselineMap(source, baselinePath);
+  const programRequest = input.program !== undefined || input.programs !== undefined;
+  if (programRequest && [input.items, input.interactions, input.action, input.event, input.target].some(v => v !== undefined)) {
+    throw new Error('program/programs 与底层 items、interactions 或 action 参数二选一。');
+  }
+  const sourceBaseline = programRequest ? readSourceBaseline(source, baselinePath ?? undefined) : null;
   const coerce = value => value === 'true' ? true : value === 'false' ? false
     : value !== '' && !Number.isNaN(Number(value)) ? Number(value) : value;
   const singleAction = input.action ? { type: input.action, ...Object.fromEntries((input.parameters ?? []).map(param => {
     const split = param.indexOf('=');
     return [param.slice(0, split), coerce(param.slice(split + 1))];
   })) } : null;
-  const items = input.items ?? [{ target: input.target, page: input.page, onPage: input.onPage,
+  const items = programRequest ? [] : input.items ?? [{ target: input.target, page: input.page, onPage: input.onPage,
     interactions: input.interactions ?? [{ event: input.event, actions: [singleAction] }] }];
   const diagnostics = [], events = [];
   let expressionCount = 0;
@@ -267,10 +273,13 @@ async function runInteractionCommand(input, cwd, dryRun) {
   }
   let candidate;
   try {
-    candidate = addInteractionsBatch(file, items, { replaceEvent: input.replaceEvent, baseline, widgetIdentities: nativeWidgetIdentities(rp) });
+    candidate = programRequest ? patchNativeProgram(file, rp, input, sourceBaseline, baseline,
+      (spec, options) => runWorkflow('native-program', spec, options))
+      : addInteractionsBatch(file, items, { replaceEvent: input.replaceEvent, baseline, widgetIdentities: nativeWidgetIdentities(rp) });
   } catch (error) {
     const code = /has no state/.test(error.message) ? 'E_AXURE_PANEL_STATE' : /exactly one (?:widget|page)|Page record not found/.test(error.message)
       ? 'E_AXURE_INTERACTION_TARGET' : 'E_AXURE_INTERACTION';
+    if (error.diagnostics) return fail(error.code ?? code, error.message, [...diagnostics, ...error.diagnostics], { lint });
     const location = error.cause?.location ?? {};
     return fail(code, error.message, [...diagnostics, { ...location, code, severity: 'error', message: error.message,
       nextAction: '按报错的事件与 Case 检查目标、状态和参数。可用 rp_inspect(view="locate") 查询原生 GUID。' }], { lint });
@@ -279,7 +288,7 @@ async function runInteractionCommand(input, cwd, dryRun) {
   const structure = zerosOf(resultRp);
   if (Object.values(structure).some(Boolean)) return fail('E_AXURE_INTERACTION_STRUCTURE', '交互候选文件未通过结构三零。', diagnostics, { structure, lint });
   let official = { status: 'skipped', reason: mode === 'static' ? 'static-only' : 'no-expressions' };
-  if (mode === 'official' || (mode === 'auto' && expressionCount > 0)) {
+  if (mode === 'official' || (mode === 'auto' && (programRequest || expressionCount > 0))) {
     const stageParent = input.output ? dirname(resolve(workDir, input.output)) : workDir;
     assertWritable(join(stageParent, '.zee-interaction-check'));
     const stage = mkdtempSync(join(stageParent, '.zee-interaction-check-'));
@@ -302,28 +311,42 @@ async function runInteractionCommand(input, cwd, dryRun) {
       return fail('E_INTERACTION_PREFLIGHT', '官方交互预检未通过。', [...diagnostics, ...(official.diagnostics ?? [])], { lint, official, structure });
     }
   }
-  const report = input.items ? candidate.report : candidate.report.results[0];
+  const report = input.items || programRequest ? candidate.report : candidate.report.results[0];
+  const nativeProgram = candidate.program ? summarizeNativePrograms(candidate.program) : undefined;
   const detail = { command: 'add-interaction', exitCode: 0, stdout: JSON.stringify(report), stderr: '',
-    report, lint, official, structure, before: countsOf(rp), after: countsOf(resultRp) };
+    report, lint, official, structure, before: countsOf(rp), after: countsOf(resultRp), ...(nativeProgram ? { nativeProgram } : {}) };
   if (dryRun) return { status: 'completed', dryRun: true, ...detail };
   if ((state && (session !== state || state.chain.at(-1) !== source)) || sha256Of(source) !== originalHash) {
     return fail('E_STALE_INTERACTION_SOURCE', '预检期间宿主发生变化，请读取最新版本后重试。', diagnostics);
   }
   const output = state ? nextWorkNode(state) : resolve(workDir, input.output);
-  let created = false;
+  let created = false, writtenBaseline;
   try {
     assertWritable(output);
-    if (!state && baselinePath && pathExists(`${output}.baseline.json`)) throw new Error(`目标基线已存在：${output}.baseline.json`);
+    if (((!state && baselinePath) || programRequest) && pathExists(`${output}.baseline.json`)) throw new Error(`目标基线已存在：${output}.baseline.json`);
     writeFileSync(output, candidate.file, { flag: 'wx' });
     created = true;
+    if (programRequest) {
+      const sidecar = `${output}.baseline.json`;
+      assertWritable(sidecar);
+      const base = sourceBaseline ?? {};
+      writeFileSync(sidecar, JSON.stringify({
+        version: 1, ...base, outputRp: output,
+        sourceMap: bindNativeSymbols(candidate.sourceMap, nativeWidgetIdentities(resultRp)),
+        programBindings: candidate.programBindings,
+      }, null, 2) + '\n', { flag: 'wx' });
+      writtenBaseline = sidecar;
+    }
     if (state) {
       commitChainNode(state, output, { op: 'add-interaction', at: now(), from: source, node: output });
-      return { status: 'completed', ...detail, chainTail: output, previousTail: source, syncStatus: computeSyncStatus(state) };
+      return { status: 'completed', ...detail, chainTail: output, previousTail: source, syncStatus: computeSyncStatus(state),
+        ...(writtenBaseline ? { baseline: writtenBaseline } : {}) };
     }
-    const outputBaseline = baselinePath ? saveIdentityBaseline(source, output, resultRp, baselinePath) : null;
+    const outputBaseline = writtenBaseline ?? (baselinePath ? saveIdentityBaseline(source, output, resultRp, baselinePath) : null);
     return { status: 'completed', ...detail, output, ...(outputBaseline ? { baseline: outputBaseline } : {}) };
   } catch (error) {
-    if (!state && created) unlinkSync(output);
+    if (writtenBaseline) unlinkSync(writtenBaseline);
+    if (created && pathExists(output) && state?.chain.at(-1) !== output) unlinkSync(output);
     if (error.code === 'EEXIST') return fail('E_OUTPUT_EXISTS', `输出已存在：${output}`, diagnostics);
     throw error;
   } finally {
@@ -1461,7 +1484,15 @@ function loadSpecObjectFromSource(sourcePath) {
   return JSON.parse(proc.stdout);
 }
 
-export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, program, verifySteps: programSteps, source: sourcePathArg, sourcePath: sourcePathAlias, recipe, output: requestedOutput, cwd, projectDir, strictAudit = false, autoHeal = false, variants, overwrite = false, compact = true, template, baseRp, prefer = 'fail', resolutions }, { beforePublish } = {}) {
+function summarizeNativePrograms(program) {
+  const one = page => ({ page: page.page, routineCount: page.routines.length,
+    triggerCount: page.triggers.length, callbackCount: Object.keys(page.callbacks).length,
+    unoptimizedCallbackCount: page.unoptimizedCallbackCount, loopCount: page.loopCount,
+    asyncLoopCount: page.asyncLoopCount, reentry: page.reentry });
+  return program.pages ? { pages: program.pages.map(one) } : one(program);
+}
+
+export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, program, programs, sharedRoutines, verifySteps: programSteps, source: sourcePathArg, sourcePath: sourcePathAlias, recipe, output: requestedOutput, cwd, projectDir, strictAudit = false, autoHeal = false, variants, overwrite = false, compact = true, template, baseRp, prefer = 'fail', resolutions }, { beforePublish } = {}) {
   let spec = { language: 'rp/1', target: 9 };
   let stage = 'validation', output, artifactDir, source, resolvedSourceFile = null, inlineCompilePath = null, plan;
   let publishedCompanionSource = null, publishedRecipeOutput = null, publishedInteractions = null;
@@ -1485,8 +1516,11 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, program,
       throw new Error('output 必须是有效的 .rp 路径。');
     }
     let effectiveRequestedOutput = requestedOutput;
-    const hasCompanionSource = Boolean(recipe || inlineRp1Text !== null || program);
-    const companionSuffix = !program || recipe || inlineRp1Text !== null ? '.rp1'
+    const authorProgram = program !== undefined || programs !== undefined;
+    if (program !== undefined && programs !== undefined) throw new Error('program 与 programs 二选一。');
+    if (!authorProgram && sharedRoutines !== undefined) throw new Error('sharedRoutines 需要 program 或 programs。');
+    const hasCompanionSource = Boolean(recipe || inlineRp1Text !== null || authorProgram);
+    const companionSuffix = !authorProgram || recipe || inlineRp1Text !== null ? '.rp1'
       : resolvedSourceFile ? `.source${extname(resolvedSourceFile)}` : '.json';
     if (requestedOutput === 'auto') {
       const sourceOutsideSkill = !recipe && resolvedSourceFile
@@ -1508,7 +1542,7 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, program,
       throw new Error('output 必须是新的 .rp 路径。');
     assertWritable(resolvedOutput);
     let nativeInteractions = readNativeInteractionSource(resolvedSourceFile);
-    if (program && nativeInteractions) throw new Error('program 与源文件旁已有的交互源码只能选择一个。');
+    if (authorProgram && nativeInteractions) throw new Error('内联 program/programs 与源文件旁的交互源码二选一。');
     const companionSourceTarget = hasCompanionSource ? resolvedOutput.slice(0, -3) + companionSuffix : null;
     if (companionSourceTarget) {
       assertWritable(companionSourceTarget);
@@ -1577,16 +1611,16 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, program,
     }
     source = join(artifactDir, 'source.json');
     writeFileSync(source, JSON.stringify(spec, null, 2) + '\n', { flag: 'wx' });
-    if (program) {
+    if (authorProgram) {
       const path = `${inlineCompilePath ?? source}.interactions.json`;
       const steps = programSteps ?? [];
-      writeFileSync(path, JSON.stringify({ program, steps }, null, 2) + '\n', { flag: 'wx' });
-      nativeInteractions = { path, items: [], program, steps };
+      writeFileSync(path, JSON.stringify({ program, programs, sharedRoutines, steps }, null, 2) + '\n', { flag: 'wx' });
+      nativeInteractions = { path, items: [], program, programs, steps };
     }
     stage = 'compile';
     reportPrototypeProgress('compile', 0, 1);
     const compiled = compilePrototype(resolvedSourceFile ?? inlineCompilePath ?? source, artifactDir, {
-      strictAudit, autoHeal: Boolean(autoHeal), nativeProgram: nativeInteractions?.program ? nativeInteractions.path : undefined,
+      strictAudit, autoHeal: Boolean(autoHeal), nativeProgram: nativeInteractions?.program || nativeInteractions?.programs ? nativeInteractions.path : undefined,
     });
     reportPrototypeProgress('compile', 1, 1);
     plan = JSON.parse(readFileSync(compiled.planPath, 'utf8'));
@@ -1739,9 +1773,7 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, program,
     const summary = { source: resolvedSourceFile ?? source, baseline: outputBaseline, verification,
       ...(nativeInteractions ? { interactionSource: publishedInteractions ?? nativeInteractions.path,
         verifySteps: nativeInteractions.steps, interactionEngine: 'official' } : {}),
-      ...(plan.nativeProgram ? { nativeProgram: { page: plan.nativeProgram.page, routineCount: plan.nativeProgram.routines.length,
-        triggerCount: plan.nativeProgram.triggers.length, callbackCount: Object.keys(plan.nativeProgram.callbacks).length,
-        loopCount: plan.nativeProgram.loopCount } } : {}),
+      ...(plan.nativeProgram ? { nativeProgram: summarizeNativePrograms(plan.nativeProgram) } : {}),
       nextActions: [
         { tool: 'export_prototype', arguments: { rp: output } },
         { tool: 'revise_prototype', source: resolvedSourceFile ?? source, rp: output },
@@ -3454,7 +3486,9 @@ export const sessionTools = [
       }, required: ['pages'] }] },
       source: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径（.rp1 或 .json）或本地 .html / http(s) URL（自动用无头 Chrome 提取 DOM/样式/表单/图片并生成可编辑 .rp 与伴随 .rp1）；与 spec/rp1 二选一（别名 sourcePath）。' },
       sourcePath: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径或 HTML/URL（同 source）。' },
-      program: { type: 'object', description: '可选 RP/1 原生交互程序。page 指向页面，on 绑定事件，routines 复用动作块，bind 批量绑定参数。动作块可写 if/then/else、repeat/limit/do 和 call。' },
+      program: { type: 'object', description: '可选 RP9 交互程序。page 选择页面，on 绑定事件，targets 声明目标别名，locals 声明页内状态，routines 与 call 复用过程，bind 批量绑定参数。支持 if、match、有界 repeat / while 与 intervalMs。' },
+      programs: { type: 'array', minItems: 1, items: { type: 'object' }, description: '多个页面的程序，在同一份 RP 中一次编译，可使用 sharedRoutines。' },
+      sharedRoutines: { type: 'object', description: '各页面按自己的元件与局部变量编译的过程库。' },
       output: { type: 'string', minLength: 1, description: '输出 .rp 路径（绝对路径，或基于 cwd/projectDir/当前工作目录解析的相对路径；传 "auto" 时按源码或工作目录自动生成不重名 .rp 路径）。' },
       cwd: { type: 'string', minLength: 1, description: '可选：解析相对路径与 output="auto" 时的本地工作目录（别名 projectDir）。' },
       projectDir: { type: 'string', minLength: 1, description: '可选：解析相对路径时的本地工作目录（同 cwd）。' },
@@ -3531,7 +3565,7 @@ export const sessionTools = [
           if (result.status !== 'completed') return result;
 
           if (htmlMode) {
-            const companionRp1 = input.program ? result.source : result.output.replace(/\.rp$/i, '.rp1');
+            const companionRp1 = input.program || input.programs ? result.source : result.output.replace(/\.rp$/i, '.rp1');
             if (stageDir && existsSync(join(stageDir, 'assets')) && importedAssets.length) {
               const outAssetsDir = join(dirname(result.output), 'assets');
               assertWritable(join(outAssetsDir, '.keep'));

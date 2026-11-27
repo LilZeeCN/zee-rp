@@ -189,11 +189,11 @@ export function readNativeInteractionSource(source) {
   assertNotProtected(path);
   if (!existsSync(path)) return null;
   const data = JSON.parse(readFileSync(path, 'utf8'));
-  if ((!data.program && (!Array.isArray(data.items) || !data.items.length)) ||
+  if ((!data.program && !data.programs && (!Array.isArray(data.items) || !data.items.length)) ||
       (data.items !== undefined && !Array.isArray(data.items)) || !Array.isArray(data.steps)) {
-    throw new Error(`原生交互源码须包含 program 或非空 items，并提供 steps：${path}`);
+    throw new Error(`原生交互源码须包含 program、programs 或非空 items，并提供 steps：${path}`);
   }
-  return { path, items: data.items ?? [], program: data.program, steps: data.steps };
+  return { path, items: data.items ?? [], program: data.program, programs: data.programs, steps: data.steps };
 }
 
 export function recipeCatalog({ recipe, includeSource = false } = {}) {

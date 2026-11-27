@@ -88,6 +88,7 @@ export function nativeRuntimeValue(ast, ctx, { targetRows = false } = {}) {
     }
     return JSON.stringify(value).replace(/[\[\]\u2028\u2029]/g, c => `\\u${c.charCodeAt(0).toString(16).padStart(4,'0')}`);
   };
+  const widgetKey = locator => typeof locator === 'object' ? JSON.stringify(locator) : locator;
   const coerce = (expression, type) => type === 'number' ? `((${expression})*1)` : type === 'boolean' ? `((${expression}).toString().toLowerCase()=='true')` : expression;
   const render = node => {
     if (node.kind === 'literal') return quote(node.value);
@@ -110,7 +111,7 @@ export function nativeRuntimeValue(ast, ctx, { targetRows = false } = {}) {
         case 'isNotOver': {
           const nameA = node.args[0]?.name;
           const nameB = node.args[1]?.name;
-          const key = `spatial:${node.fn}:${nameA}:${nameB}`;
+          const key = `spatial:${node.fn}:${widgetKey(nameA)}:${widgetKey(nameB)}`;
           if (reads.has(key)) return coerce(reads.get(key), 'boolean');
           const rectCall = wName => {
             const w = findWidget(wName);
@@ -157,7 +158,7 @@ export function nativeRuntimeValue(ast, ctx, { targetRows = false } = {}) {
         : accessor === 'checked' || accessor === 'selected' ? 'GetCheckState'
         : accessor === 'value' && isChoice ? 'GetSelectedOption' : 'GetWidgetText';
     }
-    const key = node.kind === 'widget' ? `widget:${node.name}:${getter}` : `${node.kind}:${node.name}`;
+    const key = node.kind === 'widget' ? `widget:${widgetKey(node.name)}:${getter}` : `${node.kind}:${node.name}`;
     const formatAlias = alias => getter === 'GetWidget' ? `${alias}.${accessor}` : alias;
     if (reads.has(key)) return coerce(formatAlias(reads.get(key)), node.valueType);
     const alias = `rpv${reads.size}`;

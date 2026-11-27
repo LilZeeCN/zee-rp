@@ -199,8 +199,9 @@ def main():
             if args.native_program:
                 from rplang.native_program import lower_native_program
                 with open(args.native_program, encoding="utf-8") as handle:
-                    program = json.load(handle)["program"]
-                spec_obj, program_map = lower_native_program(spec_obj, program)
+                    program_input = json.load(handle)
+                spec_obj, program_map = lower_native_program(spec_obj, program_input.get("program"),
+                    programs=program_input.get("programs"), shared_routines=program_input.get("sharedRoutines"))
             if getattr(args, "shell", None):
                 spec_obj["shell"] = args.shell
                 spec_obj["domain"] = "mobile" if args.shell == "mobile-stack" else "web"
@@ -220,7 +221,8 @@ def main():
             except LanguageError as error:
                 if program_map is not None:
                     path = error.diagnostic["pointer"]
-                    for origin in program_map["callbacks"].values():
+                    callback_maps = [entry["callbacks"] for entry in program_map.get("pages", [program_map])]
+                    for origin in (origin for callbacks in callback_maps for origin in callbacks.values()):
                         lowered_path = origin["loweredPointer"]
                         if path == lowered_path or path.startswith(lowered_path + "/"):
                             error.diagnostic["loweredPointer"] = path
@@ -232,15 +234,15 @@ def main():
                     plan = json.load(handle)
                 plan["sourceSpec"] = authored_spec
                 plan["nativeProgram"] = program_map
+                by_page = {entry["page"]: entry["callbacks"] for entry in program_map.get("pages", [program_map])}
                 for page in plan.get("pages", []):
-                    if page.get("slug") != program_map["page"]:
-                        continue
                     for interaction in page.get("interactions", []):
-                        origin = program_map["callbacks"].get(interaction.get("sourceId", "").split("/")[-1])
+                        origin = by_page.get(page.get("slug"), {}).get(interaction.get("sourceId", "").split("/")[-1])
                         if origin:
                             for event in interaction.get("events", []):
                                 for case in event.get("cases", []):
-                                    case["description"] = origin["sourcePointer"]
+                                    if case["description"].startswith("RP/1 "):
+                                        case["description"] = origin["sourcePointer"]
                 with open(res["planPath"], "w", encoding="utf-8") as handle:
                     json.dump(plan, handle, ensure_ascii=False, indent=2)
         elif args.preset == "mobile-lostfound" or (args.theme and args.theme.startswith("mobile-")):

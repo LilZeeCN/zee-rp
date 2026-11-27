@@ -2,7 +2,9 @@
 
 ## 从业务逻辑生成原生交互
 
-`generate_prototype` 可接收 `program` 对象，也会加载配套 `.rp1.interactions.json` 中的 `program`。程序复用 RP/1 的变量、作用域和表达式。编译器生成可在 RP9 编辑器中查看的交互 Case、跳转事件与必要的隐藏元件。配套文件的 `steps` 保存原剧本，可传空数组。已有 `items` 文件仍可继续使用。
+同一份交互程序可以交给 `generate_prototype` 生成新原型，也可以交给 `rp_command(add-interaction)` 写进现有 RP9 模板。单页用 `program`，多页用 `programs`。生成时也可从同名 `.rp1.interactions.json` 读取程序、`sharedRoutines` 和 `steps`。已有 `items` 文件仍可继续使用。
+
+编译器将线性动作和可内联的条件写入原触发元件。需要跨动作跳转时，整页共用一个隐藏调度元件，原生 Case 保留程序出处。成功结果的 `nativeProgram` 逐页列出触发入口、循环和辅助元件数量。
 
 下面是同一页面的乘方按钮。用户填写底数和次数，程序负责边界、循环、成功显示与非法输入提示。
 
@@ -28,7 +30,10 @@
 
 - `if / then / else` 顺序执行条件块。 `match / cases / else` 按值选择动作块，适合运算符、状态名和菜单命令。
 - `routines` 声明可复用过程，`call` 调用。可在输入框失焦、提交等不同事件复用同一过程。直接递归或互相调用的环会在编译前报告。
-- `repeat / limit / do / then / else` 只计算一次重复次数，运行有界的同步动作。合法范围内的次数为整数。零次会直接执行 `then`。非法次数执行 `else`。
+- `repeat / limit / do / then / else` 在入口计算一次次数。次数必须是 0 到 `limit` 之间的整数。零次直接执行 `then`，非法次数执行 `else`。
+- `while / limit / do / then / else` 在每次迭代开始前重新判断条件。条件为假执行 `then`。用完次数且条件仍为真时执行 `else`。
+- 两种循环的 `limit` 默认 32，最大 1024。超过 32 次或循环体中有等待动作时，编译器自动在每轮让出执行。传入 `intervalMs`（1 到 30000）可让每轮执行前等待指定毫秒数。定时逻辑可以直接写在循环里。
+- 有等待的页面程序采用单次运行语义。执行期间重复触发该程序会跳过，`bind` 在获得执行权后才写入参数。程序完成或重新载入页面后可以再次触发。
 - `bind` 将一组元件与参数绑定到同一过程。计算器的 10 个数字键共用一个数字过程，四个运算键共用一个过程。
 - `fixed(value, digits)` 按小数位格式化，`number(fixed(value, digits))` 可用于继续计算。 `nowMs()` 读取 Axure 的毫秒时间。浏览器的 `advanceTime` 可以精确验收它。
 - 构建计划记录从生成的交互到程序的指针，Axure Case 名也标出程序出处。详细源文件留在输出旁，以便审阅或改稿。
@@ -36,6 +41,42 @@
 ```json
 {"recipe":"native-calculator","output":"calculator.rp","verify":true}
 ```
+
+## 多页复用与现有模板
+
+用 `sharedRoutines` 让多个页面复用同一验证或显示逻辑。每页通过 `targets` 指向自己的元件，通过 `locals` 声明独立的状态。共享过程中的 `$value` 和 `@out` 按调用页解析。原 RP/1 顶层变量仍可用于有意共享的状态。
+
+```json
+{
+  "sharedRoutines": {
+    "publish": [{"set": {"@out": "=text($value)"}}]
+  },
+  "programs": [
+    {
+      "page": "orders",
+      "locals": {"value": {"type": "number", "value": 0}},
+      "targets": {"out": "orders_status"},
+      "on": {"confirm": {"click": [
+        {"set": {"$value": 1}},
+        {"call": "publish"}
+      ]}}
+    },
+    {
+      "page": "registration",
+      "locals": {"value": {"type": "number", "value": 0}},
+      "targets": {"out": "registration_status"},
+      "on": {"submit": {"click": [
+        {"set": {"$value": 2}},
+        {"call": "publish"}
+      ]}}
+    }
+  ]
+}
+```
+
+写入现成模板时，把上面的 `programs` 与 `sharedRoutines` 放进 `rp_command({command: "add-interaction", params: {source, output, programs, sharedRoutines, preflight: "official"}})`。将页面 ID 换为模板中的页面名或基线 ID，使用 `targets` 为触发元件和动作目标声明别名。别名值可用原生名称、`{"guid": "…"}` 或 `{"logicalId": "page/widget"}`。没有基线的模板也可通过 `rp_inspect(view: "locate")` 获取 GUID 后写入。现有全局变量默认按文本处理，`params.variables` 可补充类型声明。
+
+程序默认保留模板已有事件。如需替换同一元件上的同名事件，显式传 `replaceEvent: true`。预检检查整批程序，提交生成新 .rp 与逻辑 ID 基线。保留基线可按相同入口更新程序并复用原调度元件。页面载入时的内部复位与已有载入事件共存。
 
 ## 写入前检查
 
@@ -90,4 +131,4 @@
 | `native-loop` | 一个 repeat 块表达最多 32 步累乘。验收覆盖 99³、2⁵、2³²、零次、非整数和次数超限。 |
 | `native-blur-form` | 两个字段各自失焦时触发同一验证事件。提交按钮复用验证。验收覆盖必填、两次输入不一致和纠正后通过。 |
 
-`generate_prototype({ recipe, output, verify: true })` 生成可编辑 .rp 并用官方播放器回放。范例保留同名 `.rp1` 与 `.rp1.interactions.json`，分别存放布局和原生动作、剧本。需要自定义时编辑这两个配套文件，再以 `.rp1` 路径调用 `generate_prototype`。脚本包含 `advanceTime` 时自动启用虚拟时钟，浏览器实际执行的定时动作和 Axure 的 `Now` 使用同一时间轴。
+`generate_prototype({ recipe, output, verify: true })` 生成可编辑 .rp 并用官方播放器回放。范例保留同名 `.rp1` 与 `.rp1.interactions.json`，分别存放布局和交互程序、剧本。需要自定义时编辑这两个配套文件，再以 `.rp1` 路径调用 `generate_prototype`。脚本包含 `advanceTime` 时自动启用虚拟时钟，浏览器实际执行的定时动作和 Axure 的 `Now` 使用同一时间轴。

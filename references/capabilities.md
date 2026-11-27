@@ -2,7 +2,7 @@
 
 ## 原生交互程序
 
-`generate_prototype(program)` 支持条件、按值分派、有界循环、可复用过程和参数化绑定。表达式沿用 RP/1 类型检查，程序编译为可编辑的原生 Axure 元件、Case 和事件，保留到程序的定位。四套范例覆盖计算器、毫秒倒计时、循环与失焦表单。见[原生交互工作流](../docs/native-interaction-workflow.md)。
+`generate_prototype(programs)` 与 `rp_command(add-interaction, params.programs)` 共用 RP9 编译器。支持多页在同一 .rp 中编译、跨页复用过程、页内私有变量、通过 GUID 给独立 RP9 模板增量写入、有界异步 `repeat` / `while` 和忙时跳过重复触发。简单流程内联到业务元件，复杂流程每页最多一个隐藏调度元件。计算器、毫秒倒计时与失焦表单在同一 RP9 中通过 63 步官方浏览器验收。见[原生交互工作流](../docs/native-interaction-workflow.md)。
 
 ## 原生交互预检与匿名交付
 

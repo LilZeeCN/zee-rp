@@ -733,6 +733,8 @@ export function buildInteractiveRp(
   const baselinePath = `${absOut}.baseline.json`;
   if (!skipBaseline) {
     const pageBySlug = new Map(pagesList.map(p => [p.slug, p.pageName]));
+    const programCallbacks = new Map((plan.nativeProgram?.pages ?? (plan.nativeProgram ? [plan.nativeProgram] : []))
+      .map(program => [program.page, program.callbacks]));
     const resolvedSrcPath = sourcePath ?? plan.sourcePath ?? null;
     const sourceSha256 = resolvedSrcPath && existsSync(resolvedSrcPath)
       ? createHash('sha256').update(readFileSync(resolvedSrcPath)).digest('hex')
@@ -750,8 +752,8 @@ export function buildInteractiveRp(
         ...sym,
         logicalId: sym.id,
         pageName: pageBySlug.get(sym.pageId) ?? sym.pageId,
-        ...(sym.pageId === plan.nativeProgram?.page && plan.nativeProgram.callbacks[sym.id.split('/').at(-1)]
-          ? { programPointer: plan.nativeProgram.callbacks[sym.id.split('/').at(-1)].sourcePointer } : {}),
+        ...(programCallbacks.get(sym.pageId)?.[sym.id.split('/').at(-1)]
+          ? { programPointer: programCallbacks.get(sym.pageId)[sym.id.split('/').at(-1)].sourcePointer } : {}),
       })),
       baseRpBase64: currentBuf.toString('base64'),
     };

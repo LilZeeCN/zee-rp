@@ -242,7 +242,24 @@ def main():
     spans = cli._LAST_SPAN_MAP if isinstance(source, str) else {}
     raw_spec = dsl_to_spec(raw) if raw else (json.loads(Path(source).read_text(encoding="utf-8"))
                                            if isinstance(source, str) else copy.deepcopy(source))
-    if request["command"] == "diagnose":
+    if request["command"] == "native-program":
+        from rplang.native_program import lower_native_program
+        prepared, program = lower_native_program(spec, request.get("program"), programs=request.get("programs"),
+                                                 shared_routines=request.get("sharedRoutines"))
+        try:
+            _, ir = compile_language(prepared)
+        except LanguageError as error:
+            lowered_pointer = error.diagnostic["pointer"]
+            for page in program.get("pages", [program]):
+                for origin in page["callbacks"].values():
+                    if lowered_pointer.startswith(origin["loweredPointer"] + "/"):
+                        error.diagnostic["loweredPointer"] = lowered_pointer
+                        error.diagnostic["pointer"] = origin["sourcePointer"]
+                        break
+            raise
+        result = {"ok": True, "program": program, "symbols": ir["symbols"], "variables": ir["variables"],
+                  "pages": [{"id": page["slug"], "interactions": page["interactions"]} for page in ir["pages"]]}
+    elif request["command"] == "diagnose":
         result = diagnose_spec(spec, request.get("limit", 20), spans, raw)
     elif request["command"] == "binding":
         result = explain_binding(spec, request["target"])

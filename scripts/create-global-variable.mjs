@@ -26,7 +26,7 @@ export function removeGlobalVariable(file, name) {
   return replaceRecord(file, record, encodeRecord(record, record.strings, encodePayload(doc.roots)));
 }
 
-export function createGlobalVariable(file, name, { defaultValue = '' } = {}) {
+export function createGlobalVariable(file, name, { defaultValue = '', updateDefault = false } = {}) {
   const buf = Buffer.isBuffer(file) ? file : Buffer.from(file);
   if (buf[0] !== 0xac || buf[1] !== 0xef) {
     throw new Error('Input must be an Axure .rp project buffer');
@@ -55,7 +55,13 @@ export function createGlobalVariable(file, name, { defaultValue = '' } = {}) {
   for (const ev of existingVars) {
     const existingName = field(ev?.body ?? {}, 'name')?.text;
     if (existingName && existingName.toLowerCase() === varName.toLowerCase()) {
-      throw new Error(`Global variable "${varName}" already exists`);
+      if (!updateDefault) throw new Error(`Global variable "${varName}" already exists`);
+      const prior = field(ev.body, 'default-value');
+      if (prior?.text === String(defaultValue)) return { file: buf };
+      const value = stringNode(strings, String(defaultValue));
+      if (prior) Object.assign(prior, value);
+      else ev.body.entries.push([stringNode(strings, 'default-value'), value]);
+      return { file: replaceRecord(buf, docRecord, encodeRecord(docRecord, strings, encodePayload(doc.roots))) };
     }
   }
 

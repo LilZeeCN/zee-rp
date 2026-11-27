@@ -4,14 +4,15 @@ import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
 import { parsePayload, encodePayload, field, walkNodes } from './parse-payload.mjs';
 import { detectFileVersion } from './version.mjs';
 
-export function writeNativeScene(file, scene) {
+export function writeNativeScene(file, scene, { pageRecord, append = false } = {}) {
   if (detectFileVersion(file) !== 9) throw new Error('Native scene backend requires RP 9');
   const records = readRecords(file);
-  const record = records.find(r => r.className === 'Axure:Page');
+  const record = records.find(r => r.className === 'Axure:Page' && (pageRecord === undefined || pageRecord === r.index));
+  if (!record) throw new Error('Native scene page record not found');
   const graph = parsePayload(record), strings = [...record.strings];
   const page = [...graph.objects.values()].find(o => o.className === 'Axure:Page');
   const diagram = graph.objects.get(field(page.body, 'diagram').value);
-  if (field(diagram.body, 'diagram-objects').items.length) throw new Error('Native scene requires a blank page');
+  if (!append && field(diagram.body, 'diagram-objects').items.length) throw new Error('Native scene requires a blank page');
   const guids = graph.roots.find(n => n.tag === 30).values;
   const nullId = guids.indexOf('0'.repeat(32)) + 1;
   const str = text => {

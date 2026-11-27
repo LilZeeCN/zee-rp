@@ -299,10 +299,118 @@ test('inline program publishes editable layout and retained verification steps',
         routines: { finish: [{ set: { '@out': '已完成' } }] } },
       verifySteps: [{ action: 'click', target: 'demo/run' }, { action: 'expect', target: 'demo/out', expect: { text: '已完成' } }],
     });
-    assert.equal(result.nativeProgram.callbackCount, 1);
+    assert.equal(result.nativeProgram.callbackCount, 0);
     assert.equal(result.interactionSource, result.source + '.interactions.json');
     assert.deepEqual(JSON.parse(readFileSync(result.interactionSource)).steps, result.verifySteps);
     const verified = await call('verify_prototype', { engine: 'official', rp: result.output });
     assert.equal(verified.passed, 2);
+  });
+});
+
+test('three advanced pages compile in one RP9 and each uses at most one dispatcher', {
+  skip: !verifyHost && 'Set AXURE_MCP_EXPORT_HOST=1 on a verified macOS Axure host.',
+}, async () => {
+  await session(async ({ call, work }) => {
+    const names = ['native-calculator', 'native-countdown', 'native-blur-form'];
+    const layouts = names.map(name => readFileSync(join(root, 'examples/authoring', name + '.rp1'), 'utf8').split('\n').slice(1).join('\n'));
+    const plans = names.map(name => JSON.parse(readFileSync(join(root, 'examples/authoring', name + '.rp1.interactions.json'), 'utf8')));
+    const programs = plans.map(p => p.program);
+    const steps = plans.flatMap((p, index) => [...(index ? [{ action: 'navigate', page: p.program.page }] : []), ...p.steps]);
+    const layoutFile = join(work, 'lab.rp1');
+    writeFileSync(layoutFile, 'rp/1 target=9 name="多页交互" domain=web theme=enterprise-light\n' + layouts.join('\n'));
+    writeFileSync(layoutFile + '.interactions.json', JSON.stringify({ programs, steps }));
+    const generated = await call('generate_prototype', { source: layoutFile, output: 'lab.rp', verify: true });
+    assert.deepEqual(generated.nativeProgram.pages.map(p => p.callbackCount), [1, 1, 1]);
+    assert.deepEqual(generated.nativeProgram.pages.map(p => p.unoptimizedCallbackCount), [26, 2, 4]);
+    assert.equal(generated.behaviorVerification.passed, steps.length);
+    assert.equal(generated.behaviorVerification.total, 63);
+  });
+});
+
+test('patching a standalone RP9 template keeps native events and isolates reentrant async routines', {
+  skip: !verifyHost && 'Set AXURE_MCP_EXPORT_HOST=1 on a verified macOS Axure host.',
+}, async () => {
+  await session(async ({ call, work }) => {
+    const rp1 = `rp/1 target=9 name="课程模板" domain=web theme=enterprise-light
+page #alpha name="Alpha" canvas=[380,280]
+  box #root [380x280] layout=stack
+    button #start_a "运行 A" [104x40] x=20 y=32
+    button #start_b "运行 B" [104x40] x=146 y=32
+    label #out "就绪" [235x46] x=20 y=98
+    label #original "原界面" [163x40] x=20 y=164
+page #beta name="Beta" canvas=[380,280]
+  box #root [380x280] layout=stack
+    button #apply "运行" [102x40] x=20 y=32
+    label #result "就绪" [235x46] x=20 y=98
+page #gamma name="Gamma" canvas=[380,280]
+  box #root [380x280] layout=stack
+    button #apply "运行" [102x40] x=20 y=32
+    label #result "就绪" [235x46] x=20 y=98
+    label #original "原界面" [163x40] x=20 y=164
+`;
+    const originalLoad = { $page: { load: [{ set: { '@original': '原载入已运行' } }] } };
+    const generated = await call('generate_prototype', { rp1, output: 'teacher-source.rp',
+      programs: ['alpha', 'gamma'].map(page => ({ page, on: originalLoad })),
+    });
+    const source = join(work, 'teacher.rp');
+    writeFileSync(source, readFileSync(generated.output));
+    const original = hash(source);
+    const guidFor = async (page, query) => {
+      const result = await call('rp_inspect', { view: 'locate', path: source, page, query });
+      assert.equal(result.total, 1);
+      return { guid: result.candidates[0].guid };
+    };
+    const local = { tag: { type: 'text', value: '' }, count: { type: 'number', value: 0 } };
+    const programs = [
+      { page: 'Alpha', targets: { a: await guidFor('Alpha', '运行 A'), b: await guidFor('Alpha', '运行 B'),
+        out: await guidFor('Alpha', '就绪'), original: await guidFor('Alpha', '原界面') }, locals: local,
+      bind: [{ targets: { a: 'A', b: 'B' }, variable: '$tag', call: 'process' }],
+      routines: { process: [{ set: { '$count': 0 } }, {
+        while: '$count < 48', limit: 64, intervalMs: 250,
+        do: [{ set: { '$count': '=$count + 1' } }, { call: 'publish' }],
+      }] } },
+      { page: 'Beta', targets: { apply: await guidFor('Beta', '运行'), out: await guidFor('Beta', '就绪') }, locals: local,
+        on: { apply: { click: [{ set: { '$tag': 'Beta', '$count': 0 } },
+          { repeat: 48, limit: 64, do: [{ set: { '$count': '=$count + 1' } }], then: [{ call: 'publish' }] },
+        ] } } },
+      { page: 'Gamma', targets: { apply: await guidFor('Gamma', '运行'), out: await guidFor('Gamma', '就绪'),
+        original: await guidFor('Gamma', '原界面') }, locals: local,
+        on: { apply: { click: [{ set: { '$tag': 'Gamma', '$count': 0 } },
+          { repeat: 2, do: [{ set: { '$count': '=$count + 1' } }], then: [{ call: 'publish' }] },
+        ] } } },
+    ];
+    const params = { source, output: 'teacher-filled.rp', programs,
+      sharedRoutines: { publish: [{ set: { '@out': "=concat($tag, ':', text($count))" } }] }, preflight: 'official' };
+    const dry = await call('rp_command', { action: 'preflight', command: 'add-interaction', params });
+    assert.equal(dry.dryRun, true);
+    assert.equal(existsSync(join(work, 'teacher-filled.rp')), false);
+    const patch = await call('rp_command', { command: 'add-interaction', params });
+    assert.equal(patch.official.status, 'passed');
+    assert.deepEqual(patch.structure, { unparseable: 0, danglingRefs: 0, problems: 0 });
+    assert.deepEqual(patch.nativeProgram.pages.map(p => [p.asyncLoopCount, p.callbackCount]), [[1, 1], [1, 1], [0, 1]]);
+    assert.equal(hash(source), original);
+    const steps = [
+      { action: 'expect', target: 'Alpha/original', expect: { text: '原载入已运行' } },
+      { action: 'click', target: 'Alpha/a' }, { action: 'advanceTime', ms: 250 },
+      { action: 'expect', target: 'Alpha/out', expect: { text: 'A:1' } },
+      { action: 'click', target: 'Alpha/b' }, { action: 'advanceTime', ms: 12000 },
+      { action: 'expect', target: 'Alpha/out', expect: { text: 'A:48' } },
+      { action: 'click', target: 'Alpha/b' }, { action: 'advanceTime', ms: 12250 },
+      { action: 'expect', target: 'Alpha/out', expect: { text: 'B:48' } },
+      { action: 'navigate', page: 'Beta' }, { action: 'click', target: 'Beta/apply' },
+      { action: 'expect', target: 'Beta/out', expect: { text: 'Beta:48' } },
+      { action: 'navigate', page: 'Gamma' },
+      { action: 'expect', target: 'Gamma/original', expect: { text: '原载入已运行' } },
+      { action: 'click', target: 'Gamma/apply' },
+      { action: 'expect', target: 'Gamma/out', expect: { text: 'Gamma:2' } },
+    ];
+    const verified = await call('verify_prototype', { rp: patch.output, engine: 'official', steps });
+    assert.equal(verified.passed, steps.length);
+    const replay = await call('rp_command', { command: 'add-interaction',
+      params: { ...params, source: patch.output, output: 'teacher-filled-again.rp', replaceEvent: true, preflight: 'static' } });
+    assert.equal(replay.before.widgets, replay.after.widgets);
+    assert.equal(replay.before.interactions, replay.after.interactions);
+    const repeated = await call('verify_prototype', { rp: replay.output, engine: 'official', steps });
+    assert.equal(repeated.passed, steps.length);
   });
 });

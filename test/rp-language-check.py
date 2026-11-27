@@ -53,7 +53,7 @@ class LanguageContract(unittest.TestCase):
         original = sugar_fixture()
         lowered, summary = lower_native_program(original, program)
         self.assertEqual(summary["loopCount"], 1)
-        self.assertTrue(all(c["sourcePointer"].startswith("/program/") for c in summary["callbacks"].values()))
+        self.assertTrue(all(c["sourcePointer"].startswith("/program") for c in summary["callbacks"].values()))
         self.assertEqual(original, sugar_fixture())
         runtime = ReferenceRuntime(compile_language(lowered))
         runtime.trigger("main/apply", "OnClick")
@@ -67,7 +67,7 @@ class LanguageContract(unittest.TestCase):
         with self.assertRaises(LanguageError) as cycle:
             lower_native_program(sugar_fixture(), program)
         self.assertEqual(cycle.exception.diagnostic["code"], "E_PROGRAM_RECURSION")
-        program["routines"]["check"] = [{"repeat": 33, "limit": 33, "do": [{"set": {"$count": 0}}]}]
+        program["routines"]["check"] = [{"repeat": 1025, "limit": 1025, "do": [{"set": {"$count": 0}}]}]
         with self.assertRaises(LanguageError) as repeat:
             lower_native_program(sugar_fixture(), program)
         self.assertEqual(repeat.exception.diagnostic["pointer"], "/program/routines/check/0/limit")

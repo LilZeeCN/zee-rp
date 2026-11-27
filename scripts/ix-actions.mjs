@@ -200,7 +200,7 @@ export function pageWidgetContexts(file, pageName, reader = null) {
   return result;
 }
 
-export function addInteractions(file, target, interactions, { replaceEvent = false, version, reader = null } = {}) {
+export function addInteractions(file, target, interactions, { replaceEvent = false, prependEvent = false, version, reader = null } = {}) {
   const readRecords = reader ? () => reader.records : readFileRecords;
   const parsePayload = reader ? reader.parse : parseRecordPayload;
   if (!Array.isArray(interactions) || !interactions.length) throw new Error('No interactions given');
@@ -1751,7 +1751,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
     if (!cases.length) throw new Error(`Interaction "${eventName}" has no cases`);
 
     let replaceTarget;
-    if (replaceEvent) {
+    if (replaceEvent || prependEvent) {
       if (replaceSeenTypes.has(eventType)) throw new Error(`Cannot replace event type ${eventType} more than once in a single request`);
       replaceSeenTypes.add(eventType);
       const matches = existingEvents().filter(item => item.eventType === eventType);
@@ -1762,7 +1762,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
     const eventId = replaceTarget?.event.id ?? newGuid();
     const caseNodeIds = [];
 
-    if (replaceTarget) {
+    if (replaceTarget && !prependEvent) {
       const oldNodeIds = new Set();
       const collectDescendants = node => {
         for (const child of field(node?.body ?? {}, 'children')?.items ?? []) {
@@ -1778,7 +1778,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         const disabled = field(replaceTarget.event.body, 'Disabled');
         if (disabled) disabled.value = !!ix.disabled;
       }
-    } else {
+    } else if (!replaceTarget) {
       obj(eventId, 'Axure:InteractionEvent', {
         Disabled: bool(ix.disabled), 'event-type': int(eventType),
         'master-containing-raised-event': { tag: 0x10, values: [0, nullId] },
@@ -1819,7 +1819,16 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
       obj(eventNodeId, 'Axure:Node', { children: list(caseNodeIds.map(id => ref(id))), 'parent-node': ref(treeId), tree: ref(treeId) });
       field(treeObj.body, 'children').items.push(ref(eventNodeId));
     } else {
-      field(replaceTarget.node.body, 'children').items = caseNodeIds.map(id => ref(id));
+      const oldCases = field(replaceTarget.node.body, 'children');
+      if (prependEvent) {
+        const first = nodeTable.entries.find(([key]) => key.value === oldCases.items[0]?.value);
+        const firstCase = first && graph.objects.get(first[1].value);
+        const group = field(firstCase?.body ?? {}, 'IsNewIfGroup');
+        if (group) group.value = true;
+        oldCases.items.unshift(...caseNodeIds.map(id => ref(id)));
+      } else {
+        oldCases.items = caseNodeIds.map(id => ref(id));
+      }
     }
     added.push({ event: eventName, eventType, replaced: !!replaceTarget, cases: cases.map(c => ({ description: c.description, actions: (c.actions ?? []).map(s => s.type) })) });
   }
@@ -2002,6 +2011,7 @@ export function addInteractionsBatch(file, items, { replaceEvent = false, versio
     try {
       const res = writer.add(target, resolvedIxList, {
         replaceEvent: item.replaceEvent !== undefined ? Boolean(item.replaceEvent) : replaceEvent,
+        prependEvent: Boolean(item.prependEvent),
         version,
       });
       reports.push(res.report);

@@ -3551,14 +3551,16 @@ class Frontend:
             elif isinstance(actions, dict) and "cases" not in actions:
                 actions = [actions]
             shorthand = isinstance(actions, list)
+            grouped = isinstance(actions, dict) and actions.get("_program_groups") is True
             if shorthand:
                 cases = [{"actions": self.desugar_action_list(actions, ep)}]
             else:
-                fields(actions, {"cases"}, ep)
+                fields(actions, {"cases", "_program_groups"}, ep)
                 cases = actions.get("cases")
             if not isinstance(cases, list) or not cases:
                 fail("E_EVENT", ep, "Event requires a nonempty action array or cases")
             compiled_cases = []
+            previous_unconditional = False
             for i, case in enumerate(cases):
                 cp = ep if shorthand else ptr(ptr(ep, "cases"), i)
                 if isinstance(case, dict) and "do" in case and "actions" not in case:
@@ -3568,7 +3570,7 @@ class Frontend:
                 if isinstance(case, dict) and "_when_origin" in case:
                     case = dict(case)
                     when_origin = case.pop("_when_origin", None)
-                fields(case, {"when", "else", "actions"}, cp)
+                fields(case, {"when", "else", "actions", "_program_case"}, cp)
                 if "when" in case and isinstance(case["when"], str) and not case["when"].strip():
                     fail("E_EXPRESSION", when_origin or ptr(cp, "when"), "Expected a nonempty condition expression")
                 if not shorthand and "when" not in case and not case.get("else") and not case.get("actions"):
@@ -3579,8 +3581,11 @@ class Frontend:
                 desugared_acts = self.desugar_action_list(case.get("actions"), cp) if not shorthand else case.get("actions")
                 if not isinstance(desugared_acts, list) or not desugared_acts:
                     fail("E_EVENT", cp, "Case requires nonempty actions")
-                compiled = {"description": "RP/1 " + event,
-                            "isNewIfGroup": i == 0,
+                unconditional = "when" not in case and not case.get("else")
+                new_group = i == 0 or (grouped and (unconditional or previous_unconditional))
+                previous_unconditional = unconditional
+                compiled = {"description": case.get("_program_case") or "RP/1 " + event,
+                            "isNewIfGroup": new_group,
                             "actions": [item for j, a in enumerate(desugared_acts) for result in [self.action(a, scope, ptr(ep if shorthand else ptr(cp, "actions"), j))] for item in (result if isinstance(result, list) else [result])]}
                 for act in compiled["actions"]:
                     if act["type"] == "move":
@@ -3594,8 +3599,8 @@ class Frontend:
                     compiled["condition"] = "else"
                 elif "when" in case:
                     compiled["when"] = checked_when
-                    compiled["condition"] = "if" if i == 0 else "else-if"
-                elif len(cases) > 1:
+                    compiled["condition"] = "if" if new_group else "else-if"
+                elif len(cases) > 1 and not grouped:
                     fail("E_CONDITION", cp, "Multi-case events require when or final else")
                 compiled_cases.append(compiled)
             out.append({"event": native, "cases": compiled_cases})

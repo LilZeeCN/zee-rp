@@ -300,6 +300,7 @@ const LIB_SCRIPTS = [
   { "script": "preview-runtime.mjs", "summary": "真实 Axure 浏览器预览操作、运行变量观测及源码映射诊断", "evidence": "preview" },
   { "script": "interaction-lint.mjs", "summary": "原生交互公式、条件分组和全局变量用法静态检查", "evidence": "structure" },
   { "script": "official-interactions.mjs", "summary": "静态解码 Axure 官方 HTML 页数据并定位 STO 编译错误", "evidence": "preview" },
+  { "script": "native-program-patch.mjs", "summary": "在既有 RP9 文档中增量编译并绑定交互程序", "evidence": "structure" },
   { "script": "native-widget-identity.mjs", "summary": "原生 GUID、RP/1 源码映射及官方播放器元件 ID 的对应", "evidence": "structure" },
   { "script": "authoring-workflow.mjs", "summary": "创作范例、只读诊断、绑定解释、活动版本指纹与受保护改稿闭环", "evidence": "structure" },
   {
@@ -647,6 +648,10 @@ const LIB_SCRIPTS = [
               "minLength": 1,
               "description": "可选：显式指定 .baseline.json 路径，自动把逻辑 ID（如 btn_reset）解析为原生控件名。"
             },
+            "program": { "type": "object", "description": "编译并应用一页原生程序。targets 可用 GUID、逻辑 ID 或名称绑定现有元件。" },
+            "programs": { "type": "array", "minItems": 1, "items": { "type": "object" }, "description": "在同一份 RP9 中原子应用多个页面程序。" },
+            "sharedRoutines": { "type": "object", "description": "各页面分别编译的共用业务过程。" },
+            "variables": { "type": "object", "description": "现有 .rp 的变量类型覆盖，或待创建的变量定义，如 {total:{type:'number',value:0}}。" },
             "preflight": { "type": "string", "enum": ["auto", "static", "official"], "description": "结构化 add-interaction：auto 默认按需调用官方编译器；static 只跑静态检查；official 要求官方编译成功。用 action=preflight 检查而不提交。" },
             "interactions": {
               "type": "array",
@@ -691,7 +696,9 @@ const LIB_SCRIPTS = [
           "anyOf": [
             { "required": ["target", "event", "action"] },
             { "required": ["target", "interactions"] },
-            { "required": ["items"] }
+            { "required": ["items"] },
+            { "required": ["program"] },
+            { "required": ["programs"] }
           ],
           "additionalProperties": false
         },

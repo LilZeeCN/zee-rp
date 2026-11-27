@@ -673,6 +673,7 @@
     "tools/check-layers.mjs",
     "scripts/official-interactions.mjs",
     "scripts/native-widget-identity.mjs",
+    "scripts/native-program-patch.mjs",
     "scripts/interaction-lint.mjs",
     "docs/native-interaction-workflow.md",
     "examples/authoring/native-countdown.rp1",
