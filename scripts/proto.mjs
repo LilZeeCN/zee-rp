@@ -710,6 +710,7 @@ export function buildInteractiveRp(
   for (const symbol of sourceMap) for (const loc of symbol.native) {
     const w = finalWidgets.get(`${loc.record}:${loc.id}`);
     loc.container = w?.container ?? [];
+    if (w?.guid) loc.guid = w.guid;
   }
   const layerCount = nativeWidgets.filter(w => w.type === 'Layer').length;
   const dynamicPanelCount = nativeWidgets.filter(w => w.type === 'DynamicPanel').length;

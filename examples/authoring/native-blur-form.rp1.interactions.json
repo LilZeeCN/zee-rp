@@ -1,0 +1,183 @@
+{
+  "items": [
+    {
+      "target": "form/first",
+      "interactions": [
+        {
+          "event": "OnLostFocus",
+          "actions": [
+            {
+              "type": "raise-event",
+              "target": "form/validate"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "target": "form/second",
+      "interactions": [
+        {
+          "event": "OnLostFocus",
+          "actions": [
+            {
+              "type": "raise-event",
+              "target": "form/validate"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "target": "form/submit",
+      "interactions": [
+        {
+          "event": "OnClick",
+          "actions": [
+            {
+              "type": "raise-event",
+              "target": "form/validate"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "target": "form/validate",
+      "interactions": [
+        {
+          "event": "OnClick",
+          "cases": [
+            {
+              "description": "第一项必填",
+              "condition": "if",
+              "when": {
+                "left": {
+                  "widget": "form/first"
+                },
+                "op": "==",
+                "right": ""
+              },
+              "actions": [
+                {
+                  "type": "set-text",
+                  "target": "form/feedback",
+                  "text": "请填写通行短语"
+                }
+              ]
+            },
+            {
+              "description": "第二项必填",
+              "condition": "else-if",
+              "when": {
+                "left": {
+                  "widget": "form/second"
+                },
+                "op": "==",
+                "right": ""
+              },
+              "actions": [
+                {
+                  "type": "set-text",
+                  "target": "form/feedback",
+                  "text": "请确认通行短语"
+                }
+              ]
+            },
+            {
+              "description": "两项必须一致",
+              "condition": "else-if",
+              "when": {
+                "left": {
+                  "widget": "form/first"
+                },
+                "op": "!=",
+                "right": {
+                  "widget": "form/second"
+                }
+              },
+              "actions": [
+                {
+                  "type": "set-text",
+                  "target": "form/feedback",
+                  "text": "两次输入不一致"
+                }
+              ]
+            },
+            {
+              "description": "所有校验通过",
+              "condition": "else",
+              "actions": [
+                {
+                  "type": "set-text",
+                  "target": "form/feedback",
+                  "text": "校验通过"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "action": "click",
+      "target": "form/submit"
+    },
+    {
+      "action": "expect",
+      "target": "form/feedback",
+      "expect": {
+        "text": "请填写通行短语"
+      }
+    },
+    {
+      "action": "fill",
+      "target": "form/first",
+      "value": "学习计划"
+    },
+    {
+      "action": "expect",
+      "target": "form/feedback",
+      "expect": {
+        "text": "请确认通行短语"
+      }
+    },
+    {
+      "action": "fill",
+      "target": "form/second",
+      "value": "错误示例"
+    },
+    {
+      "action": "expect",
+      "target": "form/feedback",
+      "expect": {
+        "text": "两次输入不一致"
+      }
+    },
+    {
+      "action": "fill",
+      "target": "form/second",
+      "value": "学习计划"
+    },
+    {
+      "action": "expect",
+      "target": "form/feedback",
+      "expect": {
+        "text": "校验通过"
+      }
+    },
+    {
+      "action": "click",
+      "target": "form/submit"
+    },
+    {
+      "action": "expect",
+      "target": "form/feedback",
+      "expect": {
+        "text": "校验通过"
+      }
+    }
+  ]
+}

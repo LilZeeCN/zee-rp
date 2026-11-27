@@ -146,3 +146,141 @@ test('existing RP11 → official HTML → native textbox behavior', {
     assert.equal(runBrowser(work, 'maxlength', exported.output, '7').assertions.length, 2);
   });
 });
+
+test('STO scanner decodes official data without executing JavaScript and preserves Case coordinates', async () => {
+  const { decodeAxureData, scanOfficialInteractions } = await import('../scripts/official-interactions.mjs');
+  const dir = mkdtempSync(join(tmpdir(), 'zee-sto-data-'));
+  const page = join(dir, 'files', 'calculator');
+  mkdirSync(page, { recursive: true });
+  const literal = { exprType: 'stringLiteral', value: '[[2+]]', stos: [{ sto: 'error' }] };
+  const encoded = `$axure.loadCurrentPage(
+(function() {
+    var _ = function() { throw new Error("must never execute"); }
+    var _creator = function() { return _(a,_(b,c,d,_(e,_(f,[_(g,h,i,[_(j,_(k,l,m,n,o,[_(p,q)]))])]))),r,s); };
+    var a="page",b="name",c="Calculator",d="interactionMap",e="onClick",f="cases",g="description",h="Compute",i="actions",j="expr",k="exprType",l="stringLiteral",m="value",n="[[2+]]",o="stos",p="sto",q="error",r="generationDate",s=new Date(2);
+return _creator();
+})());`;
+  const file = join(page, 'data.js');
+  try {
+    writeFileSync(file, encoded);
+    assert.deepEqual(decodeAxureData(encoded).page.interactionMap.onClick.cases[0].actions[0].expr, literal);
+    const report = scanOfficialInteractions(dir);
+    assert.equal(report.status, 'failed');
+    assert.equal(report.errorCount, 1);
+    assert.deepEqual(report.diagnostics.map(d => [d.page, d.event, d.case, d.actionIndex, d.expression]),
+      [['Calculator', 'onClick', 'Compute', 1, '[[2+]]']]);
+    writeFileSync(file, encoded.replace('s=new Date(2)', 's=process.exit(1)'));
+    assert.equal(scanOfficialInteractions(dir).status, 'incomplete');
+    assert.equal(scanOfficialInteractions(dir).errorCount, 0);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('static STO lint pinpoints wrappers, binding aliases, coercion and dead cases', async () => {
+  const { lintExpression, summarizeCaseGroups } = await import('../scripts/interaction-lint.mjs');
+  const codes = (expression, opts) => lintExpression(expression, opts).map(d => d.code);
+  assert.deepEqual(codes('[[1 + 2'), ['E_AXURE_EXPRESSION_WRAPPER']);
+  assert.deepEqual(codes('[["1" + "8"]]'), ['W_AXURE_PLUS_COERCION']);
+  assert.deepEqual(codes('[[a * 1 + b * 1]]', { bindings: { a: true, b: true }, checkIdentifiers: true }), []);
+  assert.deepEqual(codes('[[Value * Missing]]', { bindings: { value: true }, checkIdentifiers: true }),
+    ['W_AXURE_BINDING_CASE', 'W_AXURE_UNKNOWN_IDENTIFIER']);
+  assert(codes('[[Math.round((a * 1 + b * 1) * 100000000) / 100000000]]').includes('E_AXURE_STO_MATH_NAMESPACE'));
+  assert.deepEqual(codes('[[Math.abs(-2)]]'), []);
+  assert.deepEqual(codes('[[Math.round(2.25)]]', { version: 11 }), []);
+  const when = { left: { variable: 'x' }, op: '==', right: 'ready' };
+  const summary = summarizeCaseGroups([
+    { when }, { when: { ...when } }, {}, { when }, { when, isNewIfGroup: true },
+    { when: { op: '&&', left: when, right: { ...when, right: 'done' } } },
+  ]);
+  assert.deepEqual(summary.groups.map(g => g.cases.map(c => c.role)), [['if', 'else-if', 'else', 'else-if'], ['if', 'else-if']]);
+  assert.deepEqual(summary.diagnostics.map(d => d.code),
+    ['W_AXURE_DUPLICATE_CONDITION', 'W_AXURE_UNREACHABLE_CASE', 'W_AXURE_CONTRADICTORY_CASE']);
+});
+
+test('native authoring rejects STO before commit and reuses unchanged tests on a nameless RP9 copy', {
+  skip: !verifyHost && 'Set AXURE_MCP_EXPORT_HOST=1 on a verified macOS Axure host.',
+}, async () => {
+  const { addInteractions, loadBaselineMap, resolveBaselineTarget } = await import('../scripts/ix-actions.mjs');
+  await session(async ({ call, work }) => {
+    const source = await call('generate_prototype', { recipe: 'native-loop', output: 'loop.rp' });
+    const original = hash(source.output);
+    const formula = '[[Math.round((a * 1 + b * 1) * 100000000) / 100000000]]';
+    const makeInteraction = expression => [{
+      event: 'OnClick',
+      cases: [{ description: '舍入分支', condition: 'always', actions: [{ type: 'set-text', target: 'loop/out', text: expression }] }],
+    }];
+    const proposed = { source: 'loop.rp', output: 'candidate.rp', target: { logicalId: 'loop/evaluate' },
+      replaceEvent: true, interactions: makeInteraction(formula) };
+    const checked = await call('rp_command', { command: 'add-interaction', params: proposed }, true);
+    assert.equal(checked.code, 'E_INTERACTION_PREFLIGHT');
+    assert.equal(checked.diagnostics[0].code, 'E_AXURE_STO_MATH_NAMESPACE');
+    const oracle = await call('rp_command', { command: 'add-interaction', action: 'preflight',
+      params: { ...proposed, preflight: 'official' } }, true);
+    assert.equal(oracle.official.errorCount, 1);
+    assert.deepEqual(oracle.official.diagnostics.map(d => [d.logicalId, d.event, d.case, d.actionIndex, d.expression]),
+      [['loop/evaluate', 'OnClick', '舍入分支', 1, formula]]);
+    assert(!existsSync(join(work, 'candidate.rp')));
+    assert.equal(hash(source.output), original);
+    const missing = await call('rp_command', { command: 'add-interaction', action: 'preflight', params: {
+      ...proposed, preflight: 'static', target: { logicalId: 'loop/missing', page: '循环求值' },
+      interactions: makeInteraction('正常文字'),
+    } }, true);
+    assert.equal(missing.code, 'E_AXURE_INTERACTION_TARGET');
+
+    const oldBaseline = loadBaselineMap(source.output);
+    const legacy = addInteractions(readFileSync(source.output), resolveBaselineTarget('loop/evaluate', oldBaseline),
+      [{ event: 'OnClick', cases: [{ description: '旧文件中的失败', actions: [{
+        type: 'set-text', target: resolveBaselineTarget('loop/out', oldBaseline), text: formula,
+      }] }] }], { replaceEvent: true });
+    writeFileSync(join(work, 'legacy.rp'), legacy.file);
+    const exported = await call('export_prototype', { rp: 'legacy.rp', baseline: source.baseline });
+    assert.equal(exported.interactionCompilation.errorCount, 1);
+    const failed = await call('verify_prototype', { html: exported.output, engine: 'official' }, true);
+    assert.equal(failed.stage, 'interaction-compilation');
+    assert.equal(failed.diagnostics[0].case, '旧文件中的失败');
+    assert.equal(failed.verification.browserLoaded, false);
+
+    await call('axure_open', { path: 'loop.rp' });
+    const saved = await call('axure_save', { as: 'nameless.rp', stripWidgetNames: true });
+    assert(saved.strippedWidgetNames > 0);
+    const native = await call('rp_inspect', { view: 'overview', path: 'nameless.rp' });
+    assert(native.pages.every(p => p.namedWidgets === 0));
+    const lint = await call('rp_inspect', { view: 'interaction-lint', path: 'nameless.rp' });
+    assert.equal(lint.variables.find(v => v.name === 'product')?.status, 'read-write');
+    assert(lint.events.some(e => e.groups[0].cases.some(c => c.role === 'else-if' || c.role === 'else')));
+    const id = await call('rp_inspect', { view: 'widget', path: 'nameless.rp', target: { logicalId: 'loop/out' } });
+    const targetGuid = id.widget?.guid ?? id.guid ?? id.target?.guid;
+    assert.match(targetGuid, /^[0-9a-f]{32}$/);
+
+    const patched = await call('rp_patch', { source: 'nameless.rp', output: 'patched.rp',
+      target: { logicalId: 'loop/out' }, text: '等待输入' });
+    assert(existsSync(patched.baseline));
+    const html = await call('export_prototype', { rp: 'patched.rp' });
+    const steps = [{ action: 'expect', target: { guid: targetGuid }, expect: { text: '等待输入' } }, ...source.verifySteps];
+    assert.equal((await call('verify_prototype', { html: html.output, engine: 'official', steps })).passed, steps.length);
+
+    const fix = await call('rp_command', { command: 'add-interaction', params: { ...proposed, source: 'nameless.rp',
+      interactions: makeInteraction('[[(0.1 + 0.2).toFixed(8) * 1]]') } });
+    assert.equal(fix.official.status, 'passed');
+    const repaired = await call('verify_prototype', { rp: fix.output, engine: 'official', steps: [
+      { action: 'click', target: { logicalId: 'loop/evaluate' } },
+      { action: 'expect', target: { guid: targetGuid }, expect: { text: '0.3' } },
+    ] });
+    assert.equal(repaired.passed, 2);
+    const badOption = await call('export_prototype', { rp: fix.output, overwrite: true }, true);
+    assert.equal(badOption.diagnostics[0].pointer, '/arguments/overwrite');
+    assert.match(badOption.diagnostics[0].nextAction, /verify_prototype/);
+  });
+});
+
+test('advanced recipes run core timer, bounded loop and blur form flows in official RP9', {
+  skip: !verifyHost && 'Set AXURE_MCP_EXPORT_HOST=1 on a verified macOS Axure host.',
+}, async () => {
+  await session(async ({ call }) => {
+    for (const recipe of ['native-countdown', 'native-loop', 'native-blur-form']) {
+      const generated = await call('generate_prototype', { recipe, output: `${recipe}.rp`, verify: true });
+      assert(existsSync(generated.interactionSource));
+      assert.equal(generated.behaviorVerification.interactionCompilation.status, 'passed');
+      assert.equal(generated.behaviorVerification.passed, generated.verifySteps.length);
+    }
+  });
+});

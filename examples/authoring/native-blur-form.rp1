@@ -1,0 +1,10 @@
+rp/1 target=9 name="联合失焦校验" domain=web theme=enterprise-light
+page #form name="联合表单" canvas=[480,350]
+  box #root [480x350] layout=stack
+    label #first_label "通行短语" [190x30] x=30 y=22
+    input #first [245x38] x=30 y=59 placeholder="输入短语"
+    label #second_label "确认短语" [190x30] x=30 y=111
+    input #second [245x38] x=30 y=149 placeholder="再次输入"
+    label #feedback "请填写两项" [335x35] x=30 y=205
+    button #submit "提交" [110x40] x=30 y=270
+    button #validate "内部校验" [90x34] x=363 y=285 hidden=true

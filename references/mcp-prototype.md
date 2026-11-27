@@ -1,5 +1,8 @@
 # 一次 MCP 调用生成完整原型
 
+复杂交互可从[原生交互工作流](../docs/native-interaction-workflow.md)开始，包含写入前的官方预检、STO 定位、匿名元件验证和三个可运行范例。
+
+
 ## 从 RP/1 到官方 HTML
 
 1. 调用 `prototype_recipe({recipe:"carousel-slider-captcha", includeSource:true})`（或 `"native-gestures"`），查看可直接生成的同步轮播、有界滑动、拖动吸附和输入长度范例，以及 RP/1 源码。

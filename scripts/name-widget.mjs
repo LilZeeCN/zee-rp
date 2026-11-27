@@ -23,7 +23,7 @@ export function setWidgetNames(file, edits) {
     const graph = parsePayload(record), strings = [...record.strings];
     for (const { id, name } of changes) {
       const widget = graph.objects.get(id);
-      if (!widget?.className.startsWith('Axure:DiagramObject:')) throw new Error(`Widget #${id} not found in record #${index}`);
+      if (!widget?.className.startsWith('Axure:DiagramObject:') && widget?.className !== 'Axure:Repeater') throw new Error(`Widget #${id} not found in record #${index}`);
       const text = field(field(widget.body, 'name-block') ?? {}, 'text');
       if (text?.tag !== 8) throw new Error(`Widget #${id} has no name-block text`);
       const before = text.text;

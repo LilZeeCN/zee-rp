@@ -14,6 +14,9 @@ import { reviewImageStructure } from './image-structure.mjs';
 import { findChromeExecutable } from '../studio/cdp.mjs';
 import { listImplementationFiles } from '../studio/source-fingerprint.mjs';
 
+import { readNativeWidgetMap } from './native-widget-identity.mjs';
+import { scanOfficialInteractions, officialWidgetMapFile } from './official-interactions.mjs';
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RECIPE_DIR = join(ROOT, 'examples/authoring');
 const ASSEMBLY_BRIDGE = 'tools/native-assembly/bridge.mjs';
@@ -45,7 +48,10 @@ export const verifyStepItemsSchema = {
   type: 'object',
   properties: {
     action: { type: 'string', enum: ['click', 'fill', 'input', 'drag', 'swipe', 'wait', 'advanceTime', 'navigate', 'expect', 'assert'] },
-    target: { type: 'string', minLength: 1 },
+    target: { anyOf: [{ type: 'string', minLength: 1 }, { type: 'object', anyOf: [
+      { required: ['logicalId'] }, { required: ['guid'] }, { required: ['record', 'id'] },
+    ], properties: { logicalId: { type: 'string', minLength: 1 }, guid: { type: 'string', pattern: '^[0-9a-fA-F]{32}$' },
+      record: { type: 'integer' }, id: { type: 'integer' } }, additionalProperties: false }] },
     value: { type: 'string' },
     rowIndex: { type: 'integer', minimum: 0 },
     dx: { type: 'number' },
@@ -116,6 +122,15 @@ export const recipes = [
   { id: 'carousel-slider-captcha', name: '同步轮播与有界滑块拼图验证', file: '../rp-language/carousel-slider-captcha.rp1', pages: ['demo'],
     scenario: '自动轮播+@panel.state指示器同步+滑动重启计时 → within有界水平拖滑块 → ±2px自动吸附校准与失败复位',
     customize: ['onStateChange 读取 @banner.state 同步指示器', 'drag-x 的 bounds: { within } 轨道边界', 'dragdrop 中 @piece.x 与 @target.x 容差判断与自动吸附'] },
+  { id: 'native-countdown', name: '双态毫秒倒计时', file: 'native-countdown.rp1', nativeInteractions: true, pages: ['timer'],
+    scenario: '启动 → 停止并等待 → 重启 → 毫秒时间戳到期归零',
+    customize: ['调整 deadline 与 left_ms 的时长', '调整双态面板的 repeatInterval', '停止动作使用 stateMode=current'] },
+  { id: 'native-loop', name: '有界 raise-event 循环求值', file: 'native-loop.rp1', nativeInteractions: true, pages: ['loop'],
+    scenario: '输入底数与次数 → 原生递归累乘 → 计算 99³ 及 2⁵ → 拒绝超限',
+    customize: ['将累乘动作替换为业务更新', '保留次数上限和递减动作', '递归放在条件分支末尾'] },
+  { id: 'native-blur-form', name: '多字段失焦联合校验', file: 'native-blur-form.rp1', nativeInteractions: true, pages: ['form'],
+    scenario: '空提交 → 逐字段失焦 → 联合比对 → 提交',
+    customize: ['多个 OnLostFocus 与提交按钮共用一个校验事件', '新增规则时将 else-if 放在兜底之前'] },
 ];
 
 export function recipeSource(id) {
@@ -165,11 +180,29 @@ export const AUTHORING_GOTCHAS = [
   'generate_prototype 默认返回 contactSheet（pages-sheet.png 全页面横向拼图）与 statesSheet（states-sheet.png 全状态拼图），一次看图即可巡检全量页面与面板状态。',
 ];
 
+export function readNativeInteractionSource(source) {
+  if (!source || !source.endsWith('.rp1')) return null;
+  const path = `${source}.interactions.json`;
+  assertNotProtected(path);
+  if (!existsSync(path)) return null;
+  const data = JSON.parse(readFileSync(path, 'utf8'));
+  if (!Array.isArray(data.items) || !data.items.length || !Array.isArray(data.steps)) {
+    throw new Error(`原生交互源码须包含非空 items 与 steps：${path}`);
+  }
+  return { path, items: data.items, steps: data.steps };
+}
+
 export function recipeCatalog({ recipe, includeSource = false } = {}) {
   const selection = recipe ? recipes.filter(r => r.id === recipe) : recipes;
   if (!selection.length) recipeSource(recipe);
   return { status: 'completed', recipes: selection.map(r => ({ ...r, source: recipeSource(r.id),
     ...(includeSource ? { sourceText: readFileSync(recipeSource(r.id), 'utf8') } : {}),
+    ...(r.nativeInteractions ? {
+      interactionSource: `${recipeSource(r.id)}.interactions.json`,
+      ...(includeSource ? { interactionSourceText: readFileSync(`${recipeSource(r.id)}.interactions.json`, 'utf8') } : {}),
+      verify: { tool: 'verify_prototype', arguments: { rp: `${r.id}.rp`, engine: 'official',
+        steps: readNativeInteractionSource(recipeSource(r.id)).steps } },
+    } : {}),
     generate: { tool: 'generate_prototype', arguments: { recipe: r.id, output: `${r.id}.rp` } },
   })), cheatsheet: AUTHORING_CHEATSHEET, tokens: AUTHORING_TOKENS, gotchas: AUTHORING_GOTCHAS,
   workflow: ['选范例或提交 RP/1 源码（善用 [fillxhug]、stat-row、list-item、card 简写与顶层 tab-bar）',
@@ -272,7 +305,8 @@ export function revisePrototype(input, { generate, sync }) {
   assertNotProtected(sourcePath); assertNotProtected(rpPath);
   if (!existsSync(`${rpPath}.baseline.json`))
     throw Object.assign(new Error('缺少共同基线；请先使用 generate_prototype 创建带基线的工程，或对已有文件使用原生编辑工具。'), { code: 'E_BASELINE_MISSING' });
-  const originalHashes = new Map([sourcePath, rpPath, `${rpPath}.baseline.json`].map(path => [path, fileHash(path)]));
+  const interactionSource = readNativeInteractionSource(sourcePath);
+  const originalHashes = new Map([sourcePath, rpPath, `${rpPath}.baseline.json`, interactionSource?.path].filter(Boolean).map(path => [path, fileHash(path)]));
   if (expectedRpSha256 && originalHashes.get(rpPath) !== expectedRpSha256)
     throw Object.assign(new Error('原型已变化，请读取最新状态后重试。'), { code: 'E_STALE_SYNC_STATE' });
   let output = input.output && input.output !== 'auto' ? resolveInWork(input.output) : null;
@@ -294,7 +328,9 @@ export function revisePrototype(input, { generate, sync }) {
   if (!dryRun && (!output || extname(output) !== '.rp')) throw new Error('改稿需要新的 output .rp 路径；只查看影响请传 dryRun:true。');
   if (outSource && !['.rp1', '.json'].includes(extname(outSource))) throw new Error('outSource 必须是 .rp1 或 .json。');
   const assets = output && `${output}.assets`;
-  const destinations = [output, outSource, output && `${output}.baseline.json`, assets].filter(Boolean);
+  const outInteractions = interactionSource && outSource ? `${outSource}.interactions.json` : null;
+  if (outInteractions && extname(outSource) !== '.rp1') throw new Error('含配套原生交互的范例须保留 .rp1 源文件。');
+  const destinations = [output, outSource, outInteractions, output && `${output}.baseline.json`, assets].filter(Boolean);
   for (const path of destinations) {
     assertWritable(path);
     if (pathOccupied(path)) throw Object.assign(new Error(`改稿输出已存在，请使用新文件名：${path}`), { code: 'E_OUTPUT_EXISTS' });
@@ -319,6 +355,7 @@ export function revisePrototype(input, { generate, sync }) {
     const summary = { status: dryRun ? 'planned' : 'completed', impact: patched.diff, sync: merged.summary,
       operations: patched.operations, restoredTokenReferences: restored.restoredTokenReferences, originalFilesPreserved: true };
     if (dryRun) return { ...summary, verification: { semantic: true, nativePreview: false } };
+    if (interactionSource) copyFileSync(interactionSource.path, `${mergedSource}.interactions.json`, constants.COPYFILE_EXCL);
     const built = generate({ source: mergedSource, output: join(stage, 'result.rp'), compact: false });
     if (built.status !== 'completed') return built;
     for (const [path, hash] of originalHashes) if (fileHash(path) !== hash)
@@ -340,7 +377,9 @@ export function revisePrototype(input, { generate, sync }) {
     };
     rewriteReports(assets);
     const durable = rebase(built);
-    for (const [from, to] of [[mergedSource, outSource], [built.output, output]]) {
+    const publications = [[mergedSource, outSource], [built.output, output]];
+    if (outInteractions) publications.push([`${mergedSource}.interactions.json`, outInteractions]);
+    for (const [from, to] of publications) {
       mkdirSync(dirname(to), { recursive: true });
       try { copyFileSync(from, to, constants.COPYFILE_EXCL); }
       catch (error) { failIfOutputExists(error, to); }
@@ -353,6 +392,7 @@ export function revisePrototype(input, { generate, sync }) {
     catch (error) { failIfOutputExists(error, `${output}.baseline.json`); }
     published.push(`${output}.baseline.json`);
     const report = { ...summary, output, source: outSource, baseline: `${output}.baseline.json`,
+      ...(outInteractions ? { interactionSource: outInteractions, verifySteps: built.verifySteps } : {}),
       sha256: fileHash(output), previews: durable.previews, artifacts: durable.artifacts,
       ...(durable.contactSheet ? { contactSheet: durable.contactSheet } : {}),
       ...(durable.statesSheet ? { statesSheet: durable.statesSheet } : {}),
@@ -369,7 +409,7 @@ export function revisePrototype(input, { generate, sync }) {
   }
 }
 
-export async function exportPrototype({ rp, output, cwd, projectDir }) {
+export async function exportPrototype({ rp, output, cwd, projectDir, baseline, includeWidgetMap = true }) {
   const workDir = resolveWorkDir(cwd ?? projectDir);
   const source = resolve(workDir, rp);
   let rpVersion;
@@ -407,11 +447,37 @@ export async function exportPrototype({ rp, output, cwd, projectDir }) {
       version: Number(rpVersion),
       args: [source, target],
     });
+    let widgetMap = null, mappingDiagnostic;
+    try {
+      widgetMap = readNativeWidgetMap(source, baseline ? resolve(workDir, baseline) : undefined);
+    } catch (error) {
+      mappingDiagnostic = { code: 'W_AXURE_WIDGET_MAP', severity: 'warning', message: error.message };
+    }
+    const interactionCompilation = scanOfficialInteractions(htmlDir, { symbols: widgetMap?.symbols });
+    let widgetMapPath;
+    if (includeWidgetMap && widgetMap?.symbols.length) {
+      widgetMapPath = join(htmlDir, officialWidgetMapFile);
+      const symbols = widgetMap.symbols.map(s => ({
+        id: s.id, logicalId: s.logicalId, label: s.label, name: s.name, display: s.display, pageId: s.pageId, pageName: s.pageName,
+        officialId: s.officialId,
+      }));
+      try { writeFileSync(widgetMapPath, JSON.stringify({ version: 1, symbols }) + '\n', { flag: 'wx' }); }
+      catch (error) {
+        widgetMapPath = undefined;
+        mappingDiagnostic = { code: 'W_AXURE_WIDGET_MAP', severity: 'warning', message: error.message };
+      }
+    }
     return {
       status: 'completed', rp: source, rpVersion, output: htmlDir, entry, axureBuild: identity.build, generatorSettings,
+      interactionCompilation,
+      ...(widgetMapPath ? { widgetMap: widgetMapPath } : {}),
+      ...(mappingDiagnostic || interactionCompilation.diagnostics.length ? { diagnostics: [
+        ...interactionCompilation.diagnostics, ...(mappingDiagnostic ? [mappingDiagnostic] : []),
+      ] } : {}),
       officialHtmlSource: 'exported', officialHtmlReady: true,
       verification: { officialHtmlExported: true, browserLoaded: false, behaviorVerified: false },
-      nextAction: '可用 verify_prototype(html=output, steps=[...]) 在无头 Chrome 中直接验证点击、滑动、拖动与状态/坐标断言，或打开输出目录中的 start.html 人工查看。',
+      nextAction: interactionCompilation.errorCount ? '从 diagnostics 定位并修正表达式，再导出新目录或用 rp_command(action="preflight") 验证。'
+        : '可用 verify_prototype(html=output, steps=[...]) 在无头 Chrome 中直接验证点击、滑动、拖动与状态/坐标断言，或打开输出目录中的 start.html 人工查看。',
     };
   } catch (error) {
     let nativeError;
@@ -435,22 +501,25 @@ export function authoringTools({ generate, sync, listTools }) {
       inputSchema: { type: 'object', properties: {
         rp: { type: 'string', minLength: 1, description: '现有 .rp 路径，例如 generate_prototype 返回的 output。' },
         output: { type: 'string', minLength: 1, description: '新的 HTML 输出目录。省略则使用 .rp 旁的 <文件名>-html。' },
+        baseline: { type: 'string', minLength: 1, description: '复用指定 RP/1 基线生成稳定元件映射，省略时尝试 <rp>.baseline.json。' },
+        includeWidgetMap: { type: 'boolean', description: '默认输出逻辑 ID 与官方元件 ID 映射以复用验收脚本。' },
         cwd: { type: 'string', minLength: 1, description: '可选工作目录，用于解析相对路径。' },
         projectDir: { type: 'string', minLength: 1, description: 'cwd 的别名。' },
       }, required: ['rp'], additionalProperties: false },
       handler: exportPrototype, readOnly: false },
-    { name: 'verify_prototype', description: '零外部依赖（复用内置无头 Chrome CDP 与本地环回 HTTP）验证原型交互行为：支持 click / fill / drag / swipe / wait / advanceTime(虚拟时钟秒推定时器) / navigate / expect 与双引擎（auto 有本机 Axure 时自动导出官方 HTML、无 Axure 平台/环境自动降级或显式 engine="studio-html" 走 Studio 离线 HTML）；steps 同时原生兼容 studio_scenario 剧本格式（无需重写即可跨引擎复用），可选 frame:"artboard" 裁剪主画板截出干净截图与 storyboard 拼图。',
+    { name: 'verify_prototype', description: '零外部依赖（复用内置无头 Chrome CDP 与本地环回 HTTP）验证原型交互行为：支持 click / fill / drag / swipe / wait / advanceTime(确定性推进定时器及 Axure Now) / navigate / expect 与双引擎（auto 有本机 Axure 时自动导出官方 HTML、无 Axure 平台/环境自动降级或显式 engine="studio-html" 走 Studio 离线 HTML）；steps 同时原生兼容 studio_scenario 剧本格式（无需重写即可跨引擎复用），可选 frame:"artboard" 裁剪主画板截出干净截图与 storyboard 拼图。',
       inputSchema: { type: 'object', properties: {
         rp: { type: 'string', minLength: 1, description: '现有 .rp 路径；若未传 html 将自动导出官方 HTML 或（无 Axure 时）Studio HTML。' },
         html: { type: 'string', minLength: 1, description: '已导出的官方 HTML 目录（含 start.html）或 Studio 导出 HTML 目录（含 index.html）。复用官方产物时，officialHtmlSource 为 provided，officialHtmlReady 表示官方 HTML 文件可用，verification.browserLoaded 单独报告稳定载入。' },
         engine: { type: 'string', enum: ['auto', 'official', 'studio-html'], description: '验证引擎：auto（默认，有本机 Axure 走官方导出，否则自动切 Studio 离线 HTML）、official（仅官方导出）、studio-html（直接走 Studio 离线 HTML，秒级运行且跨平台可用）。' },
         frame: { type: 'string', enum: ['viewport', 'artboard'], description: '截图取景模式：viewport（默认，按视口整帧截取）或 artboard（自动裁剪至页面主画板/内容包围盒，避开 Axure 播放器工具栏与外框干扰）。' },
+        baseline: { type: 'string', minLength: 1, description: '可选：匿名 .rp 的 RP/1 基线；导出的 HTML 可自动使用随附元件映射。' },
         source: { type: 'string', minLength: 1, description: '可选 RP/1 源码路径；省略时自动读取 .rp.baseline.json 或按页面 [data-label] 匹配（若含 verify: 块且未传 steps 时自动载入）。' },
         page: { type: 'string', minLength: 1, description: '可选起始页面 ID 或名称。' },
         cwd: { type: 'string', minLength: 1 },
         projectDir: { type: 'string', minLength: 1 },
         timeoutMs: { type: 'integer', minimum: 500, maximum: 120000, description: '单次重放超时（毫秒，500–120000，默认 15000）。' },
-        virtualClock: { type: 'boolean', description: 'true 时加速轮播等 >=200ms 定时器，配合 advanceTime 毫秒级推进（含 advanceTime 步骤时自动启用）。' },
+        virtualClock: { type: 'boolean', description: 'true 时虚拟化 >=200ms 定时器与 Axure 的事件时间 Now。含 advanceTime 步骤时自动启用。' },
         viewport: { type: 'object', properties: {
           width: { type: 'integer', minimum: 320, maximum: 3840 },
           height: { type: 'integer', minimum: 320, maximum: 2160 },

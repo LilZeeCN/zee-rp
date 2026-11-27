@@ -9,7 +9,10 @@
 // spec.json: { "target": "PanelB", "page": false, "interactions": [ { "event": "OnClick", "actions": [ { "type": "hide", "target": "PanelB" } ] } ] }
 import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { addInteractions, addInteractionsBatch, loadBaselineMap, resolveBaselineTarget, EVENTS } from './ix-actions.mjs';
+import { addInteractionsBatch, loadBaselineMap, EVENTS } from './ix-actions.mjs';
+import { lintInteractionSpecs } from './interaction-lint.mjs';
+import { readRp } from './rp-read.mjs';
+import { nativeWidgetIdentities } from './native-widget-identity.mjs';
 
 function parseArgs(argv) {
   const positional = [];
@@ -93,15 +96,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   const baseline = loadBaselineMap(src, baselineArg);
-  if (batchItems) {
-    const out = addInteractionsBatch(readFileSync(src), batchItems, { replaceEvent, baseline });
-    writeFileSync(dst, out.file, { flag: 'wx' });
-    console.log(JSON.stringify(out.report, null, 2));
-  } else {
-    const rawTarget = page ? { page: target } : (onPage ? { widget: target, page: onPage } : target);
-    const finalTarget = resolveBaselineTarget(rawTarget, baseline);
-    const out = addInteractions(readFileSync(src), finalTarget, interactions, { replaceEvent });
-    writeFileSync(dst, out.file, { flag: 'wx' });
-    console.log(JSON.stringify(out.report, null, 2));
+  const file = readFileSync(src);
+  const rp = readRp(file, { path: src });
+  const variables = rp.globalVariables.map(v => v.name);
+  const rawTarget = page ? { page: typeof target === 'string' ? target : target?.page } : onPage && typeof target === 'string' ? { widget: target, page: onPage } : target;
+  const items = batchItems ?? [{ target: rawTarget, interactions }];
+  const diagnostics = items.flatMap((item, index) => lintInteractionSpecs(
+    item.interactions ?? [{ event: item.event, actions: item.actions ?? [] }], { variables, version: rp.version, context: { target: item.target } },
+  ).diagnostics.map(d => ({ ...d, pointer: batchItems ? `/items/${index}${d.pointer}` : d.pointer })));
+  if (diagnostics.some(d => d.severity === 'error')) {
+    console.error(JSON.stringify({ code: 'E_INTERACTION_PREFLIGHT', message: '交互静态预检失败。', diagnostics }));
+    process.exit(1);
   }
+  const out = addInteractionsBatch(file, items, { replaceEvent, baseline, widgetIdentities: nativeWidgetIdentities(rp) });
+  writeFileSync(dst, out.file, { flag: 'wx' });
+  const report = batchItems ? out.report : out.report.results[0];
+  console.log(JSON.stringify({ ...report, lint: { diagnostics } }, null, 2));
 }

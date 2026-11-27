@@ -128,10 +128,47 @@ function caseCondition(graph, kase) {
   return { hasCondition: true, conditionHash: createHash('sha256').update(JSON.stringify(snapshot(ref))).digest('hex') };
 }
 
+function interactionUsage(graph, root) {
+  const reads = new Set(), writes = new Set(), expressions = [];
+  const visited = new Set();
+  const visit = node => {
+    if (!node || visited.has(node)) return;
+    visited.add(node);
+    if (node.tag === 3) {
+      const object = graph.objects.get(node.value);
+      if (object && !isWidget(object) && !/^(?:Axure:Page|Axure:PanelDiagram|Axure:Master)$/.test(object.className)) visit(object);
+    }
+    if (node.className === 'Axure:Expr:FCall') {
+      const fn = strOf(field(node.body, 'function-name'));
+      const args = field(node.body, 'args')?.items ?? [];
+      const variable = graph.objects.get(args[0]?.value);
+      const name = strOf(field(variable?.body ?? {}, 'variable-name'));
+      if (name && fn === 'SetGlobalVariableValue') writes.add(name);
+      if (name && fn === 'GetGlobalVariableValue') reads.add(name);
+    } else if (node.className === 'Axure:Expr:StringLiteral') {
+      const expression = strOf(field(node.body, 'value'));
+      if (expression && /\[\[|\]\]/.test(expression)) {
+        const bindings = Object.fromEntries((field(node.body, 'scope')?.entries ?? []).map(([key]) => [strOf(key), true]));
+        for (const ref of field(node.body, 'variable-identifiers')?.items ?? []) {
+          const identifier = graph.objects.get(ref.value);
+          const name = strOf(field(identifier?.body ?? {}, 'Name'));
+          if (name && !Object.keys(bindings).some(alias => alias.toLowerCase() === name.toLowerCase())) Object.defineProperty(bindings, name, { value: true, enumerable: true });
+        }
+        expressions.push({ expression, bindings });
+      }
+    }
+    if (node.body) visit(node.body);
+    for (const [, value] of node.entries ?? []) visit(value);
+    for (const value of node.items ?? []) visit(value);
+  };
+  visit(root);
+  return reads.size || writes.size || expressions.length ? { reads: [...reads], writes: [...writes], expressions } : undefined;
+}
+
 // ---- 交互树读取 ----
 // InteractionTreeMap = { node-table: dict(nodeId → 对象), tree: Tree }；
 // Tree.children = 事件 Node；事件 Node.children = 用例 Node；用例 Node.children = 动作 Node。
-function readInteractions(graph, mapNode, version, widgetsByGuid, panelStates) {
+function readInteractions(graph, mapNode, version, widgetsByGuid, panelStates, includeUsage) {
   const results = [];
   if (!mapNode) return results;
   const nodeTable = field(mapNode.body, 'node-table');
@@ -152,8 +189,13 @@ function readInteractions(graph, mapNode, version, widgetsByGuid, panelStates) {
       const actions = childrenOf(caseNode)
         .map(actionNode => target(actionNode.id))
         .filter(Boolean)
-        .map(action => describeAction(graph, action, version, widgetsByGuid, panelStates));
+        .map(action => {
+          const usage = includeUsage && interactionUsage(graph, action);
+          return { ...describeAction(graph, action, version, widgetsByGuid, panelStates), ...(usage ? { usage } : {}) };
+        });
+      const usage = includeUsage && interactionUsage(graph, field(kase.body, 'Condition'));
       cases.push({
+        ...(usage ? { usage } : {}),
         description: strOf(field(kase.body, 'Description')) ?? '',
         disabled: field(kase.body, 'Disabled')?.value === true,
         ...caseCondition(graph, kase),
@@ -556,7 +598,7 @@ function rawDump(graph, node, depth = 0, seen = new Set()) {
 }
 
 // ---- 主分析 ----
-export function readRp(file, { full = false, path = null, includeMasterWidgets = false, includeVectors = false } = {}) {
+export function readRp(file, { full = false, path = null, includeMasterWidgets = false, includeVectors = false, includeUsage = false } = {}) {
   const problems = [];
   const problem = (kind, message, extra = {}) => problems.push({ kind, message, ...extra });
 
@@ -770,7 +812,7 @@ export function readRp(file, { full = false, path = null, includeMasterWidgets =
         ...(panel ? { panel } : {}),
         container: containerPath,
         record: graphRecords.get(graph) ?? null,
-        ...(includeMasterWidgets ? { interactions: readInteractions(graph, graph.objects.get(field(object.body, 'InteractionMap')?.value), version, widgetsByGuid, panelStates) } : {})
+        ...(includeMasterWidgets ? { interactions: readInteractions(graph, graph.objects.get(field(object.body, 'InteractionMap')?.value), version, widgetsByGuid, panelStates, includeUsage) } : {})
       });
       visitWidgetContainers(graph, object, containerPath);
     }
@@ -872,12 +914,12 @@ export function readRp(file, { full = false, path = null, includeMasterWidgets =
         widget.panel = panel;
       }
       const mapNode = graph.objects.get(field(object.body, 'InteractionMap')?.value);
-      const interactions = readInteractions(graph, mapNode, version, widgetsByGuid, panelStates);
+      const interactions = readInteractions(graph, mapNode, version, widgetsByGuid, panelStates, includeUsage);
       if (interactions.length) { tally(interactions); widget.interactions = interactions; }
       if (full) widget.raw = rawDump(graph, object.body);
       widgets.push(widget);
     }
-    const pageInteractions = readInteractions(graph, graph.objects.get(field(pageObject?.body ?? {}, 'interactionmap')?.value), version, widgetsByGuid, panelStates);
+    const pageInteractions = readInteractions(graph, graph.objects.get(field(pageObject?.body ?? {}, 'interactionmap')?.value), version, widgetsByGuid, panelStates, includeUsage);
     tally(pageInteractions);
     pageSummaries.push({
       name: page.name, folder: page.folder, record: record.index,

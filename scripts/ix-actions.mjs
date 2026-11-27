@@ -9,6 +9,7 @@ import { extname } from 'node:path';
 import { readRecords as readFileRecords, encodeRecord, replaceRecord, replaceRecords } from './rp-records.mjs';
 import { parsePayload as parseRecordPayload, encodePayload, field, walkNodes } from './parse-payload.mjs';
 import { detectFileVersion, resolveTargetVersion } from './version.mjs';
+import { normalizedCases } from './interaction-lint.mjs';
 import { existsSync } from 'node:fs';
 import { RP9_ENABLE_VALUES, RP11_ONLY_FCALLS, RP11_ONLY_EVENTS } from './version-fields.mjs';
 import { adaptNodesForVersion } from './version-adapt.mjs';
@@ -210,8 +211,13 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
   //   { page: 'PageName' }              页面级交互
   //   { widget: 'Name', page: 'PageName' }  限定页面内找 widget（两页同名只改指定页）
   const masterName = typeof target === 'object' && target !== null ? target.master : null;
-  const pageOnly = typeof target === 'object' && target !== null && (target.page !== undefined || masterName) && target.widget === undefined;
-  const widgetName = pageOnly ? null : (typeof target === 'string' ? target : target.widget);
+  const precise = target && typeof target === 'object' && (target.guid || (Number.isInteger(target.record) && Number.isInteger(target.id)));
+  const pageOnly = !precise && target && typeof target === 'object' &&
+    (target.page !== undefined || masterName) && target.widget === undefined && target.logicalId === undefined;
+  const widgetName = pageOnly ? null : typeof target === 'string' ? target : target?.widget;
+  if (!precise && !pageOnly && typeof widgetName !== 'string') {
+    throw new Error(`Expected exactly one widget, could not resolve ${JSON.stringify(target)}`);
+  }
   const pageName = pageOnly ? target.page : (target && target.page ? target.page : null);
 
   const matches = [];
@@ -231,18 +237,23 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
   // Legacy global-name lookup retains its root-only semantics. Page-scoped calls
   // explicitly opt into reachable panel-state lookup.
   const contexts = !masterRecord && pageName && !pageOnly ? pageWidgetContexts(file, pageName, reader)
-    : pageRecords.map(r => ({ r, graph: parsePayload(r), container: [] }));
+    : (precise && !masterRecord && !pageName
+      ? readRecords(file).filter(r => ['Axure:Page', 'Axure:PanelState', 'Axure:Master'].includes(r.className))
+      : pageRecords).map(r => ({ r, graph: parsePayload(r), container: [] }));
   for (const { r, graph, container } of contexts) {
     const pageObj = [...graph.objects.values()].find(o => o.className === (masterName ? 'Axure:Master' : 'Axure:Page'));
     if (pageOnly) { matches.push({ kind: 'page', r, graph, pageObj }); continue; }
     for (const widget of graph.objects.values()) {
       if (!widget.className.startsWith('Axure:DiagramObject:') && !widget.className.startsWith('Axure:Repeater')) continue;
-      if (typeof target === 'object' && target.record !== undefined && target.record !== r.index) continue;
-      if (typeof target === 'object' && target.container && JSON.stringify(target.container) !== JSON.stringify(container)) continue;
-      if (field(field(widget.body, 'name-block') ?? {}, 'text')?.text === widgetName) matches.push({ kind: 'widget', r, graph, widget });
+      if (typeof target === 'object' && !target.guid && target.record !== undefined && target.record !== r.index) continue;
+      const matched = precise
+        ? (target.guid ? graph.roots.find(n => n.tag === 0x1e)?.values[widget.id - 1] === target.guid : widget.id === target.id)
+        : (!target?.container || JSON.stringify(target.container) === JSON.stringify(container)) &&
+          field(field(widget.body, 'name-block') ?? {}, 'text')?.text === widgetName;
+      if (matched) matches.push({ kind: 'widget', r, graph, widget });
     }
   }
-  const what = pageOnly ? `page ${pageName}` : `widget ${widgetName}${pageName ? `（限定页面 ${pageName}）` : ''}`;
+  const what = pageOnly ? `page ${pageName}` : `widget ${precise ? JSON.stringify(target) : widgetName}${pageName ? `（限定页面 ${pageName}）` : ''}`;
   if (matches.length !== 1) {
     const candidates = matches.map(m => `  · ${m.kind} #${m.r.index} obj#${m.widget?.id ?? m.pageObj?.id} ${m.widget?.className ?? ''}`);
     throw new Error(`Expected exactly one ${what}, found ${matches.length}\n${candidates.join('\n')}`);
@@ -287,19 +298,36 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
     if (!id) { guids.push(guid); id = guids.length; }
     return id;
   };
-  const findWidget = name => {
-    const candidates = [...graph.objects.values()].filter(o =>
-      (o.className.startsWith('Axure:DiagramObject:') || o.className.startsWith('Axure:Repeater')) && nameOf(o) === name);
-    if (!candidates.length && pageName) {
-      const external = pageWidgetContexts(file, pageName, reader).flatMap(context => context.widgets
-        .filter(o => nameOf(o) === name).map(node => ({ node, context })));
-      if (external.length !== 1) throw new Error(`Expected exactly one widget named "${name}" in page "${pageName}", found ${external.length}`);
-      const { node, context } = external[0];
-      const sourceGuids = context.graph.roots.find(n => n.tag === 0x1e)?.values ?? [];
-      return { ...node, id: importGuid(sourceGuids[node.id - 1]), sourceGraph: context.graph, sourceGuids };
+  const findWidget = locator => {
+    const exact = locator && typeof locator === 'object';
+    const name = exact ? locator.widget : locator;
+    if (exact && !locator.guid && locator.id === undefined && typeof name !== 'string') {
+      throw new Error(`Expected exactly one widget, could not resolve ${JSON.stringify(locator)}`);
     }
-    if (candidates.length !== 1) throw new Error(`Expected exactly one widget named "${name}" on record #${r.index}, found ${candidates.length}: ${candidates.map(o => `obj#${o.id}`).join(', ')}`);
-    return candidates[0];
+    const matchesWidget = (node, record, sourceGuids) => {
+      if (!node.className.startsWith('Axure:DiagramObject:') && node.className !== 'Axure:Repeater') return false;
+      if (!exact) return nameOf(node) === name;
+      if (locator.guid) return sourceGuids[node.id - 1] === locator.guid;
+      return (locator.record === undefined || record === locator.record) &&
+        (locator.id === undefined ? nameOf(node) === name : node.id === locator.id);
+    };
+    if (exact && locator.page && pageName && locator.page !== pageName) throw new Error(`Widget target is on page "${locator.page}", expected "${pageName}"`);
+    const candidates = [...graph.objects.values()].filter(node => matchesWidget(node, r.index, guids));
+    if (candidates.length === 1) return candidates[0];
+    if (!candidates.length && pageName) {
+      const contexts = pageWidgetContexts(file, pageName, reader);
+      const external = contexts.flatMap(context => {
+        const sourceGuids = context.graph.roots.find(n => n.tag === 0x1e)?.values ?? [];
+        const widgets = context.widgets ?? [...context.graph.objects.values()];
+        return widgets.filter(node => matchesWidget(node, context.r.index, sourceGuids)).map(node => ({ node, context, sourceGuids }));
+      });
+      if (external.length === 1) {
+        const { node, context, sourceGuids } = external[0];
+        return { ...node, id: importGuid(sourceGuids[node.id - 1]), sourceGraph: context.graph, sourceGuids };
+      }
+      throw new Error(`Expected exactly one widget ${JSON.stringify(locator)}${pageName ? ' in page "' + pageName + '"' : ''}, found ${external.length}`);
+    }
+    throw new Error(`Expected exactly one widget named "${name}" on record #${r.index}, found ${candidates.length}: ${candidates.map(o => `obj#${o.id}`).join(', ')}`);
   };
   const repeaterColumnId = (repeater, columnName) => {
     if (repeater.className !== 'Axure:DiagramObject:Repeater')
@@ -567,8 +595,8 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
   // ---- action builders: field sets copied from Axure-authored sample documents ----
   const build = (spec, ctx) => {
     const type = String(spec.type ?? spec.action ?? '').toLowerCase();
-    const targetName = spec.target ?? spec.widget ?? (ctx.widget ? nameOf(ctx.widget) : null);
-    const paths = () => ({ widget: findWidget(targetName), path: pathTo(findWidget(targetName).id) });
+    const targetName = spec.target ?? spec.widget ?? (ctx.widget ? { id: ctx.widget.id, record: r.index } : null);
+    const paths = () => { const node = findWidget(targetName); return { widget: node, path: pathTo(node.id) }; };
     const info = (cls, props) => obj(newGuid(), cls, props);
     switch (type) {
       case 'link': {
@@ -870,7 +898,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
               });
               identifiers.push(ref(identifier.id));
             } else {
-              const sourcePath = pathTo(findWidget(String(source.widget)).id);
+              const sourcePath = pathTo(findWidget(source.widget).id);
               const pathLiteral = obj(newGuid(), 'Axure:Expr:DiagramObjectPathLiteral', { value: ref(sourcePath.id) });
               read = obj(newGuid(), 'Axure:Expr:FCall', {
                 'function-name': str('GetWidgetText'), args: list([ref(pathLiteral.id)])
@@ -1776,7 +1804,13 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         Disabled: bool(false), Description: str(c.description ?? ''),
         Condition: condRef, IsNewIfGroup: bool(!!c.isNewIfGroup)
       });
-      const actionIds = actionSpecs.map(spec => build(spec, ctx).id);
+      const actionIds = actionSpecs.map((spec, index) => {
+        try { return build(spec, ctx).id; } catch (error) {
+          throw Object.assign(new Error(`${what} / ${eventName} / Case ${caseNodeIds.length}${c.description ? ' "' + c.description + '"' : ''} / 动作 ${index + 1} (${spec.type}): ${error.message}`), {
+            location: { page: pageName ?? null, target, event: eventName, case: c.description ?? '', caseIndex: caseNodeIds.length, actionIndex: index + 1 },
+          });
+        }
+      });
       nodeTable.entries.push([ref(caseNodeId), ref(caseId)]);
       actionIds.forEach((id, i) => nodeTable.entries.push([ref(actionNodeIds[i]), ref(id)]));
     }
@@ -1856,11 +1890,11 @@ export function loadBaselineMap(rpPath, explicitBaselinePath = null) {
         if (!s || typeof s !== 'object') continue;
         const nativeName = s.nativeName ?? s.name ?? s.display;
         const logicalId = s.logicalId ?? s.id;
-        if (!nativeName || !logicalId) continue;
+        if (!logicalId || (!nativeName && !s.native?.length)) continue;
         symbols.push({
           logicalId,
           id: logicalId,
-          nativeName,
+          nativeName, native: s.native,
           name: s.label ?? String(logicalId).split('/').at(-1),
           label: s.label,
           pageId: s.pageId,
@@ -1894,12 +1928,12 @@ export function loadBaselineMap(rpPath, explicitBaselinePath = null) {
 }
 
 export function resolveBaselineTarget(target, baseline) {
-  if (!baseline || !target) return target;
-  if (typeof target === 'object' && target !== null && target.page !== undefined && target.widget === undefined) {
+  if (!baseline || !target || (typeof target === 'object' && (target.guid || (Number.isInteger(target.record) && Number.isInteger(target.id))))) return target;
+  if (typeof target === 'object' && target !== null && target.page !== undefined && target.widget === undefined && target.logicalId === undefined) {
     const pMatch = baseline.pages.find(p => p.id === target.page || p.name === target.page);
     return pMatch ? { ...target, page: pMatch.name ?? target.page } : target;
   }
-  const rawWidget = typeof target === 'string' ? target : target.widget;
+  const rawWidget = typeof target === 'string' ? target : target.logicalId ?? target.widget;
   if (!rawWidget || typeof rawWidget !== 'string') return target;
   const clean = rawWidget.replace(/^@/, '').trim();
   const slashNorm = clean.replace(/\./g, '/');
@@ -1913,15 +1947,16 @@ export function resolveBaselineTarget(target, baseline) {
   });
   if (matches.length !== 1) return target;
   const sym = matches[0];
+  const identity = sym.native?.length === 1 ? sym.native[0] : {};
   const resolvedName = sym.nativeName ?? sym.name ?? rawWidget;
   const resolvedPage = pageEntry?.name ?? sym.pageName ?? baseline.pages.find(p => p.id === sym.pageId)?.name ?? pageHint;
   if (typeof target === 'string') {
-    return resolvedPage ? { widget: resolvedName, page: resolvedPage } : resolvedName;
+    return resolvedPage || identity.id !== undefined ? { ...identity, widget: resolvedName, ...(resolvedPage ? { page: resolvedPage } : {}) } : resolvedName;
   }
-  return { ...target, widget: resolvedName, ...(resolvedPage ? { page: resolvedPage } : {}) };
+  return { ...target, ...identity, widget: resolvedName, ...(resolvedPage ? { page: resolvedPage } : {}) };
 }
 
-export function addInteractionsBatch(file, items, { replaceEvent = false, version, baseline = null } = {}) {
+export function addInteractionsBatch(file, items, { replaceEvent = false, version, baseline = null, widgetIdentities = [] } = {}) {
   if (!Array.isArray(items) || !items.length) throw new Error('No interaction batch items given');
   const writer = createInteractionWriter(file);
   const reports = [];
@@ -1935,27 +1970,44 @@ export function addInteractionsBatch(file, items, { replaceEvent = false, versio
       target = { widget: item.target, page: item.onPage };
     }
     target = resolveBaselineTarget(target, baseline);
+    if (target && typeof target === 'object' && !target.page && !target.master) {
+      const owner = widgetIdentities.find(w => target.guid ? target.guid === w.guid : target.record === w.record && target.id === w.id);
+      if (owner?.page) target = { ...target, page: owner.page };
+    }
     const rawIxList = Array.isArray(item.interactions)
       ? item.interactions
       : (item.event ? [{ event: item.event, actions: item.actions || [] }] : null);
     const resolveWidgetRef = rawRef => {
-      if (typeof rawRef !== 'string') return rawRef;
-      const r = resolveBaselineTarget(rawRef, baseline);
-      return typeof r === 'object' && r !== null ? (r.widget ?? rawRef) : r;
+      if (typeof rawRef !== 'string' && !rawRef?.logicalId) return rawRef;
+      const ref = typeof rawRef === 'string' && target?.page ? { widget: rawRef, page: target.page } : rawRef;
+      const resolved = resolveBaselineTarget(ref, baseline);
+      if (resolved === ref) return rawRef;
+      return resolved?.id !== undefined || resolved?.guid ? resolved : resolved?.widget ?? resolved;
     };
-    const resolvedIxList = Array.isArray(rawIxList) ? rawIxList.map(ix => ({
+    const mapRefs = (node, section) => {
+      if (Array.isArray(node)) return node.map(item => mapRefs(item, section));
+      if (!node || typeof node !== 'object') return node;
+      const refKeys = section === 'action' ? ['target', 'widget', 'panel', 'repeater', 'widgetPath'] : ['widget', 'widgetPath'];
+      return Object.fromEntries(Object.entries(node).map(([key, value]) => [key,
+        refKeys.includes(key) ? resolveWidgetRef(value) : mapRefs(value, section)]));
+    };
+    const resolvedIxList = rawIxList?.map(ix => ({
       ...ix,
-      actions: Array.isArray(ix.actions) ? ix.actions.map(act => (act && typeof act === 'object' ? {
-        ...act,
-        ...(typeof act.target === 'string' ? { target: resolveWidgetRef(act.target) } : {}),
-        ...(typeof act.panel === 'string' ? { panel: resolveWidgetRef(act.panel) } : {}),
-      } : act)) : ix.actions,
-    })) : rawIxList;
-    const res = writer.add(target, resolvedIxList, {
-      replaceEvent: item.replaceEvent !== undefined ? Boolean(item.replaceEvent) : replaceEvent,
-      version,
-    });
-    reports.push(res.report);
+      cases: normalizedCases(ix).map(kase => ({
+        ...kase,
+        ...(kase.when !== undefined ? { when: mapRefs(kase.when, 'condition') } : {}),
+        actions: (kase.actions ?? []).map(action => mapRefs(action, 'action')),
+      })),
+    }));
+    try {
+      const res = writer.add(target, resolvedIxList, {
+        replaceEvent: item.replaceEvent !== undefined ? Boolean(item.replaceEvent) : replaceEvent,
+        version,
+      });
+      reports.push(res.report);
+    } catch (error) {
+      throw new Error(`items[${i}]：${error.message}`, { cause: error });
+    }
   }
   return {
     file: writer.finish(),

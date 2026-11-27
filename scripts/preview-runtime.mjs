@@ -10,6 +10,9 @@ import { assertNotProtected, assertWritable, resolveWorkDir } from './engine.mjs
 import { pythonInvocation } from './python.mjs';
 import { findChromeExecutable, launchChrome } from '../studio/cdp.mjs';
 
+import { bindNativeSymbols, officialIdOf, readNativeWidgetMap } from './native-widget-identity.mjs';
+import { scanOfficialInteractions, officialWidgetMapFile } from './official-interactions.mjs';
+
 const VIRTUAL_CLOCK_SHIM = `(() => {
   if (window.__zeeClockInstalled) return;
   window.__zeeClockInstalled = true;
@@ -17,11 +20,13 @@ const VIRTUAL_CLOCK_SHIM = `(() => {
   const origClearTimeout = window.clearTimeout.bind(window);
   const origSetInterval = window.setInterval.bind(window);
   const origClearInterval = window.clearInterval.bind(window);
+  const epoch = Date.now();
   let now = 0;
   let nextId = 100000;
   const queue = [];
   const clock = window.__zeeClock = {
     get now() { return now; },
+    get timestamp() { return epoch + now; },
     get pending() { return queue.length; },
     advance(ms) {
       const delta = Math.max(0, Number(ms) || 0);
@@ -132,7 +137,21 @@ const sha = value => createHash('sha256').update(value).digest('hex');
 function installAxureStartupProbe() {
   const startup = window.__zeeAxureStartup = { waiting: false, revision: 0 };
   const hook = () => {
-    const adaptive = window.$axure?.internal?.(api => api.adaptive);
+    const api = window.$axure?.internal?.(internal => internal);
+    const provider = api?.globalVariableProvider;
+    const getVariable = provider?.getVariableValue;
+    if (window.__zeeClock && typeof getVariable === 'function' && !startup.virtualNow) {
+      startup.virtualNow = true;
+      provider.getVariableValue = function(name, eventInfo, ...rest) {
+        // Keep the browser's real clock for painting/animation. Only Axure's
+        // event-local Now advances with the CDP scenario clock.
+        if (typeof name === 'string' && name.toLowerCase() === 'now' && eventInfo) {
+          eventInfo = { ...eventInfo, now: new Date(window.__zeeClock.timestamp) };
+        }
+        return Reflect.apply(getVariable, this, [name, eventInfo, ...rest]);
+      };
+    }
+    const adaptive = api?.adaptive;
     const loadFinished = adaptive?.loadFinished;
     if (typeof loadFinished !== 'function' || startup.hooked) return;
     startup.hooked = true;
@@ -173,9 +192,9 @@ const MIME_TYPES = {
 
 // Serialized into the real browser. Only reads Axure state and installs bounded
 // passive listeners; never evaluates source expressions or writes test values.
-export function observeAxure({ names = [], variables = [], waitForInitialization = false } = {}) {
+export function observeAxure({ names = [], officialIds = [], variables = [], waitForInitialization = false } = {}) {
   const windows = [window];
-  const wantFilter = Array.isArray(names) && names.length > 0;
+  const wantFilter = names.length > 0 || officialIds.length > 0;
   for (let i = 0; i < windows.length && i < 20; i++) {
     const w = windows[i];
     try {
@@ -204,10 +223,15 @@ export function observeAxure({ names = [], variables = [], waitForInitialization
             offY += fr.top + (fe.clientTop || 0);
             curW = curW.parent;
           }
-          const widgets = [...d.querySelectorAll('[data-label]')]
+          const labelElements = [...d.querySelectorAll('[data-label]')];
+          const nativeElements = (ax.getAllElementIds?.() ?? []).map(id => d.getElementById(id)).filter(Boolean);
+          const identities = new Set(officialIds);
+          const labels = new Set(names);
+          const widgets = [...new Set([...labelElements, ...nativeElements])]
             .filter(el => !el.classList.contains('panel_state'))
-            .filter(el => !wantFilter || names.includes(el.getAttribute('data-label')))
-            .map(el => {
+            .flatMap(el => {
+              const officialId = el.id ? ax.getObjectFromElementId?.(el.id)?.id : null;
+              if (wantFilter && !labels.has(el.getAttribute('data-label')) && !identities.has(officialId)) return [];
               let r = el.getBoundingClientRect();
               // Axure Layer wrappers have zero CSS size while their children are
               // visible and receive the group's click. Measure actual children.
@@ -249,8 +273,8 @@ export function observeAxure({ names = [], variables = [], waitForInitialization
               const width = typeof info?.width === 'number' && info.width > 0 ? info.width : r.width;
               const height = typeof info?.height === 'number' && info.height > 0 ? info.height : r.height;
               const textVal = input ? input.value : (el.innerText?.trim() ?? '');
-              return {
-                id: el.id,
+              return [{
+                id: el.id, officialId: officialId ?? null,
                 name: el.getAttribute('data-label'),
                 text: textVal,
                 value: textVal,
@@ -264,7 +288,7 @@ export function observeAxure({ names = [], variables = [], waitForInitialization
                 width, height,
                 centerX: offX + r.left + r.width / 2,
                 centerY: offY + r.top + r.height / 2,
-              };
+              }];
             });
           const values = {};
           const defined = ax.globalVariableProvider.getDefinedVariables();
@@ -520,53 +544,74 @@ function collectStudioNodeNames(studioDoc) {
   return namesByScoped;
 }
 
-function buildVerificationMap({ source, rp, runWorkflow }) {
+function buildVerificationMap({ source, rp, baseline, html, runWorkflow }) {
+  let compiled;
   if (source) {
     const absSrc = resolve(source);
     assertNotProtected(absSrc);
-    const map = runWorkflow('preview-map', absSrc);
-    if (!map.ok) throw Object.assign(new Error(map.diagnostics?.[0]?.message || 'Unable to read RP/1 preview map'), { code: 'E_VERIFY_SOURCE' });
-    return map;
+    compiled = runWorkflow('preview-map', absSrc);
+    if (!compiled.ok) throw Object.assign(new Error(compiled.diagnostics?.[0]?.message || 'Unable to read RP/1 preview map'), { code: 'E_VERIFY_SOURCE' });
   }
-  if (rp && existsSync(`${rp}.baseline.json`)) {
-    try {
-      const base = JSON.parse(readFileSync(`${rp}.baseline.json`, 'utf8'));
-      const pages = [];
-      const seenPages = new Set();
-      let studioNames = null;
-      if (base.studioOrigin?.sourceFile) {
-        const studioDocPath = resolve(dirname(rp), base.studioOrigin.sourceFile);
-        if (existsSync(studioDocPath)) {
-          try {
-            studioNames = collectStudioNodeNames(JSON.parse(readFileSync(studioDocPath, 'utf8')));
-          } catch {}
-        }
-      }
-      const symbols = (base.sourceMap ?? []).map(s => {
-        if (s.pageId && !seenPages.has(s.pageId)) {
-          seenPages.add(s.pageId);
-          pages.push({ id: s.pageId, name: s.pageName ?? s.pageId });
-        }
-        const studioName = studioNames?.get(s.id);
-        const studioQualified = studioName && s.pageId ? `${s.pageId}/${studioName}` : null;
-        const aliases = [studioName, studioQualified].filter(a => a && a !== s.label && a !== s.id);
-        return aliases.length ? { ...s, aliases } : s;
-      });
-      return {
-        ok: true,
-        semanticHash: base.semanticHash ?? null,
-        variables: Object.keys(base.sourceSpec?.variables ?? {}),
-        pages,
-        symbols,
-      };
-    } catch {}
+  let native, exported;
+  if (rp) {
+    try { native = readNativeWidgetMap(rp, baseline); }
+    catch (error) { if (baseline) throw error; }
   }
+  if (html) {
+    const path = join(html, officialWidgetMapFile);
+    assertNotProtected(path);
+    if (existsSync(path)) {
+      const data = JSON.parse(readFileSync(path, 'utf8'));
+      if (data.version === 1 && Array.isArray(data.symbols)) exported = data.symbols;
+    }
+  }
+  const base = native?.baseline;
+  if (!compiled && !native && !exported) return null;
+  const nativeSymbols = new Map([...(native?.symbols ?? []), ...(exported ?? [])].map(s => [s.logicalId ?? s.id, s]));
+  let studioNames;
+  if (base?.studioOrigin?.sourceFile) {
+    const studioDocPath = resolve(dirname(rp), base.studioOrigin.sourceFile);
+    assertNotProtected(studioDocPath);
+    try { studioNames = collectStudioNodeNames(JSON.parse(readFileSync(studioDocPath, 'utf8'))); } catch {}
+  }
+  if (compiled) {
+    const symbols = native?.widgets && !nativeSymbols.size ? bindNativeSymbols(compiled.symbols, native.widgets) : compiled.symbols;
+    for (const s of symbols) {
+      const bound = nativeSymbols.get(s.logicalId ?? s.id);
+      nativeSymbols.set(s.logicalId ?? s.id, { ...s, ...(bound?.officialId ? { officialId: bound.officialId } : {}) });
+    }
+  }
+  const pages = new Map((compiled?.pages ?? []).map(p => [p.id, p]));
+  const symbols = [...nativeSymbols.values()].map(s => {
+    if (s.pageId && !pages.has(s.pageId)) pages.set(s.pageId, { id: s.pageId, name: s.pageName ?? s.pageId });
+    const name = studioNames?.get(s.id);
+    return name ? { ...s, aliases: [name, `${s.pageId}/${name}`] } : s;
+  });
+  return {
+    ...compiled, ok: true, symbols, pages: [...pages.values()], widgets: native?.widgets ?? [],
+    semanticHash: compiled?.semanticHash ?? base?.semanticHash ?? null,
+    variables: compiled?.variables ?? Object.keys(base?.sourceSpec?.variables ?? {}),
+    verifySteps: compiled?.verifySteps?.length ? compiled.verifySteps : base?.nativeVerifySteps ?? [],
+  };
+}
+
+function explicitPreviewTarget(map, target) {
+  if (typeof target === 'object') {
+    if (target.guid) return { id: `guid:${target.guid}`, officialId: officialIdOf(target.guid) };
+    if (target.logicalId) return resolvePreviewSymbol(map ?? {}, target.logicalId);
+    const widget = map?.widgets?.find(w => w.record === target.record && w.id === target.id);
+    if (widget) return { id: `${target.record}:${target.id}`, officialId: widget.officialId };
+    throw Object.assign(new Error('record/id 需要一份与 HTML 对应的 .rp 文件。'), { code: 'E_PREVIEW_TARGET' });
+  }
+  if (/^guid:[0-9a-f]{32}$/i.test(target)) return { id: target, officialId: officialIdOf(target.slice(5)) };
   return null;
 }
 
 function findWidgetMatch(observation, symbol, target, { allowHidden = false, rowIndex = 0 } = {}) {
   const pool = observation.widgets ?? [];
-  const candidates = symbol
+  const candidates = symbol?.officialId && observation.engine !== 'studio-html'
+    ? pool.filter(w => w.officialId === symbol.officialId && (allowHidden || w.visible))
+    : symbol
     ? pool.filter(w => {
       const targetKeys = new Set([symbol.name, symbol.display, symbol.label, symbol.id, symbol.logicalId, ...(Array.isArray(symbol.aliases) ? symbol.aliases : [])].filter(Boolean));
       const widgetKeys = [w.name, w.id, w.scopedId, w.label].filter(Boolean);
@@ -696,6 +741,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
   let activeHtmlDir = htmlInputDir;
   let activeEngine = engine;
   let officialHtmlExported = false;
+  let interactionCompilation;
   let studioHtmlExported = false;
   let engineFallbackReason = null;
 
@@ -716,7 +762,8 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
   } else {
     findChromeExecutable();
   }
-  const map = buildVerificationMap({ source: sourcePath, rp: rpPath, runWorkflow });
+  const map = buildVerificationMap({ source: sourcePath, rp: rpPath, baseline: input.baseline ? resolve(workDir, input.baseline) : undefined,
+    html: htmlInputDir, runWorkflow });
   const frameMode = input.frame === 'artboard' ? 'artboard' : 'viewport';
   const rawSteps = (Array.isArray(input.steps) && input.steps.length > 0) ? input.steps : (map?.verifySteps ?? []);
   const steps = normalizeVerifySteps(rawSteps);
@@ -732,10 +779,11 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       activeEngine = 'studio-html';
     } else {
       const exportedHtml = join(tempStageDir, 'html');
-      const exp = await exportHtml({ rp: rpPath, output: exportedHtml, cwd: workDir });
+      const exp = await exportHtml({ rp: rpPath, output: exportedHtml, cwd: workDir, baseline: input.baseline });
       if (exp.status === 'completed') {
         activeHtmlDir = exp.output;
         officialHtmlExported = true;
+        interactionCompilation = exp.interactionCompilation;
         activeEngine = 'official';
       } else if (engine === 'official') {
         rmSync(tempStageDir, { recursive: true, force: true });
@@ -757,14 +805,32 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
     }
   }
 
-  const extraNames = steps.flatMap(s => s.target ? [s.target] : []);
+  if (activeEngine === 'official') {
+    interactionCompilation ??= scanOfficialInteractions(activeHtmlDir, { symbols: map?.symbols });
+    if (interactionCompilation.errorCount) {
+      if (tempStageDir) rmSync(tempStageDir, { recursive: true, force: true });
+      return { status: 'failed', engine: 'official', evidence: 'axure-official-html-cdp', stage: 'interaction-compilation',
+        officialHtmlSource: officialHtmlExported ? 'exported' : 'provided', officialHtmlReady: true,
+        verification: { officialHtmlExported, browserLoaded: false, behaviorVerified: false },
+        passed: 0, total: steps.length, steps: [], interactionCompilation, diagnostics: interactionCompilation.diagnostics };
+    }
+  }
+  const extraNames = steps.flatMap(s => typeof s.target === 'string' ? [s.target] : []);
   const mapNames = map ? map.symbols.flatMap(s => [s.name, s.display, s.label]).filter(Boolean) : [];
-  const names = map ? [...new Set([...mapNames, ...extraNames])] : [];
+  const officialIds = (map?.symbols ?? []).map(s => s.officialId).filter(Boolean);
+  for (const step of steps) {
+    if (!step.target) continue;
+    try {
+      const id = explicitPreviewTarget(map, step.target)?.officialId;
+      if (id) officialIds.push(id);
+    } catch { /* Report an invalid target on its original step. */ }
+  }
+  const names = map || officialIds.length ? [...new Set([...mapNames, ...extraNames])] : [];
   const variables = [...new Set([...(map?.variables ?? []), ...steps.flatMap(s => s.expect?.variable ? [s.expect.variable] : [])])];
 
   const observeExpr = activeEngine === 'official'
-    ? `(${observeAxure.toString()})(${JSON.stringify({ names, variables, waitForInitialization: true })})`
-    : `(() => window.__STUDIO_EXPORT_APP__ ? window.__STUDIO_EXPORT_APP__.observeForVerify() : { ready: false })()`;
+    ? `(${observeAxure.toString()})(${JSON.stringify({ names, officialIds, variables, waitForInitialization: true })})`
+    : `(() => window.__STUDIO_EXPORT_APP__ ? ({ ...window.__STUDIO_EXPORT_APP__.observeForVerify(), engine: 'studio-html' }) : { ready: false })()`;
   const entryHtmlFile = activeEngine === 'official' ? 'start.html' : 'index.html';
   const server = startStaticServer(activeHtmlDir, entryHtmlFile);
   let browser = null;
@@ -783,6 +849,8 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       ? { officialHtmlExported, browserLoaded: false, behaviorVerified: false }
       : { officialHtmlExported: false, studioHtmlExported, browserLoaded: false, behaviorVerified: false },
     ...(engineFallbackReason ? { engineFallbackReason } : {}),
+    ...(interactionCompilation ? { interactionCompilation } : {}),
+    ...(useVirtualClock ? { virtualClock: true } : {}),
     passed: 0,
     total: steps.length,
     ...(rpPath ? { rp: rpPath } : {}),
@@ -866,10 +934,10 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       };
       let symbol = null;
       if (step.target) {
-        try { symbol = map ? resolvePreviewSymbol(map, step.target) : null; }
+        try { symbol = explicitPreviewTarget(map, step.target) ?? (map?.symbols.length ? resolvePreviewSymbol(map, step.target) : null); }
         catch (err) {
-          const direct = before.widgets.find(w => w.name === step.target);
-          if (!direct) throw err;
+          const direct = before.widgets.find(w => [w.name, w.id].includes(step.target));
+          if (!direct) throw Object.assign(err, { stepIndex: i });
         }
       }
       const allowHidden = step.action === 'expect' && step.expect?.visible === false;

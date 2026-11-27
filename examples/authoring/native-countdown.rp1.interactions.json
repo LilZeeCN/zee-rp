@@ -1,0 +1,250 @@
+{
+  "items": [
+    {
+      "target": "timer/start",
+      "interactions": [
+        {
+          "event": "OnClick",
+          "actions": [
+            {
+              "type": "set-panel-state",
+              "target": "timer/clock",
+              "stateMode": "current"
+            },
+            {
+              "type": "set-variable",
+              "variable": "running",
+              "value": 1
+            },
+            {
+              "type": "set-variable",
+              "variable": "left_ms",
+              "value": 1500
+            },
+            {
+              "type": "set-variable",
+              "variable": "deadline",
+              "expression": "[[Now.getTime() + 1500]]"
+            },
+            {
+              "type": "set-rich-text-from-variable",
+              "target": "timer/remaining",
+              "variable": "left_ms"
+            },
+            {
+              "type": "set-text",
+              "target": "timer/status",
+              "text": "运行中"
+            },
+            {
+              "type": "set-panel-state",
+              "target": "timer/clock",
+              "stateMode": "next",
+              "loop": true,
+              "repeat": true,
+              "repeatInterval": 250,
+              "repeatSkipFirst": true
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "target": "timer/stop",
+      "interactions": [
+        {
+          "event": "OnClick",
+          "actions": [
+            {
+              "type": "set-variable",
+              "variable": "running",
+              "value": 0
+            },
+            {
+              "type": "set-panel-state",
+              "target": "timer/clock",
+              "stateMode": "current"
+            },
+            {
+              "type": "set-text",
+              "target": "timer/status",
+              "text": "已停止"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "target": "timer/clock",
+      "interactions": [
+        {
+          "event": "OnPanelStateChange",
+          "cases": [
+            {
+              "description": "仅在运行中更新时间",
+              "condition": "if",
+              "when": {
+                "left": {
+                  "variable": "running"
+                },
+                "op": "==",
+                "right": 1
+              },
+              "actions": [
+                {
+                  "type": "set-variable",
+                  "variable": "left_ms",
+                  "expression": "[[end - Now.getTime()]]",
+                  "bindings": {
+                    "end": {
+                      "variable": "deadline"
+                    }
+                  }
+                },
+                {
+                  "type": "set-rich-text-from-variable",
+                  "target": "timer/remaining",
+                  "variable": "left_ms"
+                }
+              ]
+            },
+            {
+              "description": "到期只结束一次",
+              "condition": "if",
+              "when": {
+                "left": {
+                  "left": {
+                    "variable": "running"
+                  },
+                  "op": "==",
+                  "right": 1
+                },
+                "op": "&&",
+                "right": {
+                  "left": {
+                    "variable": "left_ms"
+                  },
+                  "op": "<=",
+                  "right": 0
+                }
+              },
+              "actions": [
+                {
+                  "type": "set-variable",
+                  "variable": "running",
+                  "value": 0
+                },
+                {
+                  "type": "set-variable",
+                  "variable": "left_ms",
+                  "value": 0
+                },
+                {
+                  "type": "set-rich-text-from-variable",
+                  "target": "timer/remaining",
+                  "variable": "left_ms"
+                },
+                {
+                  "type": "set-panel-state",
+                  "target": "timer/clock",
+                  "stateMode": "current"
+                },
+                {
+                  "type": "set-text",
+                  "target": "timer/status",
+                  "text": "已到期"
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "steps": [
+    {
+      "action": "expect",
+      "target": "timer/remaining",
+      "expect": {
+        "text": "1500"
+      }
+    },
+    {
+      "action": "click",
+      "target": "timer/start"
+    },
+    {
+      "action": "expect",
+      "target": "timer/status",
+      "expect": {
+        "text": "运行中"
+      }
+    },
+    {
+      "action": "advanceTime",
+      "ms": 250
+    },
+    {
+      "action": "expect",
+      "target": "timer/remaining",
+      "expect": {
+        "text": "1250"
+      }
+    },
+    {
+      "action": "click",
+      "target": "timer/stop"
+    },
+    {
+      "action": "advanceTime",
+      "ms": 1750
+    },
+    {
+      "action": "expect",
+      "target": "timer/remaining",
+      "expect": {
+        "text": "1250"
+      }
+    },
+    {
+      "action": "expect",
+      "target": "timer/status",
+      "expect": {
+        "text": "已停止"
+      }
+    },
+    {
+      "action": "click",
+      "target": "timer/start"
+    },
+    {
+      "action": "advanceTime",
+      "ms": 1250
+    },
+    {
+      "action": "expect",
+      "target": "timer/remaining",
+      "expect": {
+        "text": "250"
+      }
+    },
+    {
+      "action": "advanceTime",
+      "ms": 250
+    },
+    {
+      "action": "expect",
+      "target": "timer/status",
+      "expect": {
+        "text": "已到期"
+      }
+    },
+    {
+      "action": "expect",
+      "target": "timer/remaining",
+      "expect": {
+        "text": "0"
+      }
+    }
+  ]
+}

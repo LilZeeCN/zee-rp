@@ -670,7 +670,17 @@
     "tools/native-assembly/browser-check.mjs",
     "tools/native-assembly/Worker.cs",
     "tools/check-attribution.mjs",
-    "tools/check-layers.mjs"
+    "tools/check-layers.mjs",
+    "scripts/official-interactions.mjs",
+    "scripts/native-widget-identity.mjs",
+    "scripts/interaction-lint.mjs",
+    "docs/native-interaction-workflow.md",
+    "examples/authoring/native-countdown.rp1",
+    "examples/authoring/native-countdown.rp1.interactions.json",
+    "examples/authoring/native-loop.rp1",
+    "examples/authoring/native-loop.rp1.interactions.json",
+    "examples/authoring/native-blur-form.rp1",
+    "examples/authoring/native-blur-form.rp1.interactions.json"
   ],
   "repository": {
     "type": "git",

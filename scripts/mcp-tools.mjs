@@ -15,13 +15,15 @@ import { parsePayload, encodePayload, field, walkNodes } from './parse-payload.m
 import { setWidgetRichText } from './set-widget-richtext.mjs';
 import { setWidgetNames } from './name-widget.mjs';
 import { listCustomStyles, renameCustomStyle, rebindWidgets, widgetSelector } from './custom-styles.mjs';
-import { EVENTS } from './ix-actions.mjs';
+import { EVENTS, addInteractionsBatch, loadBaselineMap, resolveBaselineTarget } from './ix-actions.mjs';
+import { lintInteractionSpecs, lintNativeInteractions } from './interaction-lint.mjs';
+import { nativeWidgetIdentities, officialIdOf, saveIdentityBaseline } from './native-widget-identity.mjs';
 import { compilePrototype, buildInteractiveRp, reportPrototypeProgress } from './proto.mjs';
 import { expandSpec, pasteAxvg } from './axvg.mjs';
 import { createBlankProject } from './create-blank-project.mjs';
 import { writeNativeScene } from './native-scene.mjs';
 import { mergePages } from './merge-pages.mjs';
-import { authoringTools, captureOfficialHtmlScreenshot, isInlineRp1Text, recipes, recipeSource, runWorkflow, pythonEnvironment, exportPrototype, verifyOfficialPreview } from './authoring-workflow.mjs';
+import { authoringTools, captureOfficialHtmlScreenshot, isInlineRp1Text, readNativeInteractionSource, recipes, recipeSource, runWorkflow, pythonEnvironment, exportPrototype, verifyOfficialPreview } from './authoring-workflow.mjs';
 import { importHtmlToRp1Spec, isHtmlInput } from './html-import.mjs';
 import { reviewImageStructure } from './image-structure.mjs';
 import { studioTools, runStudioFixPlanOnRp1 } from '../studio/mcp-adapter.mjs';
@@ -140,7 +142,7 @@ function runCommandPayload(command, input, { cwd } = {}) {
   const io = commandIO(command);
   const raw = Object.hasOwn(input, 'args');
   let args = commandArgs(command, input);
-  let state = null, node = null, source = null, before = null, tempSpecFile = null;
+  let state = null, node = null, source = null, before = null;
   try {
   if (io) {
     const useSession = raw ? input.session === true : input[io.source] === undefined && input[io.output] === undefined;
@@ -167,26 +169,6 @@ function runCommandPayload(command, input, { cwd } = {}) {
       if (source) { assertNotProtected(source); before = countsOf(readRp(readFileSync(source), { path: source })); }
     }
   }
-  if (command.command === 'add-interaction' && !raw) {
-    const effectiveSrc = source ?? (input.source ? resolveInWork(input.source, workDir) : undefined);
-    const effectiveOut = node ?? (input.output ? resolveInWork(input.output, workDir) : undefined);
-    const explicitBaseline = input.baseline ? resolveInWork(input.baseline, workDir) : undefined;
-    const baselinePath = findBaselineForRp(effectiveSrc, explicitBaseline, state);
-    if (Array.isArray(input.items) || Array.isArray(input.interactions)) {
-      tempSpecFile = join(tmpdir(), `zee-add-ix-${randomUUID()}.json`);
-      const specObj = Array.isArray(input.items)
-        ? { items: input.items }
-        : { target: input.target, ...(input.page ? { page: true } : {}), ...(input.onPage ? { onPage: input.onPage } : {}), interactions: input.interactions };
-      writeFileSync(tempSpecFile, JSON.stringify(specObj, null, 2));
-      args = [effectiveSrc, effectiveOut, '--json', tempSpecFile];
-      if (input.replaceEvent) args.push('--replace-event');
-      if (input.page) args.push('--page');
-      if (input.onPage) args.push('--on-page', input.onPage);
-      if (baselinePath) args.push('--baseline', baselinePath);
-    } else if (baselinePath && !args.includes('--baseline')) {
-      args.push('--baseline', baselinePath);
-    }
-  }
   if (command.command.startsWith('axvg ')) args = [command.command.split(' ')[1], ...args];
   const result = new AxureSession({ source, cwd: workDir }).run(command.command, args);
   const rawStderr = result.stderr.toString();
@@ -201,11 +183,15 @@ function runCommandPayload(command, input, { cwd } = {}) {
   const value = { command: command.command, exitCode: result.status, stdout: result.stdout.toString(), stderr: result.status === 0 ? rawStderr : cleanStderr, status: result.status === 0 ? 'completed' : 'failed' };
   if (result.status !== 0) {
     if (node && !/EEXIST|already exists/i.test(rawStderr) && pathExists(node)) value.rejected = rejectNode(node);
-    const errCode = /EEXIST|already exists/i.test(rawStderr) ? 'E_OUTPUT_EXISTS' : 'E_TOOL_INPUT';
+    let detail;
+    if (command.command === 'add-interaction') {
+      try { detail = JSON.parse(rawStderr); } catch { /* Plain CLI error. */ }
+    }
+    const errCode = detail?.code ?? (/EEXIST|already exists/i.test(rawStderr) ? 'E_OUTPUT_EXISTS' : 'E_TOOL_INPUT');
     value.ok = false;
     value.code = errCode;
-    value.message = cleanStderr || `${command.command} 执行失败 (exit=${result.status})`;
-    value.diagnostics = [{ code: errCode, pointer: '/arguments', message: value.message, nextAction: '检查参数或读取最新原型状态；保留原文件后重试。' }];
+    value.message = detail?.message ?? (cleanStderr || `${command.command} 执行失败 (exit=${result.status})`);
+    value.diagnostics = detail?.diagnostics ?? [{ code: errCode, pointer: '/arguments', message: value.message, nextAction: '检查参数或读取最新原型状态；保留原文件后重试。' }];
     value.usage = command.usage;
     value.candidates = errorCandidates(command, input, args, source, rawStderr);
     if (state) value.chainTail = state.chain.at(-1);
@@ -223,8 +209,125 @@ function runCommandPayload(command, input, { cwd } = {}) {
   }
   return value;
   } finally {
-    if (tempSpecFile) try { unlinkSync(tempSpecFile); } catch {}
     if (node) releaseWorkNode(node);
+  }
+}
+
+async function runInteractionCommand(input, cwd, dryRun) {
+  const workDir = resolveWorkDir(cwd);
+  const state = input.source === undefined ? refreshState(requireSession()) : null;
+  if ((state && input.output !== undefined) || (!state && !dryRun && input.output === undefined)) {
+    throw new Error('显式写入需同时传 source/output。只预检可仅传 source。');
+  }
+  const source = state?.chain.at(-1) ?? resolve(workDir, input.source);
+  assertNotProtected(source);
+  const originalHash = sha256Of(source);
+  const file = readFileSync(source);
+  const rp = state?.rp ?? readRp(file, { path: source });
+  const fail = (code, message, diagnostics, extra = {}) => ({ status: 'failed', code, message, diagnostics,
+    ...(state ? { chainTail: state.chain.at(-1) } : {}), ...extra });
+  if (Object.values(zerosOf(rp)).some(Boolean)) throw new Error('宿主未通过结构三零，请先用 rp_inspect(view="verify") 检查。');
+  const baselinePath = findBaselineForRp(source, input.baseline && resolve(workDir, input.baseline), state);
+  if (input.baseline && !pathExists(resolve(workDir, input.baseline))) throw new Error(`找不到指定基线：${input.baseline}`);
+  const baseline = loadBaselineMap(source, baselinePath);
+  const coerce = value => value === 'true' ? true : value === 'false' ? false
+    : value !== '' && !Number.isNaN(Number(value)) ? Number(value) : value;
+  const singleAction = input.action ? { type: input.action, ...Object.fromEntries((input.parameters ?? []).map(param => {
+    const split = param.indexOf('=');
+    return [param.slice(0, split), coerce(param.slice(split + 1))];
+  })) } : null;
+  const items = input.items ?? [{ target: input.target, page: input.page, onPage: input.onPage,
+    interactions: input.interactions ?? [{ event: input.event, actions: [singleAction] }] }];
+  const diagnostics = [], events = [];
+  let expressionCount = 0;
+  for (const [index, item] of items.entries()) {
+    const reference = item.page ? { page: item.target } : item.onPage && typeof item.target === 'string'
+      ? { widget: item.target, page: item.onPage } : item.target;
+    const target = resolveBaselineTarget(reference, baseline);
+    const context = { page: target?.page ?? null, target: item.target };
+    try {
+      const report = lintInteractionSpecs(item.interactions ?? [{ event: item.event, actions: item.actions }], {
+        context, variables: rp.globalVariables.map(v => v.name), version: rp.version,
+      });
+      diagnostics.push(...report.diagnostics.map(d => ({ ...d, pointer: input.items ? `/items/${index}${d.pointer}` : d.pointer })));
+      events.push(...report.events);
+      expressionCount += report.expressionCount;
+    } catch (error) {
+      diagnostics.push({ ...context, code: 'E_AXURE_CASE_GROUP', severity: 'error', pointer: input.items ? `/items/${index}/interactions` : '/interactions',
+        message: error.message, nextAction: '检查 condition、when 与 isNewIfGroup。' });
+    }
+  }
+  const mode = input.preflight ?? 'auto';
+  const lint = { diagnostics, events, expressionCount };
+  const hasErrors = diagnostics.some(d => d.severity === 'error');
+  // Explicit official probes may replay a known STO syntax error for complete
+  // vendor evidence. No blocked candidate is ever published.
+  if (hasErrors && (mode !== 'official' || diagnostics.some(d => d.severity === 'error' && d.code !== 'E_AXURE_STO_MATH_NAMESPACE'))) {
+    return fail('E_INTERACTION_PREFLIGHT', '交互静态预检失败。', diagnostics, { lint });
+  }
+  let candidate;
+  try {
+    candidate = addInteractionsBatch(file, items, { replaceEvent: input.replaceEvent, baseline, widgetIdentities: nativeWidgetIdentities(rp) });
+  } catch (error) {
+    const code = /has no state/.test(error.message) ? 'E_AXURE_PANEL_STATE' : /exactly one (?:widget|page)|Page record not found/.test(error.message)
+      ? 'E_AXURE_INTERACTION_TARGET' : 'E_AXURE_INTERACTION';
+    const location = error.cause?.location ?? {};
+    return fail(code, error.message, [...diagnostics, { ...location, code, severity: 'error', message: error.message,
+      nextAction: '按报错的事件与 Case 检查目标、状态和参数。可用 rp_inspect(view="locate") 查询原生 GUID。' }], { lint });
+  }
+  const resultRp = readRp(candidate.file);
+  const structure = zerosOf(resultRp);
+  if (Object.values(structure).some(Boolean)) return fail('E_AXURE_INTERACTION_STRUCTURE', '交互候选文件未通过结构三零。', diagnostics, { structure, lint });
+  let official = { status: 'skipped', reason: mode === 'static' ? 'static-only' : 'no-expressions' };
+  if (mode === 'official' || (mode === 'auto' && expressionCount > 0)) {
+    const stageParent = input.output ? dirname(resolve(workDir, input.output)) : workDir;
+    assertWritable(join(stageParent, '.zee-interaction-check'));
+    const stage = mkdtempSync(join(stageParent, '.zee-interaction-check-'));
+    try {
+      const staged = join(stage, 'candidate.rp');
+      assertWritable(staged);
+      writeFileSync(staged, candidate.file, { flag: 'wx' });
+      const exportResult = await exportPrototype({ rp: staged, output: join(stage, 'html'), baseline: baselinePath ?? undefined, cwd: workDir, includeWidgetMap: false });
+      if (exportResult.interactionCompilation) {
+        official = exportResult.interactionCompilation;
+        if (official.status === 'unavailable') official = { ...official, status: 'incomplete' };
+      } else {
+        const unavailable = /^E_ASSEMBLY_(?:PLATFORM|ARCH|INSTALL|IDENTITY|PROFILE|RUNTIME)$/.test(exportResult.diagnostics?.[0]?.code ?? '');
+        official = { status: unavailable ? 'unavailable' : 'failed', diagnostics: exportResult.diagnostics };
+      }
+    } finally {
+      rmSync(stage, { recursive: true, force: true });
+    }
+    if (['failed', 'incomplete'].includes(official.status) || (mode === 'official' && official.status !== 'passed') || hasErrors) {
+      return fail('E_INTERACTION_PREFLIGHT', '官方交互预检未通过。', [...diagnostics, ...(official.diagnostics ?? [])], { lint, official, structure });
+    }
+  }
+  const report = input.items ? candidate.report : candidate.report.results[0];
+  const detail = { command: 'add-interaction', exitCode: 0, stdout: JSON.stringify(report), stderr: '',
+    report, lint, official, structure, before: countsOf(rp), after: countsOf(resultRp) };
+  if (dryRun) return { status: 'completed', dryRun: true, ...detail };
+  if ((state && (session !== state || state.chain.at(-1) !== source)) || sha256Of(source) !== originalHash) {
+    return fail('E_STALE_INTERACTION_SOURCE', '预检期间宿主发生变化，请读取最新版本后重试。', diagnostics);
+  }
+  const output = state ? nextWorkNode(state) : resolve(workDir, input.output);
+  let created = false;
+  try {
+    assertWritable(output);
+    if (!state && baselinePath && pathExists(`${output}.baseline.json`)) throw new Error(`目标基线已存在：${output}.baseline.json`);
+    writeFileSync(output, candidate.file, { flag: 'wx' });
+    created = true;
+    if (state) {
+      commitChainNode(state, output, { op: 'add-interaction', at: now(), from: source, node: output });
+      return { status: 'completed', ...detail, chainTail: output, previousTail: source, syncStatus: computeSyncStatus(state) };
+    }
+    const outputBaseline = baselinePath ? saveIdentityBaseline(source, output, resultRp, baselinePath) : null;
+    return { status: 'completed', ...detail, output, ...(outputBaseline ? { baseline: outputBaseline } : {}) };
+  } catch (error) {
+    if (!state && created) unlinkSync(output);
+    if (error.code === 'EEXIST') return fail('E_OUTPUT_EXISTS', `输出已存在：${output}`, diagnostics);
+    throw error;
+  } finally {
+    if (state) releaseWorkNode(output);
   }
 }
 
@@ -428,7 +531,7 @@ function widgetIndex(state) {
     const pack = packages.get(item.record);
     const graph = graphs.get(item.record);
     const widget = graph?.objects.get(item.id);
-    items.set(`${item.record}:${item.id}`, { ...item, guid: pack?.guid ?? null, recordGuid: pack?.guid ?? null,
+    items.set(`${item.record}:${item.id}`, { ...item, guid: item.guid ?? graph?.roots.find(n => n.tag === 0x1e)?.values[item.id - 1] ?? null, recordGuid: pack?.guid ?? null,
       interactions: item.interactions ?? (widget ? nestedInteractions(graph, widget) : []),
     });
   };
@@ -495,10 +598,9 @@ function matchByLogicalId(state, pool, logicalId, pageFilter) {
         }
         if (nativeLocs.length > 0) {
           const byNative = pool.filter(w => nativeLocs.some(loc =>
-            w.record === loc.record && w.id === loc.id
-            && (!Array.isArray(loc.container) || w.container.join('/') === loc.container.join('/'))
+            loc.guid ? w.guid === loc.guid : w.record === loc.record && w.id === loc.id
           ));
-          if (byNative.length > 0) return byNative;
+          if (byNative.length > 0 || nativeLocs.some(loc => loc.guid)) return byNative;
         }
         const byLineShape = pool.filter(w => w.type !== 'Layer' && [...symNames].some(nm => w.name === `${nm}-l1`));
         if (byLineShape.length > 0) return byLineShape;
@@ -549,6 +651,16 @@ function resolveTarget(state, target) {
     validateInput(targetSchema, target, 'target');
   }
   const filter = typeof target === 'string' ? { query: target } : { ...target };
+  if (filter.guid !== undefined) {
+    const hits = widgetIndex(state).filter(w => w.guid === filter.guid.toLowerCase() && (filter.page === undefined || w.page === filter.page));
+    if (hits.length !== 1) throw new Error(`guid ${filter.guid} 匹配 ${hits.length} 个元件，请用 rp_inspect 定位。`);
+    return hits[0];
+  }
+  if (filter.logicalId !== undefined) {
+    const hits = matchByLogicalId(state, widgetIndex(state).filter(w => filter.page === undefined || w.page === filter.page), filter.logicalId, filter.page);
+    if (hits.length !== 1) throw new Error(`logicalId ${filter.logicalId} 匹配 ${hits.length} 个元件，请指定完整 page/id 或使用 guid。`);
+    return hits[0];
+  }
   if (filter.record !== undefined || filter.id !== undefined) {
     if (!Number.isInteger(filter.record) || !Number.isInteger(filter.id))
       throw new Error('target 显式定位需要 record 与 id 同时为整数（用 locate 返回的定位字段）');
@@ -1095,6 +1207,18 @@ function applyPatchItemsToBuffer(initialBuf, items, { sourcePath, sessionState =
   return { buf, applied };
 }
 
+function stripWidgetNames(file, path) {
+  const rp = readRp(file, { path, includeMasterWidgets: true });
+  const edits = new Map();
+  const add = (w, record) => {
+    if (w.name) edits.set(`${record}:${w.id}`, { record, id: w.id, name: '' });
+  };
+  for (const page of rp.pages) for (const w of page.widgets) add(w, page.record);
+  for (const w of rp.containedWidgets) add(w, w.record);
+  const result = setWidgetNames(file, [...edits.values()]);
+  return { buf: result.file, applied: result.applied };
+}
+
 function rpPatch(input = {}) {
   const batchList = input.edits ?? input.operations;
   if (input.edits !== undefined && input.operations !== undefined) {
@@ -1135,7 +1259,9 @@ function rpPatch(input = {}) {
 
     const initialBuf = readFileSync(sourceFile);
     const beforeCounts = ext === '.rp' ? countsOf(readRp(initialBuf, { path: sourceFile })) : undefined;
-    const { buf, applied } = applyPatchItemsToBuffer(initialBuf, items, { sourcePath: sourceFile });
+    const { buf, applied } = input.op === 'strip-widget-names'
+      ? stripWidgetNames(initialBuf, sourceFile)
+      : applyPatchItemsToBuffer(initialBuf, items, { sourcePath: sourceFile });
 
     if (ext === '.rp') {
       const outRp = readRp(buf, { path: target });
@@ -1143,8 +1269,18 @@ function rpPatch(input = {}) {
       if (zeros.unparseable || zeros.danglingRefs || zeros.problems) {
         throw new Error(`输出未过结构三零：${JSON.stringify(zeros)}`);
       }
+      const baselineSource = findBaselineForRp(sourceFile);
+      if (baselineSource && !input.overwrite && pathExists(`${target}.baseline.json`)) throw new Error(`目标基线已存在：${target}.baseline.json`);
       writeFileSync(target, buf, input.overwrite ? {} : { flag: 'wx' });
+      let baseline;
+      try {
+        if (baselineSource && !pathExists(`${target}.baseline.json`)) baseline = saveIdentityBaseline(sourceFile, target, outRp, baselineSource);
+      } catch (error) {
+        if (!input.overwrite) unlinkSync(target);
+        throw error;
+      }
       return {
+        ...(baseline ? { baseline } : {}),
         status: 'completed',
         ...(applied.length === 1 ? applied[0] : {}),
         edits: applied,
@@ -1173,7 +1309,9 @@ function rpPatch(input = {}) {
   }
   const tail = state.chain.at(-1);
   const beforeCounts = countsOf(state.rp);
-  const { buf, applied } = applyPatchItemsToBuffer(readFileSync(tail), items, { sourcePath: tail, sessionState: state });
+  const { buf, applied } = input.op === 'strip-widget-names'
+    ? stripWidgetNames(readFileSync(tail), tail)
+    : applyPatchItemsToBuffer(readFileSync(tail), items, { sourcePath: tail, sessionState: state });
   const node = nextWorkNode(state);
   let created = false;
   try {
@@ -1326,7 +1464,7 @@ function loadSpecObjectFromSource(sourcePath) {
 export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: sourcePathArg, sourcePath: sourcePathAlias, recipe, output: requestedOutput, cwd, projectDir, strictAudit = false, autoHeal = false, variants, overwrite = false, compact = true, template, baseRp, prefer = 'fail', resolutions }, { beforePublish } = {}) {
   let spec = { language: 'rp/1', target: 9 };
   let stage = 'validation', output, artifactDir, source, resolvedSourceFile = null, inlineCompilePath = null, plan;
-  let publishedCompanionRp1 = null, publishedRecipeOutput = null;
+  let publishedCompanionRp1 = null, publishedRecipeOutput = null, publishedInteractions = null;
   try {
     const explicitWorkDir = cwd ?? projectDir;
     const workDir = resolveWorkDir(explicitWorkDir);
@@ -1367,6 +1505,7 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
     if (extname(resolvedOutput).toLowerCase() !== '.rp')
       throw new Error('output 必须是新的 .rp 路径。');
     assertWritable(resolvedOutput);
+    const nativeInteractions = readNativeInteractionSource(resolvedSourceFile);
     const companionRp1Target = hasCompanionRp1 ? resolvedOutput.slice(0, -3) + '.rp1' : null;
     if (companionRp1Target) {
       assertWritable(companionRp1Target);
@@ -1475,6 +1614,19 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
         else process.env.AXURE_BLANK_TEMPLATE_RP9 = prevTpl;
       }
     }
+    if (nativeInteractions) {
+      stage = 'native-interactions';
+      const tempBaseline = `${staged}.baseline.json`;
+      const baseline = loadBaselineMap(staged);
+      const candidate = addInteractionsBatch(readFileSync(staged), nativeInteractions.items, { baseline });
+      writeFileSync(staged, candidate.file);
+      const data = JSON.parse(readFileSync(tempBaseline, 'utf8'));
+      data.baseRpBase64 = candidate.file.toString('base64');
+      data.nativeInteractionsSha256 = sha256Of(nativeInteractions.path);
+      data.nativeVerifySteps = nativeInteractions.steps;
+      writeFileSync(tempBaseline, JSON.stringify(data, null, 2) + '\n');
+      build.nativeInteractions = candidate.report;
+    }
     stage = 'structure';
     const rp = readRp(readFileSync(staged), { path: output });
     const structure = zerosOf(rp);
@@ -1519,6 +1671,8 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
     const reportPath = join(artifactDir, 'build-report.json');
     writeFileSync(reportPath, JSON.stringify({ ...build, outputRp: output }, null, 2) + '\n', { flag: 'wx' });
     stage = 'output';
+    const interactionOutput = companionRp1Target && nativeInteractions ? `${companionRp1Target}.interactions.json` : null;
+    if (interactionOutput && pathExists(interactionOutput)) throw new Error(`配套交互源码已存在：${interactionOutput}`);
     beforePublish?.();
     assertWritable(output);
     const companionExistedBefore = companionRp1Target ? pathExists(companionRp1Target) : false;
@@ -1543,6 +1697,11 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
       else copyFileSync(companionSrc, companionRp1Target, constants.COPYFILE_EXCL);
       if (!companionExistedBefore) publishedCompanionRp1 = companionRp1Target;
       resolvedSourceFile = companionRp1Target;
+      if (interactionOutput) {
+        assertWritable(interactionOutput);
+        copyFileSync(nativeInteractions.path, interactionOutput, constants.COPYFILE_EXCL);
+        publishedInteractions = interactionOutput;
+      }
       if (pathExists(outputBaseline)) {
         const baseMeta = JSON.parse(readFileSync(outputBaseline, 'utf8'));
         baseMeta.sourcePath = resolvedSourceFile;
@@ -1565,6 +1724,8 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
       for (let n = 2; ; n++) if (!pathExists(`${stem}-gui-${n}.rp`)) return `${stem}-gui-${n}.rp`;
     })();
     const summary = { source: resolvedSourceFile ?? source, baseline: outputBaseline, verification,
+      ...(nativeInteractions ? { interactionSource: publishedInteractions ?? nativeInteractions.path,
+        verifySteps: nativeInteractions.steps, interactionEngine: 'official' } : {}),
       nextActions: [
         { tool: 'export_prototype', arguments: { rp: output } },
         { tool: 'revise_prototype', source: resolvedSourceFile ?? source, rp: output },
@@ -1610,6 +1771,7 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
       verification,
     };
   } catch (error) {
+    if (publishedInteractions) rmSync(publishedInteractions, { force: true });
     if (publishedCompanionRp1) rmSync(publishedCompanionRp1, { force: true });
     if (publishedRecipeOutput) {
       rmSync(publishedRecipeOutput, { force: true });
@@ -2838,8 +3000,11 @@ const sessionHandlers = {
     const targetPath = resolveInWork(rawPath, cwd ?? projectDir);
     return overviewOf(openSession(targetPath));
   },
-  axure_save({ as, cleanup = false, cwd, projectDir } = {}) {
-    if (as === undefined) return sessionSnapshotPayload();
+  axure_save({ as, cleanup = false, stripWidgetNames: strip = false, cwd, projectDir } = {}) {
+    if (as === undefined) {
+      if (strip) throw new Error('stripWidgetNames 需要指定新的 as 路径。');
+      return sessionSnapshotPayload();
+    }
     const state = refreshState(requireSession());
     const tail = state.chain.at(-1);
     if (Object.values(zerosOf(state.rp)).some(Boolean)) {
@@ -2852,10 +3017,19 @@ const sessionHandlers = {
     if (!existsSync(outDir)) mkdirSync(outDir, { recursive: true });
     const target = writablePath(resolvedAs);
     if (existsSync(target)) throw new Error(`目标已存在，axure_save 只写新文件不覆盖：${target}`);
-    copyFileSync(tail, target, constants.COPYFILE_EXCL);
     const srcBaseline = findBaselineForRp(tail, undefined, state);
-    if (srcBaseline && pathExists(srcBaseline) && !pathExists(`${target}.baseline.json`)) {
-      copyFileSync(srcBaseline, `${target}.baseline.json`);
+    const stripped = strip ? stripWidgetNames(readFileSync(tail), tail) : null;
+    const savedRp = stripped ? readRp(stripped.buf, { path: tail }) : state.rp;
+    if (Object.values(zerosOf(savedRp)).some(Boolean)) throw new Error('另存副本未通过结构三零。');
+    if (srcBaseline && pathExists(`${target}.baseline.json`)) throw new Error(`目标基线已存在：${target}.baseline.json`);
+    if (stripped) writeFileSync(target, stripped.buf, { flag: 'wx' });
+    else copyFileSync(tail, target, constants.COPYFILE_EXCL);
+    let baseline;
+    try {
+      if (srcBaseline) baseline = saveIdentityBaseline(tail, target, savedRp, srcBaseline);
+    } catch (error) {
+      unlinkSync(target);
+      throw error;
     }
     const digest = sha256Of(target);
     const cleanedWorkFiles = [];
@@ -2879,6 +3053,8 @@ const sessionHandlers = {
       physicalPath: target,
       sha256: digest,
       fromChainTail: tail,
+      ...(baseline ? { baseline } : {}),
+      ...(stripped ? { strippedWidgetNames: stripped.applied.length, structure: zerosOf(savedRp) } : {}),
       ...(cleanup ? { cleanedWorkFiles } : {}),
     };
   },
@@ -2992,6 +3168,33 @@ const sessionHandlers = {
           ? { count: null, human: [], tree: [], note: '嵌套容器内元件的交互树 rp-read 当前不解析（仅页面顶层元件有）' }
           : { count: cand.interactions.length, human: interactionLines(cand.name || `#${cand.id}`, cand.interactions), tree: cand.interactions },
       };
+    }
+
+    if (inferredView === 'interaction-lint') {
+      const path = state.chain.at(-1);
+      const rp = readRp(readFileSync(path), { path, includeMasterWidgets: true, includeUsage: true });
+      const owners = new Map();
+      const add = (item, record, ownerPage) => {
+        if (item.interactions?.length) owners.set(`${record}:${item.id ?? 'page'}`, {
+          page: ownerPage ?? null, widget: item.name ?? null, widgetId: officialIdOf(item.guid),
+          ...(item.id ? { target: { guid: item.guid, record, id: item.id } } : {}),
+          interactions: item.interactions,
+        });
+      };
+      for (const p of rp.pages) {
+        add({ interactions: p.interactions }, p.record, p.name);
+        for (const w of p.widgets) add(w, p.record, p.name);
+      }
+      const indexed = new Map(widgetIndex(state).map(w => [`${w.record}:${w.id}`, w]));
+      for (const w of [...rp.containedWidgets]) add(w, w.record, indexed.get(`${w.record}:${w.id}`)?.page);
+      const summary = lintNativeInteractions([...owners.values()], rp.globalVariables, rp.version);
+      const selected = summary.events.filter(ix => (page === undefined || ix.page === page) &&
+        (widget === undefined || ix.widget === widget || ix.target?.guid === widget));
+      const diagnostics = summary.diagnostics.filter(d => (page === undefined || d.page === page) &&
+        (widget === undefined || d.widget === widget || d.target?.guid === widget));
+      return { view: inferredView, file: path, status: diagnostics.some(d => d.severity === 'error') ? 'failed' : 'completed',
+        total: selected.length, offset, nextOffset: offset + (limit ?? 50) < selected.length ? offset + (limit ?? 50) : null,
+        events: selected.slice(offset, offset + (limit ?? 50)), diagnostics, variables: summary.variables };
     }
 
     if (inferredView === 'interactions') {
@@ -3119,6 +3322,10 @@ const sessionHandlers = {
       ? { args, ...(useSessionFlag !== undefined ? { session: useSessionFlag } : {}) }
       : (params ?? {});
     validateInput(schema, commandInput, 'params');
+    if (cmd.command === 'add-interaction' && !Object.hasOwn(commandInput, 'args')) {
+      return runInteractionCommand(commandInput, cwd ?? projectDir, effAction === 'preflight');
+    }
+    if (effAction === 'preflight') throw new Error('预检请使用 add-interaction 的结构化 params.interactions 或 params.items。');
     return runCommandPayload(cmd, commandInput, { cwd: cwd ?? projectDir });
   },
   sync_prototype: syncPrototype,
@@ -3157,6 +3364,7 @@ const targetSchema = {
   oneOf: [
     { type: 'object', properties: {
       query: { type: 'string' }, page: { type: 'string' }, type: { type: 'string' }, name: { type: 'string' },
+      guid: { type: 'string', pattern: '^[0-9a-fA-F]{32}$' }, logicalId: { type: 'string', minLength: 1 },
       record: { type: 'number' }, id: { type: 'number' }, container: { type: 'array', items: { type: 'string' } },
     } },
     { type: 'string', minLength: 1 },
@@ -3355,8 +3563,8 @@ export const sessionTools = [
             source: result.source ?? genInput.source ?? genInput.sourcePath,
             cwd: input.cwd,
             projectDir: input.projectDir,
-            engine: verifyEngine,
-            steps: verifySteps,
+            engine: verifyEngine ?? result.interactionEngine,
+            steps: verifySteps ?? result.verifySteps,
             viewport: verifyViewport,
             virtualClock,
             includeStoryboard,
@@ -3459,11 +3667,12 @@ export const sessionTools = [
   },
   {
     name: 'axure_save',
-    description: '管理当前 .rp 编辑会话快照或将链尾另存为交付文件：省略 as 时返回完整会话状态快照（active、源文件、工作副本链 chain、timeline、链尾 SHA-256、结构三零与 syncStatus）；传入 as 时将链尾安全另存为新 .rp 文件（防覆盖，只写新文件）。传 cleanup:true 可清理中间 .work-*.rp 副本。',
+    description: '管理当前 .rp 编辑会话快照或将链尾另存为交付文件：省略 as 时返回完整会话状态快照（active、源文件、工作副本链 chain、timeline、链尾 SHA-256、结构三零与 syncStatus）；传入 as 时将链尾安全另存为新 .rp 文件（防覆盖，只写新文件）。传 stripWidgetNames:true 清空另存副本的元件名，原生 GUID 与交互保留。传 cleanup:true 可清理中间 .work-*.rp 副本。',
     inputSchema: {
       type: 'object',
       properties: {
         as: { type: 'string', minLength: 1, description: '可选：另存为新 .rp 文件路径；省略时仅返回当前活动会话状态快照。' },
+        stripWidgetNames: { type: 'boolean', description: '清空交付副本的全部元件名称，保留原生 GUID、交互和逻辑 ID 基线。' },
         cleanup: { type: 'boolean', description: 'true 时清理中间 .work-*.rp 副本（绝不删除源文件与输出文件）。' },
         cwd: { type: 'string', minLength: 1 },
         projectDir: { type: 'string', minLength: 1 },
@@ -3475,11 +3684,11 @@ export const sessionTools = [
   {
     name: 'rp_inspect',
     readOnly: true,
-    description: '统一只读检查原生 .rp / .rplib 文档（零副作用，支持活动会话或传 path/rp/file 直接读取指定文件）：view="overview" 返回全书页面/变量/母版与计数总览；view="locate" 按 query/page/type 分页搜索顶层与容器内元件；view="widget" 深看单元件富文本 runs、几何、样式与交互；view="interactions" 分页读取页面与元件完整事件/Case/动作树；view="verify" 执行结构三零与深层重名/悬空引用校验；view="styles" 列出 .rp/.rplib 原生自定义样式；view="state" 查看会话链状态。省略 view 时按参数自动推断。',
+    description: '统一只读检查原生 .rp / .rplib 文档（零副作用，支持活动会话或传 path/rp/file 直接读取指定文件）：view="overview" 返回全书页面/变量/母版与计数总览；view="locate" 按 query/page/type 分页搜索顶层与容器内元件；view="widget" 深看单元件富文本 runs、几何、样式与交互；view="interactions" 分页读取页面与元件完整事件/Case/动作树；view="interaction-lint" 汇总公式诊断、If/Else 分组和全局变量读写；view="verify" 执行结构三零与深层重名/悬空引用校验；view="styles" 列出 .rp/.rplib 原生自定义样式；view="state" 查看会话链状态。省略 view 时按参数自动推断。',
     inputSchema: {
       type: 'object',
       properties: {
-        view: { type: 'string', enum: ['overview', 'locate', 'widget', 'interactions', 'verify', 'styles', 'state'], description: '检查视图；省略时按所传过滤/定位参数自动推断（默认 overview）。' },
+        view: { type: 'string', enum: ['overview', 'locate', 'widget', 'interactions', 'interaction-lint', 'verify', 'styles', 'state'], description: '检查视图；省略时按所传过滤/定位参数自动推断（默认 overview）。' },
         path: { type: 'string', minLength: 1, description: '可选：直接只读检查指定 .rp（styles 视图亦支持 .rplib），不建 .work 副本。' },
         rp: { type: 'string', minLength: 1 },
         file: { type: 'string', minLength: 1 },
@@ -3513,6 +3722,7 @@ export const sessionTools = [
       type: 'object',
       properties: {
         ...patchItemProperties,
+        op: { ...patchItemProperties.op, enum: [...patchItemProperties.op.enum, 'strip-widget-names'] },
         edits: {
           type: 'array',
           minItems: 1,
@@ -3543,11 +3753,11 @@ export const sessionTools = [
   },
   {
     name: 'rp_command',
-    description: '受控底层原生命令总控入口（折叠全部 34 个专家级 CLI 命令，如建页、母版、动态面板克隆/填充、原生下拉/列表/表格、连接线、add-interaction 批量交互增删与 AXVG 转换）：action="describe"（省略 command 列全表，指定 command 返回精确用法与参数 Schema）；action="run" 执行指定命令（传结构化 params 或原始 args；省略宿主源与输出或传 session=true 时自动接续当前 axure_open 会话链并过三零校验）。日常创作优先使用 studio_* 或 generate_prototype / revise_prototype / rp_patch。',
+    description: '受控底层原生命令总控入口（折叠全部 34 个专家级 CLI 命令，如建页、母版、动态面板克隆/填充、原生下拉/列表/表格、连接线、add-interaction 批量交互增删与 AXVG 转换）：action="describe"（省略 command 列全表，指定 command 返回精确用法与参数 Schema）；action="run" 执行指定命令（传结构化 params 或原始 args；省略宿主源与输出或传 session=true 时自动接续当前 axure_open 会话链并过三零校验）。add-interaction 支持 action="preflight" 检查候选但不提交，正式写入按需运行官方编译器。',
     inputSchema: {
       type: 'object',
       properties: {
-        action: { type: 'string', enum: ['describe', 'run'], description: 'describe 查询命令清单或单命令 Schema；run 执行命令（传 command 时默认 run，未传 command 时默认 describe）。' },
+        action: { type: 'string', enum: ['describe', 'run', 'preflight'], description: 'describe 查询参数。run 执行，preflight 检查 add-interaction 候选但不提交。' },
         command: { type: 'string', minLength: 1, description: '注册表命令名（连字符或下划线均可，如 "create-blank-page"、"add-interaction"、"set-combobox-options"、"axvg build"）。' },
         params: { type: 'object', description: '命名参数对象（可先用 action="describe" 查看该命令的 inputSchema；省略 source/output 时自动接续活动会话；add-interaction 支持 items 批量与自动 .baseline.json 逻辑 ID）。' },
         args: { type: 'array', items: { type: 'string' }, description: '可选：原始 CLI 参数数组（与 params 二选一）。' },
@@ -3563,6 +3773,16 @@ export const sessionTools = [
 ];
 
 const sessionToolIndex = new Map(sessionTools.map(tool => [tool.name, input => {
+  const unexpected = tool.name === 'export_prototype' && input && typeof input === 'object'
+    ? Object.keys(input).find(key => !Object.hasOwn(tool.inputSchema.properties, key)) : null;
+  if (unexpected) {
+    const nextAction = unexpected === 'overwrite'
+      ? '选用一个尚不存在的 output 目录，或把已有导出目录传给 verify_prototype 的 html 字段。'
+      : '使用 rp 指定源 .rp，output 指定新目录，或用 baseline 指定元件映射。';
+    return toolResult({ status: 'failed', stage: 'validation', diagnostics: [{ code: 'E_TOOL_INPUT', field: unexpected,
+      pointer: `/arguments/${unexpected}`, message: `export_prototype 不接受 ${unexpected}。`, nextAction,
+      acceptedFields: Object.keys(tool.inputSchema.properties) }] }, true);
+  }
   validateInput(tool.inputSchema, input);
   const value = tool.handler(input);
   const finish = result => toolResult(result, result.ok === false || result.status === 'failed' || result.status === 'conflict');

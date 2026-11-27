@@ -298,6 +298,9 @@ const LIB_SCRIPTS = [
   { "script": "prototype-worker.mjs", "summary": "异步原型生成子进程；返回结构化生成结果并保持 MCP 可响应", "evidence": "internal" },
   { "script": "image-structure.mjs", "summary": "图片重建分组、重复模式、共享样式和编辑边界的只读审阅", "evidence": "structure" },
   { "script": "preview-runtime.mjs", "summary": "真实 Axure 浏览器预览操作、运行变量观测及源码映射诊断", "evidence": "preview" },
+  { "script": "interaction-lint.mjs", "summary": "原生交互公式、条件分组和全局变量用法静态检查", "evidence": "structure" },
+  { "script": "official-interactions.mjs", "summary": "静态解码 Axure 官方 HTML 页数据并定位 STO 编译错误", "evidence": "preview" },
+  { "script": "native-widget-identity.mjs", "summary": "原生 GUID、RP/1 源码映射及官方播放器元件 ID 的对应", "evidence": "structure" },
   { "script": "authoring-workflow.mjs", "summary": "创作范例、只读诊断、绑定解释、活动版本指纹与受保护改稿闭环", "evidence": "structure" },
   {
     "script": "version.mjs",
@@ -606,8 +609,13 @@ const LIB_SCRIPTS = [
               "minLength": 1
             },
             "target": {
-              "type": "string",
-              "minLength": 1
+              "anyOf": [
+                { "type": "string", "minLength": 1 },
+                { "type": "object", "properties": { "page": { "type": "string" }, "widget": { "type": "string" },
+                  "master": { "type": "string" }, "logicalId": { "type": "string" }, "guid": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+                  "record": { "type": "integer" }, "id": { "type": "integer" }, "container": { "type": "array", "items": { "type": "string" } }
+                }, "additionalProperties": false }
+              ]
             },
             "event": {
               "type": "string",
@@ -639,6 +647,7 @@ const LIB_SCRIPTS = [
               "minLength": 1,
               "description": "可选：显式指定 .baseline.json 路径，自动把逻辑 ID（如 btn_reset）解析为原生控件名。"
             },
+            "preflight": { "type": "string", "enum": ["auto", "static", "official"], "description": "结构化 add-interaction：auto 默认按需调用官方编译器；static 只跑静态检查；official 要求官方编译成功。用 action=preflight 检查而不提交。" },
             "interactions": {
               "type": "array",
               "minItems": 1,
@@ -651,7 +660,15 @@ const LIB_SCRIPTS = [
               "items": {
                 "type": "object",
                 "properties": {
-                  "target": { "type": "string", "minLength": 1 },
+                  "target": {
+              "anyOf": [
+                { "type": "string", "minLength": 1 },
+                { "type": "object", "properties": { "page": { "type": "string" }, "widget": { "type": "string" },
+                  "master": { "type": "string" }, "logicalId": { "type": "string" }, "guid": { "type": "string", "pattern": "^[0-9a-f]{32}$" },
+                  "record": { "type": "integer" }, "id": { "type": "integer" }, "container": { "type": "array", "items": { "type": "string" } }
+                }, "additionalProperties": false }
+              ]
+            },
                   "page": { "type": "boolean" },
                   "onPage": { "type": "string", "minLength": 1 },
                   "replaceEvent": { "type": "boolean" },

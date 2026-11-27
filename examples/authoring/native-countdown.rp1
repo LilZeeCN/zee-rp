@@ -1,0 +1,15 @@
+rp/1 target=9 name="毫秒倒计时" domain=web theme=enterprise-light
+var $deadline type=number value=0
+var $left_ms type=number value=1500
+var $running type=number value=0
+page #timer name="倒计时" canvas=[480,260]
+  box #root [480x260] layout=stack
+    label #remaining "1500" [220x52] x=30 y=30 fontSize=32
+    label #status "就绪" [180x32] x=30 y=89
+    button #start "开始 / 重启" [125x42] x=30 y=147
+    button #stop "停止" [110x42] x=173 y=147
+    dynamic-panel #clock [50x28] x=370 y=35 hidden=true
+      :state a
+        box #face [50x28]
+      :state b
+        box #face [50x28]
