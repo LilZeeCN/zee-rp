@@ -228,8 +228,9 @@ async function runInteractionCommand(input, cwd, dryRun) {
   const fail = (code, message, diagnostics, extra = {}) => ({ status: 'failed', code, message, diagnostics,
     ...(state ? { chainTail: state.chain.at(-1) } : {}), ...extra });
   if (Object.values(zerosOf(rp)).some(Boolean)) throw new Error('宿主未通过结构三零，请先用 rp_inspect(view="verify") 检查。');
-  const baselinePath = findBaselineForRp(source, input.baseline && resolve(workDir, input.baseline), state);
-  if (input.baseline && !pathExists(resolve(workDir, input.baseline))) throw new Error(`找不到指定基线：${input.baseline}`);
+  const requestedBaseline = input.baseline ? resolve(workDir, input.baseline) : null;
+  if (requestedBaseline && !pathExists(requestedBaseline)) throw new Error(`找不到指定基线：${input.baseline}`);
+  const baselinePath = requestedBaseline ?? findBaselineForRp(source, undefined, state);
   const baseline = loadBaselineMap(source, baselinePath);
   const programRequest = input.program !== undefined || input.programs !== undefined;
   if (programRequest && [input.items, input.interactions, input.action, input.event, input.target].some(v => v !== undefined)) {

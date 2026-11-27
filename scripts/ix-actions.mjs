@@ -200,7 +200,7 @@ export function pageWidgetContexts(file, pageName, reader = null) {
   return result;
 }
 
-export function addInteractions(file, target, interactions, { replaceEvent = false, prependEvent = false, version, reader = null } = {}) {
+export function addInteractions(file, target, interactions, { replaceEvent = false, prependEvent = false, resetVariables = [], version, reader = null } = {}) {
   const readRecords = reader ? () => reader.records : readFileRecords;
   const parsePayload = reader ? reader.parse : parseRecordPayload;
   if (!Array.isArray(interactions) || !interactions.length) throw new Error('No interactions given');
@@ -1713,10 +1713,34 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
   }
   const nodeTable = field(mapObj.body, 'node-table');
   if (!nodeTable || nodeTable.tag !== 1) throw new Error('Interaction node table is not a dictionary');
+  const interactionObject = nodeId => {
+    const entry = nodeTable.entries.find(([key]) => key.value === nodeId);
+    return entry && graph.objects.get(entry[1].value);
+  };
+  const resetNames = new Set(resetVariables);
+  const isProgramReset = (node, description) => {
+    const kase = interactionObject(node.id);
+    const title = field(kase?.body ?? {}, 'Description')?.text;
+    if (title !== description && title !== 'RP/1 load') return false;
+    const children = field(node.body, 'children')?.items ?? [];
+    return children.length > 0 && children.every(child => {
+      const action = interactionObject(child.value);
+      if (field(action?.body ?? {}, 'SetFunction')?.text !== 'SetGlobalVariableValue') return false;
+      const block = graph.objects.get(field(action.body, 'action')?.value);
+      const calls = field(block?.body ?? {}, 'subexpressions')?.items ?? [];
+      if (calls.length !== 1) return false;
+      const call = graph.objects.get(calls[0].value);
+      if (field(call?.body ?? {}, 'function-name')?.text !== 'SetGlobalVariableValue') return false;
+      const args = field(call.body, 'args')?.items ?? [];
+      const variable = graph.objects.get(args[0]?.value);
+      const value = graph.objects.get(args[1]?.value);
+      return resetNames.has(field(variable?.body ?? {}, 'variable-name')?.text) &&
+        value?.className === 'Axure:Expr:StringLiteral' && field(value.body, 'value')?.text === '0';
+    });
+  };
   const existingEvents = () => (field(treeObj.body, 'children')?.items ?? []).map(item => {
     const node = graph.objects.get(item.value);
-    const entry = nodeTable.entries.find(([key]) => key.value === node?.id);
-    const event = entry ? graph.objects.get(entry[1].value) : undefined;
+    const event = interactionObject(node?.id);
     return node && event?.className === 'Axure:InteractionEvent'
       ? { node, event, eventType: field(event.body, 'event-type')?.value }
       : undefined;
@@ -1762,7 +1786,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
     const eventId = replaceTarget?.event.id ?? newGuid();
     const caseNodeIds = [];
 
-    if (replaceTarget && !prependEvent) {
+    if (replaceTarget && (!prependEvent || resetNames.size)) {
       const oldNodeIds = new Set();
       const collectDescendants = node => {
         for (const child of field(node?.body ?? {}, 'children')?.items ?? []) {
@@ -1772,9 +1796,18 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
           collectDescendants(childNode);
         }
       };
-      collectDescendants(replaceTarget.node);
+      if (prependEvent) {
+        const children = field(replaceTarget.node.body, 'children');
+        children.items = children.items.filter(child => {
+          const node = graph.objects.get(child.value);
+          if (!node || !isProgramReset(node, cases[0].description)) return true;
+          oldNodeIds.add(node.id);
+          collectDescendants(node);
+          return false;
+        });
+      } else collectDescendants(replaceTarget.node);
       nodeTable.entries = nodeTable.entries.filter(([key]) => !oldNodeIds.has(key.value));
-      if (ix.disabled !== undefined) {
+      if (!prependEvent && ix.disabled !== undefined) {
         const disabled = field(replaceTarget.event.body, 'Disabled');
         if (disabled) disabled.value = !!ix.disabled;
       }
@@ -2012,6 +2045,7 @@ export function addInteractionsBatch(file, items, { replaceEvent = false, versio
       const res = writer.add(target, resolvedIxList, {
         replaceEvent: item.replaceEvent !== undefined ? Boolean(item.replaceEvent) : replaceEvent,
         prependEvent: Boolean(item.prependEvent),
+        resetVariables: item.resetVariables,
         version,
       });
       reports.push(res.report);

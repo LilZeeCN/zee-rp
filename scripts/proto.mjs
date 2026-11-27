@@ -748,13 +748,11 @@ export function buildInteractiveRp(
       rpSha256,
       generatedAt: new Date().toISOString(),
       sourceSpec: plan.sourceSpec ?? null,
-      sourceMap: sourceMap.map(sym => ({
-        ...sym,
-        logicalId: sym.id,
-        pageName: pageBySlug.get(sym.pageId) ?? sym.pageId,
-        ...(programCallbacks.get(sym.pageId)?.[sym.id.split('/').at(-1)]
-          ? { programPointer: programCallbacks.get(sym.pageId)[sym.id.split('/').at(-1)].sourcePointer } : {}),
-      })),
+      sourceMap: sourceMap.map(sym => {
+        const callback = programCallbacks.get(sym.pageId)?.[sym.id.split('/').at(-1)];
+        return { ...sym, logicalId: sym.id, pageName: pageBySlug.get(sym.pageId) ?? sym.pageId,
+          ...(callback ? { programPointer: callback.sourcePointer, programCasePointers: callback.casePointers } : {}) };
+      }),
       baseRpBase64: currentBuf.toString('base64'),
     };
     writeFileSync(baselinePath, JSON.stringify(baselineMeta, null, 2) + '\n');

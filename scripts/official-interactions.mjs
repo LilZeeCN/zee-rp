@@ -124,11 +124,12 @@ export function scanOfficialInteractions(directory, { symbols = [] } = {}) {
         if (node.sto === 'error') {
           const caseIndex = path.lastIndexOf('cases');
           const actionIndex = path.lastIndexOf('actions');
+          const programPointer = symbol?.programCasePointers?.[path[caseIndex + 1]] ?? symbol?.programPointer;
           diagnostics.push({
             code: 'E_AXURE_STO_COMPILE', severity: 'error', file: file.slice(directory.length + 1),
             page: data.page.name, widget: id ? widget.label || null : null, widgetId: id ?? null,
             ...(id && widget.friendlyType ? { widgetType: widget.friendlyType } : {}),
-            ...(symbol ? { logicalId: symbol.logicalId, ...(symbol.sourceSpan ? { sourceSpan: symbol.sourceSpan } : {}), ...(symbol.programPointer ? { programPointer: symbol.programPointer } : {}) } : {}),
+            ...(symbol ? { logicalId: symbol.logicalId, ...(symbol.sourceSpan ? { sourceSpan: symbol.sourceSpan } : {}), ...(programPointer ? { programPointer } : {}) } : {}),
             event: event ?? null, case: kase?.description ?? null, caseIndex: present(path, caseIndex),
             action: action?.displayName ?? action?.action ?? null, actionIndex: present(path, actionIndex),
             expression: expression ?? null, pointer: pointer(path),

@@ -3586,7 +3586,8 @@ class Frontend:
                 unconditional = "when" not in case and not case.get("else")
                 new_group = i == 0 or (grouped and (unconditional or previous_unconditional))
                 previous_unconditional = unconditional
-                compiled = {"description": case.get("_program_case") or "RP/1 " + event,
+                title = "页面载入" if page and native == "OnLoad" else "RP/1 " + event
+                compiled = {"description": case.get("_program_case") or title,
                             "isNewIfGroup": new_group,
                             "actions": [item for j, a in enumerate(desugared_acts) for result in [self.action(a, scope, ptr(ep if shorthand else ptr(cp, "actions"), j))] for item in (result if isinstance(result, list) else [result])]}
                 for act in compiled["actions"]:
@@ -4017,7 +4018,9 @@ class Frontend:
                     if len(event["cases"]) > 1:
                         for case in event["cases"]:
                             if "when" not in case and case.get("condition") != "else":
-                                case.update(when={"left": True, "op": "==", "right": True}, isNewIfGroup=True)
+                                case["isNewIfGroup"] = True
+                                if case.get("description") != "初始化任务状态":
+                                    case["when"] = {"left": True, "op": "==", "right": True}
         compiled_invariants = []
         raw_invs = self.spec.get("invariants")
         default_page_id = lowered["pages"][0]["slug"] if lowered["pages"] else ""

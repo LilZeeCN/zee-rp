@@ -4,6 +4,8 @@
 
 `generate_prototype(programs)` 与 `rp_command(add-interaction, params.programs)` 共用 RP9 编译器。支持多页编译、共享过程、通过 GUID 给独立 RP9 模板增量写入及有界异步循环。具名 `tasks` 支持同页并行、独立参数和局部变量、取消及 `restart` / `ignore` 重入策略。原生唤醒按任务和等待时长入队，通过顺序归属确认恢复权。简单流程内联到业务元件，所有复杂流程每页共用一个隐藏调度元件。计算器、毫秒倒计时与失焦表单在同一 RP9 中通过 63 步官方浏览器验收。并行倒计时示例通过取消、重启、旧唤醒和同页任务隔离测试。见[原生交互工作流](../docs/native-interaction-workflow.md)。
 
+桌面交互编辑器使用带页面与任务语义的变量名、可读的 Case 名和单个「初始化任务状态」Case。带基线增量升级时会合并旧的编译器初始化 Case，同时保留模板原载入动作和源码定位。
+
 ## 原生交互预检与匿名交付
 
 `rp_command(add-interaction)` 在写入前检查表达式、绑定、目标、Case 分组和原生结构。结构化请求可用 `action:"preflight"` 试跑候选，按需调用本机官方编译器。`rp_inspect(view:"interaction-lint")` 汇总作用域、条件组和全局变量读写。官方导出和浏览器验证会定位 STO 错误到页面、元件、事件、Case、动作及表达式。匿名 .rp 可通过 GUID 或 RP/1 逻辑 ID 继续修改和回放原剧本。添加了 `native-countdown`、`native-loop`、`native-blur-form` 三套范例。见[原生交互工作流](../docs/native-interaction-workflow.md)。

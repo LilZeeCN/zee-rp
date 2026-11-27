@@ -7,6 +7,8 @@ import re
 
 from .core import EVENTS, fail, fields, ptr
 
+RESET_CASE_TITLE = "初始化任务状态"
+
 
 def lower_native_program(spec, program=None, *, programs=None, shared_routines=None):
     if (program is None) == (programs is None):
@@ -88,6 +90,7 @@ def _both(left, right):
 
 @dataclass
 class Task:
+    name: str
     source: str
     policy: str
     body: list
@@ -95,7 +98,8 @@ class Task:
     defaults: dict
     # The stored value is idle (0), executing (-1), or a parked continuation (>0).
     resume: str
-    wait_ms: str
+    native_prefix: str
+    wait_ms: str | None = None
     entry: dict | None = None
     wakes: dict = field(default_factory=dict)
 
@@ -130,9 +134,16 @@ class ProgramLowering:
         self.loops = 0
         self.async_loops = 0
         self.prefix = "rp1flow_" + sha256(page_id.encode()).hexdigest()[:10]
+        self.native_prefix = self.name_part(page_id, "Page")
+        variables = self.spec.get("variables", {})
+        if isinstance(variables, list):
+            variable_names = [v.get("name", v.get("id", "")) for v in variables if isinstance(v, dict)]
+        else:
+            variable_names = variables if isinstance(variables, dict) else ()
+        self.variable_names = {str(name).lower() for name in variable_names}
         self.triggers = []
         self.entries = []
-        local_names = self.local_variables(program.get("locals", {}), f"{self.prefix}_local", ptr(path, "locals"))
+        local_names = self.local_variables(program.get("locals", {}), self.native_prefix, ptr(path, "locals"))
         self.target_names = program.get("targets", {})
         if not isinstance(self.target_names, dict) or any(not isinstance(value, str) for value in self.target_names.values()):
             fail("E_PROGRAM_TARGET", ptr(path, "targets"), "For RP/1 source, targets maps aliases to widget IDs")
@@ -145,9 +156,15 @@ class ProgramLowering:
             if key in program:
                 self.program[key] = _localize(program[key], local_names, self.target_names)
         self.asynchronous = any(_uses_wait(self.program.get(key), self.routines) for key in ("on", "bind"))
-        self.busy = f"{self.prefix}_busy" if self.asynchronous else None
-        if self.busy:
-            self.add_variable(self.busy, {"type": "number", "value": 0}, path)
+        self.busy = (self.add_variable(f"{self.native_prefix}_Running", {"type": "number", "value": 0}, path)
+                     if self.asynchronous else None)
+
+    @staticmethod
+    def name_part(value, fallback):
+        label = re.sub(r"[^A-Za-z0-9_]+", "_", value).strip("_")
+        if not label:
+            return fallback
+        return f"{fallback}_{label}" if label[0].isdigit() else label
 
     def local_variables(self, declarations, prefix, source):
         if not isinstance(declarations, dict):
@@ -158,8 +175,7 @@ class ProgramLowering:
             if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", name):
                 fail("E_PROGRAM_VARIABLE", origin, "Expected a variable identifier")
             private = f"{prefix}_{name}"
-            self.add_variable(private, definition, origin)
-            names[name] = private
+            names[name] = self.add_variable(private, definition, origin)
         return names
 
     def declare_tasks(self, declarations, page_names):
@@ -176,14 +192,13 @@ class ProgramLowering:
             body = task.get("do")
             if not isinstance(body, list) or not body:
                 fail("E_PROGRAM_BLOCK", ptr(at, "do"), "Expected a nonempty task body")
-            prefix = f"{self.prefix}_task_{sha256(name.encode()).hexdigest()[:10]}"
+            prefix = f"{self.native_prefix}_{self.name_part(name, 'Task')}"
             definitions = task.get("locals", {})
             names = self.local_variables(definitions, f"{prefix}_local", ptr(at, "locals"))
-            resume = f"{prefix}_resume"
-            self.add_variable(resume, {"type": "number", "value": 0}, at)
-            tasks[name] = Task(at, policy, body, {**page_names, **names},
+            resume = self.add_variable(f"{prefix}_NextStep", {"type": "number", "value": 0}, at)
+            tasks[name] = Task(name, at, policy, body, {**page_names, **names},
                                {key: (variable, definitions[key]["value"]) for key, variable in names.items()},
-                               resume, f"{prefix}_wait_ms")
+                               resume, prefix)
         return tasks
 
     def index(self, node):
@@ -198,7 +213,7 @@ class ProgramLowering:
                 self.index(state.get("root"))
         self.index(node.get("template"))
 
-    def reserve_callback(self, source, *, name=None):
+    def reserve_callback(self, source, *, name=None, label="继续执行"):
         if len(self.callbacks) >= 256:
             fail("E_PROGRAM_SIZE", source, "Program exceeds 256 native control-flow blocks")
         name = name or f"{self.prefix}_{len(self.callbacks) + 1}"
@@ -208,6 +223,7 @@ class ProgramLowering:
                   "_hidden_lookup": True, "x": 0, "y": 0, "w": 1, "h": 1}
         self.callbacks[name] = {
             "sourcePointer": source,
+            "label": label,
             "loweredPointer": f"/pages/{self.page_index}/root/children/{len(self.root['children'])}",
         }
         self.nodes[name] = widget
@@ -235,21 +251,24 @@ class ProgramLowering:
         if not isinstance(definition, dict) or "value" not in definition:
             fail("E_PROGRAM_VARIABLE", source, "Define a variable with type and value")
         variables = self.spec.setdefault("variables", {})
+        stem = name
+        suffix = 2
+        while name.lower() in self.variable_names:
+            name = f"{stem}_{suffix}"
+            suffix += 1
         if isinstance(variables, list):
-            if any(isinstance(v, dict) and str(v.get("name", v.get("id", ""))).lower() == name.lower() for v in variables):
-                fail("E_PROGRAM_NAME", source, f"Generated variable {name} collides with a declaration")
             variables.append({**definition, "name": name})
         elif isinstance(variables, dict):
-            if any(key.lower() == name.lower() for key in variables):
-                fail("E_PROGRAM_NAME", source, f"Generated variable {name} collides with a declaration")
             variables[name] = definition
         else:
             fail("E_PROGRAM_VARIABLE", "/variables", "Expected a variable map or array")
         self.generated_variables.append(name)
+        self.variable_names.add(name.lower())
+        return name
 
     def counter(self, source, numeric_limit):
-        name = f"{self.prefix}_count_{len(self.variables) + 1}"
-        self.add_variable(name, {"type": "number", "value": 0}, source)
+        name = self.add_variable(f"{self.native_prefix}_Loop{len(self.variables) + 1}_Remaining",
+                                 {"type": "number", "value": 0}, source)
         self.variables.append({"name": name, "limit": numeric_limit, "sourcePointer": source})
         return name
 
@@ -257,14 +276,14 @@ class ProgramLowering:
         if not isinstance(overrides, dict) or any(key not in task.defaults for key in overrides):
             fail("E_PROGRAM_TASK_LOCAL", ptr(source, "with"), "Only declared task locals can be initialized")
         if task.entry is None:
-            task.entry = self.reserve_callback(task.source)
+            task.entry = self.reserve_callback(task.source, label=f"运行 {task.name}")
             body = _localize(task.body, task.names, self.target_names)
             finish = [{"set": {f"${task.resume}": 0}}]
             task.entry["on"] = {"click": self.block(body, ptr(task.source, "do"), finish, task=task)}
         assignments = {f"${variable}": overrides.get(name, {"_program_literal": default})
                        for name, (variable, default) in task.defaults.items()}
         start = [{"set": {f"${task.resume}": -1, **assignments}}, self.jump(task.entry)]
-        launch = self.reserve_callback(source)
+        launch = self.reserve_callback(source, label=f"启动 {task.name}")
         condition = f"${task.resume} == 0" if task.policy == "ignore" else f"${task.resume} >= 0"
         launch["on"] = {"click": {"cases": [{"when": condition, "actions": start}]}}
         return self.jump(launch)
@@ -274,12 +293,11 @@ class ProgramLowering:
         # in submission order. Normalize short waits to avoid nesting-dependent
         # clamping reordering a restarted wait ahead of an older one.
         ms = max(ms, 4)
-        pending = f"{task.wait_ms}_{ms}_pending"
         if ms not in task.wakes:
             if not task.wakes:
-                self.add_variable(task.wait_ms, {"type": "number", "value": 0}, task.source)
-            self.add_variable(pending, {"type": "number", "value": 0}, task.source)
-            wake = self.reserve_callback(source)
+                task.wait_ms = self.add_variable(f"{task.native_prefix}_WaitMs", {"type": "number", "value": 0}, task.source)
+            pending = self.add_variable(f"{task.native_prefix}_Pending{ms}ms", {"type": "number", "value": 0}, task.source)
+            wake = self.reserve_callback(source, label=f"处理 {task.name} 的 {ms} ms 唤醒")
             wake["on"] = {"click": {"cases": [
                 {"when": f"${pending} == 1 && ${task.wait_ms} == {ms} && ${task.resume} > 0",
                  "actions": [{"set": {f"${pending}": 0}}, {"_program_resume": task.resume}]},
@@ -323,13 +341,13 @@ class ProgramLowering:
                     routine_body = (_localize(self.raw_routines[name], task.names, self.target_names)
                                     if task else self.routines[name])
                     body = self.block(routine_body, origin, next_block, (*stack, name), in_repeat, depth + 1, task)
-                    routine = self.reserve_callback(origin)
+                    routine = self.reserve_callback(origin, label=f"执行 {name}")
                     routine["on"] = {"click": body}
                     self.routine_entries[key] = routine
                 actions = [self.jump(self.routine_entries[key])]
             elif "if" in step:
                 fields(step, {"if", "then", "else"}, at)
-                branch = self.reserve_callback(at)
+                branch = self.reserve_callback(at, label="判断条件")
                 yes = self.block(step.get("then"), ptr(at, "then"), next_block, stack, in_repeat, depth + 1, task)
                 no = self.block(step["else"], ptr(at, "else"), next_block, stack, in_repeat, depth + 1, task) if "else" in step else next_block
                 cases = [{"when": step["if"], "actions": yes}]
@@ -342,7 +360,7 @@ class ProgramLowering:
                 cases = step.get("cases")
                 if not isinstance(step["match"], str) or not isinstance(cases, dict) or not cases:
                     fail("E_PROGRAM_MATCH", at, "Match needs a text expression and a nonempty value-to-actions map")
-                branch = self.reserve_callback(at)
+                branch = self.reserve_callback(at, label="按值选择")
                 compiled = [{"when": {"op": "==", "left": {"expr": step["match"]}, "right": {"expr": json.dumps(key, ensure_ascii=False)}},
                              "actions": self.block(body, ptr(ptr(at, "cases"), key), next_block, stack, in_repeat, depth + 1, task)}
                             for key, body in cases.items()]
@@ -368,7 +386,7 @@ class ProgramLowering:
                 counter = self.counter(at, limit)
                 self.loops += 1
                 self.async_loops += int(yielding)
-                loop = self.reserve_callback(at)
+                loop = self.reserve_callback(at, label="循环步骤")
                 repeat = [self.jump(loop)]
                 body = self.block(step.get("do"), ptr(at, "do"), repeat, stack, not yielding, depth + 1, task)
                 iteration = [{"set": {f"${counter}": f"=${counter} - 1"}}]
@@ -384,7 +402,7 @@ class ProgramLowering:
                     cases = [{"when": f"${counter} > 0", "actions": iteration}]
                     if finished:
                         cases.append({"else": True, "actions": finished})
-                    gate = self.reserve_callback(at)
+                    gate = self.reserve_callback(at, label="检查循环次数")
                     gate_cases = [{"when": f"${counter} >= 0 && ${counter} <= {limit} && number(fixed(${counter}, 0)) == ${counter}",
                                    "actions": repeat}]
                     if failed:
@@ -459,13 +477,14 @@ class ProgramLowering:
         payload = declarations.get(load)
         if payload is None:
             payload = self.page.pop("onLoad", [])
-        reset = {"actions": [{"set": {f"${slot}": 0 for slot in slots}}]}
+        reset = {"_program_case": RESET_CASE_TITLE, "actions": [{"set": {f"${slot}": 0 for slot in slots}}]}
         if isinstance(payload, dict) and "cases" in payload:
             declarations[load] = {"_program_groups": True, "cases": [reset, *payload["cases"]]}
         elif payload:
-            declarations[load] = [*reset["actions"], *(payload if isinstance(payload, list) else [payload])]
+            declarations[load] = {"cases": [{**reset,
+                "actions": [*reset["actions"], *(payload if isinstance(payload, list) else [payload])]}]}
         else:
-            declarations[load] = reset["actions"]
+            declarations[load] = {"cases": [reset]}
             self.triggers.append({"widget": "$page", "event": "OnLoad", "sourcePointer": self.path, "resetOnly": True})
 
     def optimize(self):
@@ -495,10 +514,12 @@ class ProgramLowering:
                 payload = expand(payload)
                 if not payload or not isinstance(payload[-1], dict):
                     return payload
-                hook = self.nodes.get(target(payload[-1]), {}).get("on", {}).get("click")
+                name = target(payload[-1])
+                hook = self.nodes.get(name, {}).get("on", {}).get("click")
                 prefix = payload[:-1]
                 if isinstance(hook, dict) and "cases" in hook and all(sync_prefix(action) for action in prefix):
-                    cases = [{**case, "actions": expand(case["actions"])} for case in hook["cases"]]
+                    cases = [{**case, "_program_case": self.callbacks[name]["label"],
+                              "actions": expand(case["actions"])} for case in hook["cases"]]
                     return {"_program_groups": True, "cases": [{"actions": prefix}, *cases] } if prefix else {"cases": cases}
                 return payload
             return {**payload, "cases": [{**case, "actions": expand(case["actions"])} for case in payload["cases"]]}
@@ -531,8 +552,8 @@ class ProgramLowering:
         ordered = [name for name in self.nodes if name in live]
         position = {name: index for index, name in enumerate(ordered, 1)}
         driver = self.reserve_callback(self.path, name=f"{self.prefix}_dispatch")
-        pc = f"{self.prefix}_state"
-        self.add_variable(pc, {"type": "number", "value": 0}, self.path)
+        driver["name"] = "交互调度"
+        pc = self.add_variable(f"{self.native_prefix}_DispatchStep", {"type": "number", "value": 0}, self.path)
 
         def rewrite(actions):
             out = []
@@ -549,15 +570,17 @@ class ProgramLowering:
                     out.append(action)
             return out
 
-        cases = []
+        cases, case_pointers = [], []
         for name in ordered:
             payload = self.nodes[name]["on"]["click"]
-            source = self.callbacks[name]["sourcePointer"]
+            origin = self.callbacks[name]
             for case in [{"actions": payload}] if isinstance(payload, list) else payload["cases"]:
                 guard = f"${pc} == {position[name]}"
                 cases.append({"when": _both(guard, case["when"]) if "when" in case else guard,
-                              "_program_case": source, "actions": rewrite(case["actions"])})
+                              "_program_case": origin["label"], "actions": rewrite(case["actions"])})
+                case_pointers.append(origin["sourcePointer"])
         driver["on"] = {"click": {"cases": cases}}
+        self.callbacks[driver["id"]]["casePointers"] = case_pointers
         self.callbacks = {driver["id"]: self.callbacks[driver["id"]]}
         for declarations, event in self.entries:
             payload = declarations[event]

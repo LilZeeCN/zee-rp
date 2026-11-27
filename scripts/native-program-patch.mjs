@@ -1,5 +1,6 @@
 import { addInteractionsBatch, resolveBaselineTarget } from './ix-actions.mjs';
 import { createGlobalVariable } from './create-global-variable.mjs';
+import { setWidgetNames } from './name-widget.mjs';
 import { writeNativeScene } from './native-scene.mjs';
 import { nativeWidgetIdentities } from './native-widget-identity.mjs';
 import { readRp } from './rp-read.mjs';
@@ -136,7 +137,7 @@ export function patchNativeProgram(file, document, input, base, baseline, compil
   }
   const updated = readRp(bytes);
   const widgets = nativeWidgetIdentities(updated);
-  const items = [], mappedSymbols = new Map((base?.sourceMap ?? []).map(s => [s.id, s]));
+  const items = [], renames = [], mappedSymbols = new Map((base?.sourceMap ?? []).map(s => [s.id, s]));
   for (const pageProgram of compiled.program.pages) {
     const id = pageProgram.page, page = actualById.get(id);
     const pageKey = pageKeyOf(document, page);
@@ -144,7 +145,8 @@ export function patchNativeProgram(file, document, input, base, baseline, compil
     const legacyReset = previous?.resetInstalled
       ? previous.variableNames?.find(name => /^rp1flow_[a-f0-9]{10}_busy$/.test(name))
       : undefined;
-    let installedResets = new Set(previous?.resetSlots ?? (legacyReset ? [legacyReset] : []));
+    const installedResets = previous?.resetSlots ?? (legacyReset ? [legacyReset] : []);
+    let resetSlots = installedResets;
     const aliases = anchors.get(id);
     const driver = driverNames.get(id);
     if (driver) {
@@ -152,6 +154,9 @@ export function patchNativeProgram(file, document, input, base, baseline, compil
       if (!found) throw problem('E_PROGRAM_DRIVER', `页面「${page.name}」缺少程序调度元件。`);
       driver.guid = found.guid;
       aliases.set(driver.id, found);
+      if (found.name === driver.name || /^txt-rp1flow_[a-f0-9]+_dispatch-/.test(found.name ?? '')) {
+        renames.push({ record: found.record, id: found.id, name: '交互调度' });
+      }
     }
     const bindings = new Map(), ownerWidgets = new Map();
     for (const symbol of compiled.symbols.filter(s => s.pageId === id)) {
@@ -161,9 +166,10 @@ export function patchNativeProgram(file, document, input, base, baseline, compil
       bindings.set(symbol.name, target(widget));
       ownerWidgets.set(symbol.name, widget);
       const prior = mappedSymbols.get(symbol.id) ?? {};
+      const programCase = alias === driver?.id ? pageProgram.callbacks[alias] : null;
       mappedSymbols.set(symbol.id, { ...prior, ...symbol, id: symbol.id, logicalId: symbol.id, pageId: id, pageName: page.name,
         native: [{ record: widget.record, id: widget.id, guid: widget.guid }],
-        ...(alias === driver?.id ? { programPointer: pageProgram.callbacks[alias].sourcePointer } : {}) });
+        ...(programCase ? { programPointer: programCase.sourcePointer, programCasePointers: programCase.casePointers } : {}) });
     }
     const keys = [];
     for (const interaction of compiled.pages.find(p => p.id === id).interactions) {
@@ -180,17 +186,13 @@ export function patchNativeProgram(file, document, input, base, baseline, compil
         const key = `${w?.guid ?? 'page'}:${ix.event}`;
         const resetOnly = !w && pageProgram.triggers.some(t => t.event === ix.event && t.resetOnly);
         if (!generated && !resetOnly) keys.push(key);
-        if (resetOnly && pageProgram.resetSlots.every(slot => installedResets.has(slot))) continue;
         const existing = priorEvents.some(event => event.event === ix.event);
         if (existing && !resetOnly && !input.replaceEvent) {
           throw problem('E_PROGRAM_EVENT_EXISTS', `「${page.name}」的 ${w?.name || interaction.trigger} 已有 ${ix.event}，请指定 replaceEvent。`);
         }
         items.push({ target: owner, interactions: [translateActions({ ...ix, cases }, bindings)], prependEvent: resetOnly && existing,
-          replaceEvent: !resetOnly && Boolean(input.replaceEvent) });
-        if (!w && ix.event === 'OnLoad') {
-          if (!resetOnly) installedResets = new Set();
-          for (const slot of pageProgram.resetSlots) installedResets.add(slot);
-        }
+          replaceEvent: !resetOnly && Boolean(input.replaceEvent), ...(resetOnly ? { resetVariables: installedResets } : {}) });
+        if (!w && ix.event === 'OnLoad') resetSlots = pageProgram.resetSlots;
       }
     }
     if (previous?.keys.some(key => !keys.includes(key))) {
@@ -198,8 +200,9 @@ export function patchNativeProgram(file, document, input, base, baseline, compil
     }
     managed[pageKey] = { keys, pageId: id, driverGuid: driver?.guid ?? previous?.driverGuid ?? null,
       variableNames: [...new Set([...(previous?.variableNames ?? []), ...pageProgram.generatedVariables])],
-      resetSlots: [...installedResets] };
+      resetSlots };
   }
   const candidate = addInteractionsBatch(bytes, items, { widgetIdentities: widgets });
-  return { ...candidate, program: compiled.program, sourceMap: [...mappedSymbols.values()], programBindings: managed };
+  const output = renames.length ? setWidgetNames(candidate.file, renames).file : candidate.file;
+  return { ...candidate, file: output, program: compiled.program, sourceMap: [...mappedSymbols.values()], programBindings: managed };
 }

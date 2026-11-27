@@ -36,7 +36,7 @@
 - 页面事件中直接写入的旧式等待沿用单次运行语义。需要在同一页面同时运行、取消或重启多个流程时，用 `tasks` 定义具名任务。
 - `bind` 将一组元件与参数绑定到同一过程。计算器的 10 个数字键共用一个数字过程，四个运算键共用一个过程。
 - `fixed(value, digits)` 按小数位格式化，`number(fixed(value, digits))` 可用于继续计算。 `nowMs()` 读取 Axure 的毫秒时间。浏览器的 `advanceTime` 可以精确验收它。
-- 构建计划记录从生成的交互到程序的指针，Axure Case 名也标出程序出处。详细源文件留在输出旁，以便审阅或改稿。
+- Axure Case 使用流程动作名称，基线按 Case 序号记录程序源码位置。官方导出诊断可以同时返回 Case 名和对应的程序指针。
 
 ```json
 {"recipe":"native-calculator","output":"calculator.rp","verify":true}
@@ -109,6 +109,8 @@
 写入现成模板时，把上面的 `programs` 与 `sharedRoutines` 放进 `rp_command({command: "add-interaction", params: {source, output, programs, sharedRoutines, preflight: "official"}})`。将页面 ID 换为模板中的页面名或基线 ID，使用 `targets` 为触发元件和动作目标声明别名。别名值可用原生名称、`{"guid": "…"}` 或 `{"logicalId": "page/widget"}`。没有基线的模板也可通过 `rp_inspect(view: "locate")` 获取 GUID 后写入。现有全局变量默认按文本处理，`params.variables` 可补充类型声明。
 
 程序默认保留模板已有事件。如需替换同一元件上的同名事件，显式传 `replaceEvent: true`。预检检查整批程序，提交生成新 .rp 与逻辑 ID 基线。保留基线可按相同入口更新程序并复用原调度元件。页面载入时的内部复位与已有载入事件共存。
+
+Axure 编辑器中的任务变量按页面、任务和用途命名，例如 `tasks_timerA_NextStep`、`tasks_timerA_Pending250ms`。编译器复用一个名为「交互调度」的辅助元件，并在页面载入时维护一组「初始化任务状态」。带原基线更新旧产物时，会合并先前由编译器写入的初始化 Case，并保留模板自身的载入 Case。
 
 ## 写入前检查
 
