@@ -1,166 +1,89 @@
 {
-  "items": [
-    {
-      "target": "timer/start",
-      "interactions": [
-        {
-          "event": "OnClick",
-          "actions": [
-            {
-              "type": "set-panel-state",
-              "target": "timer/clock",
-              "stateMode": "current"
-            },
-            {
-              "type": "set-variable",
-              "variable": "running",
-              "value": 1
-            },
-            {
-              "type": "set-variable",
-              "variable": "left_ms",
-              "value": 1500
-            },
-            {
-              "type": "set-variable",
-              "variable": "deadline",
-              "expression": "[[Now.getTime() + 1500]]"
-            },
-            {
-              "type": "set-rich-text-from-variable",
-              "target": "timer/remaining",
-              "variable": "left_ms"
-            },
-            {
-              "type": "set-text",
-              "target": "timer/status",
-              "text": "运行中"
-            },
-            {
-              "type": "set-panel-state",
-              "target": "timer/clock",
-              "stateMode": "next",
-              "loop": true,
-              "repeat": true,
-              "repeatInterval": 250,
-              "repeatSkipFirst": true
+  "program": {
+    "page": "timer",
+    "on": {
+      "start": {
+        "click": [
+          {
+            "type": "set-panel-state",
+            "target": "clock",
+            "mode": "current"
+          },
+          {
+            "set": {
+              "$running": 1,
+              "$left_ms": 1500,
+              "$deadline": "=nowMs() + 1500",
+              "@remaining": "1500",
+              "@status": "运行中"
             }
-          ]
-        }
-      ]
-    },
-    {
-      "target": "timer/stop",
-      "interactions": [
-        {
-          "event": "OnClick",
-          "actions": [
-            {
-              "type": "set-variable",
-              "variable": "running",
-              "value": 0
-            },
-            {
-              "type": "set-panel-state",
-              "target": "timer/clock",
-              "stateMode": "current"
-            },
-            {
-              "type": "set-text",
-              "target": "timer/status",
-              "text": "已停止"
+          },
+          {
+            "type": "set-panel-state",
+            "target": "clock",
+            "mode": "next",
+            "loop": true,
+            "repeatInterval": 250,
+            "repeatSkipFirst": true
+          }
+        ]
+      },
+      "stop": {
+        "click": [
+          {
+            "set": {
+              "$running": 0,
+              "@status": "已停止"
             }
-          ]
-        }
-      ]
-    },
-    {
-      "target": "timer/clock",
-      "interactions": [
-        {
-          "event": "OnPanelStateChange",
-          "cases": [
-            {
-              "description": "仅在运行中更新时间",
-              "condition": "if",
-              "when": {
-                "left": {
-                  "variable": "running"
-                },
-                "op": "==",
-                "right": 1
+          },
+          {
+            "type": "set-panel-state",
+            "target": "clock",
+            "mode": "current"
+          }
+        ]
+      },
+      "clock": {
+        "statechange": [
+          {
+            "if": "$running == 1",
+            "then": [
+              {
+                "set": {
+                  "$left_ms": "=$deadline - nowMs()"
+                }
               },
-              "actions": [
-                {
-                  "type": "set-variable",
-                  "variable": "left_ms",
-                  "expression": "[[end - Now.getTime()]]",
-                  "bindings": {
-                    "end": {
-                      "variable": "deadline"
+              {
+                "if": "$left_ms <= 0",
+                "then": [
+                  {
+                    "set": {
+                      "$running": 0,
+                      "$left_ms": 0,
+                      "@remaining": "0",
+                      "@status": "已到期"
+                    }
+                  },
+                  {
+                    "type": "set-panel-state",
+                    "target": "clock",
+                    "mode": "current"
+                  }
+                ],
+                "else": [
+                  {
+                    "set": {
+                      "@remaining": "=text($left_ms)"
                     }
                   }
-                },
-                {
-                  "type": "set-rich-text-from-variable",
-                  "target": "timer/remaining",
-                  "variable": "left_ms"
-                }
-              ]
-            },
-            {
-              "description": "到期只结束一次",
-              "condition": "if",
-              "when": {
-                "left": {
-                  "left": {
-                    "variable": "running"
-                  },
-                  "op": "==",
-                  "right": 1
-                },
-                "op": "&&",
-                "right": {
-                  "left": {
-                    "variable": "left_ms"
-                  },
-                  "op": "<=",
-                  "right": 0
-                }
-              },
-              "actions": [
-                {
-                  "type": "set-variable",
-                  "variable": "running",
-                  "value": 0
-                },
-                {
-                  "type": "set-variable",
-                  "variable": "left_ms",
-                  "value": 0
-                },
-                {
-                  "type": "set-rich-text-from-variable",
-                  "target": "timer/remaining",
-                  "variable": "left_ms"
-                },
-                {
-                  "type": "set-panel-state",
-                  "target": "timer/clock",
-                  "stateMode": "current"
-                },
-                {
-                  "type": "set-text",
-                  "target": "timer/status",
-                  "text": "已到期"
-                }
-              ]
-            }
-          ]
-        }
-      ]
+                ]
+              }
+            ]
+          }
+        ]
+      }
     }
-  ],
+  },
   "steps": [
     {
       "action": "expect",

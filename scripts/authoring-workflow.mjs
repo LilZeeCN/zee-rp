@@ -131,6 +131,9 @@ export const recipes = [
   { id: 'native-blur-form', name: '多字段失焦联合校验', file: 'native-blur-form.rp1', nativeInteractions: true, pages: ['form'],
     scenario: '空提交 → 逐字段失焦 → 联合比对 → 提交',
     customize: ['多个 OnLostFocus 与提交按钮共用一个校验事件', '新增规则时将 else-if 放在兜底之前'] },
+  { id: 'native-calculator', name: '连续四则计算器', file: 'native-calculator.rp1', nativeInteractions: true, pages: ['calc'],
+    scenario: '连续运算、十进制舍入、除零提示、出错后继续输入',
+    customize: ['program.bind 批量绑定数字与运算键', '用 if 和 call 组织分支与复用过程', '用 fixed 设置小数显示精度'] },
 ];
 
 export function recipeSource(id) {
@@ -181,15 +184,16 @@ export const AUTHORING_GOTCHAS = [
 ];
 
 export function readNativeInteractionSource(source) {
-  if (!source || !source.endsWith('.rp1')) return null;
+  if (!source || !/\.(?:rp1|json)$/i.test(source)) return null;
   const path = `${source}.interactions.json`;
   assertNotProtected(path);
   if (!existsSync(path)) return null;
   const data = JSON.parse(readFileSync(path, 'utf8'));
-  if (!Array.isArray(data.items) || !data.items.length || !Array.isArray(data.steps)) {
-    throw new Error(`原生交互源码须包含非空 items 与 steps：${path}`);
+  if ((!data.program && (!Array.isArray(data.items) || !data.items.length)) ||
+      (data.items !== undefined && !Array.isArray(data.items)) || !Array.isArray(data.steps)) {
+    throw new Error(`原生交互源码须包含 program 或非空 items，并提供 steps：${path}`);
   }
-  return { path, items: data.items, steps: data.steps };
+  return { path, items: data.items ?? [], program: data.program, steps: data.steps };
 }
 
 export function recipeCatalog({ recipe, includeSource = false } = {}) {
@@ -206,6 +210,7 @@ export function recipeCatalog({ recipe, includeSource = false } = {}) {
     generate: { tool: 'generate_prototype', arguments: { recipe: r.id, output: `${r.id}.rp` } },
   })), cheatsheet: AUTHORING_CHEATSHEET, tokens: AUTHORING_TOKENS, gotchas: AUTHORING_GOTCHAS,
   workflow: ['选范例或提交 RP/1 源码（善用 [fillxhug]、stat-row、list-item、card 简写与顶层 tab-bar）',
+    '复杂交互可通过 program 编写条件、循环及可复用过程，先查看 native-calculator 范例',
     '调用 generate_prototype 一次生成并直接查看 contactSheet / statesSheet 拼图',
     '使用 revise_prototype 按逻辑 ID 改属性或增删改节点（支持直接传 .rp1 片段）',
     '需要官方 HTML 时，把生成结果的 output 作为 export_prototype.rp；用真实浏览器验收交互'], guide: join(ROOT, 'references/authoring-workflow.md') };
@@ -329,7 +334,6 @@ export function revisePrototype(input, { generate, sync }) {
   if (outSource && !['.rp1', '.json'].includes(extname(outSource))) throw new Error('outSource 必须是 .rp1 或 .json。');
   const assets = output && `${output}.assets`;
   const outInteractions = interactionSource && outSource ? `${outSource}.interactions.json` : null;
-  if (outInteractions && extname(outSource) !== '.rp1') throw new Error('含配套原生交互的范例须保留 .rp1 源文件。');
   const destinations = [output, outSource, outInteractions, output && `${output}.baseline.json`, assets].filter(Boolean);
   for (const path of destinations) {
     assertWritable(path);

@@ -434,6 +434,22 @@ function normalizeVerifySteps(rawSteps = []) {
   return out;
 }
 
+// CDP coordinates are viewport-relative. Scroll the real Axure content frame
+// when a widget is drawn below the player's visible area.
+async function revealPreviewTarget(page, widgetId) {
+  await page.evaluate(`(() => {
+    const windows = [window];
+    for (let i = 0; i < windows.length && i < 20; i++) {
+      try {
+        const w = windows[i];
+        const el = w.document.getElementById(${JSON.stringify(widgetId)});
+        if (el) { el.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'instant' }); return; }
+        windows.push(...w.frames);
+      } catch { /* Cross-origin frame. */ }
+    }
+  })()`);
+}
+
 async function captureFramedScreenshot(page, { frame = 'viewport', activeEngine, canvasW = null, canvasH = null, vp }) {
   if (frame !== 'artboard') return page.screenshot({ format: 'png' });
   try {
@@ -941,7 +957,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
         }
       }
       const allowHidden = step.action === 'expect' && step.expect?.visible === false;
-      const { candidates, widget } = step.target
+      let { candidates, widget } = step.target
         ? findWidgetMatch(before, symbol, step.target, { allowHidden, rowIndex: step.rowIndex ?? 0 })
         : { candidates: [], widget: null };
       const entry = { index: i, action: step.action, target: symbol?.id ?? step.target ?? null, status: 'running' };
@@ -953,6 +969,16 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
         throw Object.assign(new Error(`当前页未找到可见目标 "${step.target}"。`), { code: 'E_PREVIEW_NOT_VISIBLE', stepIndex: i });
       }
 
+      const outsideViewport = w => !w || w.centerX < 0 || w.centerY < 0 || w.centerX >= vp.width || w.centerY >= vp.height;
+      if (['click', 'drag', 'swipe'].includes(step.action) && outsideViewport(widget)) {
+        if (widget) {
+          await revealPreviewTarget(page, widget.id);
+          const scrolled = await observe();
+          widget = findWidgetMatch(scrolled, symbol, step.target, { rowIndex: step.rowIndex ?? 0 }).widget;
+        }
+        if (outsideViewport(widget)) throw Object.assign(
+          new Error(`目标 "${step.target}" 的可点击中心仍在视口外。`), { code: 'E_PREVIEW_OUTSIDE_VIEWPORT', stepIndex: i });
+      }
       const baselineWidget = widget ? { ...widget } : null;
 
       if (step.action === 'click') {
@@ -1156,7 +1182,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
         })),
         errors: observed.errors,
       } : null,
-      nextAction: isCenterHint
+      nextAction: error.code === 'E_PREVIEW_OUTSIDE_VIEWPORT' ? '增大 viewport，让目标中心进入浏览器可见范围。' : isCenterHint
         ? `检测到 Axure Web 页面在 ${vp.width}px 视口中居中产生了 +${centerShift}px 水平偏移；请传 viewport: { width: ${canvasW}, height: ${Math.max(320, Math.round(canvasH ?? 700))}, dpr: 1 } 以 1:1 对齐画布坐标。`
         : '对照 actual 中的真实面板状态、坐标与变量，调整 RP/1 交互或 bounds/expression 后重新生成并验证。',
     }];

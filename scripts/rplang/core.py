@@ -4,6 +4,16 @@ import json
 import math
 import re
 
+def fixed_decimal(value, digits):
+    from decimal import Decimal, ROUND_HALF_UP, localcontext
+    if abs(value) >= 1e21:
+        return str(float(value))
+    with localcontext() as ctx:
+        ctx.prec = 36
+        rounded = Decimal.from_float(float(value)).quantize(Decimal(1).scaleb(-digits), rounding=ROUND_HALF_UP)
+        return format(rounded.copy_abs() if value == 0 else rounded, "f")
+
+
 class LanguageError(ValueError):
     def __init__(self, code, pointer, message, suggestions=None, counterexample=None, candidate_patches=None):
         diag = {"severity": "error", "code": code,
@@ -312,7 +322,7 @@ ACTION_PROPS = {
     "move": {"target", "mode", "x", "y", "duration", "easing", "bounds"},
     "show": {"target"}, "hide": {"target"}, "toggle": {"target"},
     "enable": {"target"}, "disable": {"target"}, "focus": {"target"},
-    "link": {"page"}, "wait": {"ms"},
+    "link": {"page"}, "wait": {"ms"}, "raise-event": {"target"},
     "set-size": {"target", "width", "height", "duration", "easing", "anchor"},
     "data-add": {"target", "rows"}, "data-delete": {"target", "where"},
     "data-update": {"target", "where", "set"}, "data-filter": {"target", "where", "name"},
@@ -434,7 +444,7 @@ DINGBAT_SAFE_MAP = str.maketrans({
 INLINE_EXPR_HINT_RE = re.compile(
     r"(\$[A-Za-z_]|@[A-Za-z_]|(?<![A-Za-z0-9_])(item|row|caller|var|widget|param)\.[A-Za-z_]"
     r"|==|!=|>=|<=|&&|\|\||[><+\-*/!]"
-    r"|\b(not|number|length|text|lower|upper|concat|isOver|isNotOver)\s*\()"
+    r"|\b(not|number|length|text|lower|upper|concat|fixed|nowMs|isOver|isNotOver)\s*\()"
 )
 TOKEN_RE = re.compile(
     r"""\s*(?:"""
@@ -495,11 +505,15 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
     def peek():
         return tokens[idx[0]] if idx[0] < len(tokens) else (None, None)
 
+    def peek_op():
+        kind, value = peek()
+        return value if kind in ("OP1", "OP2") else None
+
     def consume(expected_val=None):
         tok = peek()
         if tok[0] is None:
             fail("E_EXPRESSION", path, "Unexpected end of expression")
-        if expected_val is not None and tok[1] != expected_val:
+        if expected_val is not None and peek_op() != expected_val:
             fail("E_EXPRESSION", path, f"Expected '{expected_val}', got '{tok[1]}'")
         idx[0] += 1
         return tok
@@ -525,6 +539,8 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
         return {"_auto_ident": tok_val}
 
     def _apply_method(recv, m_name, args):
+        if m_name == "toFixed" and len(args) == 1:
+            return {"fn": "fixed", "args": [recv, args[0]]}
         if m_name == "toString" and len(args) == 0:
             return {"fn": "text", "args": [recv]}
         if m_name == "toLowerCase" and len(args) == 0:
@@ -541,7 +557,7 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
 
     def parse_or():
         left = parse_and()
-        while peek()[1] == "||":
+        while peek_op() == "||":
             consume("||")
             right = parse_and()
             if right == 0 and isinstance(left, dict) and (left.get("fn") == "number" or (left.get("op") == "*" and left.get("right") == 1)):
@@ -553,21 +569,21 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
 
     def parse_and():
         left = parse_eq()
-        while peek()[1] == "&&":
+        while peek_op() == "&&":
             consume("&&")
             left = {"op": "&&", "left": left, "right": parse_eq()}
         return left
 
     def parse_eq():
         left = parse_cmp()
-        while peek()[1] in ("==", "!="):
+        while peek_op() in ("==", "!="):
             op = consume()[1]
             left = {"op": op, "left": left, "right": parse_cmp()}
         return left
 
     def parse_cmp():
         left = parse_add()
-        while peek()[1] in (">", "<", ">=", "<="):
+        while peek_op() in (">", "<", ">=", "<="):
             op = consume()[1]
             right = parse_add()
             if isinstance(left, dict) and "_index_of" in left:
@@ -583,7 +599,7 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
 
     def parse_add():
         left = parse_mul()
-        while peek()[1] in ("+", "-"):
+        while peek_op() in ("+", "-"):
             op = consume()[1]
             node = {"op": op, "left": left, "right": parse_mul()}
             if op == "+":
@@ -593,7 +609,7 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
 
     def parse_mul():
         left = parse_unary()
-        while peek()[1] in ("*", "/"):
+        while peek_op() in ("*", "/"):
             op = consume()[1]
             right = parse_unary()
             if op == "*" and right == 1 and isinstance(left, dict) and (
@@ -605,7 +621,7 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
         return left
 
     def parse_unary():
-        tok_kind, tok_val = peek()
+        tok_val = peek_op()
         if tok_val == "!":
             consume("!")
             return {"fn": "not", "args": [parse_unary()]}
@@ -622,7 +638,7 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
 
     def parse_postfix():
         node = parse_primary()
-        while peek()[1] == ".":
+        while peek_op() == ".":
             consume(".")
             m_kind, m_raw = consume()
             if m_kind != "IDENT":
@@ -630,12 +646,12 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
             parts = m_raw.split(".")
             for idx_p, seg in enumerate(parts):
                 is_last = idx_p == len(parts) - 1
-                if is_last and peek()[1] == "(":
+                if is_last and peek_op() == "(":
                     consume("(")
                     args = []
-                    if peek()[1] != ")":
+                    if peek_op() != ")":
                         args.append(parse_or())
-                        while peek()[1] == ",":
+                        while peek_op() == ",":
                             consume(",")
                             args.append(parse_or())
                     consume(")")
@@ -650,7 +666,7 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
         tok_kind, tok_val = peek()
         if tok_kind is None:
             fail("E_EXPRESSION", path, "Unexpected end of expression")
-        if tok_val == "(":
+        if peek_op() == "(":
             consume("(")
             expr = parse_or()
             consume(")")
@@ -661,14 +677,14 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
         if tok_kind == "SIGIL":
             consume()
             sigil, name = tok_val[0], tok_val[1:]
-            if peek()[1] == "(" and "." in name:
+            if peek_op() == "(" and "." in name:
                 base_name, m_name = name.rsplit(".", 1)
                 recv = {"widget": {"ref": base_name}} if sigil == "@" else ({"_auto_path": base_name} if "." in base_name else {"_sigil_var": base_name})
                 consume("(")
                 args = []
-                if peek()[1] != ")":
+                if peek_op() != ")":
                     args.append(parse_or())
-                    while peek()[1] == ",":
+                    while peek_op() == ",":
                         consume(",")
                         args.append(parse_or())
                 consume(")")
@@ -684,12 +700,12 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
             return {"_sigil_var": name}
         if tok_kind == "IDENT":
             consume()
-            if peek()[1] == "(":
+            if peek_op() == "(":
                 consume("(")
                 args = []
-                if peek()[1] != ")":
+                if peek_op() != ")":
                     args.append(parse_or())
-                    while peek()[1] == ",":
+                    while peek_op() == ",":
                         consume(",")
                         args.append(parse_or())
                 consume(")")

@@ -1,5 +1,42 @@
 # Axure 原生交互预检与交付
 
+## 从业务逻辑生成原生交互
+
+`generate_prototype` 可接收 `program` 对象，也会加载配套 `.rp1.interactions.json` 中的 `program`。程序复用 RP/1 的变量、作用域和表达式。编译器生成可在 RP9 编辑器中查看的交互 Case、跳转事件与必要的隐藏元件。配套文件的 `steps` 保存原剧本，可传空数组。已有 `items` 文件仍可继续使用。
+
+下面是同一页面的乘方按钮。用户填写底数和次数，程序负责边界、循环、成功显示与非法输入提示。
+
+```json
+{
+  "page": "loop",
+  "on": {
+    "evaluate": {
+      "click": [
+        {"set": {"$factor": "=number(@base)", "$product": 1}},
+        {
+          "repeat": "=number(@count)",
+          "limit": 32,
+          "do": [{"set": {"$product": "=$product * $factor"}}],
+          "then": [{"set": {"@out": "=text($product)"}}],
+          "else": [{"set": {"@out": "次数须在 0–32 之间"}}]
+        }
+      ]
+    }
+  }
+}
+```
+
+- `if / then / else` 顺序执行条件块。 `match / cases / else` 按值选择动作块，适合运算符、状态名和菜单命令。
+- `routines` 声明可复用过程，`call` 调用。可在输入框失焦、提交等不同事件复用同一过程。直接递归或互相调用的环会在编译前报告。
+- `repeat / limit / do / then / else` 只计算一次重复次数，运行有界的同步动作。合法范围内的次数为整数。零次会直接执行 `then`。非法次数执行 `else`。
+- `bind` 将一组元件与参数绑定到同一过程。计算器的 10 个数字键共用一个数字过程，四个运算键共用一个过程。
+- `fixed(value, digits)` 按小数位格式化，`number(fixed(value, digits))` 可用于继续计算。 `nowMs()` 读取 Axure 的毫秒时间。浏览器的 `advanceTime` 可以精确验收它。
+- 构建计划记录从生成的交互到程序的指针，Axure Case 名也标出程序出处。详细源文件留在输出旁，以便审阅或改稿。
+
+```json
+{"recipe":"native-calculator","output":"calculator.rp","verify":true}
+```
+
 ## 写入前检查
 
 `rp_command` 的 `add-interaction` 支持 `action: "preflight"`。它会在副本上构造交互并执行与提交相同的检查。执行成功后，使用同一批参数、改为 `action: "run"` 提交。预检无需传 `output`，提交显式文件时须指定一个新输出文件。
@@ -48,8 +85,9 @@
 
 | `prototype_recipe` ID | 交互模式 |
 | --- | --- |
+| `native-calculator` | 按键表驱动连续四则运算，带十进制舍入和除零恢复。 |
 | `native-countdown` | 双态面板提供节拍，`Now.getTime()` 计算剩余毫秒。验收精确推进到 1250、250、0 ms，覆盖启动、停止和重启。 |
-| `native-loop` | 单一递归分支和终止 Case，实现最多 32 步累乘。验收覆盖 99³、2⁵ 和次数超限。 |
+| `native-loop` | 一个 repeat 块表达最多 32 步累乘。验收覆盖 99³、2⁵、2³²、零次、非整数和次数超限。 |
 | `native-blur-form` | 两个字段各自失焦时触发同一验证事件。提交按钮复用验证。验收覆盖必填、两次输入不一致和纠正后通过。 |
 
 `generate_prototype({ recipe, output, verify: true })` 生成可编辑 .rp 并用官方播放器回放。范例保留同名 `.rp1` 与 `.rp1.interactions.json`，分别存放布局和原生动作、剧本。需要自定义时编辑这两个配套文件，再以 `.rp1` 路径调用 `generate_prototype`。脚本包含 `advanceTime` 时自动启用虚拟时钟，浏览器实际执行的定时动作和 Axure 的 `Now` 使用同一时间轴。

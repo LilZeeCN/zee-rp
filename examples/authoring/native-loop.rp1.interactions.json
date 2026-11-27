@@ -1,146 +1,44 @@
 {
-  "items": [
-    {
-      "target": "loop/evaluate",
-      "interactions": [
-        {
-          "event": "OnClick",
-          "cases": [
-            {
-              "description": "先读取输入并重置累乘器",
-              "condition": "always",
-              "actions": [
-                {
-                  "type": "set-variable",
-                  "variable": "factor",
-                  "expression": "[[base * 1]]",
-                  "bindings": {
-                    "base": {
-                      "widget": "loop/base"
-                    }
-                  }
-                },
-                {
-                  "type": "set-variable",
-                  "variable": "remaining",
-                  "expression": "[[count * 1]]",
-                  "bindings": {
-                    "count": {
-                      "widget": "loop/count"
-                    }
-                  }
-                },
-                {
-                  "type": "set-variable",
-                  "variable": "product",
-                  "value": 1
-                }
-              ]
-            },
-            {
-              "description": "次数在允许范围内",
-              "condition": "if",
-              "when": {
-                "left": {
-                  "left": {
-                    "variable": "remaining"
-                  },
-                  "op": ">=",
-                  "right": 0
-                },
-                "op": "&&",
-                "right": {
-                  "left": {
-                    "variable": "remaining"
-                  },
-                  "op": "<=",
-                  "right": 32
-                }
-              },
-              "actions": [
-                {
-                  "type": "raise-event",
-                  "target": "loop/iterate"
-                }
-              ]
-            },
-            {
-              "description": "拒绝超过循环预算",
-              "condition": "else",
-              "actions": [
-                {
-                  "type": "set-text",
-                  "target": "loop/out",
-                  "text": "次数须在 0–32 之间"
-                }
-              ]
+  "program": {
+    "page": "loop",
+    "on": {
+      "evaluate": {
+        "click": [
+          {
+            "set": {
+              "$factor": "=number(@base)",
+              "$product": 1
             }
-          ]
-        }
-      ]
-    },
-    {
-      "target": "loop/iterate",
-      "interactions": [
-        {
-          "event": "OnClick",
-          "cases": [
-            {
-              "description": "还有乘数",
-              "condition": "if",
-              "when": {
-                "left": {
-                  "variable": "remaining"
-                },
-                "op": ">",
-                "right": 0
-              },
-              "actions": [
-                {
-                  "type": "set-variable",
-                  "variable": "product",
-                  "expression": "[[p * n]]",
-                  "bindings": {
-                    "p": {
-                      "variable": "product"
-                    },
-                    "n": {
-                      "variable": "factor"
-                    }
-                  }
-                },
-                {
-                  "type": "set-variable",
-                  "variable": "remaining",
-                  "expression": "[[i - 1]]",
-                  "bindings": {
-                    "i": {
-                      "variable": "remaining"
-                    }
-                  }
-                },
-                {
-                  "type": "raise-event",
-                  "target": "loop/iterate"
+          },
+          {
+            "repeat": "=number(@count)",
+            "limit": 32,
+            "do": [
+              {
+                "set": {
+                  "$product": "=$product * $factor"
                 }
-              ]
-            },
-            {
-              "description": "结束并显示结果",
-              "condition": "else",
-              "actions": [
-                {
-                  "type": "set-rich-text-from-variable",
-                  "target": "loop/out",
-                  "variable": "product"
+              }
+            ],
+            "else": [
+              {
+                "set": {
+                  "@out": "次数须在 0–32 之间"
                 }
-              ]
-            }
-          ]
-        }
-      ]
+              }
+            ],
+            "then": [
+              {
+                "set": {
+                  "@out": "=text($product)"
+                }
+              }
+            ]
+          }
+        ]
+      }
     }
-  ],
+  },
   "steps": [
     {
       "action": "fill",
@@ -198,6 +96,54 @@
       "target": "loop/out",
       "expect": {
         "text": "次数须在 0–32 之间"
+      }
+    },
+    {
+      "action": "fill",
+      "target": "loop/count",
+      "value": "2.5"
+    },
+    {
+      "action": "click",
+      "target": "loop/evaluate"
+    },
+    {
+      "action": "expect",
+      "target": "loop/out",
+      "expect": {
+        "text": "次数须在 0–32 之间"
+      }
+    },
+    {
+      "action": "fill",
+      "target": "loop/count",
+      "value": "0"
+    },
+    {
+      "action": "click",
+      "target": "loop/evaluate"
+    },
+    {
+      "action": "expect",
+      "target": "loop/out",
+      "expect": {
+        "text": "1"
+      }
+    },
+    {
+      "action": "fill",
+      "target": "loop/count",
+      "value": "32"
+    },
+    {
+      "action": "click",
+      "target": "loop/evaluate"
+    },
+    {
+      "action": "expect",
+      "target": "loop/out",
+      "expect": {
+        "text": "4294967296"
       }
     }
   ]

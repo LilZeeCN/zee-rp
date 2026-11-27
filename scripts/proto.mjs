@@ -750,6 +750,8 @@ export function buildInteractiveRp(
         ...sym,
         logicalId: sym.id,
         pageName: pageBySlug.get(sym.pageId) ?? sym.pageId,
+        ...(sym.pageId === plan.nativeProgram?.page && plan.nativeProgram.callbacks[sym.id.split('/').at(-1)]
+          ? { programPointer: plan.nativeProgram.callbacks[sym.id.split('/').at(-1)].sourcePointer } : {}),
       })),
       baseRpBase64: currentBuf.toString('base64'),
     };
@@ -795,13 +797,14 @@ export function buildInteractiveRp(
   };
 }
 
-export function compilePrototype(specPath, outDir, { strictAudit = false, autoHeal = false, theme, title } = {}) {
-  return runPy(buildCompileArgs({ spec: specPath, 'strict-audit': strictAudit, 'auto-heal': autoHeal, theme, title }, outDir), { allowAuditFailure: true });
+export function compilePrototype(specPath, outDir, { strictAudit = false, autoHeal = false, theme, title, nativeProgram } = {}) {
+  return runPy(buildCompileArgs({ spec: specPath, nativeProgram, 'strict-audit': strictAudit, 'auto-heal': autoHeal, theme, title }, outDir), { allowAuditFailure: true });
 }
 
 function buildCompileArgs(flags, outDir) {
   const pyArgs = ['compile', '--out-dir', resolve(outDir)];
   if (flags.spec) pyArgs.push('--spec', resolve(String(flags.spec)));
+  if (flags.nativeProgram) pyArgs.push('--native-program', resolve(flags.nativeProgram));
   if (flags.preset) pyArgs.push('--preset', String(flags.preset));
   if (flags.theme) pyArgs.push('--theme', String(flags.theme));
   if (flags.title) pyArgs.push('--title', String(flags.title));

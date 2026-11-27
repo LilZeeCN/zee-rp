@@ -48,6 +48,7 @@ def main():
     sub = parser.add_subparsers(dest="cmd", required=True, parser_class=_StructuredArgumentParser)
     p_comp = sub.add_parser("compile", help="编译多态/多页交互原型产物包 (axvg + spec + 2x预览 + 审计报告)")
     p_comp.add_argument("--out-dir", required=True, help="输出目录")
+    p_comp.add_argument("--native-program", default=None, help="RP/1 原生交互程序配套 JSON")
     p_comp.add_argument("--spec", default=None, help="声明式多页/组件树 spec.json 路径")
     p_comp.add_argument("--preset", default="web-dashboard", choices=["web-dashboard", "mobile-lostfound"], help="内置旗舰预设")
     p_comp.add_argument("--theme", default=None, choices=list(THEMES.keys()), help="设计令牌主题")
@@ -193,21 +194,55 @@ def main():
         if args.spec:
             spec_abs = os.path.abspath(args.spec)
             spec_obj = read_source(spec_abs)
+            authored_spec = spec_obj
+            program_map = None
+            if args.native_program:
+                from rplang.native_program import lower_native_program
+                with open(args.native_program, encoding="utf-8") as handle:
+                    program = json.load(handle)["program"]
+                spec_obj, program_map = lower_native_program(spec_obj, program)
             if getattr(args, "shell", None):
                 spec_obj["shell"] = args.shell
                 spec_obj["domain"] = "mobile" if args.shell == "mobile-stack" else "web"
                 if isinstance(spec_obj.get("product"), dict):
                     spec_obj["product"]["shell"] = args.shell
-            res = compile_spec_bundle(
-                spec_obj,
-                out_abs,
-                theme_override=args.theme,
-                base_dir=os.path.dirname(spec_abs),
-                no_interactions=args.no_interactions,
-                strict_audit=args.strict_audit,
-                source_path=spec_abs,
-                auto_heal=args.auto_heal,
-            )
+            try:
+                res = compile_spec_bundle(
+                    spec_obj,
+                    out_abs,
+                    theme_override=args.theme,
+                    base_dir=os.path.dirname(spec_abs),
+                    no_interactions=args.no_interactions,
+                    strict_audit=args.strict_audit,
+                    source_path=spec_abs,
+                    auto_heal=args.auto_heal,
+                )
+            except LanguageError as error:
+                if program_map is not None:
+                    path = error.diagnostic["pointer"]
+                    for origin in program_map["callbacks"].values():
+                        lowered_path = origin["loweredPointer"]
+                        if path == lowered_path or path.startswith(lowered_path + "/"):
+                            error.diagnostic["loweredPointer"] = path
+                            error.diagnostic["pointer"] = origin["sourcePointer"]
+                            break
+                raise
+            if program_map is not None:
+                with open(res["planPath"], encoding="utf-8") as handle:
+                    plan = json.load(handle)
+                plan["sourceSpec"] = authored_spec
+                plan["nativeProgram"] = program_map
+                for page in plan.get("pages", []):
+                    if page.get("slug") != program_map["page"]:
+                        continue
+                    for interaction in page.get("interactions", []):
+                        origin = program_map["callbacks"].get(interaction.get("sourceId", "").split("/")[-1])
+                        if origin:
+                            for event in interaction.get("events", []):
+                                for case in event.get("cases", []):
+                                    case["description"] = origin["sourcePointer"]
+                with open(res["planPath"], "w", encoding="utf-8") as handle:
+                    json.dump(plan, handle, ensure_ascii=False, indent=2)
         elif args.preset == "mobile-lostfound" or (args.theme and args.theme.startswith("mobile-")):
             spec_obj = build_mobile_lostfound_spec(title_override=args.title)
             res = compile_spec_bundle(

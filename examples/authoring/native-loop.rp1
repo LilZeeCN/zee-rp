@@ -1,6 +1,5 @@
 rp/1 target=9 name="有界循环求值" domain=web theme=enterprise-light
 var $factor type=number value=99
-var $remaining type=number value=0
 var $product type=number value=1
 page #loop name="循环求值" canvas=[480,290]
   box #root [480x290] layout=stack
@@ -10,4 +9,3 @@ page #loop name="循环求值" canvas=[480,290]
     input #count [120x38] x=183 y=66 placeholder="3"
     button #evaluate "计算乘方" [125x42] x=30 y=128
     label #out "等待计算" [330x40] x=30 y=192
-    button #iterate "内部循环" [100x35] x=370 y=235 hidden=true

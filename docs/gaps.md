@@ -32,6 +32,7 @@
 | 18 | ~~面板定时和原型手势跨出口不一致~~ | RP9 官方播放器、RP/1、Studio 交互预览画布、独立 HTML 导出与 `verify_prototype` 双引擎验证一致 | `docs/native-assembly-research.md` | **closed**：RP/1 创作、参考模拟、原生 `.rp` 双向 `decompile`、RP9 官方 HTML 真实浏览器、`verify_prototype(engine:"studio-html")` 离线 Chrome 真机自验（含 `virtualClock` + `storyboard`），以及 Studio 交互预览画布（`gestures.mjs`/`main.mjs` + `/api/runtime/{drag,swipe,tick}` + 独立 HTML 导出 `ExportRuntimeApp`）拖拽、滑动与轮播定时循环已全线接通并回归覆盖。 |
 | 19 | 官方 HTML 缺少日常 MCP 入口 | AI 通过工具发现 RP/1 可运行范例，生成 RP9 并导出官方 HTML。RP9 与 RP11 均用真实浏览器验收，原文件哈希保持一致。 | `references/mcp-prototype.md` | **closed（macOS 已验证构建）**：真实 stdio 与 Playwright 通过。定制 HTML 配置、Windows 程序集调用和独立模型盲测各有独立验收边界。 |
 | 20 | 官方 STO 错误发现过晚、匿名元件无法复测、复杂交互缺少模板 | 失败公式在提交前定位，已有异常导出能定位到 Case 和动作，清名副本可原样复测 | 2026-11-27 复杂交互作者反馈 | **closed（本机 RP9）**。公开 MCP 专项覆盖已知公式与编译器真值、GUID 驱动的匿名副本及 HTML-only 复测，三套范例可通过原生播放器验收。见[工作流](native-interaction-workflow.md)。 |
+| 21 | 复杂交互的模板仍要求作者维护原生 Case 和隐藏触发器 | 一份程序描述条件、循环、过程复用和按键参数，直接生成可编辑 .rp，官方浏览器验同一份场景 | 2026-11-27 作者追问 | **closed（本机 RP9）**。连续四则计算器及三套既有复杂范例已通过程序编译生成。见[交互程序](native-interaction-workflow.md)。 |
 
 ## 已关闭(近期)
 

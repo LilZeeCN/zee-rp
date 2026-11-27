@@ -1,125 +1,75 @@
 {
-  "items": [
-    {
-      "target": "form/first",
-      "interactions": [
+  "program": {
+    "page": "form",
+    "routines": {
+      "validate": [
         {
-          "event": "OnLostFocus",
-          "actions": [
+          "if": "@first == ''",
+          "then": [
             {
-              "type": "raise-event",
-              "target": "form/validate"
+              "set": {
+                "@feedback": "请填写通行短语"
+              }
+            }
+          ],
+          "else": [
+            {
+              "if": "@second == ''",
+              "then": [
+                {
+                  "set": {
+                    "@feedback": "请确认通行短语"
+                  }
+                }
+              ],
+              "else": [
+                {
+                  "if": "@first != @second",
+                  "then": [
+                    {
+                      "set": {
+                        "@feedback": "两次输入不一致"
+                      }
+                    }
+                  ],
+                  "else": [
+                    {
+                      "set": {
+                        "@feedback": "校验通过"
+                      }
+                    }
+                  ]
+                }
+              ]
             }
           ]
         }
       ]
     },
-    {
-      "target": "form/second",
-      "interactions": [
-        {
-          "event": "OnLostFocus",
-          "actions": [
-            {
-              "type": "raise-event",
-              "target": "form/validate"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "target": "form/submit",
-      "interactions": [
-        {
-          "event": "OnClick",
-          "actions": [
-            {
-              "type": "raise-event",
-              "target": "form/validate"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "target": "form/validate",
-      "interactions": [
-        {
-          "event": "OnClick",
-          "cases": [
-            {
-              "description": "第一项必填",
-              "condition": "if",
-              "when": {
-                "left": {
-                  "widget": "form/first"
-                },
-                "op": "==",
-                "right": ""
-              },
-              "actions": [
-                {
-                  "type": "set-text",
-                  "target": "form/feedback",
-                  "text": "请填写通行短语"
-                }
-              ]
-            },
-            {
-              "description": "第二项必填",
-              "condition": "else-if",
-              "when": {
-                "left": {
-                  "widget": "form/second"
-                },
-                "op": "==",
-                "right": ""
-              },
-              "actions": [
-                {
-                  "type": "set-text",
-                  "target": "form/feedback",
-                  "text": "请确认通行短语"
-                }
-              ]
-            },
-            {
-              "description": "两项必须一致",
-              "condition": "else-if",
-              "when": {
-                "left": {
-                  "widget": "form/first"
-                },
-                "op": "!=",
-                "right": {
-                  "widget": "form/second"
-                }
-              },
-              "actions": [
-                {
-                  "type": "set-text",
-                  "target": "form/feedback",
-                  "text": "两次输入不一致"
-                }
-              ]
-            },
-            {
-              "description": "所有校验通过",
-              "condition": "else",
-              "actions": [
-                {
-                  "type": "set-text",
-                  "target": "form/feedback",
-                  "text": "校验通过"
-                }
-              ]
-            }
-          ]
-        }
-      ]
+    "on": {
+      "first": {
+        "blur": [
+          {
+            "call": "validate"
+          }
+        ]
+      },
+      "second": {
+        "blur": [
+          {
+            "call": "validate"
+          }
+        ]
+      },
+      "submit": {
+        "click": [
+          {
+            "call": "validate"
+          }
+        ]
+      }
     }
-  ],
+  },
   "steps": [
     {
       "action": "click",

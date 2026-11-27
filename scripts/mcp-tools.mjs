@@ -1461,10 +1461,10 @@ function loadSpecObjectFromSource(sourcePath) {
   return JSON.parse(proc.stdout);
 }
 
-export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: sourcePathArg, sourcePath: sourcePathAlias, recipe, output: requestedOutput, cwd, projectDir, strictAudit = false, autoHeal = false, variants, overwrite = false, compact = true, template, baseRp, prefer = 'fail', resolutions }, { beforePublish } = {}) {
+export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, program, verifySteps: programSteps, source: sourcePathArg, sourcePath: sourcePathAlias, recipe, output: requestedOutput, cwd, projectDir, strictAudit = false, autoHeal = false, variants, overwrite = false, compact = true, template, baseRp, prefer = 'fail', resolutions }, { beforePublish } = {}) {
   let spec = { language: 'rp/1', target: 9 };
   let stage = 'validation', output, artifactDir, source, resolvedSourceFile = null, inlineCompilePath = null, plan;
-  let publishedCompanionRp1 = null, publishedRecipeOutput = null, publishedInteractions = null;
+  let publishedCompanionSource = null, publishedRecipeOutput = null, publishedInteractions = null;
   try {
     const explicitWorkDir = cwd ?? projectDir;
     const workDir = resolveWorkDir(explicitWorkDir);
@@ -1485,13 +1485,15 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
       throw new Error('output 必须是有效的 .rp 路径。');
     }
     let effectiveRequestedOutput = requestedOutput;
-    const hasCompanionRp1 = Boolean(recipe || inlineRp1Text !== null);
+    const hasCompanionSource = Boolean(recipe || inlineRp1Text !== null || program);
+    const companionSuffix = !program || recipe || inlineRp1Text !== null ? '.rp1'
+      : resolvedSourceFile ? `.source${extname(resolvedSourceFile)}` : '.json';
     if (requestedOutput === 'auto') {
       const sourceOutsideSkill = !recipe && resolvedSourceFile
         && !resolvedSourceFile.startsWith(`${SKILL_ROOT_DIR}/`) && resolvedSourceFile !== SKILL_ROOT_DIR;
       const baseDir = (!explicitWorkDir && sourceOutsideSkill) ? dirname(resolvedSourceFile) : workDir;
       const baseStem = recipe ? recipe : (resolvedSourceFile ? basename(resolvedSourceFile, extname(resolvedSourceFile)) : 'prototype');
-      const isAvailable = cand => !pathExists(cand) && !pathExists(`${cand}.assets`) && !pathExists(`${cand}.baseline.json`) && (!hasCompanionRp1 || !pathExists(`${cand.slice(0, -3)}.rp1`));
+      const isAvailable = cand => !pathExists(cand) && !pathExists(`${cand}.assets`) && !pathExists(`${cand}.baseline.json`) && (!hasCompanionSource || (!pathExists(`${cand.slice(0, -3)}${companionSuffix}`) && !pathExists(`${cand.slice(0, -3)}${companionSuffix}.interactions.json`)));
       const cand0 = join(baseDir, `${baseStem}.rp`);
       if (isAvailable(cand0)) effectiveRequestedOutput = cand0;
       else {
@@ -1505,14 +1507,15 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
     if (extname(resolvedOutput).toLowerCase() !== '.rp')
       throw new Error('output 必须是新的 .rp 路径。');
     assertWritable(resolvedOutput);
-    const nativeInteractions = readNativeInteractionSource(resolvedSourceFile);
-    const companionRp1Target = hasCompanionRp1 ? resolvedOutput.slice(0, -3) + '.rp1' : null;
-    if (companionRp1Target) {
-      assertWritable(companionRp1Target);
-      if (pathExists(companionRp1Target) && !(inlineRp1Text !== null && overwrite)) {
+    let nativeInteractions = readNativeInteractionSource(resolvedSourceFile);
+    if (program && nativeInteractions) throw new Error('program 与源文件旁已有的交互源码只能选择一个。');
+    const companionSourceTarget = hasCompanionSource ? resolvedOutput.slice(0, -3) + companionSuffix : null;
+    if (companionSourceTarget) {
+      assertWritable(companionSourceTarget);
+      if (pathExists(companionSourceTarget) && !(inlineRp1Text !== null && overwrite)) {
         throw new Error(recipe
-          ? `范例源码已存在，请通过 source 继续改稿：${companionRp1Target}`
-          : `源码文件已存在，请通过 source 继续改稿（或传 overwrite: true）：${companionRp1Target}`);
+          ? `范例源码已存在，请通过 source 继续改稿：${companionSourceTarget}`
+          : `源码文件已存在，请通过 source 继续改稿（或传 overwrite: true）：${companionSourceTarget}`);
       }
     }
     const resolvedTpl = template !== undefined ? resolveInWork(template, explicitWorkDir) : undefined;
@@ -1574,9 +1577,17 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
     }
     source = join(artifactDir, 'source.json');
     writeFileSync(source, JSON.stringify(spec, null, 2) + '\n', { flag: 'wx' });
+    if (program) {
+      const path = `${inlineCompilePath ?? source}.interactions.json`;
+      const steps = programSteps ?? [];
+      writeFileSync(path, JSON.stringify({ program, steps }, null, 2) + '\n', { flag: 'wx' });
+      nativeInteractions = { path, items: [], program, steps };
+    }
     stage = 'compile';
     reportPrototypeProgress('compile', 0, 1);
-    const compiled = compilePrototype(resolvedSourceFile ?? inlineCompilePath ?? source, artifactDir, { strictAudit, autoHeal: Boolean(autoHeal) });
+    const compiled = compilePrototype(resolvedSourceFile ?? inlineCompilePath ?? source, artifactDir, {
+      strictAudit, autoHeal: Boolean(autoHeal), nativeProgram: nativeInteractions?.program ? nativeInteractions.path : undefined,
+    });
     reportPrototypeProgress('compile', 1, 1);
     plan = JSON.parse(readFileSync(compiled.planPath, 'utf8'));
     if (!compiled.ok) {
@@ -1617,15 +1628,17 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
     if (nativeInteractions) {
       stage = 'native-interactions';
       const tempBaseline = `${staged}.baseline.json`;
-      const baseline = loadBaselineMap(staged);
-      const candidate = addInteractionsBatch(readFileSync(staged), nativeInteractions.items, { baseline });
-      writeFileSync(staged, candidate.file);
       const data = JSON.parse(readFileSync(tempBaseline, 'utf8'));
-      data.baseRpBase64 = candidate.file.toString('base64');
+      if (nativeInteractions.items.length) {
+        const baseline = loadBaselineMap(staged);
+        const candidate = addInteractionsBatch(readFileSync(staged), nativeInteractions.items, { baseline });
+        writeFileSync(staged, candidate.file);
+        data.baseRpBase64 = candidate.file.toString('base64');
+        build.nativeInteractions = candidate.report;
+      }
       data.nativeInteractionsSha256 = sha256Of(nativeInteractions.path);
       data.nativeVerifySteps = nativeInteractions.steps;
       writeFileSync(tempBaseline, JSON.stringify(data, null, 2) + '\n');
-      build.nativeInteractions = candidate.report;
     }
     stage = 'structure';
     const rp = readRp(readFileSync(staged), { path: output });
@@ -1671,11 +1684,11 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
     const reportPath = join(artifactDir, 'build-report.json');
     writeFileSync(reportPath, JSON.stringify({ ...build, outputRp: output }, null, 2) + '\n', { flag: 'wx' });
     stage = 'output';
-    const interactionOutput = companionRp1Target && nativeInteractions ? `${companionRp1Target}.interactions.json` : null;
+    const interactionOutput = companionSourceTarget && nativeInteractions ? `${companionSourceTarget}.interactions.json` : null;
     if (interactionOutput && pathExists(interactionOutput)) throw new Error(`配套交互源码已存在：${interactionOutput}`);
     beforePublish?.();
     assertWritable(output);
-    const companionExistedBefore = companionRp1Target ? pathExists(companionRp1Target) : false;
+    const companionExistedBefore = companionSourceTarget ? pathExists(companionSourceTarget) : false;
     if (overwrite) copyFileSync(staged, output);
     else copyFileSync(staged, output, constants.COPYFILE_EXCL);
     if (recipe || !overwrite) publishedRecipeOutput = output;
@@ -1691,12 +1704,12 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
       unlinkSync(stagedBaseline);
     }
     unlinkSync(staged);
-    if (companionRp1Target) {
-      const companionSrc = resolvedSourceFile ?? inlineCompilePath;
-      if (overwrite && !recipe) copyFileSync(companionSrc, companionRp1Target);
-      else copyFileSync(companionSrc, companionRp1Target, constants.COPYFILE_EXCL);
-      if (!companionExistedBefore) publishedCompanionRp1 = companionRp1Target;
-      resolvedSourceFile = companionRp1Target;
+    if (companionSourceTarget) {
+      const companionSrc = resolvedSourceFile ?? inlineCompilePath ?? source;
+      if (overwrite && !recipe) copyFileSync(companionSrc, companionSourceTarget);
+      else copyFileSync(companionSrc, companionSourceTarget, constants.COPYFILE_EXCL);
+      if (!companionExistedBefore) publishedCompanionSource = companionSourceTarget;
+      resolvedSourceFile = companionSourceTarget;
       if (interactionOutput) {
         assertWritable(interactionOutput);
         copyFileSync(nativeInteractions.path, interactionOutput, constants.COPYFILE_EXCL);
@@ -1726,6 +1739,9 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
     const summary = { source: resolvedSourceFile ?? source, baseline: outputBaseline, verification,
       ...(nativeInteractions ? { interactionSource: publishedInteractions ?? nativeInteractions.path,
         verifySteps: nativeInteractions.steps, interactionEngine: 'official' } : {}),
+      ...(plan.nativeProgram ? { nativeProgram: { page: plan.nativeProgram.page, routineCount: plan.nativeProgram.routines.length,
+        triggerCount: plan.nativeProgram.triggers.length, callbackCount: Object.keys(plan.nativeProgram.callbacks).length,
+        loopCount: plan.nativeProgram.loopCount } } : {}),
       nextActions: [
         { tool: 'export_prototype', arguments: { rp: output } },
         { tool: 'revise_prototype', source: resolvedSourceFile ?? source, rp: output },
@@ -1772,7 +1788,7 @@ export function generatePrototype({ rp1: inlineRp1Arg, spec: inputSpec, source: 
     };
   } catch (error) {
     if (publishedInteractions) rmSync(publishedInteractions, { force: true });
-    if (publishedCompanionRp1) rmSync(publishedCompanionRp1, { force: true });
+    if (publishedCompanionSource) rmSync(publishedCompanionSource, { force: true });
     if (publishedRecipeOutput) {
       rmSync(publishedRecipeOutput, { force: true });
       rmSync(`${publishedRecipeOutput}.baseline.json`, { force: true });
@@ -3438,6 +3454,7 @@ export const sessionTools = [
       }, required: ['pages'] }] },
       source: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径（.rp1 或 .json）或本地 .html / http(s) URL（自动用无头 Chrome 提取 DOM/样式/表单/图片并生成可编辑 .rp 与伴随 .rp1）；与 spec/rp1 二选一（别名 sourcePath）。' },
       sourcePath: { type: 'string', minLength: 1, description: '可选：RP/1 源码文件路径或 HTML/URL（同 source）。' },
+      program: { type: 'object', description: '可选 RP/1 原生交互程序。page 指向页面，on 绑定事件，routines 复用动作块，bind 批量绑定参数。动作块可写 if/then/else、repeat/limit/do 和 call。' },
       output: { type: 'string', minLength: 1, description: '输出 .rp 路径（绝对路径，或基于 cwd/projectDir/当前工作目录解析的相对路径；传 "auto" 时按源码或工作目录自动生成不重名 .rp 路径）。' },
       cwd: { type: 'string', minLength: 1, description: '可选：解析相对路径与 output="auto" 时的本地工作目录（别名 projectDir）。' },
       projectDir: { type: 'string', minLength: 1, description: '可选：解析相对路径时的本地工作目录（同 cwd）。' },
@@ -3463,7 +3480,7 @@ export const sessionTools = [
       const rawHtmlCandidate = input.source ?? input.sourcePath;
       const htmlMode = isHtmlInput(rawHtmlCandidate);
       if (!verify && !htmlMode) {
-        const result = generatePrototype(input);
+        const result = generatePrototype({ ...input, verifySteps });
         if (result.status !== 'completed') return result;
         const images = [];
         if (includeImage) {
@@ -3510,11 +3527,11 @@ export const sessionTools = [
             genInput = { ...input, source: stagedRp1, sourcePath: undefined };
           }
 
-          const result = generatePrototype(genInput);
+          const result = generatePrototype({ ...genInput, verifySteps });
           if (result.status !== 'completed') return result;
 
           if (htmlMode) {
-            const companionRp1 = result.output.replace(/\.rp$/i, '.rp1');
+            const companionRp1 = input.program ? result.source : result.output.replace(/\.rp$/i, '.rp1');
             if (stageDir && existsSync(join(stageDir, 'assets')) && importedAssets.length) {
               const outAssetsDir = join(dirname(result.output), 'assets');
               assertWritable(join(outAssetsDir, '.keep'));

@@ -70859,6 +70859,22 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "raise-event"
+            },
+            "target": {
+              "$ref": "#/$defs/reference"
+            }
+          },
+          "required": [
+            "type",
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "set-size"
             },
             "target": {

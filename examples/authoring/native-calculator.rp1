@@ -1,0 +1,28 @@
+rp/1 target=9 name="连续四则计算器" domain=web theme=enterprise-light
+var $entry = "0"
+var $value type=number value=0
+var $fresh type=number value=1
+var $pending = ""
+var $failed type=number value=0
+var $digit = ""
+var $operator = ""
+page #calc name="计算器" canvas=[368,440]
+  box #root [368x400] layout=stack fill=#F1F5F9
+    label #screen "0" [320x64] x=24 y=20 fill=#FFFFFF align=right fontSize=32
+    button #d7 "7" [66x52] x=24 y=104
+    button #d8 "8" [66x52] x=108 y=104
+    button #d9 "9" [66x52] x=192 y=104
+    button #divide "÷" [66x52] x=276 y=104
+    button #d4 "4" [66x52] x=24 y=170
+    button #d5 "5" [66x52] x=108 y=170
+    button #d6 "6" [66x52] x=192 y=170
+    button #times "×" [66x52] x=276 y=170
+    button #d1 "1" [66x52] x=24 y=236
+    button #d2 "2" [66x52] x=108 y=236
+    button #d3 "3" [66x52] x=192 y=236
+    button #minus "−" [66x52] x=276 y=236
+    button #clear "AC" [66x52] x=24 y=302
+    button #d0 "0" [66x52] x=108 y=302
+    button #decimal "." [66x52] x=192 y=302
+    button #plus "+" [66x52] x=276 y=302
+    button #equals "＝" [318x46] x=24 y=364

@@ -1,0 +1,420 @@
+{
+  "program": {
+    "page": "calc",
+    "routines": {
+      "clear": [
+        {
+          "set": {
+            "$entry": "0",
+            "$value": 0,
+            "$fresh": 1,
+            "$pending": "",
+            "$failed": 0
+          }
+        },
+        {
+          "set": {
+            "@screen": "=$entry"
+          }
+        }
+      ],
+      "digit": [
+        {
+          "if": "$failed == 1",
+          "then": [
+            {
+              "call": "clear"
+            }
+          ]
+        },
+        {
+          "if": "$fresh == 1 || $entry == '0'",
+          "then": [
+            {
+              "set": {
+                "$entry": "=$digit",
+                "$fresh": 0
+              }
+            }
+          ],
+          "else": [
+            {
+              "set": {
+                "$entry": "=concat($entry, $digit)"
+              }
+            }
+          ]
+        },
+        {
+          "set": {
+            "@screen": "=$entry"
+          }
+        }
+      ],
+      "decimal": [
+        {
+          "if": "$failed == 1",
+          "then": [
+            {
+              "call": "clear"
+            }
+          ]
+        },
+        {
+          "if": "$fresh == 1",
+          "then": [
+            {
+              "set": {
+                "$entry": "0.",
+                "$fresh": 0
+              }
+            }
+          ],
+          "else": [
+            {
+              "if": "!contains($entry, '.')",
+              "then": [
+                {
+                  "set": {
+                    "$entry": "=concat($entry, '.')"
+                  }
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "set": {
+            "@screen": "=$entry"
+          }
+        }
+      ],
+      "evaluate": [
+        {
+          "if": "$pending == '/' && number($entry) == 0",
+          "then": [
+            {
+              "set": {
+                "$failed": 1,
+                "$fresh": 1,
+                "$pending": "",
+                "@screen": "不能除以零"
+              }
+            }
+          ],
+          "else": [
+            {
+              "match": "$pending",
+              "cases": {
+                "+": [
+                  {
+                    "set": {
+                      "$value": "=$value + number($entry)"
+                    }
+                  }
+                ],
+                "-": [
+                  {
+                    "set": {
+                      "$value": "=$value - number($entry)"
+                    }
+                  }
+                ],
+                "*": [
+                  {
+                    "set": {
+                      "$value": "=$value * number($entry)"
+                    }
+                  }
+                ],
+                "/": [
+                  {
+                    "set": {
+                      "$value": "=$value / number($entry)"
+                    }
+                  }
+                ]
+              },
+              "else": [
+                {
+                  "set": {
+                    "$value": "=number($entry)"
+                  }
+                }
+              ]
+            },
+            {
+              "set": {
+                "$value": "=number(fixed($value, 8))"
+              }
+            },
+            {
+              "set": {
+                "$entry": "=text($value)"
+              }
+            },
+            {
+              "set": {
+                "@screen": "=$entry"
+              }
+            }
+          ]
+        }
+      ],
+      "operate": [
+        {
+          "if": "$failed == 0",
+          "then": [
+            {
+              "if": "$fresh == 0",
+              "then": [
+                {
+                  "call": "evaluate"
+                }
+              ]
+            },
+            {
+              "if": "$failed == 0",
+              "then": [
+                {
+                  "set": {
+                    "$pending": "=$operator",
+                    "$fresh": 1
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "equals": [
+        {
+          "if": "$fresh == 0 && $pending != ''",
+          "then": [
+            {
+              "call": "evaluate"
+            },
+            {
+              "set": {
+                "$pending": "",
+                "$fresh": 1
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "bind": [
+      {
+        "targets": {
+          "d0": "0",
+          "d1": "1",
+          "d2": "2",
+          "d3": "3",
+          "d4": "4",
+          "d5": "5",
+          "d6": "6",
+          "d7": "7",
+          "d8": "8",
+          "d9": "9"
+        },
+        "variable": "$digit",
+        "call": "digit"
+      },
+      {
+        "targets": {
+          "plus": "+",
+          "minus": "-",
+          "times": "*",
+          "divide": "/"
+        },
+        "variable": "$operator",
+        "call": "operate"
+      }
+    ],
+    "on": {
+      "decimal": {
+        "click": [
+          {
+            "call": "decimal"
+          }
+        ]
+      },
+      "equals": {
+        "click": [
+          {
+            "call": "equals"
+          }
+        ]
+      },
+      "clear": {
+        "click": [
+          {
+            "call": "clear"
+          }
+        ]
+      }
+    }
+  },
+  "steps": [
+    {
+      "action": "click",
+      "target": "calc/d9"
+    },
+    {
+      "action": "click",
+      "target": "calc/d9"
+    },
+    {
+      "action": "click",
+      "target": "calc/times"
+    },
+    {
+      "action": "click",
+      "target": "calc/d9"
+    },
+    {
+      "action": "click",
+      "target": "calc/d9"
+    },
+    {
+      "action": "click",
+      "target": "calc/times"
+    },
+    {
+      "action": "click",
+      "target": "calc/d9"
+    },
+    {
+      "action": "click",
+      "target": "calc/d9"
+    },
+    {
+      "action": "click",
+      "target": "calc/equals"
+    },
+    {
+      "action": "expect",
+      "target": "calc/screen",
+      "expect": {
+        "text": "970299"
+      }
+    },
+    {
+      "action": "click",
+      "target": "calc/clear"
+    },
+    {
+      "action": "click",
+      "target": "calc/d2"
+    },
+    {
+      "action": "click",
+      "target": "calc/plus"
+    },
+    {
+      "action": "click",
+      "target": "calc/d3"
+    },
+    {
+      "action": "click",
+      "target": "calc/times"
+    },
+    {
+      "action": "click",
+      "target": "calc/d4"
+    },
+    {
+      "action": "click",
+      "target": "calc/minus"
+    },
+    {
+      "action": "click",
+      "target": "calc/d6"
+    },
+    {
+      "action": "click",
+      "target": "calc/divide"
+    },
+    {
+      "action": "click",
+      "target": "calc/d2"
+    },
+    {
+      "action": "click",
+      "target": "calc/equals"
+    },
+    {
+      "action": "expect",
+      "target": "calc/screen",
+      "expect": {
+        "text": "7"
+      }
+    },
+    {
+      "action": "click",
+      "target": "calc/clear"
+    },
+    {
+      "action": "click",
+      "target": "calc/decimal"
+    },
+    {
+      "action": "click",
+      "target": "calc/d1"
+    },
+    {
+      "action": "click",
+      "target": "calc/plus"
+    },
+    {
+      "action": "click",
+      "target": "calc/decimal"
+    },
+    {
+      "action": "click",
+      "target": "calc/d2"
+    },
+    {
+      "action": "click",
+      "target": "calc/equals"
+    },
+    {
+      "action": "expect",
+      "target": "calc/screen",
+      "expect": {
+        "text": "0.3"
+      }
+    },
+    {
+      "action": "click",
+      "target": "calc/divide"
+    },
+    {
+      "action": "click",
+      "target": "calc/d0"
+    },
+    {
+      "action": "click",
+      "target": "calc/equals"
+    },
+    {
+      "action": "expect",
+      "target": "calc/screen",
+      "expect": {
+        "text": "不能除以零"
+      }
+    },
+    {
+      "action": "click",
+      "target": "calc/d5"
+    },
+    {
+      "action": "expect",
+      "target": "calc/screen",
+      "expect": {
+        "text": "5"
+      }
+    }
+  ]
+}

@@ -272,15 +272,37 @@ test('native authoring rejects STO before commit and reuses unchanged tests on a
   });
 });
 
-test('advanced recipes run core timer, bounded loop and blur form flows in official RP9', {
+test('declarative programs run calculator, timer, bounded loop and blur form flows in official RP9', {
   skip: !verifyHost && 'Set AXURE_MCP_EXPORT_HOST=1 on a verified macOS Axure host.',
 }, async () => {
   await session(async ({ call }) => {
-    for (const recipe of ['native-countdown', 'native-loop', 'native-blur-form']) {
+    for (const recipe of ['native-calculator', 'native-countdown', 'native-loop', 'native-blur-form']) {
       const generated = await call('generate_prototype', { recipe, output: `${recipe}.rp`, verify: true });
       assert(existsSync(generated.interactionSource));
+      assert(generated.nativeProgram.callbackCount > 0);
       assert.equal(generated.behaviorVerification.interactionCompilation.status, 'passed');
       assert.equal(generated.behaviorVerification.passed, generated.verifySteps.length);
     }
+  });
+});
+
+test('inline program publishes editable layout and retained verification steps', {
+  skip: !verifyHost && 'Set AXURE_MCP_EXPORT_HOST=1 on a verified macOS Axure host.',
+}, async () => {
+  await session(async ({ call }) => {
+    const result = await call('generate_prototype', {
+      output: 'inline-program.rp',
+      rp1: 'rp/1 target=9 name="测试" domain=web theme=enterprise-light\n' +
+        'page #demo canvas=[360,240]\n  box #root [360x240] layout=stack\n' +
+        '    button #run "运行" [104x42] x=12 y=20\n    label #out "初始" [160x34] x=12 y=80\n',
+      program: { page: 'demo', on: { run: { click: [{ call: 'finish' }] } },
+        routines: { finish: [{ set: { '@out': '已完成' } }] } },
+      verifySteps: [{ action: 'click', target: 'demo/run' }, { action: 'expect', target: 'demo/out', expect: { text: '已完成' } }],
+    });
+    assert.equal(result.nativeProgram.callbackCount, 1);
+    assert.equal(result.interactionSource, result.source + '.interactions.json');
+    assert.deepEqual(JSON.parse(readFileSync(result.interactionSource)).steps, result.verifySteps);
+    const verified = await call('verify_prototype', { engine: 'official', rp: result.output });
+    assert.equal(verified.passed, 2);
   });
 });

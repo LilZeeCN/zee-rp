@@ -39,6 +39,39 @@ def sugar_fixture():
 
 
 class LanguageContract(unittest.TestCase):
+    def test_program_expansion_keeps_operator_literals_and_source_locations(self):
+        from rplang.core import parse_inline_expr
+        from rplang.native_program import lower_native_program
+        for literal in ("+", "-", "(", ")", ".", "!"):
+            condition = parse_inline_expr(f"$answer == {json.dumps(literal)}", "/when")
+            self.assertEqual(condition["right"], literal)
+        program = {"page": "main", "on": {"apply": {"click": [
+            {"match": "$answer", "cases": {"+": [{"set": {"$count": 1}}]}},
+            {"repeat": 2, "do": [{"set": {"$count": "=$count + 1"}}],
+             "then": [{"set": {"@status": "=fixed($count, 2)"}}]},
+        ]}}}
+        original = sugar_fixture()
+        lowered, summary = lower_native_program(original, program)
+        self.assertEqual(summary["loopCount"], 1)
+        self.assertTrue(all(c["sourcePointer"].startswith("/program/") for c in summary["callbacks"].values()))
+        self.assertEqual(original, sugar_fixture())
+        runtime = ReferenceRuntime(compile_language(lowered))
+        runtime.trigger("main/apply", "OnClick")
+        self.assertEqual(runtime.variables["count"], 2)
+        self.assertEqual(runtime.widgets[runtime.symbols_by_id["main/status"]["name"]]["text"], "2.00")
+
+    def test_program_reports_routine_cycles_and_invalid_repeat_limits(self):
+        from rplang.native_program import lower_native_program
+        program = {"page": "main", "on": {"apply": {"click": [{"call": "check"}]}},
+                   "routines": {"check": [{"call": "check"}]}}
+        with self.assertRaises(LanguageError) as cycle:
+            lower_native_program(sugar_fixture(), program)
+        self.assertEqual(cycle.exception.diagnostic["code"], "E_PROGRAM_RECURSION")
+        program["routines"]["check"] = [{"repeat": 33, "limit": 33, "do": [{"set": {"$count": 0}}]}]
+        with self.assertRaises(LanguageError) as repeat:
+            lower_native_program(sugar_fixture(), program)
+        self.assertEqual(repeat.exception.diagnostic["pointer"], "/program/routines/check/0/limit")
+
     def test_native_timers_and_gestures_in_reference_runtime(self):
         from rp_language_cli import read_source
         spec = read_source(ROOT / "examples/rp-language/native-gestures.rp1")

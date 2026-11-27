@@ -1,6 +1,7 @@
 import copy
 import math
 import re
+from .core import fixed_decimal
 from .core import CHECK_KINDS, EVENTS, FORM_KINDS, OPTION_KINDS, WIDGET_GEOM_ACCESSORS, fail
 from .frontend import compile_language
 
@@ -209,6 +210,8 @@ class ReferenceRuntime:
             if fn == "lower": return str(args[0]).lower()
             if fn == "upper": return str(args[0]).upper()
             if fn == "length": return len(str(args[0]).encode("utf-16-le")) // 2
+            if fn == "fixed": return fixed_decimal(*args)
+            if fn == "nowMs": return self.time_ms
             if fn == "contains": return args[1] in args[0]
             if fn == "remove": return args[0].replace(args[1], "", 1)
             if fn == "not": return not bool(args[0])
@@ -461,7 +464,7 @@ class ReferenceRuntime:
             self._move_with_drag(target, act, row=row)
         elif kind == "raise-event":
             ev_name = "OnPanelStateChange" if act.get("eventType") == 278 else "OnClick"
-            self.trigger(target, ev_name, row=row, row_index=row_index or 0)
+            self.trigger(target, ev_name, row=row, row_index=row_index or 0, raised=True)
         elif kind in ("show", "hide", "toggle"):
             if target in self.widgets:
                 rep_n = self.widgets[target].get("repeater")
@@ -575,7 +578,7 @@ class ReferenceRuntime:
         self.widgets[tname]["text"] = text
         return self.trigger(tname, "change")
 
-    def trigger(self, target_id_or_name, event="click", row_index=0, row=None, dx=0, dy=0):
+    def trigger(self, target_id_or_name, event="click", row_index=0, row=None, dx=0, dy=0, *, raised=False):
         native_ev = EVENTS.get(event, event)
         tname = self.resolve_trigger_name(target_id_or_name)
         kind = self.widgets.get(tname, {}).get("kind")
@@ -585,7 +588,7 @@ class ReferenceRuntime:
         if native_ev not in EVENTS.values() and native_ev != "OnItemLoad":
             fail("E_EVENT", "/", f"Unsupported reference event '{event}'")
         page = self.pages_by_slug[self.current_page]
-        if tname != "page" and native_ev not in {"OnLoad", "OnItemLoad", "OnPanelStateChange"} and not self.is_operable(tname, row_index):
+        if not raised and tname != "page" and native_ev not in {"OnLoad", "OnItemLoad", "OnPanelStateChange"} and not self.is_operable(tname, row_index):
             return []
         if row is None and tname in self.widgets and self.widgets[tname].get("repeater"):
             vrows = self.visible_rows(self.widgets[tname]["repeater"])
@@ -593,7 +596,7 @@ class ReferenceRuntime:
                 row = vrows[row_index]
             else:
                 return []
-        if native_ev == "OnClick" and kind in CHECK_KINDS:
+        if not raised and native_ev == "OnClick" and kind in CHECK_KINDS:
             self._set_checked(tname, True if kind == "radio" else not self.widgets[tname]["checked"])
         if native_ev == "OnFocus": self.focused_widget = tname
         elif native_ev == "OnLostFocus" and self.focused_widget == tname: self.focused_widget = None
@@ -607,7 +610,7 @@ class ReferenceRuntime:
         try:
             for ix in page["interactions"]:
                 if ix["trigger"] == tname:
-                    fired.extend(self._exec_events(ix, native_ev, row=row, reason="input-change" if native_ev == "OnTextChange" else "panel-state-change" if native_ev == "OnPanelStateChange" else "user-event", row_index=row_index))
+                    fired.extend(self._exec_events(ix, native_ev, row=row, reason="raised-event" if raised else "input-change" if native_ev == "OnTextChange" else "panel-state-change" if native_ev == "OnPanelStateChange" else "user-event", row_index=row_index))
         finally:
             if native_ev == "OnDragDrop":
                 self.drag_origins.clear()

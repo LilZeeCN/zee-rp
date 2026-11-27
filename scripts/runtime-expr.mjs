@@ -99,6 +99,8 @@ export function nativeRuntimeValue(ast, ctx, { targetRows = false } = {}) {
         case 'number': return `(((${a})*1)||0)`;
         case 'not': return `(!(${a}))`;
         case 'concat': return `((${a}).toString().concat(${args.slice(1).join(',')}))`;
+        case 'nowMs': return 'Now.getTime()';
+        case 'fixed': return `(${a}).toFixed(${args[1]})`;
         case 'lower': return `(${a}).toLowerCase()`;
         case 'upper': return `(${a}).toUpperCase()`;
         case 'length': return `(${a}).length`;

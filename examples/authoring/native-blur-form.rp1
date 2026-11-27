@@ -7,4 +7,3 @@ page #form name="联合表单" canvas=[480,350]
     input #second [245x38] x=30 y=149 placeholder="再次输入"
     label #feedback "请填写两项" [335x35] x=30 y=205
     button #submit "提交" [110x40] x=30 y=270
-    button #validate "内部校验" [90x34] x=363 y=285 hidden=true
