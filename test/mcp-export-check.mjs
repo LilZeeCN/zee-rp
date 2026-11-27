@@ -458,3 +458,47 @@ test('same-page native tasks restart and cancel without resuming an old continua
     }
   });
 });
+
+test('official RP9 attributes each wakeup to its wait when deadlines collide', {
+  skip: !verifyHost && 'Set AXURE_MCP_EXPORT_HOST=1 on a verified macOS Axure host.',
+}, async () => {
+  await session(async ({ call, work }) => {
+    const rp1 = `rp/1 target=9 name="Wait ownership" domain=web theme=enterprise-light
+page #demo canvas=[480,240]
+  box #root [480x240] layout=stack
+    button #long "Long" [93x40] x=16 y=22
+    button #short "Short" [93x40] x=127 y=22
+    button #burst "Burst" [93x40] x=238 y=22
+    button #tiny "Tiny" [93x40] x=349 y=22
+    label #status "Ready" [280x42] x=16 y=110
+`;
+    const show = value => ({ set: { '@status': value } });
+    const start = variant => ({ start: 'job', with: { variant } });
+    const program = {
+      page: 'demo',
+      locals: { requests: { type: 'number', value: 0 } },
+      on: {
+        long: { click: [start('long')] },
+        short: { click: [start('short')] },
+        burst: { click: [{ set: { '$requests': '=$requests + 1' } },
+          { start: 'job', with: { variant: 'burst', request: '=$requests' } }] },
+        tiny: { click: [start('tiny')] },
+      },
+      tasks: { job: {
+        locals: { variant: { type: 'text', value: '' }, request: { type: 'number', value: 0 } },
+        do: [{ match: '$variant', cases: {
+          long: [show('Long started'), { wait: 500 }, show('Long finished')],
+          short: [show('Short started'), { wait: 50 }, show('Second wait'), { wait: 100 }, show('Short finished')],
+          burst: [show("=concat('Waiting ', text($request))"), { wait: 50 }, show("=concat('Finished ', text($request))")],
+          tiny: [show('Tiny started'), { wait: 1 }, show('Tiny finished')],
+        } }],
+      } },
+    };
+    const result = await call('generate_prototype', { rp1, program, output: 'colliding-wakeups.rp' });
+    assert.equal(result.nativeProgram.callbackCount, 1);
+    const exported = await call('export_prototype', { rp: result.output, output: 'colliding-wakeups-html' });
+    assert.equal(exported.interactionCompilation.errorCount, 0);
+    assert(browserModule, 'Set PLAYWRIGHT_MODULE to run the native browser acceptance.');
+    assert.equal(runBrowser(work, 'task-wakeup-order', exported.output).assertions.length, 3);
+  });
+});

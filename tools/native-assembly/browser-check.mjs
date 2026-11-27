@@ -45,7 +45,88 @@ try {
 
   const frame = page.frameLocator('#mainFrame');
   const text = value => frame.getByText(value, { exact: true }).filter({ visible: true });
-  if (scenario === 'maxlength') {
+  if (scenario === 'task-wakeup-order') {
+    await page.goto(target('start.html'));
+    const status = frame.locator('[data-label^="txt-status-"]').filter({ visible: true });
+    await status.waitFor();
+    await frame.locator('body').evaluate(() => {
+      const NativeDate = window.Date;
+      const epoch = NativeDate.now();
+      let time = epoch, capturing = false, nextId = -1;
+      const nativeTimeout = window.setTimeout.bind(window);
+      const pending = [];
+      window.Date = class extends NativeDate {
+        constructor(...args) { super(...(args.length ? args : [time])); }
+        static now() { return time; }
+      };
+      window.setTimeout = (fn, delay, ...args) => {
+        if (capturing && [1, 4, 50, 100, 500].includes(delay)) {
+          pending.push({ fn, delay, args, at: time - epoch + delay });
+          return nextId--;
+        }
+        return nativeTimeout(fn, delay, ...args);
+      };
+      function capture(run) {
+        capturing = true;
+        try { run(); } finally { capturing = false; }
+      }
+      window.__taskWaitProbe = {
+        click(button, at, times) {
+          time = epoch + at;
+          capture(() => {
+            for (let i = 0; i < times; i++) button.click();
+          });
+        },
+        fire(delay, at, times = 1) {
+          time = epoch + at;
+          capture(() => {
+            for (let i = 0; i < times; i++) {
+              const index = pending.findIndex(wait => wait.delay === delay && wait.at <= at);
+              if (index < 0) throw new Error(`No ${delay} ms Wait is due at ${at} ms`);
+              const [wait] = pending.splice(index, 1);
+              wait.fn(...wait.args);
+            }
+          });
+        },
+        pending: () => pending.map(wait => wait.delay),
+      };
+    });
+    const click = (label, at, times = 1) => text(label).evaluate((button, options) =>
+      window.__taskWaitProbe.click(button, options.at, options.times), { at, times });
+    const fire = (delay, at, times = 1) => frame.locator('body').evaluate((_, options) =>
+      window.__taskWaitProbe.fire(options.delay, options.at, options.times), { delay, at, times });
+    const readStatus = async () => (await status.innerText()).trim();
+
+    await click('Long', 0);
+    assert.equal(await readStatus(), 'Long started');
+    await click('Short', 350);
+    assert.equal(await readStatus(), 'Short started');
+    await fire(50, 400);
+    assert.equal(await readStatus(), 'Second wait');
+    // Deliver the canceled timer first at the deadline of the current wait.
+    await fire(500, 500);
+    assert.equal(await readStatus(), 'Second wait', 'the old 500 ms wake must not release the current 100 ms wait');
+    await fire(100, 500);
+    assert.equal(await readStatus(), 'Short finished');
+    assertions.push('an old 500 ms wake cannot consume a due 100 ms continuation');
+
+    await click('Burst', 600, 32);
+    assert.equal(await readStatus(), 'Waiting 32');
+    await fire(50, 650, 31);
+    assert.equal(await readStatus(), 'Waiting 32', 'earlier equal-delay wakes must be drained as stale');
+    await fire(50, 650);
+    assert.equal(await readStatus(), 'Finished 32');
+    assertions.push('32 restarts at one timestamp resume only on the last submitted wake');
+
+    await click('Tiny', 700, 2);
+    assert.deepEqual(await frame.locator('body').evaluate(() => window.__taskWaitProbe.pending()), [4, 4]);
+    await fire(4, 704);
+    assert.equal(await readStatus(), 'Tiny started');
+    await fire(4, 704);
+    assert.equal(await readStatus(), 'Tiny finished');
+    assert.deepEqual(await frame.locator('body').evaluate(() => window.__taskWaitProbe.pending()), []);
+    assertions.push('sub-clamp waits share the same native delay and preserve FIFO');
+  } else if (scenario === 'maxlength') {
     await page.goto(target('start.html'));
     const input = page.frameLocator('#mainFrame').locator('input[type=text]');
     await input.waitFor();
@@ -230,7 +311,7 @@ try {
     }
 
   } else {
-    throw new Error('Usage: node browser-check.mjs <maxlength|list-detail|timer|drag|swipe|rp1-native> <HTML directory> [length]');
+    throw new Error('Usage: node browser-check.mjs <maxlength|list-detail|timer|drag|swipe|rp1-native|task-wakeup-order> <HTML directory> [length]');
   }
   assert.deepEqual(errors, []);
   console.log(JSON.stringify({ scenario, assertions, errors }, null, 2));

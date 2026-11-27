@@ -70,7 +70,8 @@
 
 - `restart` 是默认策略，重新启动时用新参数和局部初值替换正在等待的那次运行。`ignore` 在任务运行期间跳过重复启动，同时保留当前参数。
 - `cancel` 可在页面事件中使该任务之后的等待恢复失效。停止事件可直接设置提示文字或按钮状态。其他任务保持各自的运行进度。
-- 任务可使用 `wait`、带间隔的 `repeat` / `while` 和普通 RP/1 动作。等待之后只发出唤醒信号，调度器按当前任务的截止时间取下一段动作。旧一轮留下的信号无法执行旧动作。全部任务共用一个隐藏元件。
+- 任务可使用 `wait`、带间隔的 `repeat` / `while` 和普通 RP/1 动作。编译器按任务和等待时长给原生唤醒排队，每次唤醒只消费自己的队列位置。最新等待拥有恢复权，取消或重启会撤销旧等待的恢复权。全部任务共用一个隐藏元件。
+- 同时长的原生定时器按提交顺序交付。具名任务里 0–3 ms 的等待统一以 4 ms 调度，避免浏览器的嵌套定时器钳制改变队列顺序。[HTML 定时器规范](https://html.spec.whatwg.org/multipage/timers-and-user-prompts.html#timers)
 - 用 `generate_prototype({recipe: "native-async-tasks", output: "tasks.rp", verify: true})` 运行完整示例。也可把同一份程序通过 `rp_command(add-interaction)` 写入已有 RP9 项目。
 
 ## 多页复用与现有模板

@@ -1,6 +1,6 @@
 """Lower ordered business logic to editable RP9 event graphs."""
 from copy import deepcopy
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 import json
 import re
@@ -95,9 +95,9 @@ class Task:
     defaults: dict
     # The stored value is idle (0), executing (-1), or a parked continuation (>0).
     resume: str
-    deadline: str
+    wait_ms: str
     entry: dict | None = None
-    wake: dict | None = None
+    wakes: dict = field(default_factory=dict)
 
 
 class ProgramLowering:
@@ -183,7 +183,7 @@ class ProgramLowering:
             self.add_variable(resume, {"type": "number", "value": 0}, at)
             tasks[name] = Task(at, policy, body, {**page_names, **names},
                                {key: (variable, definitions[key]["value"]) for key, variable in names.items()},
-                               resume, f"{prefix}_deadline")
+                               resume, f"{prefix}_wait_ms")
         return tasks
 
     def index(self, node):
@@ -270,19 +270,29 @@ class ProgramLowering:
         return self.jump(launch)
 
     def suspend(self, task, ms, actions, source):
-        if task.wake is None:
-            self.add_variable(task.deadline, {"type": "number", "value": 0}, task.source)
-            task.wake = self.reserve_callback(task.source)
-            task.wake["on"] = {"click": {"cases": [{
-                "when": f"${task.resume} > 0 && nowMs() >= ${task.deadline}",
-                "actions": [{"_program_resume": task.resume}],
-            }]}}
+        # Axure Wait uses window.setTimeout. Equal effective delays complete
+        # in submission order. Normalize short waits to avoid nesting-dependent
+        # clamping reordering a restarted wait ahead of an older one.
+        ms = max(ms, 4)
+        pending = f"{task.wait_ms}_{ms}_pending"
+        if ms not in task.wakes:
+            if not task.wakes:
+                self.add_variable(task.wait_ms, {"type": "number", "value": 0}, task.source)
+            self.add_variable(pending, {"type": "number", "value": 0}, task.source)
+            wake = self.reserve_callback(source)
+            wake["on"] = {"click": {"cases": [
+                {"when": f"${pending} == 1 && ${task.wait_ms} == {ms} && ${task.resume} > 0",
+                 "actions": [{"set": {f"${pending}": 0}}, {"_program_resume": task.resume}]},
+                {"when": f"${pending} > 0", "actions": [{"set": {f"${pending}": f"=${pending} - 1"}}]},
+            ]}}
+            task.wakes[ms] = (wake, pending)
+        wake, pending = task.wakes[ms]
         resume, = self.continuation(actions, source)
-        # The delayed tail only signals a wakeup. The wake case reads and
-        # consumes whichever continuation is currently due for this task.
-        return [{"set": {f"${task.deadline}": f"=nowMs() + {ms}"}},
+        # Each wake consumes its own position in this FIFO. Only its newest
+        # position can own the active continuation, even across wait sites.
+        return [{"set": {f"${task.wait_ms}": ms, f"${pending}": f"=${pending} + 1"}},
                 {"_program_park": resume["target"]["ref"], "variable": task.resume},
-                {"type": "wait", "ms": ms}, self.jump(task.wake)]
+                {"type": "wait", "ms": ms}, self.jump(wake)]
 
     def block(self, statements, source, following=(), stack=(), in_repeat=False, depth=0, task=None):
         if depth >= 24:
@@ -363,8 +373,10 @@ class ProgramLowering:
                 body = self.block(step.get("do"), ptr(at, "do"), repeat, stack, not yielding, depth + 1, task)
                 iteration = [{"set": {f"${counter}": f"=${counter} - 1"}}]
                 if yielding:
-                    body = (self.suspend(task, interval or 0, body, at) if task else
-                            [{"type": "wait", "ms": interval or 0}, *body])
+                    if not task:
+                        body = [{"type": "wait", "ms": interval or 0}, *body]
+                    elif interval is not None or limit > 32:
+                        body = self.suspend(task, interval or 0, body, at)
                 iteration.extend(body)
                 finished = self.block(step["then"], ptr(at, "then"), next_block, stack, in_repeat, depth + 1, task) if "then" in step else next_block
                 failed = self.block(step["else"], ptr(at, "else"), next_block, stack, in_repeat, depth + 1, task) if "else" in step else next_block
@@ -580,7 +592,9 @@ class ProgramLowering:
             fail("E_PROGRAM_EVENT", self.path, "The program needs at least one event binding")
         original_callbacks = self.optimize()
         active_tasks = {name: task for name, task in self.tasks.items() if task.entry is not None}
-        reset_slots = ([self.busy] if self.busy else []) + [task.resume for task in active_tasks.values()]
+        reset_slots = [self.busy] if self.busy else []
+        for task in active_tasks.values():
+            reset_slots.extend([task.resume, *(pending for _, pending in task.wakes.values())])
         if reset_slots:
             self.reset_on_load(reset_slots)
         return self.spec, {"page": self.page["id"], "triggers": self.triggers, "callbacks": self.callbacks,
