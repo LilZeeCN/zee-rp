@@ -1,4 +1,4 @@
-// 命令注册表：scripts/ 下 34 个存量脚本的唯一机读清单，供编排层与文档引用。
+// 命令注册表：scripts/ 下内核脚本的唯一机读清单（数量以 node registry.mjs validate 为准），供编排层与文档引用。
 // 数据内联自 engineering-20261007/inventory.json（2026-10-07 盘点），Skill 自包含、不依赖 workspace 文件；
 // 脚本增删后先更新盘点再同步本数组，并跑 node registry.mjs validate 核对。
 //
@@ -50,6 +50,11 @@ const COMMANDS = [
     "usage": "node create-blank-project.mjs <output.rp> [--version 9|11]",
     "output": "index:2",
     "evidence": "loaded"
+  },
+  {
+    "command": "native-check", "script": "native-check.mjs",
+    "summary": "用本机 Axure 自己的程序集无头加载 .rp，报告 Axure 是否接受该文件（加载级；需 macOS + Axure + .NET SDK）",
+    "usage": "node native-check.mjs <file.rp> [--version 9|11] [--json]", "output": "none", "evidence": "loaded"
   },
   {
     "command": "create-global-variable",

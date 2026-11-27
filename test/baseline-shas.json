@@ -22,7 +22,7 @@
   "extract-assets.mjs": "75c06700967d1f87701f15abd6b170353257fb7a0f333cb2a7c601a8db2432ad",
   "fill-panel-state.mjs": "2feaee721db0c56fae4b2954a12bdb2a444325acab7852dbf8b8b3ecfa907bf8",
   "fix-panel-registry.mjs": "2cc139034792f356a0207bd9024eda2568c251f2975b2c5d405a42622cfb174f",
-  "gen-capabilities.mjs": "88461387f071269c76fa691adcc0ede9d4440fbbb2e4c1b5d7a50936bc4c2868",
+  "gen-capabilities.mjs": "d4c729274a87e0b3fc7d014fb4d82e22664276aca40fa7a75d989ab2187f037d",
   "html-import.mjs": "f300ed276e56e820aa4e9d3049c13b5bdee01dc131d28803d810a2bf7c6deb32",
   "image-structure.mjs": "4da20c1e350991e74b1dc2120cdffa72d61acbac9076964beacd04b809f58229",
   "interaction-lint.mjs": "e43358b8e6388964eba825b3203bb43709220ae224b59addefdaf8d9e13d6a72",
@@ -49,7 +49,7 @@
   "py.mjs": "72c4423fc0d1c96ecfafc3bd4178c8f1ee640d28c6c468725cfe76a77789b233",
   "python.mjs": "3f661e4e336cee582ff67e54f28c3181caf8bffcbf2ff450e777cbaf211b4ae3",
   "rebind-widgets.mjs": "1b7fd537750c3b64d668d6309b3acb8d31f0860e94c1c3d26ed7a7cdd912affb",
-  "registry.mjs": "f428e079eb23fb8b22795a1863614574113ed53218b197c41780e9a1afb6be0e",
+  "registry.mjs": "afa818d17c85e697e09dfcf1ffedfcc47c8e4329dacd43fc63e77f43df15d872",
   "remove-interaction.mjs": "697f551f0bbbe17b036370a10163a3accd45dfb21010c05595f0ff98425ed926",
   "remove-panel-state-content.mjs": "d87f12dcff91d6356c4105d6e1be8e91321d9d0e7cae77b1496247972e45e9b6",
   "rename-custom-style.mjs": "1d7a135777fe116721d33fb1f53959c124cc1abd3f99887a9645c09f21df682a",
@@ -69,5 +69,6 @@
   "version-fields.mjs": "65e9d22c45d8537dc216dba6a0bc6c1f52855edeb56d7eca9263145675d74d1b",
   "version-lint.mjs": "5e4fd415df81d99a6798ad65b79854b69dfa2b86c32992c07c14547436dee490",
   "version.mjs": "00a006b39a278cfa8dff5fe806f00aa05067b8e9ae3cbd72d886c696b7bf475d",
-  "widget-schema.mjs": "fd9e6a96850855af27af3f8c9b485defe0641aec16f3185f16847dfd21a763b6"
+  "widget-schema.mjs": "fd9e6a96850855af27af3f8c9b485defe0641aec16f3185f16847dfd21a763b6",
+  "native-check.mjs": "43ad7e9a15eef4d77aa09738faeac6d3c2ec20071979ad46c8b1373797b25ad5"
 }
