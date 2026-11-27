@@ -119,6 +119,11 @@ check('driver: auxiliary modes stay flag-prefixed and never launch the app', () 
   for (const mode of ['--tcc', '--windows', '--close', '--quit']) assert.ok(driver.includes(`"${mode}"`), mode);
   assert.match(driver, /辅助形态绝不启动应用/);
 });
+check('driver: quit observes the requested instance and preserves normal termination', () => {
+  assert.match(driver, /app\.terminate\(\)/);
+  assert.match(driver, /kill\(pid, 0\) == -1 && errno == ESRCH/);
+  assert.doesNotMatch(driver, /runningApp\(\) == nil|forceTerminate\(|\bpkill\b/);
+});
 check('driver: legacy positional contract is preserved', () => {
   // jobs.mjs / axure-preview.mjs 依赖这三段输出（用字面量比较，避免正则转义歧义）
   assert.ok(driver.includes('print("saved-closed-reopened")'), 'missing final status word');

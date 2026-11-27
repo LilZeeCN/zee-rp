@@ -43,6 +43,18 @@ func pollUntil(_ timeout: TimeInterval, _ test: () -> Bool) -> Bool {
     return test()
 }
 
+func waitForTermination(_ app: NSRunningApplication, timeout: TimeInterval) -> Bool {
+    let pid = app.processIdentifier
+    let deadline = ProcessInfo.processInfo.systemUptime + timeout
+    repeat {
+        // Allow AppKit to deliver termination notifications. The saved PID
+        // also covers a stale workspace entry or a new instance of this bundle.
+        if app.isTerminated || (kill(pid, 0) == -1 && errno == ESRCH) { return true }
+        if ProcessInfo.processInfo.systemUptime >= deadline { return false }
+        _ = RunLoop.current.run(mode: .default, before: Date().addingTimeInterval(0.1))
+    } while true
+}
+
 do {
     let arguments = Array(CommandLine.arguments.dropFirst())
     let mode = arguments.first.flatMap { $0.hasPrefix("--") ? $0 : nil }
@@ -284,10 +296,12 @@ do {
                 _ = ensureExposed(app)
                 _ = closeDocument(app, docTitle, documentKey(URL(fileURLWithPath: docTitle).lastPathComponent))
             }
-            _ = tryScript("tell application id \"\(bundleId)\" to quit", timeout: 10)
-            // Axure 退出前要落盘自己的状态；多文档或刚关闭文档时会明显变慢，45s 才算失败。
-            if pollUntil(45, { runningApp() == nil }) { emit("quit"); exit(0) }
-            throw GuiFailure.message("\(procName) did not quit")
+            // Request normal termination of this instance. Axure owns any
+            // unsaved-document prompt; the driver does not dismiss it.
+            let requested = app.isTerminated || app.terminate()
+            if waitForTermination(app, timeout: requested ? 45 : 0) { emit("quit"); exit(0) }
+            if !requested { throw GuiFailure.message("\(procName) refused the quit request (PID \(app.processIdentifier))") }
+            throw GuiFailure.message("\(procName) is still running after the quit request (PID \(app.processIdentifier))")
         default:
             throw GuiFailure.message("Unknown mode \(mode)")
         }
