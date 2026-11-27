@@ -6,6 +6,8 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { synthesizeBlankProject } from '../scripts/blank-synthesizer.mjs';
+import { duplicatePage } from '../scripts/duplicate-page.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const evidence = process.env.AXURE_MCP_VERIFY_OUTPUT;
@@ -70,6 +72,30 @@ test('verify_prototype tool discovery and input safety guards work offline', asy
     const overwriteErr = await call('verify_prototype', { html: join(work, 'mock-html'), screenshot: existingPng }, true);
     assert.equal(overwriteErr.diagnostics[0].code, 'E_VERIFY_SCREENSHOT_EXISTS');
     assert.equal(readFileSync(existingPng, 'utf8'), 'keep');
+  });
+});
+
+test('the official player opens a non-default Unicode page from its sitemap in RP9 and RP11', {
+  skip: !verifyHost && 'Set AXURE_MCP_EXPORT_HOST=1 on a verified macOS Axure host.',
+}, async () => {
+  await session(async ({ call, work }) => {
+    for (const version of [11, 9]) {
+      const page = '02 引导页';
+      const input = join(work, `unicode-rp${version}.rp`);
+      const { file } = duplicatePage(synthesizeBlankProject({ version }), 'Page 1', page);
+      writeFileSync(input, file, { flag: 'wx' });
+      const exported = await call('export_prototype', { rp: input });
+      const result = await call('verify_prototype', {
+        html: exported.output, engine: 'official', page,
+        steps: [
+          { action: 'navigate', page: 'Page 1', expect: { page: 'Page 1' } },
+          { action: 'navigate', page, expect: { page } },
+        ],
+      });
+      assert.equal(result.verification.browserLoaded, true);
+      assert.equal(result.initial.page, page);
+      assert.equal(result.passed, 2);
+    }
   });
 });
 

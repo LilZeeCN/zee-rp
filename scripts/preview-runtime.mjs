@@ -637,24 +637,31 @@ function findWidgetMatch(observation, symbol, target, { allowHidden = false, row
   return { candidates, widget: candidates[rowIndex] };
 }
 
-function officialPageKey(htmlDir, name) {
+function officialPageTarget(htmlDir, name) {
+  const fallback = { fragment: `p=${encodeURIComponent(name)}` };
   let rootNodes;
   try {
     rootNodes = decodeAxureData(readFileSync(join(htmlDir, 'data', 'document.js'), 'utf8')).sitemap?.rootNodes;
   } catch {
     // Older/custom HTML exports may use a different document-data grammar.
-    return name;
+    return fallback;
   }
   const stack = Array.isArray(rootNodes) ? [...rootNodes] : [];
-  const urls = new Set();
+  const pages = new Map();
   while (stack.length) {
     const node = stack.pop();
     if (Array.isArray(node?.children)) stack.push(...node.children);
     if ((node?.pageName === name || node?.id === name) && /^[^/\\?#]+\.html$/i.test(node?.url ?? '')) {
-      urls.add(node.url.slice(0, -5));
+      pages.set(node.url, node);
     }
   }
-  return urls.size === 1 ? urls.values().next().value : name;
+  if (pages.size !== 1) return fallback;
+  const page = pages.values().next().value;
+  // Both players resolve sitemap IDs. RP11 migrates hashes to query strings
+  // and re-encodes percent escapes in a Unicode filename supplied as p=.
+  const fragment = typeof page.id === 'string' && /^[a-zA-Z0-9_-]+$/.test(page.id)
+    ? `id=${page.id}` : `p=${encodeURIComponent(page.url.slice(0, -5))}`;
+  return { fragment, name: page.pageName };
 }
 
 function startStaticServer(rootDir, defaultEntry = 'start.html') {
@@ -905,8 +912,9 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       : map?.pages?.[0];
     if (input.page) {
       const pageName = targetPageEntry?.name ?? input.page;
-      const pageKey = activeEngine === 'official' ? officialPageKey(activeHtmlDir, pageName) : pageName;
-      startUrl += `#p=${encodeURIComponent(pageKey)}`;
+      const fragment = activeEngine === 'official' ? officialPageTarget(activeHtmlDir, pageName).fragment
+        : `p=${encodeURIComponent(pageName)}`;
+      startUrl += `#${fragment}`;
     }
     const rawCanvas = targetPageEntry?.canvas;
     const canvasW = Array.isArray(rawCanvas) ? Number(rawCanvas[0]) : Number(rawCanvas?.w);
@@ -931,7 +939,10 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
     }
 
     const observe = () => page.evaluate(observeExpr);
-    const waitForRuntime = () => page.waitForFunction(`(() => { const r = ${observeExpr}; return Boolean(r && r.ready); })()`, { timeoutMs, pollMs: 50 });
+    const waitForRuntime = (expectedPage = null) => page.waitForFunction(`(() => {
+      const r = ${observeExpr}, expected = ${JSON.stringify(expectedPage)};
+      return Boolean(r && r.ready && (!expected || r.page === expected));
+    })()`, { timeoutMs, pollMs: 50 });
     const settle = async (waitMs = Math.min(timeoutMs, 2500)) => {
       const deadline = Date.now() + waitMs;
       while (Date.now() < deadline) {
@@ -1096,10 +1107,12 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
         const targetPageName = pageEntry?.name ?? step.page;
         if (activeEngine === 'studio-html') {
           await page.evaluate(`window.__STUDIO_EXPORT_APP__.navigate(${JSON.stringify(step.page)})`);
+          await waitForRuntime();
         } else {
-          await page.navigate(`${baseUrl}#p=${encodeURIComponent(targetPageName)}`, timeoutMs);
+          const destination = officialPageTarget(activeHtmlDir, targetPageName);
+          await page.navigate(`${baseUrl}#${destination.fragment}`, timeoutMs);
+          await waitForRuntime(destination.name);
         }
-        await waitForRuntime();
       } else if (step.action !== 'expect') {
         throw Object.assign(new Error(`未知验收步骤动作 "${step.action}"`), { code: 'E_VERIFY_INPUT', stepIndex: i });
       }
