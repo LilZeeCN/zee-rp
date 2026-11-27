@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { synthesizeBlankProject } from '../scripts/blank-synthesizer.mjs';
+import { listCustomStyles } from '../scripts/custom-styles.mjs';
 import { field, parsePayload, walkNodes } from '../scripts/parse-payload.mjs';
 import { readManifest, readRecords } from '../scripts/rp-records.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
@@ -58,6 +59,33 @@ test('each synthesized document declares both version histories and a loadable v
     assert.deepEqual(history('AssemblyVersionHistory'), [[version, 0, 0, revision]]);
     const page = records.find(record => record.className === 'Axure:Page');
     assert.equal(graph.roots[0].values[field(body, 'selected-tab-package-id').value - 1], parsePayload(page).roots[0].values[1]);
+  }
+});
+
+test('both blank project versions expose the nine native presets with their active properties', () => {
+  const labels = ['Heading 1', 'Heading 2', 'Heading 3', 'Heading 4', 'Heading 5', 'Heading 6',
+    'Paragraph', 'Form Hint', 'Form Disabled'];
+  for (const version of [9, 11]) {
+    const file = synthesizeBlankProject({ version });
+    const styles = listCustomStyles(file);
+    assert.deepEqual(styles.map(style => style.name), labels);
+    assert.equal(new Set(styles.map(style => style.guid)).size, labels.length);
+    const record = readRecords(file).find(item => item.className === 'Axure:DesignDocument');
+    const graph = parsePayload(record);
+    const presets = labels.map(label => [...graph.objects.values()].find(object =>
+      object.className === 'Axure:Style' && field(object.body, 'style-name').text === label));
+    const active = (style, property) => field(style.body, 'PropList').items.find(item =>
+      field(item, 'DOAName').value === 0xc0000000 + property);
+    const headingSizes = presets.slice(0, 6).map(style => {
+      assert.equal(field(active(style, 3), 'Value').value, 1);
+      return active(style, 2) ? field(active(style, 2), 'Value').value : null;
+    });
+    assert.deepEqual(headingSizes, [24, 18, 13.5, 10.5, null, 7.5]);
+    for (const [index, key, color] of [[6, 7, 0x00ffffff], [7, 6, 0xff999999], [8, 7, 0xfff0f0f0]]) {
+      assert.equal(field(field(active(presets[index], key), 'Value'), 'fill-color').value, color);
+    }
+    assert.equal(active(presets[6], 3), undefined);
+    assert.equal(active(presets[7], 7), undefined);
   }
 });
 

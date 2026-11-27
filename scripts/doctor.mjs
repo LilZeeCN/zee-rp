@@ -37,7 +37,7 @@ function checkBlankTemplate(version) {
     const { path, source } = readBlankTemplate(version);
     const check = { ok: true, path, source, error: null };
     if (source === 'synthesized') {
-      check.limitation = `内置合成工程不带 Heading 1–6、Paragraph、Form Hint、Form Disabled 这 9 个预置样式。需要在 Axure 的样式列表中选用这些样式时，请设置 AXURE_BLANK_TEMPLATE_RP${version} 指向含这些样式的原厂空白模板。`;
+      check.limitation = `内置合成包含 9 个文档预置样式。需要原厂 Word 规格文档配置时，可用 AXURE_BLANK_TEMPLATE_RP${version} 指定含该配置的空白工程。`;
     }
     return check;
   } catch (error) {

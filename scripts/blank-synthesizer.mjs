@@ -55,9 +55,13 @@ const configs = [
   ['PrintConfig', 'Print 1'],
 ];
 
+const solidStyleFill = ({ fields, string }, color) =>
+  fields({ 'fill-type': string('solid'), 'fill-color': integer(color) });
+
 // Default native widget properties also seed the unchecked style values in newly written widgets.
-function defaultStyleProperties(version, { fields, string }, styleId, typefaceId) {
-  const fill = color => fields({ 'fill-type': string('solid'), 'fill-color': integer(color) });
+function defaultStyleValues(version, context, styleId, typefaceId) {
+  const { fields, string } = context;
+  const fill = color => solidStyleFill(context, color);
   const shadow = (x, y, color) => fields({
     On: bool(false), OffsetX: number(x), OffsetY: number(y), BlurRadius: number(5), Color: integer(color), Spread: number(0),
   });
@@ -84,7 +88,65 @@ function defaultStyleProperties(version, { fields, string }, styleId, typefaceId
     1401: fields({ ScaleX: number(1), ScaleY: number(1), TranslateX: number(0), TranslateY: number(0), Rotate: number(0) }),
     1402: point(50, 50), 1403: fields({ On: bool(false), Radius: integer(4) }), 1404: fields({ On: bool(false), Radius: integer(4) }),
   });
-  return list(Object.entries(props).map(([id, Value]) => fields({ DOAName: integer(0xc0000000 + Number(id)), Value })));
+  return props;
+}
+
+function styleProperties(fields, values, enabled) {
+  return list(Object.entries(values).map(([id, Value]) => fields({
+    DOAName: integer((!enabled || enabled.has(Number(id)) ? 0xc0000000 : 0x80000000) + Number(id)),
+    Value,
+  })));
+}
+
+function defaultStyleProperties(version, context, styleId, typefaceId) {
+  return styleProperties(context.fields, defaultStyleValues(version, context, styleId, typefaceId));
+}
+
+// Stable identities let stock library widgets resolve the document presets they reference.
+// GUID strings here are in the record's byte order.
+const defaultLibraryId = '89a1f4538b16484793d409a1b736ad03';
+const headingPresets = [
+  ['111111119451fb4da49f67fd55eb1f88', 24],
+  ['9d5ca1b3e0dd2045be40f94c8168891e', 18],
+  ['5a4c7a8c9ad66943a5f7788171ac0b32', 13.5],
+  ['91c895e97907c8459c0b5fe110d15a0b', 10.5],
+  ['ef196b38e14bbd439b6c392ded969f89', null],
+  ['139a3bfc57b5a04f98ef0a1db9aac861', 7.5],
+];
+
+function documentPresets(version, context) {
+  const { fields, object, string, guids } = context;
+  const libraryId = guids.push(defaultLibraryId);
+  const defaults = defaultStyleValues(version, context, 20, 28);
+  // Native presets record a narrower property set than the default widget style.
+  const keys = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 20, 27,
+    70, 71, 72, 73, 74, 80, 81, 90, 91, 92, 93, 95, 1001, 1002, 1003];
+  if (version === 11) keys.push(1400, 1401, 1402, 1403, 1404);
+  const presetDefaults = Object.fromEntries(keys.map(key => [key, defaults[key]]));
+  const transparentTextBox = {
+    7: solidStyleFill(context, 0x00ffffff),
+    9: integer(0), 10: integer(0),
+    11: number(0), 12: number(0), 13: number(0), 14: number(0), 15: number(0),
+  };
+  const make = (name, identity, properties, enabled = Object.keys(properties).map(Number)) => {
+    const id = guids.push(identity);
+    return object(id, 'Style', {
+      LibraryId: guid(libraryId), LibraryName: string('Default'), LegacyName: string(''),
+      'style-name': string(name), Id: guid(id),
+      PropList: styleProperties(fields, { ...presetDefaults, ...properties }, new Set(enabled)),
+      Capabilities: scalar(0x1d, 'ffffffffffffffff'), All: bool(true),
+    });
+  };
+  return [
+    ...headingPresets.map(([id, size], index) => make(`Heading ${index + 1}`, id, {
+      ...transparentTextBox, 3: integer(1), ...(size !== null && { 2: number(size) }),
+    })),
+    make('Paragraph', '3dd48849b4800840a4a415096f1632af', transparentTextBox),
+    make('Form Hint', '66d68948ade85e4c81e59863039a5cc0', { 6: solidStyleFill(context, 0xff999999) }),
+    make('Form Disabled', '6223d09ba917894db0314c8c7fc75f16', {
+      6: solidStyleFill(context, 0xff000000), 7: solidStyleFill(context, 0xfff0f0f0),
+    }, [7]),
+  ];
 }
 
 function pageRecord(version, pageGuid, styleGuid, typefaceGuid) {
@@ -122,13 +184,15 @@ function pageRecord(version, pageGuid, styleGuid, typefaceGuid) {
 }
 
 function documentRecord(version, page, generators, styleGuid, typefaceGuid) {
-  return blankRecord(version, 'DesignDocument', newGuid(), ({ fields, object, packageRef, string, guids }) => {
+  return blankRecord(version, 'DesignDocument', newGuid(), context => {
+    const { fields, object, packageRef, string, guids } = context;
     while (guids.length < 37) guids.push(newGuid());
     guids[15 - 1] = page.id;
     generators.forEach(({ id }, index) => { guids[16 + index - 1] = id; });
     guids[20 - 1] = styleGuid;
     guids[21 - 1] = zeroGuid;
     guids[28 - 1] = typefaceGuid;
+    const presets = documentPresets(version, context);
     const packages = [page, ...generators];
     const configuration = (index, type = generators[index].type) => packageRef(type, 16 + index);
     const propertySet = (id, name) => [
@@ -149,7 +213,7 @@ function documentRecord(version, page, generators, styleGuid, typefaceGuid) {
         'ruler-guide-set': ref(22), UpgradedSVNFrom7Hack: bool(false),
       }),
       object(3, 'StyleSheet', {
-        GuidToDuplicate: dict(), ArchivedStyles: list(), CustomStyles: list(), DefaultStyle: ref(20),
+        GuidToDuplicate: dict(), ArchivedStyles: list(), CustomStyles: list(presets.map(style => ref(style.id))), DefaultStyle: ref(20),
         LegacyTableHorz: integer(1), LegacyTableVert: integer(1),
       }),
       object(20, 'Style', {
@@ -157,6 +221,7 @@ function documentRecord(version, page, generators, styleGuid, typefaceGuid) {
         'style-name': string('Default'), Id: guid(20), PropList: defaultStyleProperties(version, { fields, string }, 20, 28),
         Capabilities: scalar(0x1d, 'ffffffffffffffff'), All: bool(true),
       }),
+      ...presets,
       object(4, 'PageStyleSheet', { GuidToDuplicate: dict(), ArchivedStyles: list(), PageStyles: list(), DefaultPageStyle: ref(23) }),
       object(23, 'PageStyle', {
         'BaseStyle.Name': string(''), 'style-name': string('Default'), Id: guid(20), PropList: list(),
