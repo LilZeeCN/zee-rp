@@ -5,25 +5,41 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { addClickLink } from '../scripts/add-click-link.mjs';
 import { synthesizeBlankProject } from '../scripts/blank-synthesizer.mjs';
 import { cloneLibraryPageContent } from '../scripts/clone-library-page-content.mjs';
+import { cloneLibraryWidget } from '../scripts/clone-library-widget.mjs';
+import { createBlankPage } from '../scripts/create-blank-page.mjs';
+import { createGlobalVariable } from '../scripts/create-global-variable.mjs';
+import { duplicateMaster } from '../scripts/create-master.mjs';
 import { createPanel, panelTemplate } from '../scripts/create-panel-clone.mjs';
+import { listCustomStyles, rebindWidgets, renameCustomStyle } from '../scripts/custom-styles.mjs';
+import { duplicatePage } from '../scripts/duplicate-page.mjs';
 import { fillPanelState } from '../scripts/fill-panel-state.mjs';
 import { addInteractions } from '../scripts/ix-actions.mjs';
-import { mergePages } from '../scripts/merge-pages.mjs';
-import { nativeCheck } from '../scripts/native-check.mjs';
-import { encodePayload, field, parsePayload } from '../scripts/parse-payload.mjs';
 import { generatePrototype } from '../scripts/mcp-tools.mjs';
-import { placeMaster } from '../scripts/place-master.mjs';
+import { mergePages } from '../scripts/merge-pages.mjs';
+import { setWidgetNames } from '../scripts/name-widget.mjs';
+import { nativeCheck } from '../scripts/native-check.mjs';
 import { writeNativeScene } from '../scripts/native-scene.mjs';
-import { readRp } from '../scripts/rp-read.mjs';
+import { encodePayload, field, parsePayload } from '../scripts/parse-payload.mjs';
+import { placeMaster } from '../scripts/place-master.mjs';
+import { removeInteraction } from '../scripts/remove-interaction.mjs';
+import { removePanelStateContent } from '../scripts/remove-panel-state-content.mjs';
 import { encodeRecord, readRecords, replaceRecord } from '../scripts/rp-records.mjs';
-import { setWidgetText } from '../scripts/set-widget-text.mjs';
+import { readRp } from '../scripts/rp-read.mjs';
+import { setComboBoxOptions } from '../scripts/set-combobox-options.mjs';
+import { setListBoxOptions } from '../scripts/set-listbox-options.mjs';
+import { setMasterOverrides } from '../scripts/set-master-overrides.mjs';
+import { setPanelFitToContent } from '../scripts/set-panel-fit-to-content.mjs';
 import { setWidgetRichText } from '../scripts/set-widget-richtext.mjs';
-import { runAssemblyBridgeAsync, closeAssemblyDaemons } from '../tools/native-assembly/bridge.mjs';
+import { setWidgetText } from '../scripts/set-widget-text.mjs';
+import { closeAssemblyDaemons, runAssemblyBridgeAsync } from '../tools/native-assembly/bridge.mjs';
 import { JobManager } from '../scripts/jobs.mjs';
 
-test('Axure RP9 loads the output of the native authoring writers', { timeout: 180_000 }, async t => {
+const stockRp9Lib = '/Applications/Axure RP 9.app/Contents/Resources/DefaultSettings/Libraries/Default.rplib';
+
+test('Axure RP9 loads the output of the full native authoring writer matrix', { timeout: 240_000 }, async t => {
   if (process.platform !== 'darwin' || process.arch !== 'arm64') return t.skip('Requires the verified macOS Axure host');
   const work = mkdtempSync(join(tmpdir(), 'zee-native-oracle-'));
   t.after(async () => {
@@ -52,6 +68,7 @@ test('Axure RP9 loads the output of the native authoring writers', { timeout: 18
     const result = await runAssemblyBridgeAsync({ command: 'inspect', version: 9, args: [path] });
     assert.deepEqual(result.rows.filter(row => row.kind === 'page').map(row => row.values[1]),
       shape.pages.map(page => page.name));
+    return { path, shape };
   };
 
   await t.test('set-widget-text', async () => {
@@ -62,24 +79,82 @@ test('Axure RP9 loads the output of the native authoring writers', { timeout: 18
     const { file } = setWidgetRichText(input, { page: 'Page 1', widget: 'Probe', paragraphs: [{ runs: [{ text: 'Rich', style: { bold: true } }] }] });
     await assertNative('set-widget-richtext', file);
   });
-  await t.test('add-interaction', async () => {
-    const { file } = addInteractions(input, 'Probe', [{ event: 'OnClick', actions: [{ type: 'wait', ms: 20 }] }]);
-    await assertNative('add-interaction', file);
+  await t.test('name-widget', async () => {
+    const pageRec = readRp(input).pages[0];
+    const { file } = setWidgetNames(input, [{ record: pageRec.record, id: pageRec.widgets[0].id, name: 'RenamedProbe' }]);
+    await assertNative('name-widget', file);
+  });
+  await t.test('create-global-variable', async () => {
+    const { file } = createGlobalVariable(input, 'OracleCounter', { defaultValue: '42' });
+    await assertNative('create-global-variable', file);
+  });
+  await t.test('create-blank-page', async () => {
+    const { file } = createBlankPage(input, 'Blank Page 2');
+    await assertNative('create-blank-page', file);
+  });
+  await t.test('duplicate-page', async () => {
+    const { file } = duplicatePage(input, 'Page 1', 'Copied Page');
+    await assertNative('duplicate-page', file);
+  });
+  await t.test('add-interaction and remove-interaction', async () => {
+    const { file: withIx } = addInteractions(input, 'Probe', [{ event: 'OnClick', actions: [{ type: 'wait', ms: 20 }] }]);
+    await assertNative('add-interaction', withIx);
+    const { file: removedIx } = removeInteraction(withIx, 'Probe', { event: 'OnClick' });
+    await assertNative('remove-interaction', removedIx);
+  });
+  await t.test('add-click-link', async () => {
+    const { file } = addClickLink(input, 'Probe', 'https://example.com', 'new');
+    await assertNative('add-click-link', file);
   });
   await t.test('merge-pages', async () => {
     const merged = mergePages([{ buf: input }, { buf: input, name: 'Second' }]);
     await assertNative('merge-pages', merged);
   });
-  await t.test('place-master', async () => {
-    const source = fileURLToPath(new URL('./fixtures/rp1-master-adaptive.json', import.meta.url));
-    const report = generatePrototype({ source, output: pathFor('master-source'), cwd: work });
-    assert.equal(report.status, 'completed', JSON.stringify(report.diagnostics));
-    const masterProject = readFileSync(report.output);
-    const summary = readRp(masterProject);
-    const check = placeMaster(masterProject, { masterName: summary.sitemap.masters[0].name, pageIndex: summary.pages[0].record });
-    await assertNative('place-master', check.file);
+  await t.test('rename-custom-style and rebind-widgets', async () => {
+    const styles = listCustomStyles(input);
+    const { file: renamed } = renameCustomStyle(input, styles[0].name, 'Oracle Heading');
+    await assertNative('rename-custom-style', renamed);
+    const { file: rebound } = rebindWidgets(renamed, styles[0].guid, () => true);
+    await assertNative('rebind-widgets', rebound);
   });
-  await t.test('create-panel-clone and fill-panel-state', async sub => {
+  await t.test('add-adaptive-view', async () => {
+    const script = fileURLToPath(new URL('../scripts/add-adaptive-view.mjs', import.meta.url));
+    const out = pathFor('add-adaptive-view');
+    const res = spawnSync(process.execPath, [script, pathFor('source'), out, '768', '--override', 'V768:Probe:w=320'], { encoding: 'utf8' });
+    assert.equal(res.status, 0, res.stderr);
+    await assertNative('add-adaptive-view', readFileSync(out));
+  });
+
+  // Master writers (create-master, place-master, set-master-overrides)
+  const masterFixture = fileURLToPath(new URL('./fixtures/rp1-master-adaptive.json', import.meta.url));
+  const masterGen = generatePrototype({ source: masterFixture, output: pathFor('master-source'), cwd: work });
+  assert.equal(masterGen.status, 'completed', JSON.stringify(masterGen.diagnostics));
+  const masterProject = readFileSync(masterGen.output);
+  const masterSummary = readRp(masterProject);
+  const masterName = masterSummary.sitemap.masters[0].name;
+
+  await t.test('create-master', async () => {
+    const { file } = duplicateMaster(masterProject, masterName, 'Copied Master');
+    await assertNative('create-master', file);
+  });
+  await t.test('place-master and set-master-overrides', async () => {
+    const placed = placeMaster(masterProject, { masterName, pageIndex: masterSummary.pages[0].record });
+    await assertNative('place-master', placed.file);
+    const placedSummary = readRp(placed.file, { includeMasterWidgets: true });
+    const pageMeta = placedSummary.pages[0];
+    const rdo = pageMeta.widgets.find(w => w.type === 'ReferenceDiagramObject');
+    const masterWidget = placedSummary.containedWidgets.find(w => w.container[0]?.startsWith('母版:') && w.type === 'VectorShape' && w.name);
+    if (rdo && masterWidget) {
+      const overridden = setMasterOverrides(placed.file, {
+        record: pageMeta.record,
+        instanceId: rdo.id,
+        overrides: [{ targetGuid: masterWidget.guid, text: 'Overridden' }],
+      });
+      await assertNative('set-master-overrides', overridden.file);
+    }
+  });
+
+  await t.test('create-panel-clone, fill-panel-state, set-panel-fit-to-content, remove-panel-state-content', async sub => {
     const template = panelTemplate(blank);
     if (!existsSync(template)) return sub.skip('Axure installation has no panel fixture');
     const local = pathFor('panel-template');
@@ -92,9 +167,67 @@ test('Axure RP9 loads the output of the native authoring writers', { timeout: 18
       if (prior === undefined) delete process.env.AXURE_PANEL_TEMPLATE;
       else process.env.AXURE_PANEL_TEMPLATE = prior;
     }
-    await assertNative('create-panel-clone', panel);
-    const filled = fillPanelState(input, panel, { sourcePage: 'Page 1', targetPage: 'Page 1', panel: 'Probe panel', state: 'Initial' }).file;
+    const { shape: panelShape } = await assertNative('create-panel-clone', panel);
+    const panelWidget = panelShape.pages[0].widgets.find(w => w.type === 'DynamicPanel');
+    const fitPanel = setPanelFitToContent(panel, { record: panelShape.pages[0].record, widgetId: panelWidget.id, enabled: true }).file;
+    await assertNative('set-panel-fit-to-content', fitPanel);
+    const filled = fillPanelState(input, fitPanel, { sourcePage: 'Page 1', targetPage: 'Page 1', panel: 'Probe panel', state: 'Initial' }).file;
     await assertNative('fill-panel-state', filled);
+    const cleared = removePanelStateContent(filled, { page: 'Page 1', panel: 'Probe panel', state: 'Initial', all: true }).file;
+    await assertNative('remove-panel-state-content', cleared);
+  });
+
+  await t.test('native form and library writers (clone-library-widget, set-combobox-options, set-listbox-options, set-native-table)', async sub => {
+    const formsGen = generatePrototype({
+      rp1: [
+        'rp/1 target=9 name="OracleForms"',
+        'page #home name="Home"',
+        '  box #root [360x300] layout=column gap=12 padding=16',
+        '    listbox #lb [200x100] options=["X","Y","Z"]',
+      ].join('\n'),
+      output: pathFor('forms-source'),
+      cwd: work,
+    });
+    assert.equal(formsGen.status, 'completed', JSON.stringify(formsGen.diagnostics));
+    const formsInfo = readRp(readFileSync(formsGen.output), { includeWidgets: true });
+    const lbName = formsInfo.pages[0].widgets.find(w => w.type === 'ListBox')?.name;
+    assert.ok(lbName, 'Expected ListBox widget in forms-source');
+    const lbOut = pathFor('set-listbox-options');
+    setListBoxOptions(formsGen.output, lbOut, 'Home', lbName, ['Alpha', 'Beta', 'Gamma'], { multiple: true, selectedIndices: [0, 2] });
+    await assertNative('set-listbox-options', readFileSync(lbOut));
+
+    if (!existsSync(stockRp9Lib)) return sub.skip('No stock RP9 Default.rplib on host');
+    const localLib = join(work, 'Default.rplib');
+    copyFileSync(stockRp9Lib, localLib);
+    const clonedOut = pathFor('clone-library-widget');
+    cloneLibraryWidget(localLib, blankPath, clonedOut, {
+      sourcePageName: 'Box 1', targetPageName: 'Page 1', name: 'ClonedBox', x: 30, y: 30, width: 120, height: 50,
+    });
+    await assertNative('clone-library-widget', readFileSync(clonedOut));
+
+    const cbSrc = pathFor('combobox-src');
+    cloneLibraryWidget(localLib, blankPath, cbSrc, {
+      sourcePageName: 'Droplist', targetPageName: 'Page 1', name: 'OracleCombo', x: 20, y: 20,
+    });
+    const cbOut = pathFor('set-combobox-options');
+    setComboBoxOptions(cbSrc, cbOut, 'Page 1', 'OracleCombo', ['One', 'Two', 'Three'], { selectedIndex: 1 });
+    await assertNative('set-combobox-options', readFileSync(cbOut));
+
+    const tableSrc = pathFor('table-src');
+    cloneLibraryPageContent(localLib, blankPath, tableSrc, {
+      sourcePageName: 'Table', targetPageName: 'Page 1', x: 20, y: 20,
+    });
+    const tableSpec = join(work, 'table.json');
+    writeFileSync(tableSpec, JSON.stringify({
+      cells: [['Col1', 'Col2'], ['Val1', 'Val2']],
+      rowHeights: [32, 32],
+      columnWidths: [110, 110],
+    }));
+    const tableOut = pathFor('set-native-table');
+    const tableScript = fileURLToPath(new URL('../scripts/set-native-table.mjs', import.meta.url));
+    const tableRes = spawnSync(process.execPath, [tableScript, tableSrc, tableOut, tableSpec], { encoding: 'utf8' });
+    assert.equal(tableRes.status, 0, tableRes.stderr);
+    await assertNative('set-native-table', readFileSync(tableOut));
   });
 });
 

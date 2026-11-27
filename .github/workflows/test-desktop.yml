@@ -34,5 +34,10 @@ jobs:
       - run: node --test test/studio-startup-normalization-check.mjs
       - run: npm run test:layers
       - run: npm run test:studio-parity
+      - run: npm run test:diff-rp
+      - run: npm run test:repair-rp
+      - run: npm run test:downgrade-rp
+      - run: npm run test:build-library
+      - run: npm run test:mcp-budget
       - run: npm run test:language
       - run: npm run test:source-contract

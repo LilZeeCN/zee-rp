@@ -66,7 +66,7 @@ try {
     assert.equal(desc.command, 'create-global-variable');
     assert.match(run('bin/axure.mjs', ['create-global-variable', '--help']).stdout, /--default-value/);
   });
-  check('MCP tool names are unique (30 tools) and rp_command covers all 34 CLI commands', () => {
+  check('MCP tool names are unique (30 tools) and rp_command covers all registered CLI commands', () => {
     const tools = [...listMcpTools(), ...jobTools];
     assert.equal(tools.length, 30);
     assert.equal(new Set(tools.map(t => t.name)).size, tools.length);

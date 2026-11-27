@@ -1,15 +1,20 @@
 // Shared structural validation for public MCP input and Studio commands.
 // Semantic constraints (targets, layout, events and resources) remain in their consumers.
-export function validateInput(schema, value, at = 'arguments') {
+export function validateInput(schema, value, at = 'arguments', root = schema) {
   if (schema === true || schema === undefined) return;
   if (schema === false) throw new Error(`${at} 不接受该值`);
+  if (typeof schema.$ref === 'string' && schema.$ref.startsWith('#/')) {
+    let target = root;
+    for (const seg of schema.$ref.slice(2).split('/')) target = target?.[seg];
+    if (target && typeof target === 'object') return validateInput(target, value, at, root);
+  }
   if (Object.hasOwn(schema, 'const') && JSON.stringify(value) !== JSON.stringify(schema.const)) throw new Error(`${at} 必须为 ${JSON.stringify(schema.const)}`);
   if (schema.enum && !schema.enum.some(item => JSON.stringify(item) === JSON.stringify(value))) throw new Error(`${at} 不在允许值内`);
-  const matches = branch => { try { validateInput(branch, value, at); return true; } catch { return false; } };
+  const matches = branch => { try { validateInput(branch, value, at, root); return true; } catch { return false; } };
   if (schema.not && matches(schema.not)) throw new Error(`${at} 包含互斥参数`);
   if (schema.oneOf && schema.oneOf.filter(matches).length !== 1) throw new Error(`${at} 必须满足且仅满足一种参数形式，不能混用`);
   if (schema.anyOf && !schema.anyOf.some(matches)) throw new Error(`${at} 不符合允许的参数形式`);
-  for (const branch of schema.allOf || []) validateInput(branch, value, at);
+  for (const branch of schema.allOf || []) validateInput(branch, value, at, root);
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     for (const key of schema.required || []) if (!Object.hasOwn(value, key)) throw new Error(`${at}.${key} 缺失`);
   }
@@ -23,14 +28,14 @@ export function validateInput(schema, value, at = 'arguments') {
     for (const [key, field] of Object.entries(value)) {
       const sub = schema.properties?.[key];
       if (!sub && schema.additionalProperties === false) throw new Error(`${at}.${key} 未登记`);
-      if (sub) validateInput(sub, field, `${at}.${key}`);
-      else if (schema.additionalProperties && typeof schema.additionalProperties === 'object') validateInput(schema.additionalProperties, field, `${at}.${key}`);
+      if (sub) validateInput(sub, field, `${at}.${key}`, root);
+      else if (schema.additionalProperties && typeof schema.additionalProperties === 'object') validateInput(schema.additionalProperties, field, `${at}.${key}`, root);
     }
   } else if (Array.isArray(value)) {
     if (schema.minItems !== undefined && value.length < schema.minItems) throw new Error(`${at} 至少需要 ${schema.minItems} 项`);
     if (schema.maxItems !== undefined && value.length > schema.maxItems) throw new Error(`${at} 最多允许 ${schema.maxItems} 项`);
     if (schema.uniqueItems && new Set(value.map(item => JSON.stringify(item))).size !== value.length) throw new Error(`${at} 不能包含重复项`);
-    value.forEach((item, i) => validateInput(schema.items, item, `${at}[${i}]`));
+    value.forEach((item, i) => validateInput(schema.items, item, `${at}[${i}]`, root));
   } else if (typeof value === 'number') {
     if (schema.minimum !== undefined && value < schema.minimum) throw new Error(`${at} 不能小于 ${schema.minimum}`);
     if (schema.maximum !== undefined && value > schema.maximum) throw new Error(`${at} 不能大于 ${schema.maximum}`);

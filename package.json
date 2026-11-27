@@ -92,7 +92,13 @@
     "test:studio-finish": "node --test --test-concurrency=1 test/canvas-boost-20261031-check.mjs test/canvas-fix-g7-check.mjs test/canvas-fix-g8-check.mjs test/set-interaction-var-guard-check.mjs test/studio-canvas-g3-fixes-check.mjs test/studio-canvas-g4-fixes-check.mjs test/studio-canvas-g5-fixes-check.mjs test/studio-run-scenario-hit-test-check.mjs test/studio-startup-normalization-check.mjs",
     "test:studio-parity": "node --test test/studio-command-parity-check.mjs test/studio-doc-contract-parity-check.mjs",
     "test:20261114": "node --test --test-concurrency=1 test/mcp-convergence-and-workdir-check.mjs test/studio-workflow-contract-20261114-check.mjs test/html-and-interop-check.mjs",
-    "test:layers": "node tools/check-layers.mjs"
+    "test:layers": "node tools/check-layers.mjs",
+    "test:diff-rp": "node --test test/diff-rp-check.mjs",
+    "test:browser-core": "node --test test/browser-core-check.mjs",
+    "test:repair-rp": "node --test test/repair-rp-check.mjs",
+    "test:downgrade-rp": "node --test test/downgrade-rp-check.mjs",
+    "test:build-library": "node --test test/build-library-check.mjs",
+    "test:mcp-budget": "node --test test/mcp-budget-check.mjs"
   },
   "optionalDependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
@@ -717,7 +723,19 @@
     "examples/authoring/native-blur-form.rp1.interactions.json",
     "scripts/rplang/native_program.py",
     "examples/authoring/native-calculator.rp1",
-    "examples/authoring/native-calculator.rp1.interactions.json"
+    "examples/authoring/native-calculator.rp1.interactions.json",
+    "scripts/diff-rp.mjs",
+    "scripts/rp-browser-core.mjs",
+    "scripts/repair-rp.mjs",
+    "scripts/downgrade-rp.mjs",
+    "scripts/build-library.mjs",
+    "tools/rp-inspector/index.html",
+    "test/diff-rp-check.mjs",
+    "test/browser-core-check.mjs",
+    "test/repair-rp-check.mjs",
+    "test/downgrade-rp-check.mjs",
+    "test/build-library-check.mjs",
+    "test/mcp-budget-check.mjs"
   ],
   "repository": {
     "type": "git",

@@ -13,7 +13,7 @@ const sleep = ms => new Promise(r=>setTimeout(r,ms));
 const stamp = () => new Date().toISOString();
 const safeId = id => typeof id==='string' && /^op_[0-9a-f-]{36}$/.test(id);
 
-export const OPERATION_PROPERTIES = {async:{type:'boolean',description:'true在工程内持久记录并返回句柄；结果未知时按requestKey核对，不重做'},requestKey:{type:'string',minLength:1,maxLength:200},baseRevision:{type:'integer',minimum:1}};
+export const OPERATION_PROPERTIES = {async:{type:'boolean'},requestKey:{type:'string',minLength:1,maxLength:200},baseRevision:{type:'integer',minimum:1}};
 
 export function writeOperationFile(path,value){
   mkdirSync(dirname(path),{recursive:true});const tmp=`${path}.tmp-${randomUUID()}`;

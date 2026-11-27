@@ -44,6 +44,14 @@ jobs:
       - run: npm run test:20261114
         env:
           CHROME_BIN: /usr/bin/google-chrome
+      - run: npm run test:diff-rp
+      - run: npm run test:repair-rp
+      - run: npm run test:downgrade-rp
+      - run: npm run test:build-library
+      - run: npm run test:mcp-budget
+      - run: npm run test:browser-core
+        env:
+          CHROME_BIN: /usr/bin/google-chrome
       - run: npm run test:studio-baselines
       - run: npm run test:scripted-validate
       - run: npm run test:attribution

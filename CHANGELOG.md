@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- 新增五大原生产物级工具（`scripts/diff-rp.mjs`、`scripts/rp-browser-core.mjs` + `tools/rp-inspector/index.html`、`scripts/repair-rp.mjs`、`scripts/downgrade-rp.mjs`、`scripts/build-library.mjs`）及对应 CI/门禁（`test:diff-rp`、`test:browser-core`、`test:repair-rp`、`test:downgrade-rp`、`test:build-library`、`test:mcp-budget`）。
+- `native-check` 新增 `editorReadiness`（检测版本部件与 `DocumentSettings` 升级弹窗风险）、`.rplib` 验收支持与 `--compile`（触发公式错误检测与官方 HTML 编译检查），并扩充 `test:native-oracle` 覆盖核心原生写入矩阵。
+- `diff-rp` 支持按原生 128 位 GUID 对齐比对页面、全局变量、元件几何/文本/交互树（经实测可过滤 GUI 重存导致的变量整数槽位号重排噪声）。
+- 零 `node:*` 依赖的浏览器同构解包内核 `rp-browser-core.mjs` 与零网络离线单文件 `tools/rp-inspector/index.html` Web Worker 检视器通过 headless Chrome `file://` 验证。
+- `repair-rp` 实现损坏 `.rp` 文件的跨区 CRC32 gzip 记录打捞、悬空引用修复与显式丢弃清单（不覆盖源文件）。
+- `downgrade-rp` 实现 RP11 → RP9 原生降级编译（默认拒绝不支持的 RP11 特性，`--strip-unsupported` 显式裁剪并记录台账；补齐 `PackageInfo.root-panel-infos`、`FadeWidgetInfo.vertical`、`DocumentSettings` 与版本部件，实测 9 页 689 元件与 200 元件官方示例过 `native-check --compile`、RP9 GUI 往返及 Chrome 预览）。
+- `build-library` 支持从 `.rp` / `.rp1` 编译 RP9/RP11 原生 `.rplib` 组件库（`document-type=2`、`SavedEdition=2`），衔接 `index-library` 与 `clone-library-page-content`/`clone-library-widget`。
+- 公开 MCP 工具 Schema 通过 JSON Pointer `$ref` / `$defs` 与精简描述瘦身（保留全部 30 个工具名与 13 个 `studio_*` 动词），`full` 低于 35,000 字符且单个工具均 ≤ 5,000 字符，新增 `test:mcp-budget` 永久守卫。
+
 - 官方播放器通过站点页 ID 路由。修复 RP11 重复编码中文文件名，导致明确指定的页面首帧超时，并覆盖验收脚本切页。
 - RP9/RP11 合成工程内置六级标题、段落、表单提示和表单禁用样式，沿用原厂文档样式标识及属性。
 - `gui-roundtrip.swift --quit` 向已选 Axure 实例发出正常退出请求，并等待原进程终止，保留 Axure 自己的未保存文档确认。

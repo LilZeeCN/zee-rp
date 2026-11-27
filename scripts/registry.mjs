@@ -53,8 +53,8 @@ const COMMANDS = [
   },
   {
     "command": "native-check", "script": "native-check.mjs",
-    "summary": "用本机 Axure 自己的程序集无头加载 .rp，报告 Axure 是否接受该文件（加载级；需 macOS + Axure + .NET SDK）",
-    "usage": "node native-check.mjs <file.rp> [--version 9|11] [--json]", "output": "none", "evidence": "loaded"
+    "summary": "用本机 Axure 自己的程序集无头加载 .rp/.rplib，可选 --compile 联合官方 HTML 编译与 STO 检查，附编辑器自述预检",
+    "usage": "node native-check.mjs <file.rp|file.rplib> [--version 9|11] [--compile] [--json]", "output": "none", "evidence": "loaded"
   },
   {
     "command": "create-global-variable",
@@ -278,6 +278,38 @@ const COMMANDS = [
     "evidence": "structure"
   },
   {
+    "command": "diff-rp",
+    "script": "diff-rp.mjs",
+    "summary": "语义对比两份 .rp 文件的页面、全局变量、元件与交互树差异（按原生 GUID 对齐）",
+    "usage": "node diff-rp.mjs <before.rp> <after.rp> [--json]",
+    "output": "none",
+    "evidence": "structure"
+  },
+  {
+    "command": "repair-rp",
+    "script": "repair-rp.mjs",
+    "summary": "从截断/置零/破坏 manifest 的损坏 .rp 中打捞完整记录并重建可打开文件，附丢弃清单",
+    "usage": "node repair-rp.mjs <corrupt.rp> <recovered.rp> [--json]",
+    "output": "index:3",
+    "evidence": "loaded"
+  },
+  {
+    "command": "downgrade-rp",
+    "script": "downgrade-rp.mjs",
+    "summary": "将 RP11 原型有证据门槛地降级编译为 RP9 原生 .rp（可选显式裁剪不兼容 RP11 特性）",
+    "usage": "node downgrade-rp.mjs <rp11.rp> <rp9.rp> [--strip-unsupported] [--json]",
+    "output": "index:3",
+    "evidence": "loaded"
+  },
+  {
+    "command": "build-library",
+    "script": "build-library.mjs",
+    "summary": "将 .rp 或 .rp1 编译为 RP9/RP11 原生 .rplib 组件库",
+    "usage": "node build-library.mjs <source> <output.rplib> [--version 9|11] [--json]",
+    "output": "index:3",
+    "evidence": "loaded"
+  },
+  {
     "command": "axvg build",
     "script": "axvg.mjs",
     "summary": "把布局规格 JSON 展开为完整 Axvg JSON（几何/样式编码）",
@@ -493,6 +525,62 @@ const LIB_SCRIPTS = [
         "flags": {
           "full": "--full"
         }
+      },
+      "diff-rp": {
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "before": { "type": "string", "minLength": 1 },
+            "after": { "type": "string", "minLength": 1 }
+          },
+          "required": ["before", "after"],
+          "additionalProperties": false
+        },
+        "positionals": ["before", "after"],
+        "constants": ["--json"]
+      },
+      "repair-rp": {
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "source": { "type": "string", "minLength": 1 },
+            "output": { "type": "string", "minLength": 1 }
+          },
+          "required": ["source", "output"],
+          "additionalProperties": false
+        },
+        "positionals": ["source", "output"],
+        "constants": ["--json"]
+      },
+      "downgrade-rp": {
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "source": { "type": "string", "minLength": 1 },
+            "output": { "type": "string", "minLength": 1 },
+            "stripUnsupported": { "type": "boolean" }
+          },
+          "required": ["source", "output"],
+          "additionalProperties": false
+        },
+        "positionals": ["source", "output"],
+        "flags": { "stripUnsupported": "--strip-unsupported" },
+        "constants": ["--json"]
+      },
+      "build-library": {
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "source": { "type": "string", "minLength": 1 },
+            "output": { "type": "string", "minLength": 1 },
+            "version": { "type": "integer", "enum": [9, 11] }
+          },
+          "required": ["source", "output"],
+          "additionalProperties": false
+        },
+        "positionals": ["source", "output"],
+        "options": { "version": "--version" },
+        "constants": ["--json"]
       },
       "set-widget-text": {
         "inputSchema": {
@@ -783,6 +871,11 @@ const LIB_SCRIPTS = [
   {
     "script": "rp-records.mjs",
     "summary": ".rp 记录流读写核心库（manifest/记录解析/替换/插入/追加），无 CLI 入口",
+    "evidence": "internal"
+  },
+  {
+    "script": "rp-browser-core.mjs",
+    "summary": "零 Node 依赖浏览器同构 .rp/.rplib 解析与语义对比核心库（DecompressionStream + Uint8Array）",
     "evidence": "internal"
   },
   {

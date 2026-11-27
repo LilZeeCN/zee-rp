@@ -1,0 +1,972 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>zee-rp · 本地离线 .rp 透视与版本对比台</title>
+<style>
+  :root {
+    --bg: #0b0f17; --surface: #121824; --surface2: #1a2234; --border: #27324a;
+    --text: #e2e8f0; --muted: #8b9bb4; --brand: #38bdf8; --ok: #10b981; --warn: #f59e0b; --err: #ef4444;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+  header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 600; font-size: 14px; }
+  .badge { font-size: 11px; padding: 2px 8px; border-radius: 999px; background: rgba(16, 185, 129, 0.14); color: var(--ok); border: 1px solid rgba(16, 185, 129, 0.35); }
+  .controls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .btn { cursor: pointer; background: var(--surface2); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 12px; font-size: 12px; }
+  .btn:hover { border-color: var(--brand); }
+  .btn.primary { background: rgba(56, 189, 248, 0.15); border-color: var(--brand); color: #7dd3fc; }
+  input[type=file] { display: none; }
+  .workspace { flex: 1; display: grid; grid-template-columns: 260px 1fr 340px; min-height: 0; }
+  aside, section.right { background: var(--surface); overflow-y: auto; padding: 12px; }
+  aside { border-right: 1px solid var(--border); }
+  section.right { border-left: 1px solid var(--border); }
+  main { overflow: auto; padding: 16px; display: flex; flex-direction: column; gap: 12px; background: #080b11; }
+  h3 { margin: 0 0 8px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+  .tree-item { padding: 6px 8px; border-radius: 6px; cursor: pointer; font-size: 12px; display: flex; justify-content: space-between; align-items: center; }
+  .tree-item:hover { background: var(--surface2); }
+  .tree-item.active { background: rgba(56, 189, 248, 0.16); color: #7dd3fc; }
+  .pill { font-size: 10px; color: var(--muted); background: var(--surface2); padding: 1px 6px; border-radius: 999px; }
+  .dropzone { border: 1.5px dashed var(--border); border-radius: 10px; padding: 28px; text-align: center; color: var(--muted); font-size: 13px; background: rgba(18,24,36,0.5); }
+  .dropzone.drag { border-color: var(--brand); background: rgba(56, 189, 248, 0.08); color: var(--text); }
+  .stage { position: relative; background: #ffffff; color: #111827; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.45); margin: 0 auto; overflow: hidden; }
+  .wbox { position: absolute; border: 1px solid rgba(37, 99, 235, 0.45); background: rgba(59, 130, 246, 0.06); font-size: 11px; overflow: hidden; cursor: pointer; display: flex; align-items: center; justify-content: center; text-align: center; padding: 2px; color: #1e293b; }
+  .wbox:hover { border-color: #0284c7; background: rgba(14, 165, 233, 0.16); }
+  .wbox.sel { border: 2px solid #0284c7; background: rgba(14, 165, 233, 0.22); z-index: 10; }
+  .kv { font-size: 12px; border-bottom: 1px solid var(--border); padding: 6px 0; display: flex; justify-content: space-between; gap: 8px; }
+  .kv span:first-child { color: var(--muted); }
+  .kv code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: #cbd5e1; word-break: break-all; }
+  .ix-card { background: var(--surface2); border: 1px solid var(--border); border-radius: 6px; padding: 8px; margin-top: 8px; font-size: 12px; }
+  .search { width: 100%; background: var(--surface2); border: 1px solid var(--border); color: var(--text); border-radius: 6px; padding: 6px 8px; font-size: 12px; margin-bottom: 8px; }
+  .diff-item { padding: 8px 10px; border-radius: 6px; background: var(--surface2); border-left: 3px solid var(--brand); margin-bottom: 6px; font-size: 12px; }
+  .diff-item.add { border-color: var(--ok); }
+  .diff-item.rem { border-color: var(--err); }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#38bdf8" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="3"/><path d="M9 3v18M3 9h18"/></svg>
+    <span>zee-rp · 离线 .rp 透视与版本对比台</span>
+    <span class="badge">100% 本地 Web Worker · 零上传</span>
+  </div>
+  <div class="controls">
+    <label class="btn primary">打开主文件 (.rp/.rplib)<input id="fileA" type="file" accept=".rp,.rplib" /></label>
+    <label class="btn">对比新版 (.rp)<input id="fileB" type="file" accept=".rp" /></label>
+    <button id="toggleDiff" class="btn" style="display:none">切换 Diff 视图</button>
+    <span id="statusText" style="font-size:12px;color:var(--muted)">就绪</span>
+  </div>
+</header>
+<div class="workspace">
+  <aside>
+    <h3>站点地图与统计</h3>
+    <div id="summaryStats" style="font-size:12px;color:var(--muted);margin-bottom:10px">尚未加载文件</div>
+    <div id="pageTree"></div>
+    <h3 style="margin-top:16px">全局变量</h3>
+    <div id="varList" style="font-size:12px;color:var(--muted)">无</div>
+  </aside>
+  <main id="mainPane">
+    <div id="dropzone" class="dropzone">将 .rp 或 .rplib 文件拖入此处，或点击右上角选择文件。<br/>所有二进制解压与解析均在本地浏览器 Web Worker 内完成，0 网络请求。</div>
+    <div id="canvasHost" style="display:none"></div>
+    <div id="diffHost" style="display:none"></div>
+  </main>
+  <section class="right">
+    <h3>元件列表与属性</h3>
+    <input id="widgetSearch" class="search" placeholder="按名称/文本/类型过滤..." />
+    <div id="widgetList" style="max-height:220px;overflow-y:auto;margin-bottom:12px"></div>
+    <h3>选中元件详情</h3>
+    <div id="widgetDetail" style="font-size:12px;color:var(--muted)">点击画布或列表中的元件查看详情</div>
+  </section>
+</div>
+<script id="rp-worker-core" type="text/plain">
+// D2: 零依赖浏览器同构解析与语义对比核心（纯 ES2022 + Uint8Array + DataView + DecompressionStream）
+// 严禁引用任何 node:* 模块或 Buffer 全局对象；在 Node 18+、Chrome/Safari/Firefox 与 Web Worker 中完全同构运行。
+
+const UTF8_DECODER = new TextDecoder('utf-8');
+const UTF8_ENCODER = new TextEncoder();
+
+const K256 = new Uint32Array([
+  0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+  0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+  0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+  0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+  0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+  0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+  0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+  0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+]);
+
+export function sha256Hex(input) {
+  const bytes = typeof input === 'string' ? UTF8_ENCODER.encode(input) : toUint8Array(input);
+  const bitLen = bytes.length * 8;
+  const paddedLen = Math.ceil((bytes.length + 9) / 64) * 64;
+  const padded = new Uint8Array(paddedLen);
+  padded.set(bytes);
+  padded[bytes.length] = 0x80;
+  const dv = new DataView(padded.buffer);
+  dv.setUint32(paddedLen - 8, Math.floor(bitLen / 0x100000000), false);
+  dv.setUint32(paddedLen - 4, bitLen >>> 0, false);
+
+  let h0 = 0x6a09e667, h1 = 0xbb67ae85, h2 = 0x3c6ef372, h3 = 0xa54ff53a;
+  let h4 = 0x510e527f, h5 = 0x9b05688c, h6 = 0x1f83d9ab, h7 = 0x5be0cd19;
+  const w = new Uint32Array(64);
+  const rotr = (x, n) => (x >>> n) | (x << (32 - n));
+
+  for (let off = 0; off < paddedLen; off += 64) {
+    for (let i = 0; i < 16; i++) w[i] = dv.getUint32(off + i * 4, false);
+    for (let i = 16; i < 64; i++) {
+      const s0 = rotr(w[i - 15], 7) ^ rotr(w[i - 15], 18) ^ (w[i - 15] >>> 3);
+      const s1 = rotr(w[i - 2], 17) ^ rotr(w[i - 2], 19) ^ (w[i - 2] >>> 10);
+      w[i] = (w[i - 16] + s0 + w[i - 7] + s1) >>> 0;
+    }
+    let a = h0, b = h1, c = h2, d = h3, e = h4, f = h5, g = h6, h = h7;
+    for (let i = 0; i < 64; i++) {
+      const S1 = rotr(e, 6) ^ rotr(e, 11) ^ rotr(e, 25);
+      const ch = (e & f) ^ (~e & g);
+      const t1 = (h + S1 + ch + K256[i] + w[i]) >>> 0;
+      const S0 = rotr(a, 2) ^ rotr(a, 13) ^ rotr(a, 22);
+      const maj = (a & b) ^ (a & c) ^ (b & c);
+      const t2 = (S0 + maj) >>> 0;
+      h = g; g = f; f = e; e = (d + t1) >>> 0;
+      d = c; c = b; b = a; a = (t1 + t2) >>> 0;
+    }
+    h0 = (h0 + a) >>> 0; h1 = (h1 + b) >>> 0; h2 = (h2 + c) >>> 0; h3 = (h3 + d) >>> 0;
+    h4 = (h4 + e) >>> 0; h5 = (h5 + f) >>> 0; h6 = (h6 + g) >>> 0; h7 = (h7 + h) >>> 0;
+  }
+  return [h0, h1, h2, h3, h4, h5, h6, h7].map(v => v.toString(16).padStart(8, '0')).join('');
+}
+
+function toUint8Array(input) {
+  if (input instanceof Uint8Array) return input;
+  if (input instanceof ArrayBuffer) return new Uint8Array(input);
+  if (ArrayBuffer.isView(input)) return new Uint8Array(input.buffer, input.byteOffset, input.byteLength);
+  throw new TypeError('Expected Uint8Array or ArrayBuffer');
+}
+
+const u16le = (u8, off) => u8[off] | (u8[off + 1] << 8);
+const u32le = (u8, off) => (u8[off] | (u8[off + 1] << 8) | (u8[off + 2] << 16) | (u8[off + 3] << 24)) >>> 0;
+const f64le = (u8, off) => new DataView(u8.buffer, u8.byteOffset + off, 8).getFloat64(0, true);
+const utf8 = (u8, start = 0, end = u8.length) => UTF8_DECODER.decode(u8.subarray(start, end));
+
+function bytesToHex(u8) {
+  let out = '';
+  for (let i = 0; i < u8.length; i++) out += u8[i].toString(16).padStart(2, '0');
+  return out;
+}
+
+function bytesToBase64(u8) {
+  let bin = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < u8.length; i += chunk) {
+    bin += String.fromCharCode(...u8.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+function unguidKey(hex) {
+  if (typeof hex !== 'string' || hex.length !== 32) return hex;
+  return (
+    hex.slice(6, 8) + hex.slice(4, 6) + hex.slice(2, 4) + hex.slice(0, 2) +
+    hex.slice(10, 12) + hex.slice(8, 10) +
+    hex.slice(14, 16) + hex.slice(12, 14) +
+    hex.slice(16)
+  );
+}
+
+export function detectFileVersionBytes(input) {
+  const u8 = toUint8Array(input);
+  if (u8.length < 8 || u8[0] !== 0xac || u8[1] !== 0xef) throw new Error('Not an Axure .rp / .rplib container');
+  const version = u16le(u8, 2);
+  if (version !== 9 && version !== 11) throw new Error(`Unsupported Axure container version: ${version}`);
+  return version;
+}
+
+export function readManifestBytes(input) {
+  const file = toUint8Array(input);
+  const dataStart = 8 + u32le(file, 4);
+  if (file[8] !== 1) throw new Error('Unsupported manifest encoding');
+  let p = 9;
+  const varuint = () => {
+    let value = 0, shift = 0, byte;
+    do {
+      if (p >= dataStart || shift > 28) throw new Error('Invalid manifest length');
+      byte = file[p++];
+      value += (byte & 127) * 2 ** shift;
+      shift += 7;
+    } while (byte & 128);
+    return value;
+  };
+  const rawLength = varuint();
+  const compressedLength = varuint();
+  const end = p + compressedLength;
+  if (end !== dataStart) throw new Error('Manifest extent mismatch');
+  const out = new Uint8Array(rawLength);
+  let q = 0;
+  const length = initial => {
+    let result = initial, byte;
+    if (initial === 15) do {
+      if (p >= end) throw new Error('Truncated LZ4 length');
+      byte = file[p++];
+      result += byte;
+    } while (byte === 255);
+    return result;
+  };
+  while (p < end) {
+    const token = file[p++];
+    const literals = length(token >> 4);
+    if (p + literals > end || q + literals > out.length) throw new Error('Invalid LZ4 literal');
+    out.set(file.subarray(p, p + literals), q);
+    p += literals;
+    q += literals;
+    if (p === end) break;
+    if (p + 2 > end) throw new Error('Truncated LZ4 offset');
+    const offset = u16le(file, p);
+    p += 2;
+    const count = length(token & 15) + 4;
+    if (!offset || offset > q || q + count > out.length) throw new Error('Invalid LZ4 match');
+    for (let i = 0; i < count; i++) {
+      out[q] = out[q - offset];
+      q++;
+    }
+  }
+  if (q !== rawLength) throw new Error('Manifest decoded size mismatch');
+  return { dataStart, value: JSON.parse(utf8(out)) };
+}
+
+export async function gunzipBytes(slice) {
+  if (typeof DecompressionStream !== 'function') {
+    throw new Error('DecompressionStream("gzip") is unavailable in this runtime');
+  }
+  const stream = new Blob([slice]).stream().pipeThrough(new DecompressionStream('gzip'));
+  const buf = await new Response(stream).arrayBuffer();
+  return new Uint8Array(buf);
+}
+
+export function parseRecordBytes(raw) {
+  if (raw.length < 32 || u32le(raw, 20) !== 0xc351) {
+    const root = utf8(raw, 0, Math.min(100, raw.length)).match(/^<([A-Za-z][\w]*)/);
+    if (!root) throw new Error('Not an Axure record or XML record');
+    return { className: `xml:${root[1]}` };
+  }
+  const count = u32le(raw, 28);
+  const strings = [];
+  let p = 32;
+  for (let i = 0; i < count; i++) {
+    if (p + 4 > raw.length) throw new Error(`Truncated string length at ${i}`);
+    const n = u32le(raw, p);
+    p += 4;
+    if (p + n > raw.length) throw new Error(`Truncated string at ${i}`);
+    strings.push(utf8(raw, p, p + n));
+    p += n;
+  }
+  return { className: strings[0], strings, payloadStart: p };
+}
+
+export async function readRecordsAsync(input) {
+  const file = toUint8Array(input);
+  const isRp = file[0] === 0xac && file[1] === 0xef;
+  const isBareStream = !isRp && file.length > 4 && u32le(file, 4) > 0;
+  if (!isRp && !isBareStream) throw new Error('Not an Axure .rp / .rplib file');
+  const candidates = [];
+  for (let offset = isRp ? 15 : 4; offset + 18 <= file.length; offset++) {
+    if (file[offset] !== 0x1f || file[offset + 1] !== 0x8b || file[offset + 2] !== 8) continue;
+    const compressedSize = u32le(file, offset - 4);
+    if (compressedSize < 18 || offset + compressedSize > file.length) continue;
+    candidates.push({ offset, compressedSize, slice: file.subarray(offset, offset + compressedSize) });
+  }
+  const decoded = await Promise.all(candidates.map(async c => {
+    try {
+      const raw = await gunzipBytes(c.slice);
+      const parsed = parseRecordBytes(raw);
+      return { ...c, raw, parsed };
+    } catch {
+      return null;
+    }
+  }));
+  const records = [];
+  let minNextOffset = 0;
+  for (const item of decoded) {
+    if (!item || item.offset < minNextOffset) continue;
+    records.push({
+      index: records.length,
+      offset: item.offset,
+      compressedSize: item.compressedSize,
+      raw: item.raw,
+      ...item.parsed,
+    });
+    minNextOffset = item.offset + item.compressedSize;
+  }
+  return records;
+}
+
+const LAYOUTS = ['none', 'u8', 'u16', 'u32', 'u64', 'dict', 'list'];
+const OPAQUE_BYTES = { none: 0, u8: 1, u16: 2, u32: 4, u64: 8 };
+
+function parsePayloadRaw(buf, record, layouts, out) {
+  const nodes = [], objects = new Map();
+  out.nodes = nodes;
+  let p = 0;
+  const u32 = () => { const n = u32le(buf, p); p += 4; return n; };
+  const count = per => {
+    const n = u32();
+    if (n * per > buf.length - p) throw new RangeError(`Count ${n} exceeds remaining payload at ${p}`);
+    return n;
+  };
+  const val = () => {
+    const start = p, tag = u32(), n = { start, tag };
+    nodes.push(n);
+    switch (tag) {
+      case 1: n.entries = Array.from({ length: count(8) }, () => [val(), val()]); break;
+      case 2: n.items = Array.from({ length: count(4) }, () => val()); break;
+      case 3: case 0xf: case 0x12: case 5: case 8: case 0x11: case 0x14: case 0x16: n.value = u32(); break;
+      case 4: { const size = count(1); n.value = bytesToBase64(buf.subarray(p, p + size)); p += size; break; }
+      case 6: n.rawNumber = bytesToHex(buf.subarray(p, p + 8)); n.value = f64le(buf, p); p += 8; break;
+      case 9: n.id = u32(); n.classIndex = u32(); n.className = record.strings[n.classIndex - 1]; n.body = val(); objects.set(n.id, n); break;
+      case 0x10: case 0x13: n.values = [u32(), u32()]; break;
+      case 0x19: n.value = !!buf[p++]; break;
+      case 26: case 28: case 0x1a: case 0x1c: break;
+      case 0x1d: n.value = bytesToHex(buf.subarray(p, p + 8)); p += 8; break;
+      case 0x1e: {
+        const total = count(16);
+        n.values = Array.from({ length: total }, () => {
+          const b = buf.subarray(p, p + 16);
+          p += 16;
+          return bytesToHex(b);
+        });
+        break;
+      }
+      default: {
+        const layout = layouts?.get(tag);
+        if (layout === undefined) throw Object.assign(new Error(`Unknown tag 0x${tag.toString(16)} at ${start}`), { unknownTag: tag, at: start });
+        n.layout = layout;
+        if (layout === 'dict' || layout === 'list') {
+          n.kind = 'container';
+          if (layout === 'dict') n.entries = Array.from({ length: count(8) }, () => [val(), val()]);
+          else n.items = Array.from({ length: count(4) }, () => val());
+        } else {
+          n.kind = 'opaque';
+          p += OPAQUE_BYTES[layout];
+          if (p > buf.length) throw new RangeError(`Opaque payload out of bounds at ${p}`);
+          n.raw = bytesToBase64(buf.subarray(start + 4, p));
+        }
+      }
+    }
+    n.end = p;
+    if (tag === 8) n.text = record.strings[n.value - 1];
+    return n;
+  };
+  const roots = [];
+  while (p < buf.length) roots.push(val());
+  return { roots, nodes, objects, bytes: buf.length };
+}
+
+function plausible(graph, record) {
+  const strings = record.strings.length, roots = graph.roots, tags = roots.map(n => n.tag);
+  if (tags.length < 6 || tags[0] !== 0x1e || tags[1] !== 0x1a || tags[2] !== 0xf || tags[3] !== 0x12 || tags.at(-1) !== 0x1c
+    || tags.slice(4, -1).some(tag => tag !== 9) || roots[4].className !== record.className) return false;
+  for (const n of graph.nodes) {
+    if (n.tag === 8 && (n.value < 1 || n.value > strings)) return false;
+    if (n.tag === 9 && (n.classIndex < 1 || n.classIndex > strings)) return false;
+    if (n.tag === 9 && n.body.tag !== 1) return false;
+    if (n.entries && n.entries.some(([k]) => k.tag === 1 || k.tag === 2 || k.tag === 9 || k.kind === 'container')) return false;
+  }
+  return true;
+}
+
+export function parsePayloadBytes(record) {
+  const buf = record.raw.subarray(record.payloadStart), first = {};
+  try {
+    return parsePayloadRaw(buf, record, undefined, first);
+  } catch (error) {
+    if (error.unknownTag === undefined) throw error;
+    const found = [];
+    for (const layout of LAYOUTS) {
+      let graph;
+      try { graph = parsePayloadRaw(buf, record, new Map([[error.unknownTag, layout]]), {}); } catch { continue; }
+      if (plausible(graph, record)) found.push({ layout, graph });
+    }
+    if (!found.length) throw error;
+    const node = f => f.graph.nodes.find(n => n.start === error.at);
+    if (new Set(found.map(f => node(f).end)).size > 1) throw error;
+    const opaque = found.find(f => node(f).kind === 'opaque');
+    if (!opaque && found.length > 1) throw error;
+    return (opaque ?? found[0]).graph;
+  }
+}
+
+const field = (map, name) => map?.entries?.find(([k]) => k.text === name)?.[1];
+const walkNodes = (roots, visit) => {
+  for (const n of roots) {
+    visit(n);
+    if (n.entries) for (const pair of n.entries) walkNodes(pair, visit);
+    if (n.items) walkNodes(n.items, visit);
+    if (n.body) walkNodes([n.body], visit);
+  }
+};
+
+const DOA = { POSITION: 3221225573, SIZE: 3221225577 };
+const EVENT_NAMES = new Map([
+  [16, 'OnClick'], [17, 'OnMouseEnter'], [18, 'OnMouseOut'], [19, 'OnMouseDown'], [20, 'OnMouseUp'],
+  [21, 'OnMouseMove'], [22, 'OnMouseHover'], [23, 'OnKeyDown'], [24, 'OnKeyUp'], [25, 'OnFocus'],
+  [26, 'OnLostFocus'], [27, 'OnPageLoad'], [28, 'OnLoad'], [29, 'OnTextChange'], [30, 'OnSelectionChange'],
+  [31, 'OnSelectedChange'], [33, 'OnShow'], [34, 'OnHide'], [35, 'OnPanelStateChange'], [36, 'OnDrag'],
+  [37, 'OnDragStart'], [38, 'OnDragDrop'], [39, 'OnMove'], [40, 'OnResize'], [41, 'OnSwipeLeft'],
+  [42, 'OnSwipeRight'], [43, 'OnSwipeUp'], [44, 'OnSwipeDown'], [45, 'OnLongClick'], [48, 'OnContextMenu'],
+  [55, 'OnErrorSet'], [56, 'OnErrorRemoved'], [288, 'OnDoubleClick'], [291, 'OnBeforeItemLoad'],
+]);
+const eventName = type => EVENT_NAMES.get(type) ?? `Event(${type})`;
+const guidsOf = graph => graph?.roots?.find(n => n.tag === 0x1e)?.values ?? [];
+const strOf = node => (node && node.tag === 8 ? node.text : undefined);
+const intOf = node => (node === undefined || node === null ? undefined : node.value);
+const pairValues = node => (node && Array.isArray(node.values) ? node.values : null);
+const isWidget = o => o.className.startsWith('Axure:DiagramObject:') || o.className === 'Axure:Repeater';
+const shortType = className => className.replace(/^Axure:(DiagramObject:)?/, '') || className;
+const widgetName = widget => strOf(field(field(widget.body, 'name-block') ?? {}, 'text')) ?? '';
+
+function textOf(node) {
+  if (!node) return undefined;
+  const direct = node.entries?.find(([k, v]) => k.text === 'text' && v.tag === 8)?.[1];
+  if (direct) return direct.text;
+  const parts = [];
+  walkNodes([node], n => {
+    if (n.tag !== 1 || !n.entries) return;
+    for (const [k, v] of n.entries) {
+      if (k.text === 'Text' && v.tag === 8 && v.text) parts.push(v.text);
+    }
+  });
+  return parts.join('') || undefined;
+}
+
+function geometryOf(graph, widget) {
+  const style = graph.objects.get(field(widget.body, 'MyStyle')?.value);
+  const out = { x: null, y: null, w: null, h: null };
+  for (const item of field(style?.body ?? {}, 'PropList')?.items ?? []) {
+    const name = intOf(field(item, 'DOAName'));
+    const value = field(item, 'Value');
+    if (!value || value.tag !== 1) continue;
+    if (name === DOA.POSITION) { out.x = intOf(field(value, 'X')); out.y = intOf(field(value, 'Y')); }
+    if (name === DOA.SIZE) { out.w = intOf(field(value, 'Width')); out.h = intOf(field(value, 'Height')); }
+  }
+  return out;
+}
+
+function describeAction(graph, action, widgetsByGuid, panelStates) {
+  const disabled = field(action.body, 'Disabled')?.value === true;
+  const resolveWidget = id => {
+    if (id === undefined || id === null) return undefined;
+    const local = graph.objects.get(id);
+    if (local) return local;
+    const g = guidsOf(graph)[id - 1];
+    return g ? widgetsByGuid.get(g) : undefined;
+  };
+  const targets = keys => {
+    const names = [], seen = new Set();
+    for (const key of keys) {
+      for (const item of field(action.body, key)?.items ?? []) {
+        const path = graph.objects.get(item.value);
+        if (!path) continue;
+        const id = field(path.body, 'object-id')?.value;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const w = resolveWidget(id);
+        names.push(w ? (widgetName(w) || `${shortType(w.className)}#${w.id}`) : `#${id}`);
+      }
+    }
+    return names;
+  };
+  const cls = action.className.replace(/^Axure:/, '');
+  const names = targets(['WidgetPaths', 'panelobjectpaths', 'PanelPaths', 'Paths']);
+  let type = cls, human = names.length ? `${cls} -> ${names.join('、')}` : cls;
+  if (cls === 'InteractionLinkWindowAction') {
+    const target = graph.objects.get(field(action.body, 'target')?.value);
+    const valNode = field(target?.body ?? {}, 'target-literal');
+    const valObj = valNode?.tag === 8 ? valNode.text : strOf(field(graph.objects.get(valNode?.value)?.body ?? {}, 'value'));
+    type = 'link';
+    human = `打开 ${valObj ?? '(未指定)'}`;
+  } else if (cls === 'InteractionFadeWidgetAction') {
+    const fade = graph.objects.get(field(action.body, 'FadeInfos')?.items?.[0]?.value)?.body ?? {};
+    const kind = intOf(field(fade, 'fade-action-type'));
+    type = kind === 1 ? 'show' : kind === 0 ? 'hide' : 'toggle';
+    human = `${kind === 1 ? '显示' : kind === 0 ? '隐藏' : '切换'} ${names.join('、') || '(未指定)'}`;
+  } else if (cls === 'InteractionSetPanelStateAction') {
+    const st = graph.objects.get(field(action.body, 'SetStateInfos')?.items?.[0]?.value)?.body ?? {};
+    const g = guidsOf(graph)[intOf(field(st, 'diagram-id')) - 1];
+    const sn = panelStates.get(g)?.name;
+    type = 'set-panel-state';
+    human = `设置面板 ${names.join('、')}${sn ? ` -> ${sn}` : ''}`;
+  } else if (cls === 'InteractionWaitAction') {
+    type = 'wait';
+    human = `等待 ${intOf(field(action.body, 'wait_time'))}ms`;
+  }
+  return { type, className: cls, disabled, human };
+}
+
+function readInteractions(graph, mapNode, widgetsByGuid, panelStates) {
+  const results = [];
+  if (!mapNode) return results;
+  const nodeTable = field(mapNode.body, 'node-table');
+  const target = id => {
+    const entry = nodeTable?.entries?.find(([k]) => k.value === id);
+    return entry ? graph.objects.get(entry[1].value) : undefined;
+  };
+  const tree = graph.objects.get(field(mapNode.body, 'tree')?.value);
+  const childrenOf = obj => (field(obj?.body ?? {}, 'children')?.items ?? []).map(item => graph.objects.get(item.value)).filter(Boolean);
+  for (const eventNode of childrenOf(tree)) {
+    const event = target(eventNode.id);
+    if (!event || event.className !== 'Axure:InteractionEvent') continue;
+    const cases = [];
+    for (const caseNode of childrenOf(eventNode)) {
+      const kase = target(caseNode.id);
+      if (!kase) continue;
+      const actions = childrenOf(caseNode).map(an => target(an.id)).filter(Boolean)
+        .map(a => describeAction(graph, a, widgetsByGuid, panelStates));
+      cases.push({
+        description: strOf(field(kase.body, 'Description')) ?? '',
+        disabled: field(kase.body, 'Disabled')?.value === true,
+        isNewIfGroup: field(kase.body, 'IsNewIfGroup')?.value === true,
+        actions,
+      });
+    }
+    results.push({
+      event: eventName(intOf(field(event.body, 'event-type'))),
+      eventType: intOf(field(event.body, 'event-type')),
+      disabled: field(event.body, 'Disabled')?.value === true,
+      cases,
+    });
+  }
+  return results;
+}
+
+export async function inspectRpBytes(inputBytes, { path = '(browser)' } = {}) {
+  const file = toUint8Array(inputBytes);
+  const version = detectFileVersionBytes(file);
+  const records = await readRecordsAsync(file);
+  const manifest = readManifestBytes(file);
+  const problems = [];
+  const problem = (kind, message, extra = {}) => problems.push({ kind, message, ...extra });
+
+  const graphs = new Map();
+  let parseFailures = 0;
+  for (const record of records) {
+    if (!record.strings) continue;
+    try { graphs.set(record.index, parsePayloadBytes(record)); }
+    catch (e) {
+      parseFailures++;
+      problem('unparseable-record', `${record.className} #${record.index} 解析失败：${e.message}`, { record: record.index });
+    }
+  }
+  const recordByPackageGuid = new Map();
+  for (const record of records) {
+    const g = guidsOf(graphs.get(record.index))[1];
+    if (g) recordByPackageGuid.set(g, record);
+  }
+  const recordByRel = new Map(records.map(r => [r.offset - 8 - manifest.dataStart, r]));
+  const packages = [];
+  const walkManifest = (node, p) => {
+    for (const [key, child] of Object.entries(node.children ?? {})) {
+      const rel = child.parts?.package;
+      const record = rel === undefined ? undefined : recordByRel.get(rel);
+      const entry = {
+        key, guid: unguidKey(key), path: p ? `${p}/${key}` : key,
+        parts: child.parts ?? {}, record: record?.index ?? null, className: record?.className ?? null,
+        container: Object.keys(child.children ?? {}).length > 0,
+      };
+      packages.push(entry);
+      if (rel !== undefined && !record) problem('unreadable-record', `manifest 登记了包 ${key} 但读不出记录`, { key, offset: rel });
+      walkManifest(child, entry.path);
+    }
+  };
+  walkManifest(manifest.value.root, '');
+
+  const docRecord = records.find(r => r.className === 'Axure:DesignDocument');
+  if (!docRecord) throw new Error('No Axure:DesignDocument record');
+  const docGraph = graphs.get(docRecord.index);
+  const docRoot = docGraph.objects.get(docGraph.roots.find(n => n.tag === 0xf)?.value);
+  const packageInfos = new Map();
+  for (const item of field(docRoot.body, 'PackageInfos')?.items ?? []) {
+    const info = docGraph.objects.get(item.value);
+    const values = pairValues(field(info?.body ?? {}, 'package-id'));
+    if (!values) continue;
+    packageInfos.set(values[1], {
+      name: strOf(field(info.body, 'package-name')) ?? '(未命名)',
+      kind: docRecord.strings[values[0] - 1],
+      guidIndex: values[1],
+    });
+  }
+
+  const readTreeMap = (mapField, kind) => {
+    const folders = [], items = [];
+    const mapNode = docGraph.objects.get(field(docRoot.body, mapField)?.value);
+    const nodeTable = field(mapNode?.body ?? {}, 'node-table');
+    const tree = docGraph.objects.get(field(mapNode?.body ?? {}, 'tree')?.value);
+    const metaOf = nodeId => {
+      const entry = nodeTable?.entries?.find(([k]) => k.value === nodeId);
+      const value = entry?.[1];
+      const pair = pairValues(value);
+      if (pair) {
+        const info = packageInfos.get(pair[1]);
+        return { label: info?.name ?? `(节点#${nodeId})`, kind: info?.kind, guidIndex: info?.guidIndex, folder: false };
+      }
+      if (value?.tag === 3) {
+        const folder = docGraph.objects.get(value.value);
+        return { label: strOf(field(folder?.body ?? {}, 'name')) ?? `(节点#${nodeId})`, folder: true };
+      }
+      return { label: `(节点#${nodeId})`, folder: false };
+    };
+    const visit = (node, trail) => {
+      for (const item of field(node?.body ?? {}, 'children')?.items ?? []) {
+        const child = docGraph.objects.get(item.value);
+        if (!child) continue;
+        const meta = metaOf(child.id);
+        if (meta.folder || (field(child.body, 'children')?.items ?? []).length) {
+          folders.push({ name: meta.label, folder: [...trail] });
+          visit(child, [...trail, meta.label]);
+          continue;
+        }
+        items.push({ name: meta.label, kind: meta.kind ?? kind, folder: [...trail], guidIndex: meta.guidIndex });
+      }
+    };
+    if (tree) visit(tree, []);
+    if (!items.length && !folders.length) {
+      for (const info of packageInfos.values()) if (info.kind === kind) items.push({ name: info.name, kind, folder: [], guidIndex: info.guidIndex });
+    }
+    return { items, folders };
+  };
+  const site = readTreeMap('sitemap', 'Axure:Page');
+  const masterMap = readTreeMap('mastermap', 'Axure:Master');
+  const globalVariables = [];
+  const variableSet = [...docGraph.objects.values()].find(o => o.className === 'Axure:GlobalVariableSet');
+  for (const item of field(variableSet?.body ?? {}, 'global-variables')?.items ?? []) {
+    const v = docGraph.objects.get(item.value);
+    if (v) globalVariables.push({
+      name: strOf(field(v.body, 'name')) ?? '',
+      value: strOf(field(v.body, 'default-value')) ?? '',
+      variableId: intOf(field(v.body, 'variable-id')),
+    });
+  }
+
+  const panelStates = new Map();
+  let panelStateRecords = 0;
+  for (const record of records) {
+    if (record.className !== 'Axure:PanelState') continue;
+    panelStateRecords++;
+    const graph = graphs.get(record.index);
+    if (!graph) continue;
+    const gs = guidsOf(graph);
+    const diagram = [...graph.objects.values()].find(o => o.className === 'Axure:PanelDiagram');
+    const state = { name: strOf(field(diagram?.body ?? {}, 'Name')) ?? '(未命名状态)', record: record.index };
+    for (const g of [gs[1], gs[0]]) if (g && !panelStates.has(g)) panelStates.set(g, state);
+  }
+
+  const widgetsByGuid = new Map();
+  for (const g of graphs.values()) {
+    const gs = guidsOf(g);
+    for (const o of g.objects.values()) if (isWidget(o) && gs[o.id - 1]) widgetsByGuid.set(gs[o.id - 1], o);
+  }
+
+  const describePanel = (graph, object) => {
+    const panel = field(object.body, 'panel-diagrams');
+    if (!panel) return null;
+    return (panel.items ?? []).map(item => {
+      const guidIndex = pairValues(item)?.[1] ?? item.value;
+      const state = panelStates.get(guidsOf(graph)[guidIndex - 1]);
+      return { name: state?.name ?? `(状态 ${guidIndex})`, guidIndex, record: state?.record ?? null };
+    });
+  };
+
+  let danglingRefs = 0;
+  for (const record of records) {
+    const graph = graphs.get(record.index);
+    if (!graph) continue;
+    const guidCount = guidsOf(graph).length;
+    walkNodes(graph.roots, node => {
+      if (node.tag === 3 && !graph.objects.has(node.value) && !(node.value >= 1 && node.value <= guidCount)) {
+        danglingRefs++;
+      }
+    });
+  }
+  if (danglingRefs) problem('dangling-ref', `发现 ${danglingRefs} 个悬空引用`);
+
+  const pageSummaries = [];
+  let widgetCount = 0, panelCount = 0, interactionCount = 0, actionCount = 0;
+  for (const page of site.items) {
+    const pkgGuid = page.guidIndex !== undefined ? guidsOf(docGraph)[page.guidIndex - 1] : null;
+    const record = pkgGuid ? recordByPackageGuid.get(pkgGuid) : undefined;
+    const graph = record ? graphs.get(record.index) : undefined;
+    if (!record || !graph) continue;
+    const gs = guidsOf(graph);
+    const pageObj = [...graph.objects.values()].find(o => o.className === 'Axure:Page');
+    const widgets = [];
+    for (const object of graph.objects.values()) {
+      if (!isWidget(object)) continue;
+      widgetCount++;
+      const geo = geometryOf(graph, object);
+      const panel = describePanel(graph, object);
+      if (panel) panelCount++;
+      const interactions = readInteractions(graph, graph.objects.get(field(object.body, 'InteractionMap')?.value), widgetsByGuid, panelStates);
+      interactionCount += interactions.length;
+      for (const ix of interactions) actionCount += ix.cases.reduce((n, c) => n + c.actions.length, 0);
+      widgets.push({
+        id: object.id,
+        guid: gs[object.id - 1] || null,
+        name: widgetName(object),
+        type: shortType(object.className),
+        className: object.className,
+        x: geo.x, y: geo.y, w: geo.w, h: geo.h,
+        text: textOf(field(object.body, 'RichTextBlock') ?? field(object.body, 'TextBlock')),
+        ...(panel ? { panel } : {}),
+        ...(interactions.length ? { interactions } : {}),
+      });
+    }
+    const pageInteractions = readInteractions(graph, graph.objects.get(field(pageObj?.body ?? {}, 'interactionmap')?.value), widgetsByGuid, panelStates);
+    interactionCount += pageInteractions.length;
+    for (const ix of pageInteractions) actionCount += ix.cases.reduce((n, c) => n + c.actions.length, 0);
+    pageSummaries.push({
+      name: page.name, folder: page.folder, packageGuid: pkgGuid, record: record.index,
+      interactions: pageInteractions, widgets,
+      counts: { widgets: widgets.length, dynamicPanels: widgets.filter(w => w.panel).length, interactions: widgets.reduce((n, w) => n + (w.interactions?.length ?? 0), 0) + pageInteractions.length },
+    });
+  }
+
+  return {
+    path,
+    sha256: sha256Hex(file),
+    version,
+    format: `RP${version} .rp`,
+    bytes: file.length,
+    dataStart: manifest.dataStart,
+    records: { total: records.length, parsed: graphs.size, unparseable: parseFailures },
+    packages,
+    sitemap: { pages: site.items, masters: masterMap.items, folders: site.folders },
+    globalVariables,
+    pages: pageSummaries,
+    counts: {
+      packages: packages.length, pages: site.items.length, masters: masterMap.items.length,
+      widgets: widgetCount, dynamicPanels: panelCount, panelStates: panelStateRecords,
+      interactions: interactionCount, actions: actionCount, globalVariables: globalVariables.length,
+      danglingRefs, problems: problems.length,
+    },
+    problems,
+  };
+}
+
+export async function diffRpBytes(beforeBytes, afterBytes) {
+  const [before, after] = await Promise.all([inspectRpBytes(beforeBytes, { path: 'before.rp' }), inspectRpBytes(afterBytes, { path: 'after.rp' })]);
+  const changes = { pages: [], variables: [], widgets: [], interactions: [] };
+  const pageMapA = new Map(before.pages.map(p => [p.packageGuid || p.name, p]));
+  const pageMapB = new Map(after.pages.map(p => [p.packageGuid || p.name, p]));
+  for (const [k, pA] of pageMapA) {
+    const pB = pageMapB.get(k);
+    if (!pB) { changes.pages.push({ kind: 'removed', page: pA.name }); continue; }
+    if (pA.name !== pB.name) changes.pages.push({ kind: 'modified', page: pB.name, before: pA.name, after: pB.name });
+    const wA = new Map(pA.widgets.map(w => [w.guid || w.name || `${w.type}:${w.x},${w.y}`, w]));
+    const wB = new Map(pB.widgets.map(w => [w.guid || w.name || `${w.type}:${w.x},${w.y}`, w]));
+    for (const [wk, a] of wA) {
+      const b = wB.get(wk);
+      if (!b) { changes.widgets.push({ kind: 'removed', page: pB.name, widget: a.name || `#${a.id}`, type: a.type }); continue; }
+      const diff = {};
+      if (a.name !== b.name) diff.name = { before: a.name, after: b.name };
+      if ((a.text ?? '') !== (b.text ?? '')) diff.text = { before: a.text ?? '', after: b.text ?? '' };
+      if (a.x !== b.x || a.y !== b.y || a.w !== b.w || a.h !== b.h) diff.geometry = { before: [a.x, a.y, a.w, a.h], after: [b.x, b.y, b.w, b.h] };
+      if (Object.keys(diff).length) changes.widgets.push({ kind: 'modified', page: pB.name, widget: b.name || `#${b.id}`, type: b.type, changes: diff });
+      if (JSON.stringify(a.interactions ?? []) !== JSON.stringify(b.interactions ?? [])) {
+        changes.interactions.push({ page: pB.name, widget: b.name || `#${b.id}`, before: a.interactions ?? [], after: b.interactions ?? [] });
+      }
+    }
+    for (const [wk, b] of wB) if (!wA.has(wk)) changes.widgets.push({ kind: 'added', page: pB.name, widget: b.name || `#${b.id}`, type: b.type });
+  }
+  for (const [k, pB] of pageMapB) if (!pageMapA.has(k)) changes.pages.push({ kind: 'added', page: pB.name });
+  const vA = new Map(before.globalVariables.map(v => [v.name, v.value]));
+  const vB = new Map(after.globalVariables.map(v => [v.name, v.value]));
+  for (const [name, val] of vA) {
+    if (!vB.has(name)) changes.variables.push({ kind: 'removed', name, beforeValue: val });
+    else if (vB.get(name) !== val) changes.variables.push({ kind: 'modified', name, beforeValue: val, afterValue: vB.get(name) });
+  }
+  for (const [name, val] of vB) if (!vA.has(name)) changes.variables.push({ kind: 'added', name, afterValue: val });
+  const totalChanges = changes.pages.length + changes.variables.length + changes.widgets.length + changes.interactions.length;
+  return { ok: true, hasChanges: totalChanges > 0, totalChanges, before: before.counts, after: after.counts, changes };
+}
+
+</script>
+<script>
+(() => {
+  const coreSource = document.getElementById("rp-worker-core").textContent.replace(/^export\s+/gm, "");
+  const workerGlue = `
+self.onmessage = async (ev) => {
+  const { id, op, a, b, nameA } = ev.data;
+  try {
+    const t0 = performance.now();
+    if (op === "inspect") {
+      const report = await inspectRpBytes(new Uint8Array(a), { path: nameA || "local.rp" });
+      self.postMessage({ id, ok: true, report, elapsedMs: performance.now() - t0 });
+    } else if (op === "diff") {
+      const diff = await diffRpBytes(new Uint8Array(a), new Uint8Array(b));
+      self.postMessage({ id, ok: true, diff, elapsedMs: performance.now() - t0 });
+    } else {
+      throw new Error("Unknown op: " + op);
+    }
+  } catch (err) {
+    self.postMessage({ id, ok: false, error: err && err.message ? err.message : String(err) });
+  }
+};
+`;
+  const workerUrl = URL.createObjectURL(new Blob([coreSource + "\n" + workerGlue], { type: "text/javascript" }));
+  const worker = new Worker(workerUrl);
+  let seq = 0;
+  const pending = new Map();
+  worker.onmessage = (ev) => {
+    const { id, ok, error, ...rest } = ev.data;
+    const entry = pending.get(id);
+    if (!entry) return;
+    pending.delete(id);
+    if (ok) entry.resolve(rest);
+    else entry.reject(new Error(error));
+  };
+  const callWorker = (payload, transfers = []) => new Promise((resolve, reject) => {
+    const id = ++seq;
+    pending.set(id, { resolve, reject });
+    worker.postMessage({ id, ...payload }, transfers);
+  });
+  const b64ToBuf = (b64) => {
+    const bin = atob(b64);
+    const u8 = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) u8[i] = bin.charCodeAt(i);
+    return u8.buffer;
+  };
+
+  let state = { bytesA: null, bytesB: null, report: null, diff: null, activePageIdx: 0, activeWidgetId: null, showDiff: false };
+  const $ = id => document.getElementById(id);
+
+  function render() {
+    const r = state.report;
+    if (!r) return;
+    $("dropzone").style.display = "none";
+    $("summaryStats").textContent = `RP${r.version} · ${r.counts.pages} 页 · ${r.counts.widgets} 元件 · ${r.counts.interactions} 交互 · 问题 ${r.counts.problems}`;
+    $("pageTree").innerHTML = "";
+    r.pages.forEach((p, idx) => {
+      const el = document.createElement("div");
+      el.className = "tree-item" + (idx === state.activePageIdx && !state.showDiff ? " active" : "");
+      el.innerHTML = `<span>${p.name}</span><span class="pill">${p.counts.widgets}</span>`;
+      el.onclick = () => { state.showDiff = false; state.activePageIdx = idx; state.activeWidgetId = null; render(); };
+      $("pageTree").appendChild(el);
+    });
+    $("varList").innerHTML = r.globalVariables.length
+      ? r.globalVariables.map(v => `<div class="kv"><span>${v.name}</span><code>${JSON.stringify(v.value)}</code></div>`).join("")
+      : "无";
+
+    $("toggleDiff").style.display = state.diff ? "inline-block" : "none";
+    if (state.showDiff && state.diff) {
+      $("canvasHost").style.display = "none";
+      $("diffHost").style.display = "block";
+      const d = state.diff;
+      const items = [
+        ...d.changes.pages.map(c => `<div class="diff-item ${c.kind==="added"?"add":c.kind==="removed"?"rem":""}">[页面 ${c.kind}] ${c.page}</div>`),
+        ...d.changes.variables.map(v => `<div class="diff-item">[变量 ${v.kind}] ${v.name}: ${JSON.stringify(v.beforeValue)} -> ${JSON.stringify(v.afterValue)}</div>`),
+        ...d.changes.widgets.map(w => `<div class="diff-item ${w.kind==="added"?"add":w.kind==="removed"?"rem":""}">[元件 ${w.kind}] ${w.page} / ${w.widget}: ${JSON.stringify(w.changes || w.type)}</div>`),
+        ...d.changes.interactions.map(ix => `<div class="diff-item">[交互变更] ${ix.page} / ${ix.widget}</div>`),
+      ];
+      $("diffHost").innerHTML = `<h3>语义对比结果：共 ${d.totalChanges} 处变更</h3>` + (items.length ? items.join("") : "<div class=\"diff-item\">两份文件无结构变更（0 噪音）</div>");
+    } else {
+      $("diffHost").style.display = "none";
+      $("canvasHost").style.display = "block";
+      const page = r.pages[state.activePageIdx];
+      if (page) {
+        let maxX = 420, maxY = 720;
+        for (const w of page.widgets) {
+          if (Number.isFinite(w.x) && Number.isFinite(w.w)) maxX = Math.max(maxX, w.x + w.w + 24);
+          if (Number.isFinite(w.y) && Number.isFinite(w.h)) maxY = Math.max(maxY, w.y + w.h + 24);
+        }
+        const stage = document.createElement("div");
+        stage.className = "stage";
+        stage.style.width = Math.min(1200, maxX) + "px";
+        stage.style.height = Math.min(2000, maxY) + "px";
+        for (const w of page.widgets) {
+          if (!Number.isFinite(w.x) || !Number.isFinite(w.y) || !Number.isFinite(w.w) || !Number.isFinite(w.h)) continue;
+          const box = document.createElement("div");
+          box.className = "wbox" + (w.id === state.activeWidgetId ? " sel" : "");
+          box.style.left = w.x + "px"; box.style.top = w.y + "px";
+          box.style.width = Math.max(4, w.w) + "px"; box.style.height = Math.max(4, w.h) + "px";
+          box.textContent = w.text || w.name || w.type;
+          box.onclick = () => { state.activeWidgetId = w.id; render(); };
+          stage.appendChild(box);
+        }
+        $("canvasHost").innerHTML = "";
+        $("canvasHost").appendChild(stage);
+
+        const q = $("widgetSearch").value.trim().toLowerCase();
+        const filtered = page.widgets.filter(w => !q || (w.name || "").toLowerCase().includes(q) || (w.text || "").toLowerCase().includes(q) || w.type.toLowerCase().includes(q));
+        $("widgetList").innerHTML = "";
+        for (const w of filtered.slice(0, 150)) {
+          const item = document.createElement("div");
+          item.className = "tree-item" + (w.id === state.activeWidgetId ? " active" : "");
+          item.innerHTML = `<span>${w.name || "#" + w.id}</span><span class="pill">${w.type}</span>`;
+          item.onclick = () => { state.activeWidgetId = w.id; render(); };
+          $("widgetList").appendChild(item);
+        }
+        const sel = page.widgets.find(w => w.id === state.activeWidgetId) || filtered[0];
+        if (sel) {
+          $("widgetDetail").innerHTML =
+            `<div class="kv"><span>名称</span><code>${sel.name || "(未命名)"}</code></div>` +
+            `<div class="kv"><span>类型</span><code>${sel.className}</code></div>` +
+            `<div class="kv"><span>GUID</span><code>${sel.guid || "-"}</code></div>` +
+            `<div class="kv"><span>几何</span><code>x=${sel.x}, y=${sel.y}, w=${sel.w}, h=${sel.h}</code></div>` +
+            (sel.text ? `<div class="kv"><span>文本</span><code>${sel.text}</code></div>` : "") +
+            (sel.interactions?.length ? sel.interactions.map(ix => `<div class="ix-card"><strong>${ix.event}</strong>${ix.cases.map(c => c.actions.map(a => `<div>· ${a.human}</div>`).join("")).join("")}</div>`).join("") : "");
+        }
+      }
+    }
+  }
+
+  async function loadPrimary(buf, name) {
+    state.bytesA = buf;
+    $("statusText").textContent = "Worker 解析中...";
+    const res = await callWorker({ op: "inspect", a: buf.slice(0), nameA: name });
+    state.report = res.report;
+    state.activePageIdx = 0;
+    state.activeWidgetId = null;
+    state.showDiff = false;
+    $("statusText").textContent = `就绪（${res.elapsedMs.toFixed(1)} ms）`;
+    render();
+    return res;
+  }
+
+  async function loadDiff(buf) {
+    if (!state.bytesA) return;
+    state.bytesB = buf;
+    $("statusText").textContent = "Worker 对比中...";
+    const res = await callWorker({ op: "diff", a: state.bytesA.slice(0), b: buf.slice(0) });
+    state.diff = res.diff;
+    state.showDiff = true;
+    $("statusText").textContent = `对比完成（${res.elapsedMs.toFixed(1)} ms，${res.diff.totalChanges} 处变更）`;
+    render();
+    return res;
+  }
+
+  $("fileA").onchange = async (e) => { const f = e.target.files[0]; if (f) await loadPrimary(await f.arrayBuffer(), f.name); };
+  $("fileB").onchange = async (e) => { const f = e.target.files[0]; if (f) await loadDiff(await f.arrayBuffer()); };
+  $("toggleDiff").onclick = () => { state.showDiff = !state.showDiff; render(); };
+  $("widgetSearch").oninput = () => render();
+  document.body.ondragover = (e) => { e.preventDefault(); $("dropzone").classList.add("drag"); };
+  document.body.ondragleave = () => $("dropzone").classList.remove("drag");
+  document.body.ondrop = async (e) => {
+    e.preventDefault();
+    $("dropzone").classList.remove("drag");
+    const f = e.dataTransfer.files[0];
+    if (f) await loadPrimary(await f.arrayBuffer(), f.name);
+  };
+
+  window.__RP_INSPECTOR__ = {
+    async inspectBase64(b64, name = "probe.rp") {
+      return loadPrimary(b64ToBuf(b64), name);
+    },
+    async diffBase64(b64A, b64B) {
+      await loadPrimary(b64ToBuf(b64A), "before.rp");
+      return loadDiff(b64ToBuf(b64B));
+    },
+  };
+})();
+</script>
+</body>
+</html>

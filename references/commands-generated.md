@@ -11,7 +11,7 @@
 | rename-custom-style | rename-custom-style.mjs | 按样式身份级联改名，更新所有记录的 MatchInfo 与 StyleCache 名称 | index:3 | gui-roundtrip |
 | rebind-widgets | rebind-widgets.mjs | 筛选元件并批量绑定文件中已有原生样式；可显式清除局部样式覆盖 | index:3 | gui-roundtrip |
 | create-blank-project | create-blank-project.mjs | 创建 RP9 / RP11 单页空白 .rp，有对应本机模板时优先使用，否则合成 | index:2 | loaded |
-| native-check | native-check.mjs | 用本机 Axure 自己的程序集无头加载 .rp，报告 Axure 是否接受该文件（加载级；需 macOS + Axure + .NET SDK） | none | loaded |
+| native-check | native-check.mjs | 用本机 Axure 自己的程序集无头加载 .rp/.rplib，可选 --compile 联合官方 HTML 编译与 STO 检查，附编辑器自述预检 | none | loaded |
 | create-global-variable | create-global-variable.mjs | 创建具名全局变量及字符串默认值（离线结构级） | index:3 | structure |
 | create-blank-page | create-blank-page.mjs | 把与输入文件同版本的空白模板 Page 记录追加到已有 .rp 生成新空白页（跨版本模板会拒绝） | index:3 | gui-roundtrip |
 | duplicate-page | duplicate-page.mjs | 按页名（或 --index 记录号）复制已有页面生成新页 | index:3 | gui-roundtrip |
@@ -40,6 +40,10 @@
 | patch-link-window | patch-link-window.mjs | 字节级改写唯一 Page 记录里链接打开方式 current/new（capabilities.md 未列，仅结构级研究工具） | index:3 | structure |
 | patch-string | patch-string.mjs | 替换唯一 Page 记录中的一个已有字符串（研究用，capabilities.md 未列） | index:3 | structure |
 | rp-read | rp-read.mjs | 只读解析 .rp 输出页面/元件/交互摘要或 JSON（含 dangling refs 检查） | none | structure |
+| diff-rp | diff-rp.mjs | 语义对比两份 .rp 文件的页面、全局变量、元件与交互树差异（按原生 GUID 对齐） | none | structure |
+| repair-rp | repair-rp.mjs | 从截断/置零/破坏 manifest 的损坏 .rp 中打捞完整记录并重建可打开文件，附丢弃清单 | index:3 | loaded |
+| downgrade-rp | downgrade-rp.mjs | 将 RP11 原型有证据门槛地降级编译为 RP9 原生 .rp（可选显式裁剪不兼容 RP11 特性） | index:3 | loaded |
+| build-library | build-library.mjs | 将 .rp 或 .rp1 编译为 RP9/RP11 原生 .rplib 组件库 | index:3 | loaded |
 | axvg build | axvg.mjs | 把布局规格 JSON 展开为完整 Axvg JSON（几何/样式编码） | flag:-o | channel-a |
 | axvg paste | axvg.mjs | 把 Axvg JSON 写入剪贴板并触发 Axure 粘贴上画布（宿主按 --version / --bundle-id 显式绑定） | none | channel-a |
 | axvg selftest | axvg.mjs | 内置几何/编码断言自检，不产出文件 | none | channel-a |
@@ -50,7 +54,7 @@
 - **rename-custom-style**：`node rename-custom-style.mjs <source.rp|rplib> <output.rp|rplib> <oldName> <newName>`
 - **rebind-widgets**：`node rebind-widgets.mjs <source.rp|rplib> <output.rp|rplib> <styleGuid> <selector.json> [--reset-overrides]`
 - **create-blank-project**：`node create-blank-project.mjs <output.rp> [--version 9|11]`
-- **native-check**：`node native-check.mjs <file.rp> [--version 9|11] [--json]`
+- **native-check**：`node native-check.mjs <file.rp|file.rplib> [--version 9|11] [--compile] [--json]`
 - **create-global-variable**：`node create-global-variable.mjs <source.rp> <output.rp> <VariableName> [--default-value "Value"]`
 - **create-blank-page**：`node create-blank-page.mjs <input.rp> <output.rp> <newPageName>`
 - **duplicate-page**：`node duplicate-page.mjs source.rp output.rp sourceName newName`
@@ -79,6 +83,10 @@
 - **patch-link-window**：`node patch-link-window.mjs <source.rp> <new.rp> <current|new>`
 - **patch-string**：`node patch-string.mjs <source.rp> <new.rp> <old string> <new string>`
 - **rp-read**：`node rp-read.mjs <file.rp> [--json] [--full]`
+- **diff-rp**：`node diff-rp.mjs <before.rp> <after.rp> [--json]`
+- **repair-rp**：`node repair-rp.mjs <corrupt.rp> <recovered.rp> [--json]`
+- **downgrade-rp**：`node downgrade-rp.mjs <rp11.rp> <rp9.rp> [--strip-unsupported] [--json]`
+- **build-library**：`node build-library.mjs <source> <output.rplib> [--version 9|11] [--json]`
 - **axvg build**：`node axvg.mjs build <spec.json> -o <out.axvg.json>`
 - **axvg paste**：`node axvg.mjs paste <file.axvg.json> [--no-menu] [--version 9|11] [--bundle-id <id>]`
 - **axvg selftest**：`node axvg.mjs selftest`
@@ -107,6 +115,7 @@
 | mcp-tools.mjs | 收敛后的 MCP 工具面（Studio / RP1 / 图片 / 会话 / 浏览器验证 / rp_inspect / rp_patch / rp_command），经 AxureSession 与原生库执行 | internal |
 | gen-capabilities.mjs | 由注册表和完整离线回归生成确定性命令文档，-o 输出新文件 | internal |
 | rp-records.mjs | .rp 记录流读写核心库（manifest/记录解析/替换/插入/追加），无 CLI 入口 | internal |
+| rp-browser-core.mjs | 零 Node 依赖浏览器同构 .rp/.rplib 解析与语义对比核心库（DecompressionStream + Uint8Array） | internal |
 | parse-payload.mjs | payload 节点树解析/编码库（parsePayload/encodePayload/field/walkNodes）；含 main guard 仅作逐记录自测打印，不面向用户 | internal |
 | clone-closure.mjs | 引用闭包计算与跨文档克隆库函数（closureOf/cloneInto），无 CLI 入口 | internal |
 | ix-actions.mjs | 交互构造核心库（45 事件枚举 + 全部动作分支序列化器），无 CLI 入口 | internal |

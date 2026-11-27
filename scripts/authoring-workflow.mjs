@@ -502,56 +502,78 @@ export async function exportPrototype({ rp, output, cwd, projectDir, baseline, i
 }
 
 const sourceSchema = { oneOf: [{ type: 'string', minLength: 1 }, { type: 'object' }], description: 'RP/1 源码 .rp1/.json 路径、JSON 对象文本或 JSON 对象。' };
+function stripSchemaDescriptions(node) {
+  if (Array.isArray(node)) return node.map(stripSchemaDescriptions);
+  if (!node || typeof node !== 'object') return node;
+  const out = {};
+  for (const [k, v] of Object.entries(node)) {
+    if (k === 'description') continue;
+    out[k] = stripSchemaDescriptions(v);
+  }
+  return out;
+}
+
+const compactVerifyStepSchema = {
+  type: 'object',
+  properties: {
+    action: { type: 'string', enum: ['click', 'fill', 'input', 'drag', 'swipe', 'wait', 'advanceTime', 'navigate', 'expect', 'assert'] },
+    target: { anyOf: [{ type: 'string', minLength: 1 }, { type: 'object' }] },
+    value: { type: 'string' },
+    page: { type: 'string', minLength: 1 },
+    ms: { type: 'number', minimum: 0 },
+    expect: { type: 'object' },
+  },
+  required: ['action'],
+};
+
 export function authoringTools({ generate, sync, listTools }) {
   return [
-    { name: 'export_prototype', description: '将现有 RP9 或 RP11 .rp 导出为 Axure 官方 HTML（含 start.html 和资源），无需打开编辑器。自动按文件版本调用本机 Axure 程序集，使用出厂发布设置。适合交付浏览器原型或为验收准备 HTML。',
+    { name: 'export_prototype', description: '按版本无头导出 RP9/RP11 .rp 为 Axure 官方 HTML。',
       inputSchema: { type: 'object', properties: {
-        rp: { type: 'string', minLength: 1, description: '现有 .rp 路径，例如 generate_prototype 返回的 output。' },
-        output: { type: 'string', minLength: 1, description: '新的 HTML 输出目录。省略则使用 .rp 旁的 <文件名>-html。' },
-        baseline: { type: 'string', minLength: 1, description: '复用指定 RP/1 基线生成稳定元件映射，省略时尝试 <rp>.baseline.json。' },
-        includeWidgetMap: { type: 'boolean', description: '默认输出逻辑 ID 与官方元件 ID 映射以复用验收脚本。' },
-        cwd: { type: 'string', minLength: 1, description: '可选工作目录，用于解析相对路径。' },
-        projectDir: { type: 'string', minLength: 1, description: 'cwd 的别名。' },
-      }, required: ['rp'], additionalProperties: false },
-      handler: exportPrototype, readOnly: false },
-    { name: 'verify_prototype', description: '零外部依赖（复用内置无头 Chrome CDP 与本地环回 HTTP）验证原型交互行为：支持 click / fill / drag / swipe / wait / advanceTime(确定性推进定时器及 Axure Now) / navigate / expect 与双引擎（auto 有本机 Axure 时自动导出官方 HTML、无 Axure 平台/环境自动降级或显式 engine="studio-html" 走 Studio 离线 HTML）；steps 同时原生兼容 studio_scenario 剧本格式（无需重写即可跨引擎复用），可选 frame:"artboard" 裁剪主画板截出干净截图与 storyboard 拼图。',
-      inputSchema: { type: 'object', properties: {
-        rp: { type: 'string', minLength: 1, description: '现有 .rp 路径；若未传 html 将自动导出官方 HTML 或（无 Axure 时）Studio HTML。' },
-        html: { type: 'string', minLength: 1, description: '已导出的官方 HTML 目录（含 start.html）或 Studio 导出 HTML 目录（含 index.html）。复用官方产物时，officialHtmlSource 为 provided，officialHtmlReady 表示官方 HTML 文件可用，verification.browserLoaded 单独报告稳定载入。' },
-        engine: { type: 'string', enum: ['auto', 'official', 'studio-html'], description: '验证引擎：auto（默认，有本机 Axure 走官方导出，否则自动切 Studio 离线 HTML）、official（仅官方导出）、studio-html（直接走 Studio 离线 HTML，秒级运行且跨平台可用）。' },
-        frame: { type: 'string', enum: ['viewport', 'artboard'], description: '截图取景模式：viewport（默认，按视口整帧截取）或 artboard（自动裁剪至页面主画板/内容包围盒，避开 Axure 播放器工具栏与外框干扰）。' },
-        baseline: { type: 'string', minLength: 1, description: '可选：匿名 .rp 的 RP/1 基线；导出的 HTML 可自动使用随附元件映射。' },
-        source: { type: 'string', minLength: 1, description: '可选 RP/1 源码路径；省略时自动读取 .rp.baseline.json 或按页面 [data-label] 匹配（若含 verify: 块且未传 steps 时自动载入）。' },
-        page: { type: 'string', minLength: 1, description: '可选起始页面 ID 或名称。' },
+        rp: { type: 'string', minLength: 1 },
+        output: { type: 'string', minLength: 1 },
+        baseline: { type: 'string', minLength: 1 },
+        includeWidgetMap: { type: 'boolean' },
         cwd: { type: 'string', minLength: 1 },
         projectDir: { type: 'string', minLength: 1 },
-        timeoutMs: { type: 'integer', minimum: 500, maximum: 120000, description: '单次重放超时（毫秒，500–120000，默认 15000）。' },
-        virtualClock: { type: 'boolean', description: 'true 时虚拟化 >=200ms 定时器与 Axure 的事件时间 Now。含 advanceTime 步骤时自动启用。' },
+      }, required: ['rp'], additionalProperties: false },
+      handler: exportPrototype, readOnly: false },
+    { name: 'verify_prototype', description: 'Chrome CDP 原型交互验收，支持官方 HTML 与 studio-html 双引擎及 studio_scenario 步骤。',
+      inputSchema: { type: 'object', properties: {
+        rp: { type: 'string', minLength: 1 },
+        html: { type: 'string', minLength: 1 },
+        engine: { type: 'string', enum: ['auto', 'official', 'studio-html'] },
+        frame: { type: 'string', enum: ['viewport', 'artboard'] },
+        baseline: { type: 'string', minLength: 1 },
+        source: { type: 'string', minLength: 1 },
+        page: { type: 'string', minLength: 1 },
+        cwd: { type: 'string', minLength: 1 },
+        projectDir: { type: 'string', minLength: 1 },
+        timeoutMs: { type: 'integer', minimum: 500, maximum: 120000, description: '超时 ms（500–120000）' },
+        virtualClock: { type: 'boolean' },
         viewport: { type: 'object', properties: {
           width: { type: 'integer', minimum: 320, maximum: 3840 },
           height: { type: 'integer', minimum: 320, maximum: 2160 },
           dpr: { type: 'number', minimum: 1, maximum: 3 },
         }, additionalProperties: false },
-        screenshot: { type: 'string', minLength: 1, description: '可选 .png 最终截图输出路径（禁止覆盖已有文件）。' },
-        includeImage: { type: 'boolean', description: 'true 时在 MCP 响应中附带最终截图 PNG。' },
-        storyboard: { type: 'string', minLength: 1, description: '可选 .png 交互时序关键帧拼图输出路径（禁止覆盖已有文件）。' },
-        includeStoryboard: { type: 'boolean', description: 'true 时在 MCP 响应中附带横向标注每步交互状态的关键帧拼图 PNG。' },
-        steps: { type: 'array', minItems: 0, maxItems: 120, items: verifyStepItemsSchema, description: '无头 Chrome 交互步骤数组（0–120 步）。' },
+        screenshot: { type: 'string', minLength: 1 },
+        includeImage: { type: 'boolean' },
+        storyboard: { type: 'string', minLength: 1 },
+        includeStoryboard: { type: 'boolean' },
+        steps: { type: 'array', minItems: 0, maxItems: 120, items: compactVerifyStepSchema, description: '验证步骤（0–120）' },
       }, additionalProperties: false },
       handler: input => verifyOfficialPreview(input, { runWorkflow, exportHtml: exportPrototype }), readOnly: false },
-    { name: 'preview_prototype', description: '在已有 ego lite 任务空间中验证真实 Axure 预览。按逻辑 ID 点击、输入并断言文字/变量/面板状态，返回实际状态、源码位置及报告截图。用 export_prototype + verify_prototype 进行无头 Chrome 验收，或先运行 gui_roundtrip(preview:true)；不接管用户空间，不把模拟当原生证据。',
+    { name: 'preview_prototype', description: '在 ego lite 空间验证真实 Axure 预览（优先使用 export_prototype + verify_prototype 做无头 Chrome 验收）。',
       inputSchema: { type: 'object', properties: {
-        source: { type: 'string', minLength: 1 }, output: { type: 'string', minLength: 1 },
-        cwd: { type: 'string', minLength: 1, description: '可选工作目录；用于解析相对路径。' },
-        projectDir: { type: 'string', minLength: 1, description: '可选工作目录（同 cwd）。' },
-        spaceId: { type: 'integer', minimum: 1 }, pageLabel: { type: 'string' }, url: { type: 'string', minLength: 1 },
+        source: { type: 'string' }, output: { type: 'string' },
+        cwd: { type: 'string' },
+        projectDir: { type: 'string' },
+        spaceId: { type: 'integer', minimum: 1 }, pageLabel: { type: 'string' }, url: { type: 'string' },
         timeoutMs: { type: 'integer', minimum: 500, maximum: 10000 },
         steps: { type: 'array', minItems: 1, maxItems: 40, items: { type: 'object', properties: {
-          action: { type: 'string', enum: ['click', 'fill', 'expect'] }, target: { type: 'string', minLength: 1 },
-          value: { type: 'string' }, rowIndex: { type: 'integer', minimum: 0 },
-          expect: { type: 'object', properties: { text: { type: 'string' }, visible: { type: 'boolean' }, panelState: { type: 'string' },
-            width: { type: 'number', minimum: 0 }, height: { type: 'number', minimum: 0 },
-            page: { type: 'string' }, variable: { type: 'string' }, equals: {} }, additionalProperties: false },
+          action: { type: 'string', enum: ['click', 'fill', 'expect'] }, target: { type: 'string' },
+          value: { type: 'string' }, rowIndex: { type: 'integer' },
+          expect: { type: 'object' },
         }, required: ['action'], additionalProperties: false } },
       }, required: ['source', 'output', 'spaceId', 'steps'], additionalProperties: false },
       handler: input => {
@@ -559,19 +581,19 @@ export function authoringTools({ generate, sync, listTools }) {
         const resolveInWork = p => (isAbsolute(p) ? p : resolve(workDir, p));
         return previewPrototype({ ...input, source: resolveInWork(input.source), output: resolveInWork(input.output) }, runWorkflow);
       }, readOnly: false },
-    { name: 'prototype_recipe', description: '查看完整 RP/1 创作范例（含原生轮播、左右滑动、拖动与输入长度）、RP/1 零算高语法速查表（cheatsheet/tokens/gotchas）、推荐修改入口和可直接调用的生成参数；不写文件。',
+    { name: 'prototype_recipe', description: '查看 RP/1 创作范例与语法速查表（只读）。',
       inputSchema: { type: 'object', properties: { recipe: { type: 'string', enum: recipes.map(r => r.id) }, includeSource: { type: 'boolean' } }, additionalProperties: false },
       handler: recipeCatalog, readOnly: true },
-    { name: 'diagnose_prototype', description: '统一只读诊断与审阅入口（不改源码/不写产物）：1) 默认诊断 RP/1 source 或内联 rp1 文本（语法/语义/自适应，返回行列号、当前值与候选补丁）；2) 传 target（或 mode="binding"）解释 RP/1 元件数据绑定、依赖变量、初始值与刷新事件；3) 传图片分层 spec（或 mode="image"）审阅卡片分组、重复结构与共享样式候选。',
+    { name: 'diagnose_prototype', description: '只读诊断：静态诊断 rp1/source、解释 target 绑定或审阅图片 spec。',
       inputSchema: { type: 'object', properties: {
-        mode: { type: 'string', enum: ['diagnose', 'binding', 'image'], description: '诊断模式：diagnose（默认，RP/1 静态诊断）、binding（数据绑定与刷新链路解释）、image（图片还原 trace spec 结构审阅）。省略时按 target/spec 自动推断。' },
-        rp1: { type: 'string', minLength: 1, description: '可选：直接内联 RP/1 缩进源码文本（无需先写文件）。' },
+        mode: { type: 'string', enum: ['diagnose', 'binding', 'image'] },
+        rp1: { type: 'string' },
         source: sourceSchema,
-        target: { type: 'string', minLength: 1, description: '可选：要解释绑定的元件逻辑 ID（如 page/widget）或源码指针；提供时执行绑定解释。' },
-        spec: { oneOf: [{ type: 'string', minLength: 1 }, { type: 'object' }], description: '可选：图片还原 trace spec 路径、JSON 文本或对象；提供且无 source（或 mode="image"）时执行图片结构只读审阅。' },
-        limit: { type: 'integer', minimum: 1, maximum: 100 },
-        cwd: { type: 'string', minLength: 1 },
-        projectDir: { type: 'string', minLength: 1 },
+        target: { type: 'string' },
+        spec: { oneOf: [{ type: 'string' }, { type: 'object' }] },
+        limit: { type: 'integer' },
+        cwd: { type: 'string' },
+        projectDir: { type: 'string' },
       }, additionalProperties: false },
       handler: ({ mode, rp1, source, target, spec, limit, cwd, projectDir } = {}) => {
         const workDir = resolveWorkDir(cwd ?? projectDir);
@@ -607,20 +629,20 @@ export function authoringTools({ generate, sync, listTools }) {
         }
         return runWorkflow('diagnose', rpSource, { limit, cwd, projectDir });
       }, readOnly: true },
-    { name: 'runtime_info', description: '读取活动 MCP 版本、启动实现指纹、磁盘差异、工具清单指纹、RP9 模板与官方 HTML 导出的宿主发现结果；判断是否需要重新连接服务。',
+    { name: 'runtime_info', description: '读取 MCP 版本、实现指纹与本机 Axure 宿主发现结果。',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false }, handler: () => runtimeInfo(listTools()), readOnly: true },
-    { name: 'revise_prototype', description: '一次完成最小源码改稿、原生漂移检查、三方合并、原型生成和共同基线。支持逻辑 ID + property、结构节点增删改（add-node/remove-node/replace-node，value 支持直接传 .rp1 片段或 JSON）或 JSON Pointer 操作；output 省略或传 "auto" 时自动递增生成 -v2.rp；保留输入，输出新的源码与 .rp。冲突默认拒绝，dryRun 只返回影响。',
+    { name: 'revise_prototype', description: '最小源码改稿、漂移检查、三方合并并重编 .rp 与共同基线。',
       inputSchema: { type: 'object', properties: {
-        source: { type: 'string', minLength: 1 }, rp: { type: 'string', minLength: 1 }, output: { type: 'string', minLength: 1 }, outSource: { type: 'string', minLength: 1 },
-        cwd: { type: 'string', minLength: 1, description: '可选工作目录；用于解析相对路径或指定 auto 输出目录（默认源码目录或 process.cwd()）。' },
-        projectDir: { type: 'string', minLength: 1, description: '可选工作目录（同 cwd）。' },
+        source: { type: 'string' }, rp: { type: 'string' }, output: { type: 'string' }, outSource: { type: 'string' },
+        cwd: { type: 'string' },
+        projectDir: { type: 'string' },
         operations: { type: 'array', minItems: 1, items: { type: 'object', properties: {
           op: { type: 'string', enum: ['replace', 'add', 'remove', 'add-node', 'insert-node', 'addNode', 'remove-node', 'delete-node', 'removeNode', 'replace-node', 'replaceNode'] },
           target: { type: 'string' }, parent: { type: 'string' }, after: { type: 'string' }, before: { type: 'string' },
-          index: { oneOf: [{ type: 'integer', minimum: 0 }, { type: 'string' }] },
-          property: { type: 'string', minLength: 1 }, path: { type: 'string' }, value: {}, node: {}, oldValue: {},
+          index: { oneOf: [{ type: 'integer' }, { type: 'string' }] },
+          property: { type: 'string' }, path: { type: 'string' }, value: {}, node: {}, oldValue: {},
         }, additionalProperties: false } },
-        async: { type: 'boolean', description: 'stdio MCP 中 true 立即返回 revise-prototype 任务句柄，使用 jobs({action:"get",id}) 查询；支持 dryRun。' }, dryRun: { type: 'boolean' }, prefer: { type: 'string', enum: ['fail', 'source', 'native'] }, resolutions: { type: 'object' },
+        async: { type: 'boolean' }, dryRun: { type: 'boolean' }, prefer: { type: 'string', enum: ['fail', 'source', 'native'] }, resolutions: { type: 'object' },
         expectedHash: { type: 'string' }, expectedRpSha256: { type: 'string' },
       }, required: ['source', 'rp', 'operations'], additionalProperties: false },
       handler: input => revisePrototype(input, { generate, sync }), readOnly: false },

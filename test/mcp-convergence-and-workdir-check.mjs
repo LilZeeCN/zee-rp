@@ -38,7 +38,7 @@ function parseToolJson(res) {
   return JSON.parse(res.content[0].text);
 }
 
-test('MCP surface exposes 30 tools, folds 34 CLI commands into rp_command, and returns migration hints for retired tools', async () => {
+test('MCP surface exposes 30 tools, folds all registered CLI commands into rp_command, and returns migration hints for retired tools', async () => {
   const work = mkdtempSync(join(tmpdir(), 'zee-mcp-conv-'));
   try {
     await withMcpClient({ cwd: work }, async client => {
@@ -62,7 +62,7 @@ test('MCP surface exposes 30 tools, folds 34 CLI commands into rp_command, and r
       const descAllRes = await client.callTool({ name: 'rp_command', arguments: { action: 'describe' } });
       assert.ok(!descAllRes.isError, descAllRes.content[0].text);
       const descAll = parseToolJson(descAllRes);
-      assert.equal(descAll.count, 34);
+      assert.equal(descAll.count, listCommands().length);
       assert.deepEqual(
         descAll.commands.map(c => c.command).sort(),
         listCommands().map(c => c.command).sort()
