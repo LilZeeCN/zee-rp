@@ -4,8 +4,9 @@
 
 - 官方 HTML 验收按站点树解析指定页面的文件名。页面显示名与文件名不同的 RP11 工程可直接按页面名启动验收。
 
-- RP9 / RP11 空白工程由运行时合成，`create-blank-project`、`create-blank-page` 和 RP9 生成链在没有模板时自动使用。显式模板继续校验版本。
-- 新增 `index-library` 读取 `.rplib` 的目录、库项与顶层元件。扩展 `clone-library-widget`，支持按名称、记录号和元件 ID 选择。
+- RP9 / RP11 空白工程由运行时合成，`create-blank-project`、`create-blank-page` 和 RP9 生成链在没有模板时自动使用。合成工程写入版本历史，使两版编辑器可直接原地首存。GUI 作业记录保存落盘耗时、重试、体积及遇到的对话框。
+- 新增 `index-library`。默认提供 ≤4 KB 摘要，`--json` 提供明细，`--folder` / `--limit` 限定范围。扩展 `clone-library-widget`，支持按名称、记录号和元件 ID 选择。
+- 克隆到 RP11 时补齐 Layer、ImageBox、VectorShape 缺少的布尔 `Error` 字段，解决具备完整引用却遭原生拒收的旧跨版本写入缺陷。原生判据保留出错页 GUID 及完整异常链。
 - 新增本机 Axure 原生加载回归，覆盖交互写入、富文本、页面装配、母版和动态面板。修复常驻桥接器一次失败后拒绝执行后续请求的问题。
 
 - 新增 `zee-rp native-check <file.rp>`（`scripts/native-check.mjs`）：用本机 Axure 自己的程序集无头加载文件，报告接受 / 拒绝 / 判据不可用，拒绝时附 Axure 的原始异常。校准样本上与 GUI 真值一致；它当场推翻了一个结构测试全绿但 Axure 打不开的改动（纯字面量 manifest）。需要 macOS + Axure + .NET SDK，其他环境明确报告不可用。

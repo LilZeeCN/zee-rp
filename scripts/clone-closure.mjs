@@ -116,10 +116,9 @@ export function cloneInto({ srcGraph, srcStrings, dstGraph, dstStrings, closure,
     if (!src) continue;
     created.push(clone({ tag: 9, ...src }));
   }
-  // 跨版本克隆时（如 RP 11 源 → RP 9 目标），克隆体会原样带着 RP 11 专属键。
-  // 三零查不出这类问题，必须在落地前按目标版本裁剪。version 不传时按原样保留（旧行为）。
+  // 按目标版本增删已验证的字段。结构检查无法识别原生反序列化器要求的字段。
   const versionAdaptations = version
-    ? adaptNodesForVersion(created, { version })
+    ? adaptNodesForVersion(created, { version, str: text => ({ tag: 8, value: intern(text), text }) })
     : [];
   for (const c of created) dstGraph.objects.set(c.id, c);
   return { created, idMap, guidMap, rootNewId: idMap.get(rootOldId), versionAdaptations };

@@ -163,7 +163,7 @@ const COMMANDS = [
   {
     "command": "index-library", "script": "index-library.mjs",
     "summary": "只读列出 .rplib 的目录、库项、顶层元件名称、类型、尺寸和文字",
-    "usage": "node index-library.mjs <source.rplib> [--json]", "output": "none", "evidence": "structure"
+    "usage": "node index-library.mjs <source.rplib> [--folder <path>] [--limit <N>] [--json]", "output": "none", "evidence": "structure"
   },
   {
     "command": "clone-library-widget",

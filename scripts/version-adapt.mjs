@@ -5,9 +5,14 @@
 // 而三零检查查不出这类问题。用 scripts/version-lint.mjs 可以全量扫描发现漏网。
 import { RP11_ONLY_KEYS, RP9_TAG_OVERRIDES, RP11_ONLY_CLASSES, RP9_ENABLE_VALUES } from './version-fields.mjs';
 
+const RP11_REQUIRED_ERROR = new Set([
+  'Axure:DiagramObject:Layer',
+  'Axure:DiagramObject:ImageBox',
+  'Axure:DiagramObject:VectorShape',
+]);
+
 /**
- * 就地改写新建对象，使其符合目标版本的原生字段集。只处理目标版本为 9 的情况；
- * version 11 时原样返回（保持 RP 11 默认行为不变）。
+ * 就地改写新建对象，使其符合目标版本的原生字段集。
  *
  * @param {Array} nodes   新建对象节点（{tag:9,className,body:{entries:[[keyNode,valueNode]]}}）
  * @param {object} opts   { version, str, log }
@@ -16,8 +21,20 @@ import { RP11_ONLY_KEYS, RP9_TAG_OVERRIDES, RP11_ONLY_CLASSES, RP9_ENABLE_VALUES
  * @returns {string[]} 本次做过的适配说明
  */
 export function adaptNodesForVersion(nodes, { version, str, log = () => {} }) {
-  // str 只在改名分支里用到；目前 RP9_RENAME_INVERT 为空（REA 否定了两键互换的做法），
-  // 所以调用方可以不传。若将来真有改名规则而没传 str，这里明确报错而不是静默跳过。
+  if (version === 11 && str) {
+    const changes = new Set();
+    for (const node of nodes) {
+      if (!RP11_REQUIRED_ERROR.has(node.className)) continue;
+      const entries = node.body.entries;
+      if (entries.some(([key]) => key.text === 'Error')) continue;
+      // RP11's base reader unconditionally converts this boolean for these classes.
+      entries.push([str('Error'), { tag: 0x19, value: false }]);
+      const message = `${node.className}.Error 默认补 false（Axure RP 11 原生加载必需）`;
+      if (!changes.has(message)) log(message);
+      changes.add(message);
+    }
+    return [...changes];
+  }
   if (version !== 9) return [];
   const changes = [];
   const note = m => { changes.push(m); log(m); };

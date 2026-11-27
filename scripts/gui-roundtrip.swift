@@ -200,6 +200,17 @@ do {
         """)?.booleanValue == true
     }
 
+    func axMenuItem(_ app: NSRunningApplication, _ menuNames: [String], _ itemNames: [String]) -> AXUIElement? {
+        let axApp = AXUIElementCreateApplication(app.processIdentifier)
+        guard let bar = axAttr(axApp, kAXMenuBarAttribute as String), CFGetTypeID(bar) == AXUIElementGetTypeID() else { return nil }
+        for menu in axChildren(bar as! AXUIElement) where menuNames.contains(axTitle(menu)) {
+            for sub in axChildren(menu) {
+                for item in axChildren(sub) where itemNames.contains(axTitle(item)) { return item }
+            }
+        }
+        return nil
+    }
+
     /// 把某个已打开的文档抬到最前。Axure 只把「活动文档」暴露给可访问性 API，
     /// 并排打开两个作业时，另一个既不在 AXWindows 里也不在 System Events 的窗口列表里。
     /// 用 LaunchServices 再投递一次同一路径：宿主会把已有窗口抬起来，而不是开第二份。
@@ -223,8 +234,13 @@ do {
         guard let window = ownedWindow(app, path: path, title: docTitle) else { return false }
         if versionArg == "9" {
             raiseWindow(app, window)
-            guard pollUntil(3, { windowIsFocused(app, window) }),
-                  pressFocusedFileMenu(app, window, "关闭", "Close") else { return false }
+            guard pollUntil(3, { windowIsFocused(app, window) }) else { return false }
+            if let item = axMenuItem(app, ["文件", "File"], ["关闭", "Close"]),
+               (axAttr(item, kAXEnabledAttribute as String) as? Bool) != false,
+               windowIsFocused(app, window),
+               AXUIElementPerformAction(item, kAXPressAction as CFString) == .success,
+               pollUntil(2, { !documentWindows(app).contains(docTitle) }) { return true }
+            guard pressFocusedFileMenu(app, window, "关闭", "Close") else { return false }
             return pollUntil(8) { !documentWindows(app).contains(docTitle) }
         }
         if pressCloseButton(window), pollUntil(2, { !documentWindows(app).contains(docTitle) }) { return true }
@@ -292,7 +308,89 @@ do {
     guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundleId }) else {
         throw GuiFailure.message("\(procName) is unavailable")
     }
-    let axApp = AXUIElementCreateApplication(app.processIdentifier)
+    // Axure can show an upgrade notice even when the document window already exists.
+    // Only observe this application's windows. Never accept a dialog on behalf of a job.
+    func blockingDialog() -> String? {
+        func upgradeHint(_ text: String) -> Bool {
+            let lower = text.lowercased()
+            return lower.contains("your project has been loaded")
+                || lower.contains("save your project to a new file")
+                || lower.contains("save to a new file")
+                || text.contains("保存到新文件")
+                || text.contains("另存为新文件")
+        }
+
+        for window in axWindowList(app) {
+            let windowTitle = axTitle(window)
+            // The built-in progress window is modal while normal open/save work
+            // completes. Other documents' dialogs cannot describe this job.
+            if ["progress", "进度"].contains(windowTitle.lowercased()) { continue }
+            if documentKey(windowTitle) != title && !windowIsFocused(app, window) { continue }
+            var items = [window]
+            var inspected = 0
+            while let item = items.popLast(), inspected < 80 {
+                inspected += 1
+                let role = axAttr(item, kAXRoleAttribute as String) as? String
+                let subrole = axAttr(item, kAXSubroleAttribute as String) as? String
+                let modal = role == (kAXSheetRole as String) || (inspected == 1
+                    && (subrole == (kAXDialogSubrole as String) || (axAttr(item, "AXModal") as? Bool == true)))
+                let title = axTitle(item)
+                let value = role == (kAXStaticTextRole as String) ? axAttr(item, kAXValueAttribute as String) as? String : nil
+                let descriptions = [title, value ?? ""].filter { !$0.isEmpty }
+                if let hint = descriptions.first(where: upgradeHint) { return hint }
+                if modal {
+                    let body = axChildren(item).flatMap { child -> [String] in
+                        guard axAttr(child, kAXRoleAttribute as String) as? String == (kAXStaticTextRole as String) else { return [] }
+                        return [axTitle(child), axAttr(child, kAXValueAttribute as String) as? String ?? ""]
+                    }.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                    return body.first(where: upgradeHint) ?? body.first ?? descriptions.first
+                        ?? (windowTitle.isEmpty ? "Axure modal dialog" : windowTitle)
+                }
+                if inspected == 1 || role == (kAXGroupRole as String) || role == (kAXSplitGroupRole as String) {
+                    items.append(contentsOf: axChildren(item).prefix(25))
+                }
+            }
+        }
+        return nil
+    }
+
+    func rejectBlockingDialog() throws {
+        if let message = blockingDialog() {
+            let line = message.split(whereSeparator: \.isNewline).joined(separator: " ")
+            let diagnostic = line.trimmingCharacters(in: .whitespaces).isEmpty ? "Axure modal dialog" : line
+            FileHandle.standardError.write(Data("AXURE_GUI_MODAL \(diagnostic.prefix(400))\n".utf8))
+            captureSaveBlock()
+            try fail("Axure is waiting on a modal dialog")
+        }
+    }
+
+    func captureSaveBlock() {
+        // Some WPF/Mono dialogs only paint text. Preserve a capture of the owned Axure
+        // window if window capture is available so the real message survives cleanup.
+        let windows = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]] ?? []
+        let window = windows.first { info in
+            guard info[kCGWindowOwnerPID as String] as? Int == Int(app.processIdentifier),
+                  let name = info[kCGWindowName as String] as? String else { return false }
+            return documentKey(name) == title
+        }
+        if let id = window?[kCGWindowNumber as String] as? Int {
+            let temporary = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString + ".png")
+            let destination = URL(fileURLWithPath: path + ".blocked.png")
+            defer { try? FileManager.default.removeItem(at: temporary) }
+            let capture = Process()
+            capture.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            capture.arguments = ["-x", "-l", String(id), temporary.path]
+            capture.standardError = FileHandle.nullDevice
+            if (try? capture.run()) != nil {
+                capture.waitUntilExit()
+                if capture.terminationStatus == 0, (try? FileManager.default.copyItem(at: temporary, to: destination)) != nil {
+                    FileHandle.standardError.write(Data("AXURE_GUI_BLOCKED_SCREENSHOT \(destination.path)\n".utf8))
+                }
+            }
+        }
+        let titles = axWindowList(app).map { axTitle($0).split(whereSeparator: \.isNewline).joined(separator: " ") }.filter { !$0.isEmpty }
+        FileHandle.standardError.write(Data("AXURE_GUI_BLOCKED_WINDOWS \(titles.joined(separator: " | ").prefix(400))\n".utf8))
+    }
 
     func isOpen() -> Bool { documentWindows(app).contains(title) }
     func isTargetFocused() -> Bool {
@@ -301,7 +399,11 @@ do {
     }
     var observedDocument = false
     func focusTarget() throws {
-        try waitUntil({ isOpen() }, "Owned job document is unavailable")
+        guard pollUntil(10, { isOpen() || blockingDialog() != nil }) else {
+            try fail("Owned job document is unavailable")
+            return
+        }
+        try rejectBlockingDialog()
         if !observedDocument {
             observedDocument = true
             FileHandle.standardError.write(Data("AXURE_GUI_DOCUMENT_OPENED\n".utf8))
@@ -311,7 +413,11 @@ do {
             throw GuiFailure.message("Axure did not expose the owned document window")
         }
         raiseWindow(app, window)
-        try waitUntil(isTargetFocused, "Owned job document is not the active Axure document")
+        guard pollUntil(10, { isTargetFocused() || blockingDialog() != nil }) else {
+            try fail("Owned job document is not the active Axure document")
+            return
+        }
+        try rejectBlockingDialog()
     }
     func openTarget() throws {
         for attempt in 0..<2 {
@@ -330,39 +436,40 @@ do {
             }
         }
     }
-    func axMenuItem(_ menuNames: [String], _ itemNames: [String]) -> AXUIElement? {
-        guard let bar = axAttr(axApp, kAXMenuBarAttribute as String) else { return nil }
-        let barEl = bar as! AXUIElement
-        for m in axChildren(barEl) where menuNames.contains(axTitle(m)) {
-            for sub in axChildren(m) {
-                for item in axChildren(sub) where itemNames.contains(axTitle(item)) { return item }
-            }
-        }
-        return nil
-    }
     /// 菜单项存在且已启用。刚打开文档 / 正在保存时菜单会短暂禁用，
     /// 这时按下 AXPress 会「成功但什么都不做」，是保存静默失败的来源。
     func axMenuReady(_ menuNames: [String], _ itemNames: [String]) -> Bool {
-        guard let item = axMenuItem(menuNames, itemNames) else { return false }
+        guard let item = axMenuItem(app, menuNames, itemNames) else { return false }
         return (axAttr(item, kAXEnabledAttribute as String) as? Bool) ?? true
     }
     func axPressMenu(_ menuNames: [String], _ itemNames: [String]) -> Bool {
-        guard let item = axMenuItem(menuNames, itemNames) else { return false }
+        guard let item = axMenuItem(app, menuNames, itemNames) else { return false }
         return AXUIElementPerformAction(item, kAXPressAction as CFString) == .success
     }
     func waitMenuReady(_ chinese: String, _ english: String, timeout: TimeInterval = 10) -> Bool {
-        pollUntil(timeout) { axMenuReady(["文件", "File"], [chinese, english]) }
+        pollUntil(timeout) { axMenuReady(["文件", "File"], [chinese, english]) || blockingDialog() != nil }
     }
-    func fileAction(_ chinese: String, _ english: String) throws {
+    func fileAction(_ chinese: String, _ english: String, directFirst: Bool = false) throws -> Date {
         try focusTarget()
-        _ = waitMenuReady(chinese, english)  // 来不及启用时仍然尝试点击，由调用方的校验兜底
-        if let window = ownedWindow(app, path: path, title: title),
-           pressFocusedFileMenu(app, window, chinese, english) {
-            return
+        _ = waitMenuReady(chinese, english)
+        try rejectBlockingDialog()
+        if directFirst, let item = axMenuItem(app, ["文件", "File"], [chinese, english]), isTargetFocused() {
+            let requestedAt = Date()
+            if AXUIElementPerformAction(item, kAXPressAction as CFString) == .success {
+                return requestedAt
+            }
         }
+        if let window = ownedWindow(app, path: path, title: title),
+           windowIsFocused(app, window) {
+            let requestedAt = Date()
+            if pressFocusedFileMenu(app, window, chinese, english) { return requestedAt }
+        }
+        try rejectBlockingDialog()
+        let requestedAt = Date()
         guard isTargetFocused(), axPressMenu(["文件", "File"], [chinese, english]) else {
             throw GuiFailure.message("AX menu press failed for \(english)/\(chinese)")
         }
+        return requestedAt
     }
     guard !isOpen() else { throw GuiFailure.message("A document with this title is already open; refusing ambiguous GUI target") }
     let before = try FileManager.default.attributesOfItem(atPath: path)[.modificationDate] as? Date
@@ -380,16 +487,30 @@ do {
     // 保存必须校验：磁盘 mtime 没变就是没保存，重新聚焦再按一次（最多三次）。
     var saved = false
     for attempt in 1...3 {
-        try fileAction("保存", "Save")
-        saved = pollUntil(6) {
+        let requestedAt = try fileAction("保存", "Save", directFirst: attempt == 1)
+        var writtenAt: Date?
+        _ = pollUntil(6) {
             let after = (try? FileManager.default.attributesOfItem(atPath: path)[.modificationDate]) as? Date
-            return after != nil && after != before
+            if let after = after, after != before {
+                writtenAt = after
+                return true
+            }
+            return blockingDialog() != nil
         }
-        if saved { break }
+        try rejectBlockingDialog()
+        if let writtenAt = writtenAt {
+            saved = true
+            let ms = max(0, Int((writtenAt.timeIntervalSince(requestedAt) * 1000.0).rounded()))
+            FileHandle.standardError.write(Data("AXURE_GUI_SAVE_DISK_MS \(ms)\n".utf8))
+            break
+        }
         FileHandle.standardError.write(Data("AXURE_GUI_RETRY save (\(attempt)/3)\n".utf8))
         Thread.sleep(forTimeInterval: 0.5)
     }
-    guard saved else { throw GuiFailure.message("Native Save did not modify the owned output file") }
+    if !saved {
+        captureSaveBlock()
+        throw GuiFailure.message("Native Save did not modify the owned output file")
+    }
     phase("saved")
     guard closeDocument(app, path, title) else { throw GuiFailure.message("Owned job document did not close") }
     phase("closed")

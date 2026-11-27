@@ -180,6 +180,71 @@ function documentRecord(version, page, generators, styleGuid, typefaceGuid) {
   });
 }
 
+// Version history controls the editor's open/save path, independent of Load accepting the container.
+const editorVersions = {
+  9: { fileBuild: 1, assemblyRevision: 3754 },
+  11: { fileBuild: 0, assemblyRevision: 4137 },
+};
+
+function settingsRecord(version, pageId, styleId, typefaceId) {
+  const { fileBuild, assemblyRevision } = editorVersions[version];
+  const modern = version === 11;
+  return blankRecord(version, 'DocumentSettings', zeroGuid, context => {
+    const { fields, object, string, guids } = context;
+    guids.push(pageId, typefaceId, newGuid(), newGuid(), newGuid(), styleId);
+    const versionHistory = (Build, Revision) => list([fields({
+      Major: integer(version), Minor: integer(0), Build: integer(Build), Revision: integer(Revision),
+    })]);
+    const margin = number(modern ? 10 : 0.5);
+    return [
+      object(1, 'DocumentSettings', {
+        'collasped-page-ids': list(), 'collasped-master-folder-ids': list(),
+        'data-column-ids': list(), 'data-column-widths': list(),
+        ...(modern && { FloatingEditorLayoutInfos: dict() }),
+        'selected-tab-package-id': guid(3), 'selected-tab-object-id': guid(2),
+        'open-tab-package-ids': list(modern ? [guid(2), guid(3)] : [guid(3)]),
+        'open-tab-object-ids': list(modern ? [guid(2), guid(2)] : [guid(2)]),
+        'dpmanager-editor-package-ids': list(), 'dpmanager-editor-object-ids': list(),
+        'dpmanager-collapse-object-ids': list(), 'collasped-interaction-treeview-ids': list(),
+        IsMetric: bool(modern), IsPrintPortrait: bool(true),
+        PrintSize: fields({ Width: number(modern ? 210 : 8.5), Height: number(modern ? 297 : 11) }),
+        PrintMargins: fields({ Left: margin, Top: margin, Right: margin, Bottom: margin }),
+        PrintResolution: number(modern ? 100 / 25.4 : 100),
+        CurrentAdaptiveView: guid(4), FormatPainterStyle: ref(5), 'print-settings': ref(6),
+        ...(modern && { UploadedSitmapIds: list(), PrototypeDeleted: bool(false), ShowLastPublishedCurrentLinks: bool(false) }),
+        PrototypeId: string(''), PrototypeName: string(''), WorkspaceName: string(''),
+        LastUsedPublishAddress: string(''), LastUsedPublishHost: string(''),
+        LastUsedLoginId: string('00000000-0000-0000-0000-000000000000'),
+        LibraryCollapsedCategories: list(), HtmlPreviewConfigId: guid(2), AxsharePrototypeConfigId: guid(2),
+        FileVersionHistory: versionHistory(fileBuild, 0), AssemblyVersionHistory: versionHistory(0, assemblyRevision),
+      }),
+      object(5, 'Style', {
+        LibraryId: guid(2), LibraryName: string(''), LegacyName: string(''),
+        'style-name': string('FormatPainterSettings'), Id: guid(7),
+        PropList: defaultStyleProperties(version, context, 8, 4),
+        Capabilities: scalar(0x1d, 'ffffffffffffffff'), All: bool(true),
+      }),
+      object(6, 'PrintSettings', {
+        'margin-left': integer(0), 'margin-right': integer(0), 'margin-top': integer(0), 'margin-bottom': integer(0),
+        'paper-kind': integer(0), 'paper-height': integer(0), 'paper-width': integer(0), 'paper-name': string(''),
+        'paper-source': integer(0), 'paper-source-name': string(''), landscape: bool(false),
+        'scale-percentage': integer(100), 'scale-type': integer(1),
+      }),
+    ];
+  });
+}
+
+function versionPart(version) {
+  const minimum = `${version}.0.0.0`;
+  const message = `Open this project in Axure RP ${version} or later.`;
+  return gzipSync(Buffer.from([
+    '<BreakingChanges>',
+    `<Change Fail="True" UseMessage="False" Beta="${version === 11}">`,
+    `<Version>${minimum}</Version><Message>${message}</Message><TeamMessage>${message}</TeamMessage>`,
+    '</Change></BreakingChanges>',
+  ].join('\n')));
+}
+
 export function synthesizeBlankProject({ version, pageName = 'Page 1' } = {}) {
   version = resolveTargetVersion(version);
   if (typeof pageName !== 'string' || !pageName.trim()) throw new Error('Page name must not be empty');
@@ -203,6 +268,8 @@ export function synthesizeBlankProject({ version, pageName = 'Page 1' } = {}) {
   const thumbnail = append(blankThumbnail);
   manifest.root.children[guidKey(page.id)] = { parts: { thumbnail, package: append(pageRecord(version, page.id, styleGuid, typefaceGuid)) } };
   manifest.root.parts.DesignDocument = append(documentRecord(version, page, generators, styleGuid, typefaceGuid));
+  manifest.root.parts[`${version}.0.0.${editorVersions[version].assemblyRevision}.version`] = append(versionPart(version));
+  manifest.root.parts.DocumentSettings = append(settingsRecord(version, page.id, styleGuid, typefaceGuid));
   const header = Buffer.alloc(8);
   header[0] = MAGIC0;
   header[1] = MAGIC1;

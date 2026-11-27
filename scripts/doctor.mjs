@@ -32,6 +32,19 @@ function detectAxureHost() {
   };
 }
 
+function checkBlankTemplate(version) {
+  try {
+    const { path, source } = readBlankTemplate(version);
+    const check = { ok: true, path, source, error: null };
+    if (source === 'synthesized') {
+      check.limitation = `内置合成工程不带 Heading 1–6、Paragraph、Form Hint、Form Disabled 这 9 个预置样式。需要在 Axure 的样式列表中选用这些样式时，请设置 AXURE_BLANK_TEMPLATE_RP${version} 指向含这些样式的原厂空白模板。`;
+    }
+    return check;
+  } catch (error) {
+    return { ok: false, path: null, error: error.message };
+  }
+}
+
 export function runDoctor({ strict = false } = {}) {
   const isWin = process.platform === 'win32';
   const nodeVersion = process.versions.node;
@@ -85,14 +98,8 @@ export function runDoctor({ strict = false } = {}) {
     chromeCheck.error = err.message;
   }
 
-  let templateCheck = { ok: false, path: null, error: null };
-  try {
-    const { path, source } = readBlankTemplate(9);
-    templateCheck = { ok: true, path, source, error: null };
-  } catch (err) {
-    templateCheck.error = err.message;
-  }
-
+  const templateCheck = checkBlankTemplate(9);
+  const templateCheckRp11 = checkBlankTemplate(11);
   const axureHostCheck = detectAxureHost();
 
   const capabilities = {
@@ -141,6 +148,7 @@ export function runDoctor({ strict = false } = {}) {
       pythonDeps: pythonDepsCheck,
       chrome: chromeCheck,
       axureTemplate: templateCheck,
+      axureTemplateRp11: templateCheckRp11,
       axureHost: axureHostCheck,
     },
     capabilities,
@@ -150,13 +158,18 @@ export function runDoctor({ strict = false } = {}) {
 
 function formatDoctorText(report) {
   const mark = ok => (ok ? '[OK]  ' : '[MISS]');
+  const templateLines = (version, check) => [
+    `${mark(check.ok)} RP${version} 空白模板   ${check.path ?? (check.ok ? '内置合成' : check.error)}`,
+    ...(check.limitation ? [`       ${check.limitation}`] : []),
+  ];
   const lines = [
     `zee-rp 环境自检 (${report.platform}/${report.arch})`,
     `${mark(report.checks.node.ok)} Node.js        ${report.checks.node.version} (要求 ${report.checks.node.required})`,
     `${mark(report.checks.python.ok)} Python         ${report.checks.python.ok ? `${report.checks.python.version} (${report.checks.python.command})` : report.checks.python.error}`,
     `${mark(report.checks.pythonDeps.ok)} Python 依赖    ${report.checks.pythonDeps.ok ? 'pillow / numpy / jsonschema 就绪' : `缺少: ${report.checks.pythonDeps.missingRequired.join(', ')}`}${report.checks.pythonDeps.optional.scipy ? ' (+ scipy)' : ' (可选 scipy 未装)'}`,
     `${mark(report.checks.chrome.ok)} Chrome / CDP   ${report.checks.chrome.ok ? report.checks.chrome.path : '未检测到浏览器'}`,
-    `${mark(report.checks.axureTemplate.ok)} RP9 空白模板   ${report.checks.axureTemplate.path ?? (report.checks.axureTemplate.ok ? '内置合成' : report.checks.axureTemplate.error)}`,
+    ...templateLines(9, report.checks.axureTemplate),
+    ...templateLines(11, report.checks.axureTemplateRp11),
     `${mark(report.checks.axureHost.ok)} Axure RP 9     ${report.checks.axureHost.ok ? report.checks.axureHost.path : '未在本机检测到（Studio / HTML 导入 / studio-html 真机验收不受影响）'}`,
     '',
     '可用能力矩阵：',

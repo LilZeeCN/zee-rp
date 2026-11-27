@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,6 +10,7 @@ import { cloneLibraryWidget } from '../scripts/clone-library-widget.mjs';
 import { indexLibrary } from '../scripts/index-library.mjs';
 import { writeNativeScene } from '../scripts/native-scene.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
+import { mergePages } from '../scripts/merge-pages.mjs';
 
 test('library index identifies named and duplicate widgets and supports cloning by record and object id', t => {
   const work = mkdtempSync(join(tmpdir(), 'zee-library-index-'));
@@ -40,4 +43,31 @@ test('library index identifies named and duplicate widgets and supports cloning 
   const namedOutput = join(work, 'named.rp');
   cloneLibraryWidget(source, target, namedOutput, { ...options, sourceWidget: 'Unique' });
   assert.equal(readRp(readFileSync(namedOutput)).pages[0].widgets[0].text, 'Text 2');
+});
+
+test('the CLI keeps default output bounded and limits JSON after folder filtering', t => {
+  const work = mkdtempSync(join(tmpdir(), 'zee-library-budget-'));
+  t.after(() => rmSync(work, { recursive: true, force: true }));
+  const file = join(work, 'budget.rplib');
+  const names = ['Alpha', 'Beta', 'Gamma'];
+  const bytes = mergePages(names.map(name => ({ buf: synthesizeBlankProject({ version: 9 }), name })));
+  writeFileSync(file, bytes);
+  const run = (...args) => spawnSync(process.execPath, [
+    fileURLToPath(new URL('../bin/axure.mjs', import.meta.url)), 'index-library', file, ...args,
+  ], { encoding: 'utf8' });
+  const summary = run();
+  assert.equal(summary.status, 0, summary.stderr);
+  assert(Buffer.byteLength(summary.stdout) <= 4096);
+  assert.match(summary.stdout, /3 library items/);
+  assert.doesNotMatch(summary.stdout, /Alpha|Beta|Gamma/);
+  const limited = run('--json', '--limit', '2');
+  assert.equal(limited.status, 0, limited.stderr);
+  const result = JSON.parse(limited.stdout);
+  assert.deepEqual(result.counts, { pages: 3, widgets: 0 });
+  assert.deepEqual(result.pages.map(page => page.name), ['Alpha', 'Beta']);
+  assert.equal(result.omitted, 1);
+  const filtered = run('--folder', 'Missing', '--json');
+  assert.equal(filtered.status, 0, filtered.stderr);
+  assert.deepEqual(JSON.parse(filtered.stdout).pages, []);
+  for (const limit of ['-1', '1.5', '']) assert.notEqual(run('--limit', limit).status, 0);
 });

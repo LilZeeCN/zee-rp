@@ -131,6 +131,8 @@ npm.cmd ci
 
 直接运行生成命令，首次运行会按需合成空白工程。空白工程与基础 RP/1 布局可离线生成。需要克隆本机库元件或动态面板样本的构建仍需要对应的 Axure 资源。
 
+内置合成工程不带 `Heading 1–6`、`Paragraph`、`Form Hint`、`Form Disabled` 这 9 个文档预置样式。需要在 Axure 的样式列表中选用它们时，通过 `AXURE_BLANK_TEMPLATE_RP9` 或 `AXURE_BLANK_TEMPLATE_RP11` 指定带这些样式的原厂空白模板。使用内置合成时，`zee-rp doctor` 也会提示这一点。
+
 ```sh
 node scripts/proto.mjs generate --spec examples/authoring/mobile-cards.rp1 --out-dir output/mobile-cards --out-rp output/mobile-cards.rp --backend native
 ```
@@ -140,11 +142,12 @@ node scripts/proto.mjs generate --spec examples/authoring/mobile-cards.rp1 --out
 ### 发现并复用 Axure 元件库
 
 ```sh
-zee-rp index-library /path/to/components.rplib --json
+zee-rp index-library /path/to/components.rplib
+zee-rp index-library /path/to/components.rplib --folder 'Forms' --limit 10 --json
 zee-rp clone-library-widget /path/to/components.rplib /path/to/project.rp /path/to/result.rp 'Button' 'Page 1' 'Primary action'
 ```
 
-索引返回目录、库项记录号、元件 ID、类名、尺寸和现有文字。重名库项可用 `'#<record>'` 指定。库项里有多个元件时，用 `--source-widget '名称'` 或 `--source-widget '#<id>'` 选一个。整组内容或动态面板状态使用 `clone-library-page-content`。Agent 可通过 `rp_command` 调用相同命令。
+索引默认输出不超过 4 KB 的目录与数量摘要。用 `--folder` 按目录路径查找，用 `--limit` 限制列出的库项数量，用 `--json` 获取库项记录号、元件 ID、类名、尺寸和现有文字。需导出全库明细时，可单独传 `--json`。重名库项可用 `'#<record>'` 指定。库项里有多个元件时，用 `--source-widget '名称'` 或 `--source-widget '#<id>'` 选一个。整组内容或动态面板状态使用 `clone-library-page-content`。Agent 可通过 `rp_command` 调用相同命令。
 
 <details>
 <summary><b>连接你的 MCP 客户端</b> · 展开配置</summary>

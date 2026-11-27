@@ -152,7 +152,15 @@ internal static class Worker
         var ids = (IEnumerable)Call(Sitemap(file), Pick("DODD", "rbG1"));
         foreach (object id in ids)
         {
-            object page = Call(file, Pick("GOub", "gIAd"), id, true, null, Guid.Empty, null);
+            object page;
+            try
+            {
+                page = Call(file, Pick("GOub", "gIAd"), id, true, null, Guid.Empty, null);
+            }
+            catch (TargetInvocationException error) when (error.InnerException != null)
+            {
+                throw new InvalidDataException("Axure could not deserialize page " + id, error.InnerException);
+            }
             if (page == null)
                 throw new InvalidDataException("Missing page object: " + id);
             using ((IDisposable)page)
@@ -260,7 +268,7 @@ internal static class Worker
             }
             catch (Exception error)
             {
-                Emit("done", "err", error.Message);
+                Emit("done", "err", error.ToString());
             }
             finally
             {

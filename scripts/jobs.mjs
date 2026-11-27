@@ -5,6 +5,7 @@ import { dirname, basename, join, extname, isAbsolute, resolve } from 'node:path
 import { fileURLToPath } from 'node:url';
 import { assertNotProtected, assertWritable, resolveWorkDir } from './engine.mjs';
 import { readRp } from './rp-read.mjs';
+import { readManifest } from './rp-records.mjs';
 import { resolvePasteTarget } from './version.mjs';
 
 const HELPER = fileURLToPath(new URL('./gui-roundtrip.swift', import.meta.url));
@@ -131,7 +132,7 @@ export class JobManager {
     const id = randomUUID();
     const job = { id, type: 'gui-roundtrip', source, output, preview: Boolean(preview), host: { version: host.version, label: host.label, bundleId: host.bundleId },
       status: 'queued', stdout: '', stderr: '', phase: 'queued', validation: null,
-      outputCopy: { dev: copied.dev, ino: copied.ino, mtimeMs: copied.mtimeMs,
+      outputCopy: { dev: copied.dev, ino: copied.ino, mtimeMs: copied.mtimeMs, bytes: copied.size,
         sha256: createHash('sha256').update(readFileSync(output)).digest('hex') } };
     job.done = new Promise(resolveDone => { job.finish = resolveDone; });
     this.jobs.set(id, job);
@@ -168,9 +169,39 @@ export class JobManager {
           const rp = readRp(outBytes);
           const gui = job.stdout.trim() === 'saved-closed-reopened';
           job.outputSha256 = createHash('sha256').update(outBytes).digest('hex');
+          const blockingDialog = job.stderr.match(/^AXURE_GUI_MODAL (.+)$/m)?.[1] ?? null;
+          const blockedScreenshot = job.stderr.match(/^AXURE_GUI_BLOCKED_SCREENSHOT (.+)$/m)?.[1] ?? null;
+          const blockedWindows = job.stderr.match(/^AXURE_GUI_BLOCKED_WINDOWS (.+)$/m)?.[1] ?? null;
+          const guiSaved = !blockingDialog && (gui || job.stderr.includes('AXURE_GUI_PHASE saved'))
+            && statSync(job.output).mtimeMs > originalMtime;
+          // The editor can consume an upgrade notice without exposing its text to AX.
+          // Keep the missing parts as evidence, without reporting an unseen dialog.
+          const missingVersionParts = [];
+          if (!guiSaved && (blockingDialog || job.stderr.includes('AXURE_GUI_RETRY save'))) {
+            const parts = readManifest(outBytes).value.root.parts ?? {};
+            if (!Object.hasOwn(parts, 'DocumentSettings')) missingVersionParts.push('DocumentSettings');
+            if (!Object.keys(parts).some(key => key.startsWith(`${job.host.version}.`) && key.endsWith('.version'))) {
+              missingVersionParts.push(`RP${job.host.version} .version`);
+            }
+          }
+          const millis = marker => {
+            const match = marker.exec(job.stderr);
+            return match ? Number(match[1]) : null;
+          };
           job.validation = {
+            blockingDialog,
+            ...(blockedScreenshot && { blockedScreenshot }),
+            ...(blockedWindows && { blockedWindows }),
+            ...(missingVersionParts.length && { missingVersionParts }),
+            save: {
+              diskMs: millis(/^AXURE_GUI_SAVE_DISK_MS (\d+)$/m),
+              phaseMs: millis(/^AXURE_GUI_PHASE saved \((\d+)ms\)$/m),
+              retries: [...job.stderr.matchAll(/^AXURE_GUI_RETRY save /gm)].length,
+              sourceBytes: job.outputCopy.bytes,
+              outputBytes: outBytes.length,
+            },
             structure: rp.records.unparseable === 0 && rp.counts.danglingRefs === 0 && rp.counts.problems === 0,
-            guiSaved: (gui || job.stderr.includes('AXURE_GUI_PHASE saved')) && statSync(job.output).mtimeMs > originalMtime,
+            guiSaved,
             closed: gui || job.stderr.includes('AXURE_GUI_PHASE closed'),
             reopened: gui || job.stderr.includes('AXURE_GUI_PHASE reopened'),
             preview: Boolean(job.preview && job.stderr.includes('AXURE_GUI_PHASE preview')),
@@ -178,7 +209,8 @@ export class JobManager {
             counts: rp.counts
           };
           const passed = job.validation.structure && job.validation.guiSaved && job.validation.closed && job.validation.reopened;
-          this.complete(job, code, code === 0 && !passed ? '没有确认结构健康及 GUI 保存、关闭、重开全部完成' : '');
+          this.complete(job, code, code === 0 && !passed
+            ? (blockingDialog ?? '没有确认结构健康及 GUI 保存、关闭、重开全部完成') : '');
         } catch (error) { this.complete(job, 1, error.message); }
       });
     } catch (error) { this.complete(job, 1, error.message); }

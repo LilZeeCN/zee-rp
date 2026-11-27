@@ -41,6 +41,26 @@ test('RP9 and RP11 emit fresh native identities and carry no embedded source ass
   }
 });
 
+test('each synthesized document declares both version histories and a loadable version part', () => {
+  for (const { version, build, revision } of [{ version: 9, build: 1, revision: 3754 }, { version: 11, build: 0, revision: 4137 }]) {
+    const file = synthesizeBlankProject({ version });
+    const { dataStart, value } = readManifest(file);
+    const records = readRecords(file);
+    const versionPart = records.find(record => record.offset === dataStart + value.root.parts[`${version}.0.0.${revision}.version`] + 8);
+    assert.equal(versionPart?.className, 'xml:BreakingChanges');
+    assert.match(versionPart.raw.toString(), new RegExp(`<Version>${version}\\.0\\.0\\.0</Version>`));
+    const settings = records.find(record => record.offset === dataStart + value.root.parts.DocumentSettings + 8);
+    assert.equal(settings?.className, 'Axure:DocumentSettings');
+    const graph = parsePayload(settings);
+    const body = graph.objects.get(1).body;
+    const history = name => field(body, name).items.map(item => ['Major', 'Minor', 'Build', 'Revision'].map(key => field(item, key).value));
+    assert.deepEqual(history('FileVersionHistory'), [[version, 0, build, 0]]);
+    assert.deepEqual(history('AssemblyVersionHistory'), [[version, 0, 0, revision]]);
+    const page = records.find(record => record.className === 'Axure:Page');
+    assert.equal(graph.roots[0].values[field(body, 'selected-tab-package-id').value - 1], parsePayload(page).roots[0].values[1]);
+  }
+});
+
 test('the public command synthesizes without installed templates and keeps explicit templates strict', t => {
   const work = mkdtempSync(join(tmpdir(), 'zee-blank-synth-test-'));
   t.after(() => rmSync(work, { recursive: true, force: true }));

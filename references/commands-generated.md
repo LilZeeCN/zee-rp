@@ -64,7 +64,7 @@
 - **add-interaction**：`node add-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] [--baseline <file.baseline.json>] [--replace-event] (--json <spec.json> | --event <EventName> --action <type> [key=value ...])`
 - **remove-interaction**：`node remove-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] --event <EventName> (--remove-event | --remove-action --case-index <n> --action-index <n>)`
 - **add-click-link**：`node add-click-link.mjs source.rp output.rp widgetName url [current|new]`
-- **index-library**：`node index-library.mjs <source.rplib> [--json]`
+- **index-library**：`node index-library.mjs <source.rplib> [--folder <path>] [--limit <N>] [--json]`
 - **clone-library-widget**：`node clone-library-widget.mjs <source.rplib> <target.rp> <output.rp> <sourcePage|#record> <targetPage> <newName> [--source-widget <name|#id>] [--x N --y N --w N --h N]`
 - **clone-library-page-content**：`node clone-library-page-content.mjs <source.rplib> <target.rp> <output.rp> <sourcePage> <targetPage> [--x N --y N]`
 - **set-combobox-options**：`node set-combobox-options.mjs <source.rp> <output.rp> <pageName> <widgetName> <options-json> [--selected <zeroBasedIndex>]`

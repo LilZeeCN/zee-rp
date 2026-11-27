@@ -131,6 +131,8 @@ npm.cmd ci
 
 Run the generator directly. It builds blank projects and basic RP/1 layouts offline. Builds that clone Axure library controls or panel fixtures still need those local assets.
 
+Synthesized projects omit nine named document presets: `Heading 1–6`, `Paragraph`, `Form Hint`, and `Form Disabled`. To select them in the Axure style list, point `AXURE_BLANK_TEMPLATE_RP9` or `AXURE_BLANK_TEMPLATE_RP11` at an original blank project that includes them. The `zee-rp doctor` check also reports this when it uses the synthesizer.
+
 ```sh
 node scripts/proto.mjs generate --spec examples/authoring/mobile-cards.rp1 --out-dir output/mobile-cards --out-rp output/mobile-cards.rp --backend native
 ```
@@ -140,11 +142,12 @@ Open `output/mobile-cards.rp` in Axure RP9 to edit it.
 ### Discover and reuse an Axure library
 
 ```sh
-zee-rp index-library /path/to/components.rplib --json
+zee-rp index-library /path/to/components.rplib
+zee-rp index-library /path/to/components.rplib --folder 'Forms' --limit 10 --json
 zee-rp clone-library-widget /path/to/components.rplib /path/to/project.rp /path/to/result.rp 'Button' 'Page 1' 'Primary action'
 ```
 
-The index lists folders, item record numbers, widget IDs, classes, dimensions, and current text. Select a duplicate item with `'#<record>'` or pick a widget within an item with `--source-widget 'name'` or `--source-widget '#<id>'`. Use `clone-library-page-content` for complete groups and dynamic panel states. Agents can call both commands through `rp_command`.
+The default index is a folder and count summary capped at 4 KB. Use `--folder` to select a folder path, `--limit` to cap the number of listed items, and `--json` to read item record numbers, widget IDs, classes, dimensions, and current text. Pass `--json` on its own for a full dump. Select a duplicate item with `'#<record>'` or pick a widget within an item with `--source-widget 'name'` or `--source-widget '#<id>'`. Use `clone-library-page-content` for complete groups and dynamic panel states. Agents can call both commands through `rp_command`.
 
 <details>
 <summary><b>Connect your MCP client</b> · Expand configuration</summary>

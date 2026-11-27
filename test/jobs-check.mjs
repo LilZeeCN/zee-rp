@@ -96,6 +96,22 @@ try {
     const job = await failed.startRoundtrip({ source, output: join(work, 'failed.rp'), wait: true });
     assert.equal(job.status, 'failed'); assert.equal(job.validation.guiSaved, false); await failed.close();
   });
+  await check('升级模态框优先于保存成功标记，保留可见文案', async () => {
+    const blocked = new JobManager({ runner: ([output]) => output === '--close' ? mockClose()
+      : spawn(process.execPath, ['-e', [
+        'const f=require("fs"),p=process.argv[1]; f.writeFileSync(p,f.readFileSync(p));',
+        'console.error("AXURE_GUI_PHASE opened (400ms)");',
+        'console.error("AXURE_GUI_SAVE_DISK_MS 214");',
+        'console.error("AXURE_GUI_MODAL Save your project to a new file");',
+        'console.log("saved-closed-reopened");',
+      ].join(''), output]) });
+    const job = await blocked.startRoundtrip({ source, output: join(work, 'upgrade-blocked.rp'), wait: true });
+    assert.equal(job.status, 'failed');
+    assert.equal(job.validation.guiSaved, false);
+    assert.match(job.validation.blockingDialog, /save your project/i);
+    assert.deepEqual(job.validation.save, { diskMs: 214, phaseMs: null, retries: 0, sourceBytes: original.length, outputBytes: original.length });
+    await blocked.close();
+  });
   await check('首次未打开文档的失败清理本次副本，相同参数可直接重试', async () => {
     let attempts = 0;
     const retry = new JobManager({ runner: args => ++attempts === 1
