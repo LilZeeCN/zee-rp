@@ -3,11 +3,11 @@
 ## 免模板生成、元件库索引与原生加载回归
 
 - `create-blank-project` 与 `create-blank-page` 在找不到版本匹配的本机空白模板时，使用纯 Node 合成 RP9 / RP11 原生文件。RP/1 的 RP9 生成入口共用此路径。显式指定的模板仍会校验版本及路径。克隆官方库控件和面板样本的设计仍需要相应本机资源。
-- 合成工程写入目标版本的 `DocumentSettings` 和 `.version` 部件。本机 RP9 9.0.0.3754、RP11 11.0.0.4137 及三页 RP9 合成原型均已原地保存、关闭并重开，保存后的三页原型经官方 HTML 回放 8/8。内置骨架省略 `Heading 1–6`、`Paragraph`、`Form Hint`、`Form Disabled` 及普通 Word 文档配置，需这些预置时可使用相应原厂空白模板。
+- 合成工程写入目标版本的 `DocumentSettings` 和 `.version` 部件。本机 RP9 9.0.0.3754、RP11 11.0.0.4137 及三页 RP9 合成原型均已原地保存、关闭并重开，保存后的三页原型经官方 HTML 回放 8/8。内置骨架提供 `Heading 1–6`、`Paragraph`、`Form Hint`、`Form Disabled` 九个文档预置样式。原厂 Word 规格文档配置可由空白模板提供。
 - `index-library <file.rplib> [--folder <path>] [--limit <N>] [--json]` 默认输出不超过 4 KB 的目录与计数摘要。`--json` 提供库项、顶层元件、尺寸及现有文本，可通过目录与条数限制范围。两版自带的 9 个库已实读。`clone-library-widget` 可指定库项名或 `#记录号`，同项多元件可指定 `--source-widget <名称|#对象ID>`。完整组合和面板状态用 `clone-library-page-content`。CLI 与 `rp_command` 复用同一注册表。
 - `npm run test:native-oracle` 在已验证的 macOS Axure 宿主上用 Axure 自己的加载器检查写入产物。普通 CI 执行离线结构回归，按宿主可用性报告原生加载跳过。
 - 有两个目标版本及可用的辅助功能权限时，运行 `ZEE_AXURE_EDITOR_ACCEPTANCE=1 npm run test:native-oracle` 可额外检查编辑器首存落盘 ≤300 ms、零重试、无模态框、体积变化 ≤128 B 或 1%（取较大值），以及同路径关闭重开。
-- 官方 HTML 回放从发布站点树读取实际入口文件，可用显示名指定页面。已验 RP11 的 `Page 1` 对应 `page_1.html`。
+- 官方 HTML 回放从发布站点树按页面名或 ID 查找页面，优先用播放器的站点页 ID 打开或切换页面。RP9、RP11 已验证从 `start.html` 定位到中文名称的非首页及脚本化切页。
 
 ## `native-check`：让 Axure 自己判定文件是否可加载（2026-11-27，加载级）
 

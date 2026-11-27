@@ -131,7 +131,7 @@ npm.cmd ci
 
 Run the generator directly. It builds blank projects and basic RP/1 layouts offline. Builds that clone Axure library controls or panel fixtures still need those local assets.
 
-Synthesized projects omit nine named document presets: `Heading 1–6`, `Paragraph`, `Form Hint`, and `Form Disabled`. To select them in the Axure style list, point `AXURE_BLANK_TEMPLATE_RP9` or `AXURE_BLANK_TEMPLATE_RP11` at an original blank project that includes them. The `zee-rp doctor` check also reports this when it uses the synthesizer.
+Synthesized projects include `Heading 1–6`, `Paragraph`, `Form Hint`, and `Form Disabled` in the Axure widget style list. Set `AXURE_BLANK_TEMPLATE_RP9` or `AXURE_BLANK_TEMPLATE_RP11` to inherit another project's styles or its Word specification configuration.
 
 ```sh
 node scripts/proto.mjs generate --spec examples/authoring/mobile-cards.rp1 --out-dir output/mobile-cards --out-rp output/mobile-cards.rp --backend native
