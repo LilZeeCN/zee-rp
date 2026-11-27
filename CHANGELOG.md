@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- 官方 HTML 验收按站点树解析指定页面的文件名。页面显示名与文件名不同的 RP11 工程可直接按页面名启动验收。
+
+- RP9 / RP11 空白工程由运行时合成，`create-blank-project`、`create-blank-page` 和 RP9 生成链在没有模板时自动使用。显式模板继续校验版本。
+- 新增 `index-library` 读取 `.rplib` 的目录、库项与顶层元件。扩展 `clone-library-widget`，支持按名称、记录号和元件 ID 选择。
+- 新增本机 Axure 原生加载回归，覆盖交互写入、富文本、页面装配、母版和动态面板。修复常驻桥接器一次失败后拒绝执行后续请求的问题。
+
 - 新增 `zee-rp native-check <file.rp>`（`scripts/native-check.mjs`）：用本机 Axure 自己的程序集无头加载文件，报告接受 / 拒绝 / 判据不可用，拒绝时附 Axure 的原始异常。校准样本上与 GUI 真值一致；它当场推翻了一个结构测试全绿但 Axure 打不开的改动（纯字面量 manifest）。需要 macOS + Axure + .NET SDK，其他环境明确报告不可用。
 - 未知 Tag 无损透传（离线结构级验证）：`parsePayload` 遇到未识别的 Tag 码时，把 7 种候选布局（无载荷、1/2/4/8 字节、dict、list）逐个代入重解析整条记录，只有恰好解析到末尾、通过四条结构判据且结论唯一时才采信，其余照旧报错。不透明布局的载荷原样写回，透明容器的子节点可照常修改。容器计数先校验再分配，坏计数报错而不是进程 OOM。新增 `npm run test:protocol` 并接入两个 CI 工作流。
 - 记录一条原生反例：manifest 不可压缩时不能回退为纯字面量 LZ4 block——Axure（K4os.Compression.LZ4 分块流）的 RP9 / RP11 加载器都拒绝这种文件，所以保持报错。

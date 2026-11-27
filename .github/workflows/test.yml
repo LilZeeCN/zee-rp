@@ -22,6 +22,9 @@ jobs:
         run: test -x /usr/bin/google-chrome
       - run: npm test
       - run: npm run test:bin
+      - run: npm run test:blank
+      - run: npm run test:library-index
+      - run: npm run test:native-oracle
       - run: npm run test:protocol
       - run: npm run test:styles
       - run: npm run test:mcp-export

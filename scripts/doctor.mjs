@@ -5,7 +5,7 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { pythonCommand, spawnPythonSync } from './python.mjs';
-import { resolveBlankTemplate } from './blank-template.mjs';
+import { readBlankTemplate } from './blank-template.mjs';
 import { findChromeExecutable } from '../studio/cdp.mjs';
 
 function detectAxureHost() {
@@ -87,7 +87,8 @@ export function runDoctor({ strict = false } = {}) {
 
   let templateCheck = { ok: false, path: null, error: null };
   try {
-    templateCheck = { ok: true, path: resolveBlankTemplate(9), error: null };
+    const { path, source } = readBlankTemplate(9);
+    templateCheck = { ok: true, path, source, error: null };
   } catch (err) {
     templateCheck.error = err.message;
   }
@@ -124,9 +125,7 @@ export function runDoctor({ strict = false } = {}) {
       : '请安装 Google Chrome / Chromium，或设置 CHROME_BIN 指向浏览器可执行文件（用于 Studio 截图、HTML 导入与免 Axure 真机验收）。');
   }
   if (!templateCheck.ok) {
-    recommendations.push(isWin
-      ? '原生 .rp 生成需要用本机 Axure RP 9 另存单页空白工程并设置 $env:AXURE_BLANK_TEMPLATE_RP9 = "C:\\AxureTests\\blank.rp"。'
-      : '原生 .rp 生成需要用本机 Axure RP 9 另存单页空白工程并设置 export AXURE_BLANK_TEMPLATE_RP9=/abs/path/blank.rp。');
+    recommendations.push(templateCheck.error);
   }
 
   const coreOk = nodeCheck.ok && pythonCheck.ok && pythonDepsCheck.ok;
@@ -157,7 +156,7 @@ function formatDoctorText(report) {
     `${mark(report.checks.python.ok)} Python         ${report.checks.python.ok ? `${report.checks.python.version} (${report.checks.python.command})` : report.checks.python.error}`,
     `${mark(report.checks.pythonDeps.ok)} Python 依赖    ${report.checks.pythonDeps.ok ? 'pillow / numpy / jsonschema 就绪' : `缺少: ${report.checks.pythonDeps.missingRequired.join(', ')}`}${report.checks.pythonDeps.optional.scipy ? ' (+ scipy)' : ' (可选 scipy 未装)'}`,
     `${mark(report.checks.chrome.ok)} Chrome / CDP   ${report.checks.chrome.ok ? report.checks.chrome.path : '未检测到浏览器'}`,
-    `${mark(report.checks.axureTemplate.ok)} RP9 空白模板   ${report.checks.axureTemplate.ok ? report.checks.axureTemplate.path : '未配置 AXURE_BLANK_TEMPLATE_RP9'}`,
+    `${mark(report.checks.axureTemplate.ok)} RP9 空白模板   ${report.checks.axureTemplate.path ?? (report.checks.axureTemplate.ok ? '内置合成' : report.checks.axureTemplate.error)}`,
     `${mark(report.checks.axureHost.ok)} Axure RP 9     ${report.checks.axureHost.ok ? report.checks.axureHost.path : '未在本机检测到（Studio / HTML 导入 / studio-html 真机验收不受影响）'}`,
     '',
     '可用能力矩阵：',

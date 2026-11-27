@@ -295,7 +295,7 @@ async function getDaemon(installation, profile) {
       entry.idleTimer.unref?.();
     },
     call(op, args) {
-      entry.queue = entry.queue.then(() => new Promise((resolveCall, rejectCall) => {
+      const request = entry.queue.then(() => new Promise((resolveCall, rejectCall) => {
         if (entry.closed || child.exitCode !== null) {
           rejectCall(code('E_ASSEMBLY_PROCESS', 'Assembly daemon exited unexpectedly.'));
           return;
@@ -331,7 +331,9 @@ async function getDaemon(installation, profile) {
         const line = [op, ...args.map(a => Buffer.from(String(a), 'utf8').toString('base64'))].join('\t') + '\n';
         child.stdin.write(line);
       }));
-      return entry.queue;
+      // Report this request's error to its caller without rejecting the next request.
+      entry.queue = request.catch(() => {});
+      return request;
     },
   };
 

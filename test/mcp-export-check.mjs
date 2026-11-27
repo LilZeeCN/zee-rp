@@ -10,6 +10,8 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { addInteractions } from '../scripts/ix-actions.mjs';
 
+import { readRp } from '../scripts/rp-read.mjs';
+
 const root = fileURLToPath(new URL('../', import.meta.url));
 const evidence = process.env.AXURE_MCP_EXPORT_OUTPUT;
 const browserModule = process.env.PLAYWRIGHT_MODULE;
@@ -144,6 +146,10 @@ test('existing RP11 → official HTML → native textbox behavior', {
     assert(existsSync(exported.entry));
     writeFileSync(join(work, 'export.json'), JSON.stringify(exported, null, 2) + '\n');
     assert(browserModule, 'Set PLAYWRIGHT_MODULE to run the native browser acceptance.');
+    const rp11Page = readRp(readFileSync(localCopy)).pages[0].name;
+    const replay = await call('verify_prototype', { rp: localCopy, html: exported.output, engine: 'official', page: rp11Page });
+    assert.equal(replay.verification.browserLoaded, true);
+    assert.equal(replay.initial.page, rp11Page);
     assert.equal(runBrowser(work, 'maxlength', exported.output, '7').assertions.length, 2);
   });
 });

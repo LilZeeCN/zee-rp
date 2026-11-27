@@ -22,11 +22,14 @@ test('受保护路径与不存在的文件拒绝检查', async () => {
   process.env.AXURE_PROTECTED_PATHS = join(tmpdir(), 'zee-native-check-protected.rp');
   try {
     await assert.rejects(() => nativeCheck(join(tmpdir(), 'zee-native-check-protected.rp')), /受保护|protect/i);
-  } finally { process.env.AXURE_PROTECTED_PATHS = previous; }
+  } finally {
+    if (previous === undefined) delete process.env.AXURE_PROTECTED_PATHS;
+    else process.env.AXURE_PROTECTED_PATHS = previous;
+  }
   await assert.rejects(() => nativeCheck(join(tmpdir(), 'zee-native-check-missing.rp')), /文件不存在/);
 });
 
-test('--version 与文件头不一致是参数错误', async () => {
+test('--version 与文件头不一致是参数错误', async t => {
   if (!existsSync(template)) return t.skip('本机没有 RP9 空白模板');
   await assert.rejects(() => nativeCheck(template, { version: 11 }), /与文件头版本 RP9 不一致/);
 });

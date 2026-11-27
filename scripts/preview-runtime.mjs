@@ -11,7 +11,7 @@ import { pythonInvocation } from './python.mjs';
 import { findChromeExecutable, launchChrome } from '../studio/cdp.mjs';
 
 import { bindNativeSymbols, officialIdOf, readNativeWidgetMap } from './native-widget-identity.mjs';
-import { scanOfficialInteractions, officialWidgetMapFile } from './official-interactions.mjs';
+import { decodeAxureData, scanOfficialInteractions, officialWidgetMapFile } from './official-interactions.mjs';
 
 const VIRTUAL_CLOCK_SHIM = `(() => {
   if (window.__zeeClockInstalled) return;
@@ -637,6 +637,26 @@ function findWidgetMatch(observation, symbol, target, { allowHidden = false, row
   return { candidates, widget: candidates[rowIndex] };
 }
 
+function officialPageKey(htmlDir, name) {
+  let rootNodes;
+  try {
+    rootNodes = decodeAxureData(readFileSync(join(htmlDir, 'data', 'document.js'), 'utf8')).sitemap?.rootNodes;
+  } catch {
+    // Older/custom HTML exports may use a different document-data grammar.
+    return name;
+  }
+  const stack = Array.isArray(rootNodes) ? [...rootNodes] : [];
+  const urls = new Set();
+  while (stack.length) {
+    const node = stack.pop();
+    if (Array.isArray(node?.children)) stack.push(...node.children);
+    if ((node?.pageName === name || node?.id === name) && /^[^/\\?#]+\.html$/i.test(node?.url ?? '')) {
+      urls.add(node.url.slice(0, -5));
+    }
+  }
+  return urls.size === 1 ? urls.values().next().value : name;
+}
+
 function startStaticServer(rootDir, defaultEntry = 'start.html') {
   const realRoot = realpathSync(rootDir);
   const server = createServer((req, res) => {
@@ -884,7 +904,9 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       ? map?.pages?.find(p => p.id === input.page || p.name === input.page)
       : map?.pages?.[0];
     if (input.page) {
-      startUrl += `#p=${encodeURIComponent(targetPageEntry?.name ?? input.page)}`;
+      const pageName = targetPageEntry?.name ?? input.page;
+      const pageKey = activeEngine === 'official' ? officialPageKey(activeHtmlDir, pageName) : pageName;
+      startUrl += `#p=${encodeURIComponent(pageKey)}`;
     }
     const rawCanvas = targetPageEntry?.canvas;
     const canvasW = Array.isArray(rawCanvas) ? Number(rawCanvas[0]) : Number(rawCanvas?.w);

@@ -10,7 +10,7 @@
 | list-custom-styles | custom-styles.mjs | 列出文件已有原生自定义样式及 GUID（不创建样式） | none | structure |
 | rename-custom-style | rename-custom-style.mjs | 按样式身份级联改名，更新所有记录的 MatchInfo 与 StyleCache 名称 | index:3 | gui-roundtrip |
 | rebind-widgets | rebind-widgets.mjs | 筛选元件并批量绑定文件中已有原生样式；可显式清除局部样式覆盖 | index:3 | gui-roundtrip |
-| create-blank-project | create-blank-project.mjs | 复制用户本机的 RP 9 / RP 11 原生空白模板生成单页空白 .rp 工程（模板按目标版本绑定） | index:2 | loaded |
+| create-blank-project | create-blank-project.mjs | 创建 RP9 / RP11 单页空白 .rp，有对应本机模板时优先使用，否则合成 | index:2 | loaded |
 | native-check | native-check.mjs | 用本机 Axure 自己的程序集无头加载 .rp，报告 Axure 是否接受该文件（加载级；需 macOS + Axure + .NET SDK） | none | loaded |
 | create-global-variable | create-global-variable.mjs | 创建具名全局变量及字符串默认值（离线结构级） | index:3 | structure |
 | create-blank-page | create-blank-page.mjs | 把与输入文件同版本的空白模板 Page 记录追加到已有 .rp 生成新空白页（跨版本模板会拒绝） | index:3 | gui-roundtrip |
@@ -25,6 +25,7 @@
 | add-interaction | add-interaction.mjs | 向单个或多个元件/页面追加事件+动作交互（支持 items 批量事务、自动读取 .baseline.json 解析逻辑 ID、interactions JSON 与条件/边界/IsOver/GetPanelState 原生表达；优先使用 generate_prototype 内联 RP/1，此命令用于直接修补已有 .rp） | index:3 | gui-roundtrip |
 | remove-interaction | remove-interaction.mjs | 按事件类型移除活动事件，或按 Case/Action 序号移除单个活动动作 | index:3 | gui-roundtrip |
 | add-click-link | add-click-link.mjs | 给无交互的具名元件添加点击打开链接交互（capabilities.md 未列此工具，仅结构级） | index:3 | structure |
+| index-library | index-library.mjs | 只读列出 .rplib 的目录、库项、顶层元件名称、类型、尺寸和文字 | none | structure |
 | clone-library-widget | clone-library-widget.mjs | 从 .rplib 克隆单个原生控件到目标 .rp 页面 | index:4 | gui-roundtrip |
 | clone-library-page-content | clone-library-page-content.mjs | 把 .rplib 库页的全部内容闭包导入目标 .rp 页面 | index:4 | gui-roundtrip |
 | set-combobox-options | set-combobox-options.mjs | 设置唯一原生 ComboBox 的选项与选中项 | index:3 | gui-roundtrip |
@@ -63,7 +64,8 @@
 - **add-interaction**：`node add-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] [--baseline <file.baseline.json>] [--replace-event] (--json <spec.json> | --event <EventName> --action <type> [key=value ...])`
 - **remove-interaction**：`node remove-interaction.mjs source.rp output.rp <widgetName|pageName> [--page] [--on-page <pageName>] --event <EventName> (--remove-event | --remove-action --case-index <n> --action-index <n>)`
 - **add-click-link**：`node add-click-link.mjs source.rp output.rp widgetName url [current|new]`
-- **clone-library-widget**：`node clone-library-widget.mjs <source.rplib> <target.rp> <output.rp> <sourcePage> <targetPage> <newName> [--x N --y N --w N --h N]`
+- **index-library**：`node index-library.mjs <source.rplib> [--json]`
+- **clone-library-widget**：`node clone-library-widget.mjs <source.rplib> <target.rp> <output.rp> <sourcePage|#record> <targetPage> <newName> [--source-widget <name|#id>] [--x N --y N --w N --h N]`
 - **clone-library-page-content**：`node clone-library-page-content.mjs <source.rplib> <target.rp> <output.rp> <sourcePage> <targetPage> [--x N --y N]`
 - **set-combobox-options**：`node set-combobox-options.mjs <source.rp> <output.rp> <pageName> <widgetName> <options-json> [--selected <zeroBasedIndex>]`
 - **set-listbox-options**：`node set-listbox-options.mjs <source.rp> <output.rp> <pageName> <widgetName> <options-json> [--selected <indices-json>] [--single]`
@@ -100,7 +102,8 @@
 | version-fields.mjs | RP 9 / RP 11 动作与信息对象的字段差异表（由两版自带原生样本实测键集派生） | structure |
 | pack-release.mjs | 按代码与使用文档白名单生成新发布目录和 SHA 清单，排除研究、Axure 资源和 fixture | internal |
 | jobs.mjs | 后台异步生成/改稿与 macOS GUI 保存关闭重开队列：统一 jobs(list\|get\|cancel) 句柄管理，单服务内串行 | internal |
-| blank-template.mjs | 解析用户本机空白模板 AXURE_BLANK_TEMPLATE 或本机缓存；不分发 Axure 模板 | internal |
+| blank-synthesizer.mjs | 用原生记录结构合成空白工程，不读取 Axure 或外部模板 | internal |
+| blank-template.mjs | 按版本读取本机模板或合成原生空白工程 | internal |
 | mcp-tools.mjs | 收敛后的 MCP 工具面（Studio / RP1 / 图片 / 会话 / 浏览器验证 / rp_inspect / rp_patch / rp_command），经 AxureSession 与原生库执行 | internal |
 | gen-capabilities.mjs | 由注册表和完整离线回归生成确定性命令文档，-o 输出新文件 | internal |
 | rp-records.mjs | .rp 记录流读写核心库（manifest/记录解析/替换/插入/追加），无 CLI 入口 | internal |

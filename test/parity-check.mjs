@@ -42,7 +42,7 @@ function execNode(first, args, { env } = {}) {
 const sha256 = file => createHash('sha256').update(readFileSync(file)).digest('hex');
 
 // 对拍/回归不受白名单影响：清掉外部可能存在的 AXURE_WRITE_ROOT，白名单用例单独注入。
-const baseEnv = { ...process.env };
+const baseEnv = { ...process.env, AXURE_BLANK_TEMPLATE: ASSET_BLANK };
 delete baseEnv.AXURE_WRITE_ROOT;
 
 // ---- 工作目录：随机名 + 跑前清理，保证可重复 ----

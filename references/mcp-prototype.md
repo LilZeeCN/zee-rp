@@ -40,7 +40,7 @@
 
 ## 前提
 
-按 README 安装 Python 依赖，并在启动 MCP 服务时设置 `AXURE_BLANK_TEMPLATE_RP9` 指向用户自己的 RP9 单页空白工程。当前入口使用 RP9 原生后端。启用新工具后，MCP 客户端需重新连接以更新工具列表。
+按 README 安装 Python 依赖。找不到本机模板时直接合成 RP9 空白工程，可用 `AXURE_BLANK_TEMPLATE_RP9` 或工具的 `template` 参数覆盖。当前入口使用 RP9 原生后端。启用新工具后，MCP 客户端需重新连接以更新工具列表。
 
 ## 输入
 

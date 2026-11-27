@@ -1,23 +1,22 @@
-import { copyFileSync, readFileSync, constants } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { extname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { readRecords } from './rp-records.mjs';
 import { readRp } from './rp-read.mjs';
 import { parsePayload, field } from './parse-payload.mjs';
 
-import { resolveBlankTemplate } from './blank-template.mjs';
+import { readBlankTemplate } from './blank-template.mjs';
 import { assertNotProtected } from './engine.mjs';
 import { DEFAULT_VERSION, detectFileVersion, resolveTargetVersion } from './version.mjs';
 
 export function createBlankProject(outputPath, { version = DEFAULT_VERSION } = {}) {
   const target = resolveTargetVersion(version);
-  const TEMPLATE = resolveBlankTemplate(target);
+  const { path: templatePath, source: templateSource, buffer: template } = readBlankTemplate(target);
   const output = resolve(outputPath);
   assertNotProtected(output);
   if (extname(output).toLowerCase() !== '.rp') throw new Error('Output path must end in .rp');
 
-  const template = readFileSync(TEMPLATE);
-  const summary = readRp(template, { path: TEMPLATE });
+  const summary = readRp(template, { path: templatePath });
   const records = readRecords(template);
   const page = records.find(record => record.index === summary.pages[0]?.record && record.className === 'Axure:Page');
   const graph = page && parsePayload(page);
@@ -28,11 +27,12 @@ export function createBlankProject(outputPath, { version = DEFAULT_VERSION } = {
   if (summary.pages.length !== 1 || summary.counts.widgets !== 0 || summary.counts.panelStates !== 0 || objects.length !== 0) {
     throw new Error('Resolved Axure template is no longer a one-page blank project');
   }
-  copyFileSync(TEMPLATE, output, constants.COPYFILE_EXCL);
+  writeFileSync(output, template, { flag: 'wx' });
   return {
     output,
     version: detectFileVersion(template),
-    template: TEMPLATE,
+    template: templatePath,
+    templateSource,
     page: summary.pages[0].name,
     pages: summary.counts.pages,
     widgets: summary.counts.widgets,

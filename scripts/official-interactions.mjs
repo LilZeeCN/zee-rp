@@ -7,10 +7,10 @@ export const officialWidgetMapFile = 'zee-widget-map.json';
 // constants. Decode that data grammar without executing any exported JS.
 export function decodeAxureData(input) {
   const source = input.replace(/^\uFEFF/, '').trim();
-  const json = source.match(/^\$axure\.loadCurrentPage\(\s*(\{[\s\S]*\})\s*\);?$/);
+  const json = source.match(/^\$axure\.(?:loadCurrentPage|loadDocument)\(\s*(\{[\s\S]*\})\s*\);?$/);
   if (json) return JSON.parse(json[1]);
   const start = /\bvar\s+_creator\s*=\s*function\s*\(\)\s*\{\s*return\s*/.exec(source);
-  if (!source.startsWith('$axure.loadCurrentPage(') || !start) throw new Error('Unknown Axure page-data format');
+  if (!/^\$axure\.(?:loadCurrentPage|loadDocument)\(/.test(source) || !start) throw new Error('Unknown Axure page-data format');
   const suffix = /\s*return\s+_creator\(\)\s*;\s*\}\)\(\)\);?\s*$/.exec(source);
   if (!suffix || suffix.index <= start.index) throw new Error('Missing Axure page-data footer');
 

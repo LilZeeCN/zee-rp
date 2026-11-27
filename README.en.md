@@ -81,7 +81,7 @@ Generate a native **`.rp`** and continue editing supported text, controls and la
 
 ## Get started
 
-Install **Node.js 18+** and **Python 3.10+**. Native generation additionally needs local Axure resources and your own single-page blank project saved in RP9.
+Install **Node.js 18+** and **Python 3.10+**. Blank projects and basic RP/1 layouts can be generated offline.
 
 ### One-command install (straight from GitHub)
 
@@ -120,7 +120,7 @@ $env:ZEE_PYTHON = (Resolve-Path .\.venv\Scripts\python.exe).Path
 npm.cmd ci
 ```
 
-- The generator needs a one-page, zero-widget RP9 project saved by your own Axure; set `AXURE_BLANK_TEMPLATE_RP9` to it.
+- The generator can synthesize blank RP9 and RP11 projects. Set `AXURE_BLANK_TEMPLATE_RP9` or `AXURE_BLANK_TEMPLATE_RP11` to use your own template.
 - Axure is auto-detected in common install directories and drive-root portable installs (`C:\AxureRP9.exe`, `D:\AxureRP9.exe`). Override with `AXURE_APP_RP9`; point at `DefaultSettings` with `AXURE_INSTALL_ROOT_RP9` (install root) or `AXURE_DEFAULT_SETTINGS_RP9` (direct path).
 - Multi-path environment variables use `;` on Windows (`AXURE_PROTECTED_PATHS`, `AXURE_WRITE_ROOT`).
 - RP/1 uses the native backend by default. Pass `--backend native` for older specs with `build-rp` or `generate`. The GUI backend, macOS menu automation and `tools/rp9_place.py` are macOS-only. `axvg paste` writes the payload to the Windows clipboard. Press Ctrl+V in Axure.
@@ -129,13 +129,22 @@ npm.cmd ci
 
 ### Generate your first RP9 prototype
 
-Point to your blank project with `export AXURE_BLANK_TEMPLATE_RP9=/absolute/path/blank.rp` on macOS or `$env:AXURE_BLANK_TEMPLATE_RP9 = 'C:\AxureTests\blank.rp'` in Windows PowerShell. Replace the path with your own, then run the same generation command on either platform.
+Run the generator directly. It builds blank projects and basic RP/1 layouts offline. Builds that clone Axure library controls or panel fixtures still need those local assets.
 
 ```sh
 node scripts/proto.mjs generate --spec examples/authoring/mobile-cards.rp1 --out-dir output/mobile-cards --out-rp output/mobile-cards.rp --backend native
 ```
 
 Open `output/mobile-cards.rp` in Axure RP9 to edit it.
+
+### Discover and reuse an Axure library
+
+```sh
+zee-rp index-library /path/to/components.rplib --json
+zee-rp clone-library-widget /path/to/components.rplib /path/to/project.rp /path/to/result.rp 'Button' 'Page 1' 'Primary action'
+```
+
+The index lists folders, item record numbers, widget IDs, classes, dimensions, and current text. Select a duplicate item with `'#<record>'` or pick a widget within an item with `--source-widget 'name'` or `--source-widget '#<id>'`. Use `clone-library-page-content` for complete groups and dynamic panel states. Agents can call both commands through `rp_command`.
 
 <details>
 <summary><b>Connect your MCP client</b> · Expand configuration</summary>
@@ -147,14 +156,13 @@ Without cloning, let npx fetch the package from GitHub (`zee-rp mcp` and `zee-rp
   "mcpServers": {
     "zee-rp": {
       "command": "npx",
-      "args": ["-y", "github:LilZeeCN/zee-rp", "mcp"],
-      "env": { "AXURE_BLANK_TEMPLATE_RP9": "/absolute/path/my-rp9-blank.rp" }
+      "args": ["-y", "github:LilZeeCN/zee-rp", "mcp"]
     }
   }
 }
 ```
 
-When running from source, replace the absolute paths with your installation, Python environment and RP9 blank project:
+When running from source, replace the absolute paths with your installation and Python environment:
 
 ```json
 {
@@ -163,15 +171,14 @@ When running from source, replace the absolute paths with your installation, Pyt
       "command": "node",
       "args": ["/absolute/path/zee-rp/bin/mcp.mjs"],
       "env": {
-        "ZEE_PYTHON": "/absolute/path/zee-rp/.venv/bin/python",
-        "AXURE_BLANK_TEMPLATE_RP9": "/absolute/path/my-rp9-blank.rp"
+        "ZEE_PYTHON": "/absolute/path/zee-rp/.venv/bin/python"
       }
     }
   }
 }
 ```
 
-The example uses macOS paths. On Windows, use paths such as `C:/work/zee-rp/bin/mcp.mjs`, `C:/work/zee-rp/.venv/Scripts/python.exe` and `C:/AxureTests/blank.rp` in the corresponding fields. Use an absolute Node path in `command` if needed. Reconnect MCP after updates.
+The example uses macOS paths. On Windows, use paths such as `C:/work/zee-rp/bin/mcp.mjs`, `C:/work/zee-rp/.venv/Scripts/python.exe` in the corresponding fields. Use an absolute Node path in `command` if needed. Reconnect MCP after updates.
 
 </details>
 

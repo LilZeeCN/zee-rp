@@ -1,5 +1,7 @@
-import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { synthesizeBlankProject } from './blank-synthesizer.mjs';
 import { assertNotProtected } from './engine.mjs';
 import { DEFAULT_VERSION, detectFileVersion, resolveTargetVersion, templateCandidates, versionLabel } from './version.mjs';
 
@@ -9,29 +11,28 @@ import { DEFAULT_VERSION, detectFileVersion, resolveTargetVersion, templateCandi
 //   版本 11 -> AXURE_BLANK_TEMPLATE_RP11 或 ~/Library/Application Support/zee-axure/templates/axure-rp11-blank.rp
 // 旧变量 AXURE_BLANK_TEMPLATE 仍被接受，但会校验文件头版本是否等于目标版本，
 // 避免把 RP 11 的空白 Page 导进 RP 9 工程（或反过来）。
-export function resolveBlankTemplate(version = DEFAULT_VERSION) {
+export function readBlankTemplate(version = DEFAULT_VERSION) {
   const target = resolveTargetVersion(version);
   const candidates = templateCandidates(target);
   if (process.env.AXURE_BLANK_TEMPLATE) {
     candidates.unshift({ path: process.env.AXURE_BLANK_TEMPLATE, from: 'AXURE_BLANK_TEMPLATE' });
   }
 
-  const tried = [];
-  let versionMismatch = null;
   for (const c of candidates) {
     const path = resolve(c.path);
     assertNotProtected(path);
     const isExplicitEnv = c.from !== 'default' && c.from !== 'tmp-fallback';
     if (!existsSync(path)) {
       if (isExplicitEnv) throw new Error(`${c.from} 指定的空白模板不存在：${path}`);
-      tried.push(`${c.from}: ${path}（不存在）`);
       continue;
     }
-    let actual;
-    try { actual = detectFileVersion(readFileSync(path)); }
+    let actual, buffer;
+    try {
+      buffer = readFileSync(path);
+      actual = detectFileVersion(buffer);
+    }
     catch (e) {
       if (isExplicitEnv) throw new Error(`${c.from} 不是可识别的 Axure 容器（${path}）：${e.message}`);
-      tried.push(`${c.from}: ${path}（不是可识别的 Axure 容器：${e.message}）`);
       continue;
     }
     if (actual !== target) {
@@ -39,19 +40,25 @@ export function resolveBlankTemplate(version = DEFAULT_VERSION) {
       if (isExplicitEnv) {
         throw new Error(`${detail}\n请改用 ${target === 9 ? 'AXURE_BLANK_TEMPLATE_RP9' : 'AXURE_BLANK_TEMPLATE_RP11'}，或清掉 AXURE_BLANK_TEMPLATE。`);
       }
-      versionMismatch = detail;
-      tried.push(`${c.from}: ${path}（版本 ${actual} ≠ 目标 ${target}）`);
       continue;
     }
-    return path;
+    return { path, source: c.from, buffer };
   }
 
-  const envName = target === 9 ? 'AXURE_BLANK_TEMPLATE_RP9' : 'AXURE_BLANK_TEMPLATE_RP11';
-  const lines = [
-    `缺少 ${versionLabel(target)} 的空白工程模板。`,
-    `请用 ${versionLabel(target)} 新建单页空白工程并另存为新文件，再设置 ${envName} 指向它。代码包不包含 Axure .rp 模板。`,
-    `已尝试：\n  ${tried.join('\n  ')}`,
-  ];
-  if (versionMismatch) lines.push(`版本不匹配：${versionMismatch}`);
-  throw new Error(lines.join('\n'));
+  return { path: null, source: 'synthesized', buffer: synthesizeBlankProject({ version: target }) };
+}
+
+// Path-based callers get a private temporary file. Authoring uses the buffer
+// directly and generates fresh identities for each new project.
+let scratch;
+export function resolveBlankTemplate(version = DEFAULT_VERSION) {
+  const blank = readBlankTemplate(version);
+  if (blank.path) return blank.path;
+  if (!scratch) {
+    scratch = mkdtempSync(join(tmpdir(), 'zee-rp-blank-'));
+    process.once('exit', () => rmSync(scratch, { recursive: true, force: true }));
+  }
+  const path = join(scratch, `axure-rp${detectFileVersion(blank.buffer)}-blank.rp`);
+  if (!existsSync(path)) writeFileSync(path, blank.buffer, { flag: 'wx' });
+  return path;
 }

@@ -46,7 +46,7 @@ const COMMANDS = [
   {
     "command": "create-blank-project",
     "script": "create-blank-project.mjs",
-    "summary": "复制用户本机的 RP 9 / RP 11 原生空白模板生成单页空白 .rp 工程（模板按目标版本绑定）",
+    "summary": "创建 RP9 / RP11 单页空白 .rp，有对应本机模板时优先使用，否则合成",
     "usage": "node create-blank-project.mjs <output.rp> [--version 9|11]",
     "output": "index:2",
     "evidence": "loaded"
@@ -161,10 +161,15 @@ const COMMANDS = [
     "evidence": "structure"
   },
   {
+    "command": "index-library", "script": "index-library.mjs",
+    "summary": "只读列出 .rplib 的目录、库项、顶层元件名称、类型、尺寸和文字",
+    "usage": "node index-library.mjs <source.rplib> [--json]", "output": "none", "evidence": "structure"
+  },
+  {
     "command": "clone-library-widget",
     "script": "clone-library-widget.mjs",
     "summary": "从 .rplib 克隆单个原生控件到目标 .rp 页面",
-    "usage": "node clone-library-widget.mjs <source.rplib> <target.rp> <output.rp> <sourcePage> <targetPage> <newName> [--x N --y N --w N --h N]",
+    "usage": "node clone-library-widget.mjs <source.rplib> <target.rp> <output.rp> <sourcePage|#record> <targetPage> <newName> [--source-widget <name|#id>] [--x N --y N --w N --h N]",
     "output": "index:4",
     "evidence": "gui-roundtrip"
   },
@@ -420,8 +425,13 @@ const LIB_SCRIPTS = [
     ]
   },
   {
+    "script": "blank-synthesizer.mjs",
+    "summary": "用原生记录结构合成空白工程，不读取 Axure 或外部模板",
+    "evidence": "internal"
+  },
+  {
     "script": "blank-template.mjs",
-    "summary": "解析用户本机空白模板 AXURE_BLANK_TEMPLATE 或本机缓存；不分发 Axure 模板",
+    "summary": "按版本读取本机模板或合成原生空白工程",
     "evidence": "internal"
   },
   {
