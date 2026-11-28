@@ -330,17 +330,33 @@ async function extractInBrowserDom() {
           const ink = range.getBoundingClientRect();
           const padL = parseFloat(cs.paddingLeft) || 0;
           const padR = parseFloat(cs.paddingRight) || 0;
-          const spans = [...el.childNodes].map(child => {
+          const rawSpans = [...el.childNodes].map(child => {
             const style = child.nodeType === Node.ELEMENT_NODE ? getComputedStyle(child) : cs;
             return { text: child.textContent.replace(/\s+/g, ' '), fontSize: Math.round(parseFloat(style.fontSize) || fontSize),
               fontWeight: Number(style.fontWeight) || fontWeight, color: toHex(style.color) || color || '#000000' };
           }).filter(span => span.text);
+          const spans = [];
+          let pendingSpace = '';
+          for (const span of rawSpans) {
+            if (!span.text.trim()) {
+              if (spans.length) pendingSpace = ' ';
+              continue;
+            }
+            const nextText = pendingSpace ? pendingSpace + span.text.trimStart() : span.text;
+            pendingSpace = '';
+            spans.push({ ...span, text: nextText });
+          }
           const largestFont = Math.max(fontSize, ...spans.map(span => span.fontSize));
           const isPara = ink.height > largestFont * 1.65;
           const distinct = new Set(spans.map(({ fontSize, fontWeight, color }) => [fontSize, fontWeight, color].join('/')));
+          const extraW = !isPara ? Math.max(w, Math.ceil(ink.width + padL + padR + 2)) : w;
+          const parentRect = el.parentElement?.getBoundingClientRect?.();
+          const flushRight = Boolean(parentRect && parentRect.width > 0 && Math.abs(parentRect.right - rect.right) <= 2 && rect.left - parentRect.left > 24);
+          const adjAbsX = extraW > w && flushRight ? Math.max(Math.round(parentRect.left + sx), absX - (extraW - w)) : absX;
           return {
             ...base,
-            ...(!isPara ? { w: Math.max(w, Math.ceil(ink.width + padL + padR + 2)) } : {}),
+            absX: adjAbsX,
+            w: extraW,
             textPaddingX: fill || borders.stroke ? Math.round((padL + padR) / 2) : 0,
             ...(distinct.size > 1 ? { spans } : {}),
             kind: isPara ? 'paragraph' : 'label',
@@ -349,7 +365,7 @@ async function extractInBrowserDom() {
             fontSize,
             fontWeight,
             ...(lineHeight ? { lineHeight } : {}),
-            ...(textAlign ? { textAlign } : {}),
+            ...(textAlign ? { textAlign } : (flushRight && !isPara ? { textAlign: 'right' } : {})),
             ...(fontFamily ? { fontFamily } : {}),
           };
         }

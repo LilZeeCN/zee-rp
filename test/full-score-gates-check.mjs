@@ -234,3 +234,52 @@ page #home [440x340] name="主页"
   assert.equal(wrong.cacheStats.cachedStepCount, 0);
   assert.equal(wrong.failed, 1);
 }));
+
+test('F3 & D2: default proofDirectory stays beside nested RP output and flush-right HTML spans stay within parent bounds', { timeout: 60_000 }, () => inWorkspace('proof-and-html-right-align', async directory => {
+  const { importHtmlToRp1Spec } = await import('../scripts/html-import.mjs');
+  const cwd = mkdtempSync(join(directory, 'run-'));
+  const sub = join(cwd, 'nested');
+  mkdirSync(sub, { recursive: true });
+  const source = join(sub, 'demo.rp1'), rp = join(sub, 'demo.rp');
+  writeFileSync(source, 'rp/1 target=9 name="归属检查"\npage #home [360x220] name="首页"\n  column #root [fillxfill] padding=16\n    label #title [120x32] "嵌套产物"\n');
+  const built = generatePrototype({ source, output: rp, cwd });
+  assert.equal(built.status, 'completed', JSON.stringify(built.diagnostics));
+  const verified = await verifyOfficialPreview({ rp, source, cwd, fast: true, steps: [text('title', '嵌套产物')] }, services);
+  assert.equal(verified.status, 'completed', JSON.stringify(verified.diagnostics));
+  assert.equal(verified.proofReport, join(sub, 'demo.assets', 'PROOF.md'));
+  assert.equal(existsSync(join(sub, 'demo.assets', 'PROOF.md')), true);
+  assert.equal(existsSync(join(cwd, 'demo.assets')), false);
+
+  const htmlFile = join(cwd, 'flex-right.html');
+  writeFileSync(htmlFile, `<!DOCTYPE html><html lang="zh"><head><meta charset="UTF-8"><style>
+    body{margin:0;background:#F1F5F9;display:flex;justify-content:center;font-family:-apple-system,sans-serif;}
+    .phone{width:375px;background:#fff;padding:20px;box-sizing:border-box;}
+    .card{background:#F8FAFC;border:1px solid #E2E8F0;border-radius:14px;padding:16px;}
+    .row{display:flex;justify-content:space-between;align-items:center;}
+    .badge{display:inline-block;background:#2563EB;color:#fff;font-size:11px;padding:2px 8px;border-radius:999px;}
+    .stat b{font-size:24px;color:#2563EB;}
+    .stat span{font-size:12px;color:#64748B;}
+  </style></head><body><div class="phone"><div class="card"><div class="row">
+    <span class="badge">实时</span><span class="stat"><b>128</b> <span>在线设备</span></span>
+  </div></div></div></body></html>`);
+  const imported = await importHtmlToRp1Spec(htmlFile, { cwd });
+  const findStat = (node, parent = null) => {
+    if (!node || typeof node !== 'object') return null;
+    if (typeof node.text === 'string' && node.text.includes('128')) return { node, parent };
+    for (const ch of node.children || []) {
+      const hit = findStat(ch, node);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const hit = findStat(imported.spec.pages[0].root);
+  assert.ok(hit, 'expected imported stat node');
+  assert.equal(hit.node.align, 'right');
+  assert.ok(hit.node.x + hit.node.w <= hit.parent.w, `expected ${hit.node.x} + ${hit.node.w} <= ${hit.parent.w}`);
+  assert.equal(hit.node.spans?.length, 2);
+  const compiledRp = join(cwd, 'flex-right.rp');
+  const compiled = generatePrototype({ rp1: imported.rp1Text, output: compiledRp, cwd, strictAudit: true });
+  assert.equal(compiled.status, 'completed', JSON.stringify(compiled.diagnostics));
+  assert.equal(compiled.audit.structuralOk, true);
+  assert.equal(compiled.audit.aestheticOk, true);
+}));

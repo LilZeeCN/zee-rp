@@ -971,6 +971,19 @@ function storeOfficialHtmlCache(exported, target) {
   pruneBuildCache(dirname(parent));
 }
 
+function defaultProofDirectory(owner, workDir) {
+  if (!owner) return null;
+  const folder = basename(owner, extname(owner)) + '.assets';
+  const beside = join(dirname(owner), folder);
+  try {
+    assertNotProtected(beside);
+    assertWritable(beside);
+    return beside;
+  } catch {
+    return join(workDir, folder);
+  }
+}
+
 export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) {
   const engine = input.fast ? 'studio-html' : input.engine ?? 'auto';
   if (!['auto', 'official', 'studio-html'].includes(engine)) {
@@ -983,8 +996,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
   const baselinePath = input.baseline ? resolve(workDir, input.baseline) : null;
   const screenshotPath = input.screenshot ? resolve(workDir, input.screenshot) : null;
   const owner = rpPath || sourcePath;
-  const proofBase = owner && (input.cwd || input.projectDir ? workDir : dirname(owner));
-  const proofDirectory = input.proofDirectory ?? (owner ? join(proofBase, basename(owner, extname(owner)) + '.assets') : null);
+  const proofDirectory = input.proofDirectory ?? defaultProofDirectory(owner, workDir);
   const autoStoryboard = Boolean(proofDirectory && !input.fast && (input.includeStoryboard || input.proofStoryboard));
   const storyboardPath = input.storyboard ? resolve(workDir, input.storyboard) : autoStoryboard ? join(proofDirectory, 'storyboard.png') : null;
   if (!rpPath && !htmlInputDir && !(engine === 'studio-html' && sourcePath)) {

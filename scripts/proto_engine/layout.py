@@ -1469,42 +1469,54 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                     }
             if not has_native_style and resolved_spans and len(resolved_spans) > 1 and not fill_h and not stroke_h:
                 max_sp_sz = max(snap_token(sp.get("fontSize", sp.get("size", fsz)), FONT_SIZE_TOKENS) for sp in resolved_spans)
-                cur_sx = nx
-                span_shapes = []
+                span_layout = []
+                rel_x = 0
+                prev_trail_sp = 0
                 for sp_idx, sp in enumerate(resolved_spans, start=1):
                     raw_stxt = str(sp.get("text", ""))
                     stxt = raw_stxt.strip()
                     if not stxt:
+                        if span_layout:
+                            prev_trail_sp = max(prev_trail_sp, len(raw_stxt))
                         continue
                     lead_sp = len(raw_stxt) - len(raw_stxt.lstrip(" "))
+                    trail_sp = len(raw_stxt) - len(raw_stxt.rstrip(" "))
                     s_sz = snap_token(sp.get("fontSize", sp.get("size", fsz)), FONT_SIZE_TOKENS)
                     s_wt = snap_token(sp.get("fontWeight", sp.get("weight", fwt)), FONT_WEIGHT_TOKENS)
                     s_col = sp.get("_resolved_color") or txt_h
                     tw_s, _ = measure_text(stxt, s_sz, s_wt)
-                    sw_box = max(12, tw_s + 8)
+                    sw_box = max(12, tw_s + 2)
                     sh_box = nh if s_sz >= max_sp_sz else max(18, min(nh, int(round(s_sz * 1.35))))
                     sy_box = ny if s_sz >= max_sp_sz else (ny + nh - sh_box - max(1, int(round((nh - max_sp_sz) * 0.25))))
-                    gap_px = 0 if not span_shapes else max(6, lead_sp * max(5, int(round(s_sz * 0.35))))
-                    sx_box = cur_sx + gap_px
-                    cur_sx = sx_box + sw_box
-                    s_name = unique_emit_name(f"{name}-s{sp_idx}")
-                    if cur_modal:
-                        modal_targets.append(s_name)
-                    flat_spec_children.append({
-                        "kind": "text", "name": s_name, "x": sx_box, "y": sy_box, "w": sw_box, "h": sh_box,
-                        "fill": None, "stroke": None, "radius": 0, "text": stxt, "size": s_sz, "weight": s_wt,
-                        "color": s_col, "align": "left", "inModal": cur_modal,
-                    })
-                    span_shapes.append(make_axvg_vector_shape(
-                        next_id(), s_name, sx_box, sy_box, sw_box, sh_box,
-                        fill_hex=None, stroke_hex=None, radius=0,
-                        text=stxt, font_size=s_sz, font_weight=s_wt, text_color_hex=s_col, align="left", font_family=node.get("fontFamily", "Inter"),
-                        alpha=alpha_v, v_align="middle",
-                        italic=bool(sp.get("italic", node.get("italic", False))),
-                        underline=bool(sp.get("underline", node.get("underline", False))),
-                        strikethrough=bool(sp.get("strikethrough", node.get("strikethrough", False))),
-                    ))
-                if span_shapes:
+                    sp_count = lead_sp + prev_trail_sp
+                    gap_px = 0 if not span_layout else (max(4, sp_count * max(4, int(round(s_sz * 0.3)))) if sp_count > 0 else 2)
+                    rx = rel_x + gap_px
+                    rel_x = rx + sw_box
+                    prev_trail_sp = trail_sp
+                    span_layout.append((sp_idx, sp, stxt, rx, sy_box, sw_box, sh_box, s_sz, s_wt, s_col))
+                if span_layout:
+                    total_span_w = rel_x
+                    base_x = (nx + nw - total_span_w) if aln == "right" else ((nx + int(round((nw - total_span_w) / 2))) if aln == "center" else nx)
+                    span_shapes = []
+                    for sp_idx, sp, stxt, rx, sy_box, sw_box, sh_box, s_sz, s_wt, s_col in span_layout:
+                        sx_box = base_x + rx
+                        s_name = unique_emit_name(f"{name}-s{sp_idx}")
+                        if cur_modal:
+                            modal_targets.append(s_name)
+                        flat_spec_children.append({
+                            "kind": "text", "name": s_name, "x": sx_box, "y": sy_box, "w": sw_box, "h": sh_box,
+                            "fill": None, "stroke": None, "radius": 0, "text": stxt, "size": s_sz, "weight": s_wt,
+                            "color": s_col, "align": "left", "inModal": cur_modal,
+                        })
+                        span_shapes.append(make_axvg_vector_shape(
+                            next_id(), s_name, sx_box, sy_box, sw_box, sh_box,
+                            fill_hex=None, stroke_hex=None, radius=0,
+                            text=stxt, font_size=s_sz, font_weight=s_wt, text_color_hex=s_col, align="left", font_family=node.get("fontFamily", "Inter"),
+                            alpha=alpha_v, v_align="middle",
+                            italic=bool(sp.get("italic", node.get("italic", False))),
+                            underline=bool(sp.get("underline", node.get("underline", False))),
+                            strikethrough=bool(sp.get("strikethrough", node.get("strikethrough", False))),
+                        ))
                     return {
                         "flippedHorizontal": False, "flippedVertical": False, "id": next_id(), "name": name,
                         "visible": True, "isLocked": False, "isNameDynamic": False, "rotation": float(node.get("rotation") or 0),
