@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- 新增五大原生产物级工具（`scripts/diff-rp.mjs`、`scripts/rp-browser-core.mjs` + `tools/rp-inspector/index.html`、`scripts/repair-rp.mjs`、`scripts/downgrade-rp.mjs`、`scripts/build-library.mjs`）及对应 CI/门禁（`test:diff-rp`、`test:browser-core`、`test:repair-rp`、`test:downgrade-rp`、`test:build-library`、`test:mcp-budget`）。
+- 新增五大原生产物级工具（`scripts/diff-rp.mjs`、`scripts/rp-browser-core.mjs` + `tools/rp-inspector/index.html`、`scripts/repair-rp.mjs`、`scripts/downgrade-rp.mjs`、`scripts/build-library.mjs`）及对应 CI/门禁（`test:diff-rp`、`test:browser-core`、`test:repair-rp`、`test:downgrade-rp`、`test:build-library`、`test:mcp-budget`）；另附公开净室二进制规范 [docs/rp-format-spec.md](docs/rp-format-spec.md) 与单源同步脚本 `tools/sync-inspector.mjs`。
+- `rp-browser-core.mjs` 与 `tools/rp-inspector/index.html` 升级为 4 模式纯本地 Web Worker 工作台（透视 / Diff / 损坏抢救 / RP11→RP9 降级与 `.rplib` 编译），内置纯 JS RFC 1951 `inflateRawWithEnd` 与 `CompressionStream('gzip')`，Chrome 输出通过 `native-check --compile` 与真实 RP9 GUI 往返。
+- `downgrade-rp` 扩充至 20 份多样化真实 RP11 原型（含 4 份官方 Training 示例、689/706 元件多页外壳与中继器条件原型）压测通过 20/20 `native-check --compile` 及两份重度官方原型 RP9 GUI 往返。
 - `native-check` 新增 `editorReadiness`（检测版本部件与 `DocumentSettings` 升级弹窗风险）、`.rplib` 验收支持与 `--compile`（触发公式错误检测与官方 HTML 编译检查），并扩充 `test:native-oracle` 覆盖核心原生写入矩阵。
 - `diff-rp` 支持按原生 128 位 GUID 对齐比对页面、全局变量、元件几何/文本/交互树（经实测可过滤 GUI 重存导致的变量整数槽位号重排噪声）。
 - 零 `node:*` 依赖的浏览器同构解包内核 `rp-browser-core.mjs` 与零网络离线单文件 `tools/rp-inspector/index.html` Web Worker 检视器通过 headless Chrome `file://` 验证。

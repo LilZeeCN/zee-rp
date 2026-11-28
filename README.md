@@ -70,7 +70,7 @@ page #notes name="手记" device=iphone-17-pro
 | :--- | :--- |
 | **Studio** | 和 AI 共用设计文档、事务、原子 `fix_plan(apply:true)` 自愈与撤销历史 |
 | **Axure** | 打开原生 `.rp`，或反编译已有 `.rp` 进 Studio，再 `studio_export(format:"rp1")` 导出源码 |
-| **二进制工程链** | `diff-rp`（按 GUID 对齐比对）、`repair-rp`（损坏抢救）、`downgrade-rp`（RP11→RP9 降级）、`build-library`（`.rplib` 编译）、[离线 Inspector](tools/rp-inspector/index.html) 与 `native-check --compile` |
+| **二进制工程链** | `diff-rp`（GUID 对齐对比）、`repair-rp`（损坏抢救）、`downgrade-rp`（RP11→RP9 降级）、`build-library`（`.rplib` 编译）、[4 模式离线网页工作台](tools/rp-inspector/index.html)、[二进制格式规范](docs/rp-format-spec.md) 与 `native-check --compile` |
 | **浏览器** | 运行拖拽/滑动/定时切态预览；免装 Axure 即可用 `verify_prototype(engine:"studio-html")` 真机验收 |
 | **网页 / 截图** | 直接传本地 `.html` 或 `http(s)://` URL 给 `studio_open_project` / `generate_prototype`，一步提取排版与表单进画布 |
 

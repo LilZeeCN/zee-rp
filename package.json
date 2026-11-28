@@ -730,6 +730,8 @@
     "scripts/downgrade-rp.mjs",
     "scripts/build-library.mjs",
     "tools/rp-inspector/index.html",
+    "tools/sync-inspector.mjs",
+    "docs/rp-format-spec.md",
     "test/diff-rp-check.mjs",
     "test/browser-core-check.mjs",
     "test/repair-rp-check.mjs",

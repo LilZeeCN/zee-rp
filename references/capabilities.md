@@ -3,9 +3,9 @@
 ## 降维打击工具矩阵与 Schema 预算守卫（2026-11-28）
 
 - **语义版本 Diff (`diff-rp`)**：按原生 128 位 GUID 对齐页面、元件与交互树，并按名称对齐全局变量；在 GUI 重存对比中过滤全局变量槽位重排噪声，精确定位实质文本、几何与交互变更。
-- **零依赖浏览器内核与离线逆向检视器 (`rp-browser-core.mjs` + [Web Inspector](../tools/rp-inspector/index.html))**：纯 ES 模块 + `DecompressionStream('gzip')` + WebCrypto SHA-256，在零 `node:*` 依赖和离线 `file://` Blob Worker 中解析容器、结构统计与双版本 GUID Diff。
+- **零依赖浏览器全能内核与 4 模式离线工作台 (`rp-browser-core.mjs` + [Web Workbench](../tools/rp-inspector/index.html) + `tools/sync-inspector.mjs`)**：纯 ES2022 模块（零 `node:*` 依赖、内置纯 JS RFC 1951 解压、`CompressionStream('gzip')` 与 SHA-256），在 `file://` 离线 Blob Worker 中完整支持透视、GUID Diff、损坏 `.rp` 抢救、RP11→RP9 降级与 `.rplib` 编译（详情参考 [rp-format-spec.md](../docs/rp-format-spec.md)），Chrome 产出的修复/降级/`.rplib` 文件已通过 `native-check --compile` 与真实 RP9 GUI 往返。
 - **损坏 `.rp` 外科抢救 (`repair-rp`)**：无视坏掉的 LZ4 Manifest 或截断/中段置零页记录，基于 gzip + CRC32/ISIZE 逐字节扫描打捞完好 `Axure:Page`/`Axure:PanelState` 与全局变量、重置悬空 `tag:3` 引用，并输出显式丢弃清单；找不到可用页面时返回 `E_REPAIR_NO_PAGES_SALVAGED`（`allowEmpty` 可回退空白页）。
-- **RP11 → RP9 原生降级编译 (`downgrade-rp`)**：拦截非 RP11 文件与 RP11 独占事件/动作/STO 函数/DOA 样式；支持 `--strip-unsupported` 显式裁剪并记录台账，自动补齐 `PackageInfo.root-panel-infos`、`FadeWidgetInfo.vertical`/`SetPanelStateInfo.vertical`、`DocumentSettings` 与版本部件并通过 `lintVersionKeys(v9)`。已在真实 9 页 689 元件与 200 元件 RP11 示例上通过 `native-check --compile`、RP9 GUI 往返与官方 Chrome 加载。
+- **RP11 → RP9 原生降级编译 (`downgrade-rp`)**：拦截非 RP11 文件与 RP11 独占事件/动作/STO 函数/DOA 样式；支持 `--strip-unsupported` 显式裁剪并记录台账，自动补齐 `PackageInfo.root-panel-infos`、`FadeWidgetInfo.vertical`/`SetPanelStateInfo.vertical`、`DocumentSettings` 与版本部件并通过 `lintVersionKeys(v9)`。已在 20 份多样化真实 RP11 原型（含 4 份官方 Training 示例、689/706 元件多页及中继器原型）上 20/20 通过 `native-check --compile`，并完成重度官方原型 RP9 GUI 往返与官方 Chrome 加载。
 - **原生 `.rplib` 组件库编译 (`build-library`)**：将 `.rp` / `.rp1` 编译为 RP9 或 RP11 原生 `.rplib`（`DesignDocument` 标记 `document-type=2`、`SavedEdition=2`），打通 `index-library` → `clone-library-widget`/`clone-library-page-content` → `native-check --compile` 闭环。
 - **原生编译门槛 (`native-check --compile`)**：在原生加载之外追加无头官方 HTML 导出与 STO 表达式错误扫描（发现语法错误拒绝并返回 `E_OFFICIAL_COMPILE`），同时输出 `editorReadiness`（检查 `.version` 与 `DocumentSettings` 版本历史，披露升级弹窗风险）。
 - **MCP Schema 预算守卫 (`test:mcp-budget`)**：30 个公开工具（含 13 个 `studio_*` 动词）全部保留并通过 `$ref`/`$defs` 与精简描述收敛，`full` ≤ 35,000、`author` ≤ 28,000、`studio` ≤ 20,000、`core` ≤ 20,000 字符、单工具 ≤ 5,000 字符。

@@ -70,7 +70,7 @@ Generate a native **`.rp`** and continue editing supported text, controls and la
 | :--- | :--- |
 | **Studio** | A shared design document, transactions, atomic `fix_plan(apply:true)` healing and undo history |
 | **Axure** | Open native `.rp`, decompile existing `.rp` into Studio, or export back to `.rp1` via `studio_export(format:"rp1")` |
-| **Binary Toolchain** | `diff-rp` (GUID-aligned semantic diff), `repair-rp` (corrupt `.rp` salvage), `downgrade-rp` (RP11→RP9), `build-library` (`.rplib`), [offline Inspector](tools/rp-inspector/index.html), and `native-check --compile` |
+| **Binary Toolchain** | `diff-rp` (GUID semantic diff), `repair-rp` (corrupt salvage), `downgrade-rp` (RP11→RP9), `build-library` (`.rplib`), [4-mode offline Web Workbench](tools/rp-inspector/index.html), [binary format spec](docs/rp-format-spec.md), and `native-check --compile` |
 | **The browser** | Drag/swipe/timer previews; run cross-platform Chrome verification without Axure via `verify_prototype(engine:"studio-html")` |
 | **HTML / URL / Image** | Pass local `.html`, `http(s)://` URLs or UI screenshots to `studio_open_project` / `generate_prototype` / `generate_from_image` |
 
