@@ -317,10 +317,15 @@ def language_schema():
         for name in fields:
             props[name] = ref("reference") if name == "target" else ref("value") if name in {"text", "value", "where"} else array({"type": "object", "additionalProperties": ref("value")}, 1) if name == "rows" else {"type": "object", "minProperties": 1, "additionalProperties": ref("value")} if name == "set" else nonnegative_int if name == "ms" else either({"enum": ["next", "previous", "first", "last"]}, positive_int) if name == "page" and kind == "data-page" else text
         if kind in {"set-check", "set-selected"}:
-            props["checked" if kind == "set-check" else "selected"] = ref("booleanValue")
+            props["checked" if kind == "set-check" else "selected"] = either(ref("booleanValue"), {"const": "toggle"})
         if kind == "set-option":
             props["value"] = ref("textValue")
-        optional = {"direction"} if kind == "data-sort" else {"name"} if kind == "data-filter" else set()
+        optional = {"direction"} if kind == "data-sort" else {"name"} if kind in {"data-filter", "data-clear-filter"} else set()
+        if kind == "open-link":
+            props["window"] = {"enum": ["current", "new"]}
+            optional = {"window"}
+        if kind == "raise-event":
+            optional = {"event"}
         if kind == "set-size":
             props["width"] = ref("value")
             props["height"] = ref("value")

@@ -2,7 +2,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { sha256 } from './document.mjs';
 import { resolveDocumentScene } from './scene-resolver.mjs';
-import { evaluatePrototypeExpression, executePrototypeInteraction, executeRp1DataAction, refreshRp1Bindings } from './prototype-runtime.mjs';
+import { evaluatePrototypeExpression, executePrototypeInteraction, executeRp1DataAction, refreshRp1Bindings, readComputedWidgetStyle } from './prototype-runtime.mjs';
 import { textLayout, textSpanCss, visualCss } from './visual-style.mjs';
 import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
 import { locateDiagnostic } from './diagnostics.mjs';
@@ -232,9 +232,9 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
   const unsupEntries = nodeUnsupportedMap.get(n.scopedId) || [];
   const supCount = nodeSupportedMap.get(n.scopedId) || 0;
   const paint = {};
-  if (n.fills || n.shadows || n.shadow || n.mixBlendMode || n.gradient || n.innerGlow) {
+  if (n.fills || n.shadows || n.shadow || n.mixBlendMode || n.gradient || n.innerGlow || n.aurora || n.noise || n.backdropBlur) {
     const css = visualCss(n);
-    for (const key of ['background-image', 'box-shadow', 'mix-blend-mode']) {
+    for (const key of ['background-image', 'box-shadow', 'mix-blend-mode', 'backdrop-filter']) {
       if (!css[key]) continue;
       paint[key] = key === 'background-image' && assetRewriteMap.size
         ? css[key].replace(/url\(\s*(?:"([^"]+)"|'([^']+)'|([^)"'\s]+))\s*\)/gi, (full, q1, q2, bare) => {
@@ -268,6 +268,7 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
     ...(!n.truncated && n.spans?.length ? { spans: n.spans.map(span => ({ text: span.text, css: textSpanCss(span, n.fontStackCss) })) } : {}),
     rawText: n.rawText ?? n.text ?? '',
     ...(n.when !== undefined ? { when: n.when } : {}),
+    ...(n.logicalAlias ? { logicalAlias: n.logicalAlias } : {}),
     placeholder: n.placeholder || '',
     value: n.value ?? n.text ?? '',
     ...(Number.isInteger(n.maxLength) && n.maxLength >= 0 ? { maxLength: n.maxLength } : {}),
@@ -699,6 +700,7 @@ function buildAppJs(bundlePayload) {
   'use strict';
 
   ${evaluatePrototypeExpression.toString()}
+  ${readComputedWidgetStyle.toString()}
   ${refreshRp1Bindings.toString()}
   ${executeRp1DataAction.toString()}
   ${executePrototypeInteraction.toString()}
@@ -1436,7 +1438,7 @@ function buildAppJs(bundlePayload) {
       return this.getState();
     }
 
-    observeForVerify() {
+    observeForVerify({ styles = false } = {}) {
       const pg = this.getCurrentPage();
       const activeNodes = pg ? this.getActiveNodesForPage(pg.id) : [];
       const boardEl = typeof document !== 'undefined' ? document.getElementById('studio-export-board') : null;
@@ -1462,6 +1464,7 @@ function buildAppJs(bundlePayload) {
         const h = r ? r.height : n.h;
         widgets.push({
           id: n.id,
+          ...(n.logicalAlias ? { logicalAlias: n.logicalAlias } : {}),
           scopedId: n.scopedId,
           name: n.name || n.id,
           label: n.name || n.id,
@@ -1483,6 +1486,7 @@ function buildAppJs(bundlePayload) {
           centerX: r ? (r.left + r.width / 2) : (bx + x + w / 2),
           centerY: r ? (r.top + r.height / 2) : (by + y + h / 2),
           ...(el?.id ? { inputId: el.id } : {}),
+          ...(styles && el ? readComputedWidgetStyle(el, { textNode: el.querySelector('span') || el, svg: el.querySelector('svg path, svg rect') }) : {}),
         });
       }
       for (const el of boardEl?.querySelectorAll('[data-template-node-id]') || []) {
@@ -1502,6 +1506,7 @@ function buildAppJs(bundlePayload) {
           x, y, left: x, top: y, right: x + r.width, bottom: y + r.height, width: r.width, height: r.height,
           centerX: r.left + r.width / 2, centerY: r.top + r.height / 2,
           ...(el.id ? { inputId: el.id } : {}),
+          ...(styles ? readComputedWidgetStyle(el) : {}),
         });
       }
       return {
@@ -1961,18 +1966,15 @@ function buildAppJs(bundlePayload) {
       });
     }
 
-    _findGestureHost(startNode, pg) {
+    _findInteractionHost(startNode, pg, events) {
       if (!startNode || !pg) return null;
       const byScoped = new Map(this.getActiveNodesForPage(pg.id).map(item => [item.scopedId, item]));
-      const hasOwnGesture = node => Boolean(
-        node?.on?.dragStart || node?.on?.drag || node?.on?.dragDrop ||
-        node?.on?.swipeLeft || node?.on?.swipeRight || node?.on?.swipeUp || node?.on?.swipeDown
-      );
+      const hasInteraction = node => events.some(event => node.on?.[event]);
       let cur = startNode;
       const seen = new Set();
       while (cur && !seen.has(cur.scopedId)) {
         seen.add(cur.scopedId);
-        if (hasOwnGesture(cur)) return cur;
+        if (hasInteraction(cur)) return cur;
         let next = cur.parentScopedId ? byScoped.get(cur.parentScopedId) : null;
         if (!next && cur.scopedId.includes('/')) {
           const parts = cur.scopedId.split('/');
@@ -2236,8 +2238,13 @@ function buildAppJs(bundlePayload) {
 
       const ownHasDrag = Boolean(n.on?.dragStart || n.on?.drag || n.on?.dragDrop);
       const ownHasSwipe = Boolean(n.on?.swipeLeft || n.on?.swipeRight || n.on?.swipeUp || n.on?.swipeDown);
+      const pg = this.getCurrentPage();
+      const gestureEvents = ['dragStart', 'drag', 'dragDrop', 'swipeLeft', 'swipeRight', 'swipeUp', 'swipeDown'];
+      const ownClick = (n.hasSupportedInteraction && n.on?.click) || (isCheckOrRadio && !n.disabled);
+      const clickHost = ownClick ? n : (!rowContext && !['input', 'combobox', 'listbox', 'checkbox', 'radio'].includes(n.type)
+        ? this._findInteractionHost(n, pg, ['click']) : null);
       const gestureHost = (!['input', 'combobox'].includes(n.type))
-        ? ((ownHasDrag || ownHasSwipe) ? n : this._findGestureHost(n, this.getCurrentPage()))
+        ? ((ownHasDrag || ownHasSwipe) ? n : this._findInteractionHost(n, pg, gestureEvents))
         : null;
       const hasDragEvent = Boolean(gestureHost && (gestureHost.on?.dragStart || gestureHost.on?.drag || gestureHost.on?.dragDrop));
       const hasSwipeEvent = Boolean(gestureHost && (gestureHost.on?.swipeLeft || gestureHost.on?.swipeRight || gestureHost.on?.swipeUp || gestureHost.on?.swipeDown));
@@ -2266,17 +2273,11 @@ function buildAppJs(bundlePayload) {
             const dx = Math.round(upEvt.clientX - startX);
             const dy = Math.round(upEvt.clientY - startY);
             const dist = Math.hypot(dx, dy);
-            const selfClick = (n.hasSupportedInteraction && n.on?.click) || ((n.type === 'checkbox' || n.type === 'radio') && !n.disabled);
-            const selfTargetId = rowContext && n.id.includes('__') ? n.id.split('__')[0] : n.scopedId;
             const hostTargetId = rowContext && gestureHost.scopedId === n.scopedId && n.id.includes('__')
               ? n.id.split('__')[0]
               : gestureHost.scopedId;
             if (dist < 4) {
-              if (selfClick) {
-                this.click(selfTargetId, rowContext);
-              } else if (gestureHost.scopedId !== n.scopedId && gestureHost.on?.click) {
-                this.click(hostTargetId, rowContext);
-              }
+              if (clickHost) this.click(rowContext ? n.id.split('__')[0] : clickHost.scopedId, rowContext);
             } else if (hasDragEvent) {
               this.drag(hostTargetId, { dx, dy });
             } else if (hasSwipeEvent && dist >= 24) {
@@ -2287,10 +2288,10 @@ function buildAppJs(bundlePayload) {
           window.addEventListener('mousemove', onMove);
           window.addEventListener('mouseup', onUp);
         });
-      } else if ((n.hasSupportedInteraction && n.on?.click) || ((n.type === 'checkbox' || n.type === 'radio') && !n.disabled)) {
+      } else if (clickHost) {
         el.addEventListener('click', e => {
           e.stopPropagation();
-          const targetId = rowContext && n.id.includes('__') ? n.id.split('__')[0] : n.scopedId;
+          const targetId = rowContext ? n.id.split('__')[0] : clickHost.scopedId;
           this.click(targetId, rowContext);
         });
       }
@@ -2350,7 +2351,8 @@ export async function exportStudioDocumentToCode(
   const assetsOutDir = join(absOutDir, 'assets');
 
   // Resolve default scene + inactive dynamic panel states
-  const scene = resolveDocumentScene(doc, { projectDir });
+  const exportLayouts = new Map();
+  const scene = resolveDocumentScene(doc, { projectDir, exportLayouts, useCache: false });
   const rawVisMap = collectRawVisibilityMap(doc);
   const layoutAnalysis = analyzeDocumentInteractionsAndLayout(doc);
   const copiedFonts = [], fontCss = [];
@@ -2501,6 +2503,9 @@ export async function exportStudioDocumentToCode(
         const stScene = resolveDocumentScene(doc, {
           projectDir,
           activePanelStates: nextActiveStates,
+          pageIds: [pg.id],
+          exportLayouts,
+          useCache: false,
         });
         const stPg = stScene.pages.find(x => x.id === pg.id);
         const statePrefix = `${pNode.scopedId}/${st.id}/`;
@@ -2522,7 +2527,7 @@ export async function exportStudioDocumentToCode(
       domain: pg.domain || doc.domain || 'web',
       device: pg.device || null,
       board: pg.board,
-      ...(pg.on ? { on: pg.on } : {}),
+      ...(sourcePage?.on ? { on: sourcePage.on } : {}),
       ...Object.fromEntries(['views', 'bindings'].filter(key => sourcePage?.[key]).map(key => [key, sourcePage[key]])),
       nodes: allNodes,
       repeaterTemplates,

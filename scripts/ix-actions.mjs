@@ -1013,7 +1013,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
         const fireInfo = info('Axure:FireEventsActionInfo', {
           IsPage: bool(spec.firePage === undefined ? true : !!spec.firePage),
           RaisedEventIds: list([]),
-          FireEventTypes: list([int(num(spec.eventType ?? EVENTS.OnClick))]),
+          FireEventTypes: list([int(num(spec.eventType ?? (spec.event ? EVENTS[spec.event] : EVENTS.OnClick)))]),
           Raised: bool(!!spec.raised)
         });
         return obj(newGuid(), 'Axure:InteractionRaiseEventAction', {
@@ -1065,7 +1065,7 @@ export function addInteractions(file, target, interactions, { replaceEvent = fal
       }
       case 'data-sort': return build({ ...spec, type:'repeater-sort' }, ctx);
       case 'data-clear-sort': return build({ ...spec, type:'remove-sort', removeAll:true }, ctx);
-      case 'data-clear-filter': return build({ ...spec, type:'remove-filter', removeAll:true }, ctx);
+      case 'data-clear-filter': return build({ ...spec, type:'remove-filter', removeAll: !spec.label }, ctx);
       case 'data-page': return build({ ...spec, type:'set-repeater-page' }, ctx);
       case 'data-add': return build({ ...spec, type:'repeater-add-items' }, ctx);
       case 'data-delete': return build({ ...spec, type:'repeater-delete-items' }, ctx);

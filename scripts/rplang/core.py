@@ -284,12 +284,12 @@ BOX = {"layout", "padding", "gap", "align", "justify", "wrap", "equalHeight", "c
 NODE_PROPS = {
     "box": BOX,
     "card": BOX | {"variant"},
-    "label": TEXT | {"wrap", "lineGap", "lineHeight", "maxLines", "fill", "stroke", "radius"} | STYLE_EXTRAS,
-    "paragraph": TEXT | {"lineGap", "lineHeight", "maxLines", "padding", "fill", "stroke", "radius"} | STYLE_EXTRAS,
+    "label": TEXT | {"wrap", "lineGap", "lineHeight", "maxLines", "fill", "stroke", "radius", "textPaddingX"} | STYLE_EXTRAS,
+    "paragraph": TEXT | {"lineGap", "lineHeight", "maxLines", "padding", "fill", "stroke", "radius", "textPaddingX"} | STYLE_EXTRAS,
     "button": TEXT | {"variant", "fill", "stroke", "radius", "icon"} | STYLE_EXTRAS,
     "badge": TEXT | {"variant", "fill", "stroke", "radius", "icon"} | STYLE_EXTRAS,
-    "input": {"value", "placeholder", "maxLength", "multiline", "native", "fill", "stroke", "radius", "fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX"} | STYLE_EXTRAS,
-    "textarea": {"value", "placeholder", "native", "fill", "stroke", "radius", "fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX"} | STYLE_EXTRAS,
+    "input": {"value", "placeholder", "maxLength", "multiline", "native", "fill", "stroke", "radius", "fontSize", "fontFamily", "size", "fontWeight", "weight", "color", "align", "textPaddingX"} | STYLE_EXTRAS,
+    "textarea": {"value", "placeholder", "native", "fill", "stroke", "radius", "fontSize", "fontFamily", "size", "fontWeight", "weight", "color", "align", "textPaddingX"} | STYLE_EXTRAS,
     "divider": {"direction", "color", "fill", "opacity"},
     "image": {"src", "radius", "opacity", "shadow", "rotation"},
     "icon": {"icon", "color", "fill", "stroke", "radius", "strokeWidth"} | STYLE_EXTRAS,
@@ -323,11 +323,12 @@ ACTION_PROPS = {
     "move": {"target", "mode", "x", "y", "duration", "easing", "bounds"},
     "show": {"target"}, "hide": {"target"}, "toggle": {"target"},
     "enable": {"target"}, "disable": {"target"}, "focus": {"target"},
-    "link": {"page"}, "wait": {"ms"}, "raise-event": {"target"},
+    "link": {"page"}, "open-link": {"url", "window"}, "wait": {"ms"},
+    "raise-event": {"target", "event"}, "scroll-to": {"target"},
     "set-size": {"target", "width", "height", "duration", "easing", "anchor"},
     "data-add": {"target", "rows"}, "data-delete": {"target", "where"},
     "data-update": {"target", "where", "set"}, "data-filter": {"target", "where", "name"},
-    "data-clear-filter": {"target"}, "data-sort": {"target", "column", "direction"},
+    "data-clear-filter": {"target", "name"}, "data-sort": {"target", "column", "direction"},
     "data-clear-sort": {"target"}, "data-page": {"target", "page"},
 }
 
@@ -2374,10 +2375,12 @@ def expand_phone_shell_macro(source, path):
         tb.setdefault("type", "tab-bar")
         tb.setdefault("id", f"{sh_id}_tabs")
         children.append(tb)
+    free_screen = (source.get("statusBar") is False and not source.get("navBar") and not source.get("tabBar")
+                   and len(children) > 0 and all(isinstance(child, dict) and "x" in child and "y" in child for child in children))
     outer = {
         "type": "box",
         "id": sh_id,
-        "layout": "column",
+        "layout": "stack" if free_screen else "column",
         "w": source.get("w", preset["w"]),
         "h": source.get("h", preset["h"]),
         "padding": source.get("padding", [14, 16, 20, 16]),

@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { assertNotProtected } from '../scripts/engine.mjs';
 import { spawnPythonSync } from '../scripts/python.mjs';
 import { ensureCoreComponentsRegistered } from './component-contracts.mjs';
-import { normalizeInteractionSpec } from './interactions.mjs';
+import { NATIVE_PASSTHROUGH_ACTIONS, normalizeInteractionSpec } from './interactions.mjs';
 import { INTERACTION_LINT_CODES, lintDocumentInteractions } from './interaction-lint.mjs';
 export { assertNotProtected };
 
@@ -321,9 +321,23 @@ function isInlineRp1Snippet(value) {
     && /^(?:palette:|tab-bar:|var\s+[A-Za-z_]|page\s+#?|component\s+|master\s+|dataset\s+|tokens:|box\b|column\b|row\b|card\b|label\b)/m.test(trimmed);
 }
 
+function prepareStudioSource(spec) {
+  const source = JSON.stringify(spec);
+  const usesSharedExpansion = spec.language === 'rp/1' && spec.schemaVersion === undefined &&
+    (spec.product || spec.rules || spec.transactions || spec.masters || /"(?:data-table|searchable-list)"/.test(source));
+  if (!usesSharedExpansion) return normalizeSpecShorthand(spec);
+  const proc = spawnPythonSync(['-B', '-m', 'rplang.studio_source'], {
+    cwd: join(ROOT, 'scripts'), input: source, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
+  });
+  if (proc.status !== 0) {
+    throw Object.assign(new Error(`RP/1 共享展开失败：${proc.stderr || proc.stdout || proc.error?.message}`), { code: 'E_RP1_STUDIO_EXPAND' });
+  }
+  return normalizeSpecShorthand(JSON.parse(proc.stdout));
+}
+
 export function parseSourceSpec(sourcePathOrObject) {
   if (typeof sourcePathOrObject === 'object' && sourcePathOrObject !== null) {
-    return { spec: normalizeSpecShorthand(structuredClone(sourcePathOrObject)), baseDir: process.cwd(), sourcePath: null };
+    return { spec: prepareStudioSource(structuredClone(sourcePathOrObject)), baseDir: process.cwd(), sourcePath: null };
   }
   const rawStr = String(sourcePathOrObject);
   if (isInlineRp1Snippet(rawStr)) {
@@ -336,7 +350,7 @@ print(json.dumps(dsl_to_spec(sys.stdin.read()), ensure_ascii=False))
     if (proc.status !== 0) {
       throw Object.assign(new Error(`Failed to parse inline RP/1 DSL: ${proc.stderr || proc.stdout || proc.error?.message}`), { code: 'E_DSL_PARSE' });
     }
-    return { spec: normalizeSpecShorthand(JSON.parse(proc.stdout)), baseDir: process.cwd(), sourcePath: null };
+    return { spec: prepareStudioSource(JSON.parse(proc.stdout)), baseDir: process.cwd(), sourcePath: null };
   }
   const absPath = resolve(rawStr);
   assertNotProtected(absPath);
@@ -353,7 +367,7 @@ with open(sys.argv[2], encoding="utf-8") as f:
     if (proc.status !== 0) {
       throw Object.assign(new Error(`Failed to parse .rp1 DSL: ${proc.stderr || proc.stdout || proc.error?.message}`), { code: 'E_DSL_PARSE' });
     }
-    return { spec: normalizeSpecShorthand(JSON.parse(proc.stdout)), baseDir, sourcePath: absPath };
+    return { spec: prepareStudioSource(JSON.parse(proc.stdout)), baseDir, sourcePath: absPath };
   }
   if (ext === '.rp') {
     const proc = spawnPythonSync(['-B', '-c', `
@@ -369,7 +383,7 @@ print(json.dumps(res['spec'], ensure_ascii=False))
     return { spec: normalizeSpecShorthand(JSON.parse(proc.stdout)), baseDir, sourcePath: absPath };
   }
   const text = readFileSync(absPath, 'utf8');
-  return { spec: normalizeSpecShorthand(JSON.parse(text)), baseDir, sourcePath: absPath };
+  return { spec: prepareStudioSource(JSON.parse(text)), baseDir, sourcePath: absPath };
 }
 
 const MACRO_TYPES = new Set([
@@ -493,13 +507,38 @@ function normalizeDslShorthand(node) {
   return copy;
 }
 
+function attachProjectTabs(root, config, activePage) {
+  if (!root || !config || !Array.isArray(config.items ?? config.tabs)) return root;
+  const items = (config.items ?? config.tabs).map((item, index) => {
+    const tab = typeof item === 'string' ? { id: item, label: item } : structuredClone(item);
+    const page = tab.page ?? tab.goto ?? tab.link ?? tab.id;
+    const id = String(tab.id || page || ('tab_' + (index + 1)));
+    return { ...tab, id: id.startsWith('tab_') ? id : 'tab_' + id, page, active: tab.active ?? page === activePage };
+  });
+  const bar = { ...config, type: 'tab-bar', id: activePage + '_tabs', items };
+  delete bar.active;
+  const attach = node => {
+    if (node.type === 'phone-shell') {
+      if (node.tabBar !== false && !node.tabBar && !node.children?.some(child => child.type === 'tab-bar')) {
+        node.children = [...(node.children ?? node.body ?? []), bar];
+      }
+      return true;
+    }
+    return node.children?.some(attach) ?? false;
+  };
+  if (!attach(root) && Array.isArray(root.children) && !root.children.some(child => child.type === 'tab-bar')) root.children.push(bar);
+  return root;
+}
+
 export function normalizeSpecShorthand(spec) {
   if (!spec || typeof spec !== 'object') return spec;
   const out = { ...spec };
   if (Array.isArray(out.pages)) {
     out.pages = out.pages.map(page => {
       if (!page || typeof page !== 'object') return page;
-      const next = { ...page, root: normalizeDslShorthand(page.root) };
+      const root = normalizeDslShorthand(page.root);
+      const tabs = Array.isArray(out.tabBar) ? { items: out.tabBar } : out.tabBar;
+      const next = { ...page, root: page.tabBar === false ? root : attachProjectTabs(root, tabs, page.id) };
       if (Array.isArray(next.canvas) && next.canvas.length === 2) {
         next.canvas = { w: Number(next.canvas[0]), h: Number(next.canvas[1]) };
       }
@@ -577,6 +616,41 @@ export function normalizeNodeInteractions(node, context = null) {
   for (const child of node.children || []) normalizeNodeInteractions(child, context);
   for (const state of node.states || []) normalizeNodeInteractions(state.root, context);
   normalizeNodeInteractions(node.template, context);
+}
+
+function walkInteractionActions(spec, visit) {
+  if (Array.isArray(spec)) {
+    for (const item of spec) walkInteractionActions(item, visit);
+  } else if (spec && typeof spec === 'object') {
+    if (spec.type) visit(spec);
+    for (const key of ['actions', 'then', 'else', 'cases']) walkInteractionActions(spec[key], visit);
+  }
+}
+
+export function importCompatibility(doc) {
+  let fullySupportedCount = 0;
+  const preservedAsNativePassThrough = [];
+  const scan = (node, pageId) => {
+    if (!node) return;
+    for (const [event, spec] of Object.entries(node.on || {})) {
+      walkInteractionActions(spec, action => {
+        if (Object.hasOwn(NATIVE_PASSTHROUGH_ACTIONS, action.type)) {
+          preservedAsNativePassThrough.push({ pageId, nodeId: node.id, event, type: action.type });
+        } else {
+          fullySupportedCount++;
+        }
+      });
+    }
+    for (const child of node.children || []) scan(child, pageId);
+    for (const state of node.states || []) scan(state.root, pageId);
+    scan(node.template, pageId);
+  };
+  for (const page of doc.pages || []) {
+    scan(page, page.id);
+    scan(page.root, page.id);
+  }
+  for (const [id, component] of Object.entries(doc.components || {})) scan(component.root, `component:${id}`);
+  return { fullySupportedCount, preservedAsNativePassThrough };
 }
 
 function collectRawWidgetIds(node, out = new Set()) {
@@ -799,6 +873,7 @@ export function importToStudioDocument(sourcePathOrObject, { projectDir = null, 
       interactionContext
     );
 
+    const on = nodeEvents(pg, interactionContext);
     return {
       id: pageId,
       name: pageName,
@@ -811,6 +886,7 @@ export function importToStudioDocument(sourcePathOrObject, { projectDir = null, 
         h: canvasH,
       },
       root: rootNode,
+      ...(on ? { on } : {}),
       ...(pg.views ? { views: structuredClone(pg.views) } : {}),
       ...(pg.bindings ? { bindings: structuredClone(pg.bindings) } : {}),
       interactions: structuredClone(pg.interactions || []),

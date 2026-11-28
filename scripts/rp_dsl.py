@@ -5,9 +5,11 @@ Provides 1:1 lossless bidirectional conversion between `.rp1` textual DSL and
 RP/1 JSON AST (`spec_to_dsl`, `dsl_to_spec`, `format_dsl`) with line/column
 sourceSpan tracking and >50% structural token reduction.
 """
+from difflib import get_close_matches
 import json
 import re
 from rp_language import LanguageError, SHORTHAND_NODE_KINDS, EVENT_SHORTHANDS
+from rplang.core import ACTION_PROPS, NODE_SOURCE_ALIASES
 
 SIMPLE_STR_RE = re.compile(r"^[A-Za-z0-9_.$@/#-]+$")
 IDENT_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_-]*$")
@@ -55,8 +57,54 @@ def _node_kind_and_id(node):
     return "box", node.get("id", "node"), "type"
 
 
+_FORM_ACTIONS = {
+    "check": ("set-check", "checked"),
+    "select": ("set-selected", "selected"),
+    "choose": ("set-option", "value"),
+}
+_FORM_ALIASES = {action: verb for verb, (action, _) in _FORM_ACTIONS.items()}
+_ACTION_ALIASES = {"panel", "setPanelState", "goto", "navigate", "set", "fire", *_FORM_ACTIONS}
+
+
+def _emit_action(action):
+    if not isinstance(action, dict):
+        return None
+    kind = action.get("type")
+    if kind not in ACTION_PROPS:
+        return None
+    options = {key: value for key, value in action.items() if key != "type"}
+    target = options.get("target")
+    if kind in _FORM_ALIASES and isinstance(target, str):
+        verb = _FORM_ALIASES[kind]
+        _, field = _FORM_ACTIONS[verb]
+        value = options.get(field)
+        if set(options) == {"target", field} and not isinstance(value, dict):
+            return f"{verb} {target} {_fmt_inline(value)}"
+    if kind == "set-panel-state" and isinstance(target, str):
+        field = "state" if "state" in options else "mode"
+        state = options.get(field)
+        if isinstance(state, str) and (field == "mode" or state not in ("next", "previous", "current")):
+            tail = _fmt_kv_pairs(options, skip={"target", field})
+            return f"setPanelState {target} to {state} {tail}".rstrip()
+    return f"{kind} {_fmt_kv_pairs(options)}".rstrip()
+
+
+def _emit_event(lines, pad, event, value):
+    if isinstance(value, list) and value:
+        emitted = [_emit_action(action) for action in value]
+        if all(emitted):
+            lines.append(f"{pad}+{event}:")
+            lines.extend(f"{pad}  {action}" for action in emitted)
+            return
+    lines.append(f"{pad}+{event} {_fmt_inline(value)}")
+
+
 def _emit_node(node, indent, lines):
     pad = "  " * indent
+    node = dict(node)
+    for legacy, canonical in NODE_SOURCE_ALIASES.items():
+        if legacy in node and canonical not in node:
+            node[canonical] = node.pop(legacy)
     kind, nid, form = _node_kind_and_id(node)
     skip = {kind if form == "shorthand" else "type", "id"}
     head = f"{pad}{kind}" if form == "type" else f"{pad}@{kind}"
@@ -93,10 +141,10 @@ def _emit_node(node, indent, lines):
     # Emit events
     for ev_sh in EVENT_SHORTHANDS:
         if ev_sh in node:
-            lines.append(f"{c_pad}+{ev_sh} {_fmt_inline(node[ev_sh])}")
+            _emit_event(lines, c_pad, ev_sh, node[ev_sh])
     if "on" in node and isinstance(node["on"], dict):
         for ev_k, ev_v in node["on"].items():
-            lines.append(f"{c_pad}+on.{ev_k} {_fmt_inline(ev_v)}")
+            _emit_event(lines, c_pad, f"on.{ev_k}", ev_v)
 
     # Emit macro array items compactly
     for arr_k, tag in (("columns", "col"), ("fields", "field"), *(() if kind == "stat-row" else (("items", "item"),))):
@@ -316,6 +364,19 @@ def _set_diag_span(err, line_no, col_no):
     return err
 
 
+class _SourceSpans(dict):
+    def __init__(self, initial):
+        super().__init__(initial)
+        self.warnings = []
+
+
+def _syntax_warning(pointer, line, column, legacy, canonical, section):
+    return {"code": "W_DEPRECATED_SYNTAX", "severity": "warning", "pointer": pointer,
+            "line": line, "column": column, "sourceSpan": {"line": line, "column": column},
+            "legacy": legacy, "canonical": canonical, "docRef": f"references/rp-language.md#{section}",
+            "message": f"第 {line} 行的旧写法 {legacy!r} 仍可使用，推荐迁移为 {canonical!r}。"}
+
+
 def _parse_value(raw, line_no=1):
     raw = raw.strip()
     if not raw:
@@ -451,6 +512,8 @@ _VERIFY_EXPECT_KEYS = {
     "text", "value", "visible", "enabled", "checked", "panelState",
     "width", "height", "x", "y", "left", "right", "top", "bottom",
     "dx", "dy", "tolerance", "page", "variable", "equals",
+    "fill", "color", "opacity", "fontFamily", "fontSize", "fontWeight", "radius",
+    "visualBaseline", "maxDiffPct", "saveBaselineIfMissing",
 }
 
 
@@ -470,13 +533,62 @@ def _norm_expr_val(v_raw, line_no=1):
     return parsed
 
 
-def _parse_action_stmt(line, line_no):
+def _parse_action_stmt(line, line_no, pointer="/", column=1):
     s = line.strip()
     if s.startswith("- "):
         s = s[2:].strip()
-    if s.startswith("{"):
+    if s.startswith(("{", "[")):
         return _parse_value(s, line_no)
     tok, pos = _scan_token(s, 0, line_no)
+
+    def invalid(message):
+        raise _set_diag_span(LanguageError("E_DSL_SYNTAX", pointer, message), line_no, column)
+
+    # Typed key=value syntax covers the complete JSON action vocabulary.
+    tail, _ = _scan_token(s, pos, line_no)
+    if tok in ACTION_PROPS and tail and re.match(r"^[a-zA-Z][\w]*=", tail):
+        return {"type": tok, **_parse_kv_tail(s, pos, line_no)}
+    if tok in {*_FORM_ACTIONS, *_FORM_ALIASES}:
+        kind, field = _FORM_ACTIONS[_FORM_ALIASES.get(tok, tok)]
+        target, pos = _scan_token(s, pos, line_no)
+        value = s[pos:].strip()
+        if not target or not value:
+            invalid(f"{tok} requires a target and value")
+        return {"type": kind, "target": target.lstrip("@#"), field: _norm_expr_val(value, line_no)}
+    if tok and tok.startswith("data-") and tok in ACTION_PROPS:
+        target, pos = _scan_token(s, pos, line_no)
+        if not target:
+            invalid(f"{tok} requires a repeater target")
+        out = {"type": tok, "target": target.lstrip("@#")}
+        if tok == "data-sort":
+            out["column"], pos = _scan_token(s, pos, line_no)
+            direction, pos = _scan_token(s, pos, line_no)
+            if direction:
+                out["direction"] = direction
+        elif tok == "data-page":
+            page, pos = _scan_token(s, pos, line_no)
+            if not page:
+                invalid("data-page requires a direction or page number")
+            out["page"] = _parse_value(page, line_no)
+        tail = _parse_kv_tail(s, pos, line_no)
+        if isinstance(tail.get("where"), str):
+            tail["where"] = _norm_expr_val(tail["where"], line_no)
+        return {**out, **tail}
+    if tok in ("raise-event", "fire", "open-link", "scroll-to"):
+        target, pos = _scan_token(s, pos, line_no)
+        if not target:
+            invalid(f"{tok} requires a target")
+        kind = "raise-event" if tok == "fire" else tok
+        out = {"type": kind}
+        if kind == "open-link":
+            out["url"] = _parse_value(target, line_no)
+        else:
+            out["target"] = target.lstrip("@#")
+        event, next_pos = _scan_token(s, pos, line_no)
+        if kind == "raise-event" and event and "=" not in event:
+            out["event"] = event
+            pos = next_pos
+        return {**out, **_parse_kv_tail(s, pos, line_no)}
     if tok == "move":
         t_tok, pos = _scan_token(s, pos, line_no)
         if not t_tok:
@@ -569,7 +681,9 @@ def _parse_action_stmt(line, line_no):
             if isinstance(kvs.get(axis), str):
                 kvs[axis] = _norm_expr_val(kvs[axis], line_no)
         return {"type": "set-size", "target": t_tok.lstrip("@#"), **kvs}
-    return s
+    suggestions = get_close_matches(tok or "", sorted(set(ACTION_PROPS) | _ACTION_ALIASES), n=3)
+    raise _set_diag_span(LanguageError("E_DSL_SYNTAX", pointer, f"Unknown event action '{tok}'",
+                                       suggestions=suggestions), line_no, column)
 
 
 def _parse_cond_header(cnt, line_no, indent, ev_ptr):
@@ -588,7 +702,7 @@ def _parse_cond_header(cnt, line_no, indent, ev_ptr):
     return None, None
 
 
-def _parse_stmt_block(raw_lines, idx, parent_indent, ev_ptr):
+def _parse_stmt_block(raw_lines, idx, parent_indent, ev_ptr, span_map):
     n_lines = len(raw_lines)
     if idx >= n_lines or raw_lines[idx][1] <= parent_indent:
         return [], idx
@@ -616,7 +730,7 @@ def _parse_stmt_block(raw_lines, idx, parent_indent, ev_ptr):
             elif current_chain is None or current_chain[-1]["_kind"] == "else":
                 raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ev_ptr, f"'{cond_kind}' without preceding 'if'/'elif' at line {lno}"), lno, ind + 1)
             idx += 1
-            body_stmts, idx = _parse_stmt_block(raw_lines, idx, ind, ev_ptr)
+            body_stmts, idx = _parse_stmt_block(raw_lines, idx, ind, ev_ptr, span_map)
             if not body_stmts:
                 raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ev_ptr, f"Empty conditional branch at line {lno}"), lno, ind + 1)
             branch = {"_kind": cond_kind, "_src": (lno, ind + 1), "actions": body_stmts}
@@ -627,7 +741,26 @@ def _parse_stmt_block(raw_lines, idx, parent_indent, ev_ptr):
             current_chain.append(branch)
         else:
             flush_chain()
-            stmts.append(_parse_action_stmt(cnt, lno))
+            statement_pointer = f"{ev_ptr}/{len(stmts)}"
+            try:
+                statement = _parse_action_stmt(cnt, lno, statement_pointer, ind + 1)
+            except LanguageError as error:
+                if error.diagnostic.get("pointer") == "/":
+                    error.diagnostic["pointer"] = statement_pointer
+                    _set_diag_span(error, lno, ind + error.diagnostic.get("column", 1))
+                raise
+            actions = statement if isinstance(statement, list) else [statement]
+            if not all(isinstance(action, dict) for action in actions):
+                raise _set_diag_span(LanguageError("E_DSL_SYNTAX", statement_pointer,
+                                                   "Embedded event JSON must contain action objects"), lno, ind + 1)
+            for action in actions:
+                stmts.append({**action, "_src": (lno, ind + 1)})
+            if re.match(r"^-?\s*(?:panel|set-panel-state)\s", cnt):
+                legacy = re.sub(r"^-?\s*(?:panel|set-panel-state)\s+", "", cnt)
+                target, end = _scan_token(legacy, 0, lno)
+                remaining = legacy[end:].strip()
+                canonical = f"setPanelState {target} {remaining}" if remaining.startswith("to ") else f"setPanelState {target} to {remaining}"
+                span_map.warnings.append(_syntax_warning(statement_pointer, lno, ind + 1, cnt, canonical, "面板状态动作"))
             idx += 1
     flush_chain()
     return stmts, idx
@@ -644,16 +777,21 @@ def _finalize_stmt_list(items, base_ptr, span_map, single_cases_top=False):
                 src = c.get("_src")
                 if src:
                     span_map[f"{c_ptr}/{ci}"] = {"line": src[0], "column": src[1]}
-                c_copy["actions"] = _finalize_stmt_list(c["actions"], f"{c_ptr}/{ci}/actions", span_map, single_cases_top=False)
+                body = c.get("actions", [])
+                c_copy["actions"] = _finalize_stmt_list(body if isinstance(body, list) else [body], f"{c_ptr}/{ci}/actions", span_map, single_cases_top=False)
                 clean_cases.append(c_copy)
             out.append({"cases": clean_cases})
         else:
+            if isinstance(item, dict) and "_src" in item:
+                src = item["_src"]
+                span_map[f"{base_ptr}/{i}"] = {"line": src[0], "column": src[1]}
+                item = {k: v for k, v in item.items() if k != "_src"}
             out.append(item)
     return out
 
 
 def _parse_event_block(raw_lines, idx, parent_indent, ev_ptr, span_map):
-    stmts, idx = _parse_stmt_block(raw_lines, idx, parent_indent, ev_ptr)
+    stmts, idx = _parse_stmt_block(raw_lines, idx, parent_indent, ev_ptr, span_map)
     if not stmts:
         return [], idx
     if len(stmts) == 1 and isinstance(stmts[0], dict) and "cases" in stmts[0]:
@@ -760,7 +898,12 @@ def _parse_node_block(raw_lines, idx, base_indent, ptr_prefix, span_map):
                     span_map[f"{ptr_prefix}/{ev_sh}"] = {"line": line_no, "column": indent + saved + 1}
             else:
                 kvs[k] = _parse_value(v_raw, line_no)
-                span_map[f"{ptr_prefix}/{k}"] = {"line": line_no, "column": indent + saved + 1}
+                key_pointer = f"{ptr_prefix}/{k}"
+                column = indent + saved + 1
+                span_map[key_pointer] = {"line": line_no, "column": column}
+                if k in NODE_SOURCE_ALIASES:
+                    span_map.warnings.append(_syntax_warning(
+                        key_pointer, line_no, column, ntok, f"{NODE_SOURCE_ALIASES[k]}={v_raw}", "节点属性"))
         else:
             raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ptr_prefix, f"Expected key=value token, got '{ntok}' at line {line_no}"), line_no, indent + saved + 1)
 
@@ -976,7 +1119,7 @@ def dsl_to_spec(dsl_text, return_spans=False):
     if not raw_lines:
         raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", "Empty .rp1 document"), 1, 1)
 
-    span_map = {"/": {"line": raw_lines[0][0], "column": 1}}
+    span_map = _SourceSpans({"/": {"line": raw_lines[0][0], "column": 1}})
     lno0, _, first = raw_lines[0]
     if not first.startswith("rp/1"):
         raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/language", "First statement in .rp1 must start with 'rp/1'"), lno0, 1)

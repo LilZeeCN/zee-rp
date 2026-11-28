@@ -253,7 +253,7 @@ test('RP9 native forms serialization & gesture fixture roundtrip', { skip: nativ
       const lifted = join(work, 'gestures-lifted.rp1');
       run('node', ['scripts/proto.mjs', 'decompile', '--rp', nativePath, '--out', lifted]);
       const sourceText = readFileSync(lifted, 'utf8');
-      assert.match(sourceText, /repeatInterval":450/);
+      assert.match(sourceText, /repeatInterval=450/);
       assert.match(sourceText, /swiperight/);
       assert.match(sourceText, /locationBeforeDrag/);
       assert.match(sourceText, /maxLength=7/);

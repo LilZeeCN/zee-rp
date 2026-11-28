@@ -5731,6 +5731,21 @@
                         "$ref": "#/$defs/compileExpression"
                       }
                     ]
+                  },
+                  "textPaddingX": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -20038,6 +20053,16 @@
                     "$ref": "#/$defs/compileExpression"
                   }
                 ]
+              },
+              "fontFamily": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -21897,6 +21922,21 @@
                 ]
               },
               "borderRadius": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "textPaddingX": {
                 "anyOf": [
                   {
                     "type": "number",
@@ -26877,6 +26917,21 @@
                 ]
               },
               "borderRadius": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
+              },
+              "textPaddingX": {
                 "anyOf": [
                   {
                     "type": "number",
@@ -36033,6 +36088,16 @@
                     "$ref": "#/$defs/compileExpression"
                   }
                 ]
+              },
+              "fontFamily": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -40646,6 +40711,21 @@
                   "box": {
                     "type": "string",
                     "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+                  },
+                  "textPaddingX": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0
+                      },
+                      {
+                        "type": "string",
+                        "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                      },
+                      {
+                        "$ref": "#/$defs/compileExpression"
+                      }
+                    ]
                   }
                 },
                 "required": [
@@ -55102,6 +55182,16 @@
               "input": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "fontFamily": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -56997,6 +57087,21 @@
               "label": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "textPaddingX": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -62031,6 +62136,21 @@
               "paragraph": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "textPaddingX": {
+                "anyOf": [
+                  {
+                    "type": "number",
+                    "minimum": 0
+                  },
+                  {
+                    "type": "string",
+                    "pattern": "^\\$[A-Za-z_][A-Za-z0-9_.-]*$"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -71291,6 +71411,16 @@
               "textarea": {
                 "type": "string",
                 "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$"
+              },
+              "fontFamily": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "$ref": "#/$defs/compileExpression"
+                  }
+                ]
               }
             },
             "required": [
@@ -73357,6 +73487,28 @@
           "type": "object",
           "properties": {
             "type": {
+              "const": "open-link"
+            },
+            "window": {
+              "enum": [
+                "current",
+                "new"
+              ]
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "url"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
               "const": "wait"
             },
             "ms": {
@@ -73378,6 +73530,25 @@
             },
             "target": {
               "$ref": "#/$defs/reference"
+            },
+            "event": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "target"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "scroll-to"
+            },
+            "target": {
+              "$ref": "#/$defs/reference"
             }
           },
           "required": [
@@ -73392,11 +73563,12 @@
             "type": {
               "const": "set-size"
             },
-            "anchor": {
-              "type": "string"
-            },
             "target": {
               "$ref": "#/$defs/reference"
+            },
+            "duration": {
+              "type": "number",
+              "minimum": 0
             },
             "easing": {
               "type": "string"
@@ -73407,9 +73579,8 @@
             "height": {
               "$ref": "#/$defs/value"
             },
-            "duration": {
-              "type": "number",
-              "minimum": 0
+            "anchor": {
+              "type": "string"
             }
           },
           "required": [
@@ -73494,11 +73665,11 @@
             "type": {
               "const": "data-delete"
             },
-            "target": {
-              "$ref": "#/$defs/reference"
-            },
             "where": {
               "$ref": "#/$defs/value"
+            },
+            "target": {
+              "$ref": "#/$defs/reference"
             }
           },
           "required": [
@@ -73514,15 +73685,15 @@
             "type": {
               "const": "data-update"
             },
+            "target": {
+              "$ref": "#/$defs/reference"
+            },
             "set": {
               "type": "object",
               "minProperties": 1,
               "additionalProperties": {
                 "$ref": "#/$defs/value"
               }
-            },
-            "target": {
-              "$ref": "#/$defs/reference"
             },
             "where": {
               "$ref": "#/$defs/value"
@@ -73542,11 +73713,11 @@
             "type": {
               "const": "data-filter"
             },
-            "where": {
-              "$ref": "#/$defs/value"
-            },
             "target": {
               "$ref": "#/$defs/reference"
+            },
+            "where": {
+              "$ref": "#/$defs/value"
             },
             "name": {
               "type": "string"
@@ -73567,6 +73738,9 @@
             },
             "target": {
               "$ref": "#/$defs/reference"
+            },
+            "name": {
+              "type": "string"
             }
           },
           "required": [
@@ -73581,6 +73755,9 @@
             "type": {
               "const": "data-sort"
             },
+            "target": {
+              "$ref": "#/$defs/reference"
+            },
             "column": {
               "type": "string"
             },
@@ -73591,9 +73768,6 @@
                 "asc",
                 "desc"
               ]
-            },
-            "target": {
-              "$ref": "#/$defs/reference"
             }
           },
           "required": [
@@ -73625,6 +73799,9 @@
             "type": {
               "const": "data-page"
             },
+            "target": {
+              "$ref": "#/$defs/reference"
+            },
             "page": {
               "anyOf": [
                 {
@@ -73640,9 +73817,6 @@
                   "minimum": 1
                 }
               ]
-            },
-            "target": {
-              "$ref": "#/$defs/reference"
             }
           },
           "required": [
@@ -73658,11 +73832,18 @@
             "type": {
               "const": "set-check"
             },
-            "checked": {
-              "$ref": "#/$defs/booleanValue"
-            },
             "target": {
               "$ref": "#/$defs/reference"
+            },
+            "checked": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/booleanValue"
+                },
+                {
+                  "const": "toggle"
+                }
+              ]
             }
           },
           "required": [
@@ -73679,7 +73860,14 @@
               "const": "set-selected"
             },
             "selected": {
-              "$ref": "#/$defs/booleanValue"
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/booleanValue"
+                },
+                {
+                  "const": "toggle"
+                }
+              ]
             },
             "target": {
               "$ref": "#/$defs/reference"
@@ -73698,11 +73886,11 @@
             "type": {
               "const": "set-option"
             },
-            "value": {
-              "$ref": "#/$defs/textValue"
-            },
             "target": {
               "$ref": "#/$defs/reference"
+            },
+            "value": {
+              "$ref": "#/$defs/textValue"
             }
           },
           "required": [
@@ -75019,6 +75207,7 @@
       "styles",
       "text",
       "textColor",
+      "textPaddingX",
       "type",
       "underline",
       "visible",
@@ -75994,6 +76183,7 @@
       "fill",
       "flex",
       "font",
+      "fontFamily",
       "fontSize",
       "fontWeight",
       "goto",
@@ -76173,6 +76363,7 @@
       "styles",
       "text",
       "textColor",
+      "textPaddingX",
       "type",
       "underline",
       "visible",
@@ -76567,6 +76758,7 @@
       "styles",
       "text",
       "textColor",
+      "textPaddingX",
       "type",
       "underline",
       "visible",
@@ -77337,6 +77529,7 @@
       "fill",
       "flex",
       "font",
+      "fontFamily",
       "fontSize",
       "fontWeight",
       "goto",
@@ -77522,7 +77715,8 @@
       "lineHeight": "仅在 box 声明 text、没有 children 且没有 layout/padding/gap/justify/columns 时消费：正规化为 label，使用 label 的字段语义",
       "textColor": "仅在 box 声明 text 且没有 children 时消费：正规化为 label 或实际文字子节点",
       "fontSize": "仅在 box 声明 text 且没有 children 时消费：正规化为 label 或实际文字子节点",
-      "type": "仅在 box 声明 text、没有 children 且没有 layout/padding/gap/justify/columns 时消费：正规化为 label，使用 label 的字段语义"
+      "type": "仅在 box 声明 text、没有 children 且没有 layout/padding/gap/justify/columns 时消费：正规化为 label，使用 label 的字段语义",
+      "textPaddingX": "仅在 box 声明 text、没有 children 且没有 layout/padding/gap/justify/columns 时消费：正规化为 label，使用 label 的字段语义"
     },
     "card": {
       "tagTone": "仅在 card 同时声明 title/body/tag/actionText 等内容简写时消费；展开后修改实际子节点",

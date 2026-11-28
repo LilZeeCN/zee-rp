@@ -14,8 +14,15 @@ export const RP1_DATA_ACTION_FIELDS = Object.freeze({
   'data-clear-sort': ['target'],
   'data-page': ['target', 'page'],
 });
+export const NATIVE_PASSTHROUGH_ACTIONS = Object.freeze({
+  'open-link': ['url', 'window'],
+  'scroll-to': ['target'],
+  'raise-event': ['target', 'event'],
+  wait: ['ms'],
+});
 const typed = new Set(['set-var', 'set-variable', 'show', 'hide', 'toggle', 'set-text', 'set-panel-state', 'set-check', 'set-selected', 'set-option', 'move', 'link', 'navigate',
   ...Object.keys(RP1_DATA_ACTION_FIELDS),
+  ...Object.keys(NATIVE_PASSTHROUGH_ACTIONS),
   ...['dataset', 'repeater'].flatMap(prefix => ['add', 'update', 'delete', 'select', 'toggle-select', 'filter', 'sort', 'page'].map(op => `${prefix}-${op}`))]);
 
 function parseInlineActionString(raw) {
@@ -59,17 +66,17 @@ function expandSetShorthand(setMap, context = null) {
     if (rawKey.startsWith('$') || rawKey.startsWith('var.')) {
       const name = rawKey.startsWith('$') ? rawKey.slice(1) : rawKey.slice(4);
       actions.push({ type: 'set-var', name, value: val });
+    } else if (rawKey.endsWith('.state')) {
+      actions.push({ type: 'set-panel-state', target: rawKey.replace(/^@/, '').slice(0, -6), state: String(val) });
+    } else if (rawKey.endsWith('.checked')) {
+      actions.push({ type: 'set-check', target: rawKey.replace(/^@/, '').slice(0, -8), checked: val });
+    } else if (rawKey.endsWith('.selected')) {
+      actions.push({ type: 'set-selected', target: rawKey.replace(/^@/, '').slice(0, -9), selected: val });
+    } else if (rawKey.endsWith('.option')) {
+      actions.push({ type: 'set-option', target: rawKey.replace(/^@/, '').slice(0, -7), value: val });
     } else if (rawKey.startsWith('@')) {
       actions.push({ type: 'set-text', target: rawKey.slice(1), value: val });
-    } else if (rawKey.endsWith('.state')) {
-      actions.push({ type: 'set-panel-state', target: rawKey.slice(0, -6), state: String(val) });
-    } else if (rawKey.endsWith('.checked')) {
-      actions.push({ type: 'set-check', target: rawKey.slice(0, -8), checked: val });
-    } else if (rawKey.endsWith('.selected')) {
-      actions.push({ type: 'set-selected', target: rawKey.slice(0, -9), selected: val });
-    } else if (rawKey.endsWith('.option')) {
-      actions.push({ type: 'set-option', target: rawKey.slice(0, -7), value: val });
-    } else if (context?.variableNames?.has(rawKey)) {
+    } else if (context?.variableNames?.has(rawKey) && !context?.widgetIds?.has(rawKey)) {
       actions.push({ type: 'set-var', name: rawKey, value: val });
     } else if (context?.widgetIds?.has(rawKey)) {
       actions.push({ type: 'set-text', target: rawKey, value: val });
@@ -119,9 +126,11 @@ export function normalizeInteractionSpec(spec, context = null) {
   }
   const conditional = ['type','when','if','condition','then','else','actions','cases','break'];
   const dataFields = ['dataset','repeater','op','rowId','clearOthers','row','patch','requireNonEmpty','onEmptyShow','onEmptySelectionShow','query','field','operator','order','page'];
-  const knownFields = (Object.hasOwn(RP1_DATA_ACTION_FIELDS, out.type) ? RP1_DATA_ACTION_FIELDS[out.type] : null) || ({show:['target'],hide:['target'],toggle:['target'],'set-text':['target','value','text'],
+  const knownFields = (Object.hasOwn(RP1_DATA_ACTION_FIELDS, out.type) ? RP1_DATA_ACTION_FIELDS[out.type] : null)
+    || (Object.hasOwn(NATIVE_PASSTHROUGH_ACTIONS, out.type) ? NATIVE_PASSTHROUGH_ACTIONS[out.type] : null)
+    || ({show:['target'],hide:['target'],toggle:['target'],'set-text':['target','value','text'],
     'set-var':['name','variable','value','expr'],'set-variable':['name','variable','value','expr'],
-    'set-panel-state':['target','panel','state','mode','loop','repeat','repeatInterval','repeatSkipFirst','enterAnimation','exitAnimation','duration'],
+    'set-panel-state':['target','panel','state','mode','loop','repeat','repeatInterval','repeatSkipFirst','enterAnimation','exitAnimation','enterDuration','exitDuration','duration','openIn'],
     'set-check':['target','checked','value'],
     'set-selected':['target','selected','value'],
     'set-option':['target','value','option','selected'],

@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { copyFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { basename, dirname, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assertNotProtected, EXPORTER_VERSION, nodeEvents, sha256,canonicalJson } from './document.mjs';
 import { exportCssPlan, parseCssBorderShorthand, resolveShadowCss, textLayout } from './visual-style.mjs';
@@ -10,7 +10,7 @@ import { resolveColorValue, resolveDocumentScene } from './scene-resolver.mjs';
 import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
 import {nodePropertyCapability,STUDIO_SOURCE_ONLY_MACROS} from './node-capabilities.mjs';
 import { normalizeVectorNodeSpec, buildRp9ControlPointsForSubpaths } from './vector-paths.mjs';
-import { buildInteractiveRp } from '../scripts/proto.mjs';
+import { buildInteractiveRp, compilePrototype } from '../scripts/proto.mjs';
 import { pythonInvocation, spawnPythonSync } from '../scripts/python.mjs';
 import { setWidgetRichText } from '../scripts/set-widget-richtext.mjs';
 import { readRp } from '../scripts/rp-read.mjs';
@@ -154,6 +154,16 @@ function normalizeSingleExportAction(act, exportCtx = null) {
     if (c.panel && !c.target) {
       c.target = c.panel;
       delete c.panel;
+    }
+    if (c.duration !== undefined) {
+      if (c.enterAnimation) c.enterDuration ??= c.duration;
+      if (c.exitAnimation) c.exitDuration ??= c.duration;
+      delete c.duration;
+    }
+    delete c.openIn;
+    if (['next', 'previous', 'current'].includes(c.state) && !c.mode) {
+      c.mode = c.state;
+      delete c.state;
     }
     if (typeof c.state === 'string' && /[:/]/.test(c.state)) {
       c.state = c.state.split(/[:/]/).pop();
@@ -1197,8 +1207,8 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
         resolvedTreeToRp1Node(
           {
             ...ch,
-            _relX: 0,
-            _relY: 0,
+            _relX: (ch._x ?? 0) - (node._x ?? 0),
+            _relY: (ch._y ?? 0) - (node._y ?? 0),
           },
           pageId,
           compatEntries,
@@ -1426,7 +1436,6 @@ function resolvedTreeToRp1Node(node, pageId, compatEntries, { omitRootXY = false
   if (isTextLike) {
     if (node._resolvedFontFamily || node.fontFamily) out.fontFamily = node._resolvedFontFamily || node.fontFamily;
     if (out.type === 'input') {
-      delete out.fontFamily; // Native input style family is not yet represented.
       if (node.placeholder !== undefined) out.placeholder = node.placeholder;
       if (node.value !== undefined) out.value = node.value;
       else if (node.text !== undefined) out.value = node.text;
@@ -1549,11 +1558,16 @@ function assembleStudioRp1Spec(snapshotDoc, exportPages, inlineDatasets) {
       palette: { ...(snapshotDoc.palette || {}), ...(snapshotDoc.tokens?.colors || {}) },
     };
     const isPhoneShell = pgScene.rootTree?.type === 'phone-shell';
+    const authored = snapshotDoc.pages.find(page => page.id === pgScene.id);
+    const pageEvents = normalizeExportOn(authored?.on, exportCtx);
     return {
       id: pgScene.id,
       name: pgScene.name,
       ...(pgScene.device ? { device: pgScene.device } : {}),
       ...(isPhoneShell ? {} : { canvas: { w: pgScene.board.screenW, h: pgScene.board.screenH } }),
+      ...(pageEvents ? { on: pageEvents } : {}),
+      ...(authored?.bindings ? { bindings: structuredClone(authored.bindings) } : {}),
+      ...(authored?.views ? { views: structuredClone(authored.views) } : {}),
       root: resolvedTreeToRp1Node(pgScene.rootTree, pgScene.id, compatEntries, { exportCtx }),
     };
   });
@@ -1589,6 +1603,8 @@ function assembleStudioRp1Spec(snapshotDoc, exportPages, inlineDatasets) {
     theme: RP1_THEMES.has(snapshotDoc.theme) ? snapshotDoc.theme : 'mobile-hifi',
     palette: cleanPalette,
     ...(Object.keys(snapshotDoc.variables || {}).length ? { variables: structuredClone(snapshotDoc.variables) } : {}),
+    ...(Object.keys(snapshotDoc.computed || {}).length ? { computed: structuredClone(snapshotDoc.computed) } : {}),
+    ...(Object.keys(snapshotDoc.views || {}).length ? { views: structuredClone(snapshotDoc.views) } : {}),
     ...(Object.keys(cleanDatasets).length ? { datasets: cleanDatasets } : {}),
     pages: resolvedPages,
   };
@@ -1605,6 +1621,22 @@ export async function exportStudioDocumentToRp1(doc, { projectDir = null, outRp1
   const absOutRp1 = outRp1Path ? resolve(outRp1Path) : null;
   if (absOutRp1) assertNotProtected(absOutRp1);
   const { snapshotDoc, exportSpec, compatEntries } = buildStudioRp1Spec(doc, { projectDir });
+  if (projectDir) {
+    const resolveAssets = node => {
+      if (!node) return;
+      if (node.type === 'image' && typeof node.src === 'string' && !isAbsolute(node.src)) {
+        const image = resolve(projectDir, node.src);
+        if (existsSync(image)) {
+          assertNotProtected(image);
+          node.src = image;
+        }
+      }
+      for (const child of node.children || []) resolveAssets(child);
+      for (const state of node.states || []) resolveAssets(state.root);
+      resolveAssets(node.template);
+    };
+    for (const page of exportSpec.pages) resolveAssets(page.root);
+  }
   const proc = spawnPythonSync(['-B', '-c', `
 import json, sys
 sys.path.insert(0, sys.argv[1])
@@ -1620,6 +1652,18 @@ sys.stdout.write(spec_to_dsl(spec))
     throw Object.assign(new Error(`Studio 导出 .rp1 失败：${proc.stderr || proc.stdout || proc.error?.message}`), { code: 'E_EXPORT_RP1_FAILED' });
   }
   const rp1Text = proc.stdout;
+  const stage = mkdtempSync(join(tmpdir(), 'zee-studio-source-roundtrip-'));
+  let roundtrip;
+  try {
+    const path = join(stage, 'exported.rp1');
+    writeFileSync(path, rp1Text, 'utf8');
+    const audit = compilePrototype(path, stage, { strictAudit: true, skipPreviews: true });
+    roundtrip = { structuralOk: audit.structural_ok, aestheticOk: audit.aesthetic_ok,
+      warningCount: audit.warnings?.length ?? 0, warnings: (audit.warnings ?? []).slice(0, 5) };
+  } catch (error) {
+    roundtrip = { structuralOk: false, aestheticOk: false, message: error.message };
+  } finally { rmSync(stage, { recursive: true, force: true }); }
+  const strictClean = roundtrip.structuralOk && roundtrip.aestheticOk && roundtrip.warningCount === 0;
   if (absOutRp1) {
     mkdirSync(dirname(absOutRp1), { recursive: true });
     writeFileSync(absOutRp1, rp1Text, 'utf8');
@@ -1633,6 +1677,10 @@ sys.stdout.write(spec_to_dsl(spec))
     revision: snapshotDoc.revision,
     contentHash: snapshotDoc.contentHash,
     compatSummary: { entriesCount: compatEntries.length },
+    roundtripContract: strictClean ? 'bidirectional-strict-clean' : 'strict-audit-findings',
+    roundtrip,
+    nextAction: { tool: 'generate_prototype',
+      arguments: { source: absOutRp1 ?? '<导出的 RP/1 文件路径>', output: 'studio-roundtrip.rp', strictAudit: true } },
   };
 }
 

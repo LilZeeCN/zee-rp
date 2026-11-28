@@ -371,10 +371,12 @@ function expandMacroNode(node, palette, macroCtx = {}) {
         children: n.tabs.map((tabLabel, tIdx) => {
           const targetSt = n.states[tIdx] || n.states[0];
           const isActive = targetSt?.id === st.id || tIdx === stIdx;
+          const tabId = stIdx === 0 ? `${n.id}_tab_${targetSt.id}` : `${n.id}_${st.id}_tab_${targetSt.id}`;
           return {
             type: 'button',
             id: `${n.id}_${st.id}_tab_${tIdx}`,
             name: `${n.id}_${st.id}_tab_${tIdx}`,
+            logicalAlias: tabId,
             text: String(tabLabel),
             flex: 1,
             h: 44,
@@ -558,8 +560,8 @@ function expandMacroNode(node, palette, macroCtx = {}) {
       const gotoPage = itemObj.goto || itemObj.page || itemObj.link;
       return {
         type: 'button',
-        id: `${n.id}_tab_${idx}`,
-        name: `${n.id}_tab_${idx}`,
+        id: typeof itemObj.id === 'string' && itemObj.id.startsWith('tab_') ? itemObj.id : `${n.id}_tab_${idx}`,
+        name: typeof itemObj.id === 'string' && itemObj.id.startsWith('tab_') ? itemObj.id : `${n.id}_tab_${idx}`,
         text: label,
         flex: 1,
         h: 44,
@@ -1606,7 +1608,8 @@ function computeRootShellKey(pg) {
   return JSON.stringify({ ...pg, root, childCount: children.length });
 }
 
-export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState = null, projectDir = null, useCache = true } = {}) {
+export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState = null, projectDir = null, useCache = true,
+  pageIds = null, exportLayouts = null } = {}) {
   const layoutDocument = (runtimeState?.datasets || runtimeState?.variables || runtimeState?.datasetPages)
     ? {
         ...doc,
@@ -1644,7 +1647,9 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
     dp: runtimeState?.datasetPages || null,
   });
 
+  const selected = pageIds ? new Set(pageIds) : null;
   for (const pg of doc.pages || []) {
+    if (selected && !selected.has(pg.id)) continue;
     const pgCanon = useCache && getCachedNodeCanonical(pg);
     const pageSource = useCache ? pgCanon || JSON.stringify(pg) : null;
     const pageCacheKey = useCache ? `${globalContextKey}::${pgCanon ? 'canon::' : ''}${pageSource}` : null;
@@ -1670,7 +1675,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
 
     const sliceCacheId = `${doc.documentId || 'doc'}::${pg.id}`;
     // Display formulas can read a repeater view in a sibling subtree.
-    const canSlice = useCache && !pageSource.includes('dataset.') && canUseRootChildSlices(pg);
+    const canSlice = useCache && !exportLayouts && !pageSource.includes('dataset.') && canUseRootChildSlices(pg);
     const rootShellKey = canSlice ? computeRootShellKey(pg) : null;
     const prevSliceEntry = canSlice ? lastPageSceneByKey.get(sliceCacheId) : null;
     const reusableChildSlices = (
@@ -1680,12 +1685,18 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
       prevSliceEntry.rootShellKey === rootShellKey
     ) ? prevSliceEntry.childSlices : null;
 
-    const { tree, fontReport } = measureAndLayoutTree(pg.root, screenW, screenH, layoutDocument, pg.id, {
-      projectDir,
-      runtimeState,
-      reusableChildSlices,
-      enableChildSliceMeta: canSlice,
+    // Layout already measures and positions every state. During one export,
+    // switching the selected state changes the flattened nodes only.
+    const layout = exportLayouts?.get(pg) ?? measureAndLayoutTree(pg.root, screenW, screenH, layoutDocument, pg.id, {
+      projectDir, runtimeState, reusableChildSlices, enableChildSliceMeta: canSlice,
     });
+    if (exportLayouts) exportLayouts.set(pg, layout);
+    const tree = layout.tree;
+    const fontReport = exportLayouts ? {
+      ...layout.fontReport,
+      clipDiagnostics: [...layout.fontReport.clipDiagnostics],
+      layoutDiagnostics: [...layout.fontReport.layoutDiagnostics],
+    } : layout.fontReport;
     allFontDiagnostics.push(...fontReport.diagnostics);
     allClipDiagnostics.push(...(fontReport.clipDiagnostics || []));
     allLayoutDiagnostics.push(...(fontReport.layoutDiagnostics || []));
@@ -1732,6 +1743,7 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
 
       const resolvedNode = {
         id: n.id,
+        ...(n.logicalAlias ? { logicalAlias: n.logicalAlias } : {}),
         scopedId,
         pageId: pg.id,
         parentId: parentNode?.id || null,
@@ -2086,11 +2098,11 @@ export function resolveDocumentScene(doc, { activePanelStates = {}, runtimeState
     fontDiagnostics: allFontDiagnostics,
     clipDiagnostics: allClipDiagnostics,
     layoutDiagnostics: allLayoutDiagnostics,
-    assetDiagnostics: doc._diagnosticsCurrent ? (doc.diagnostics || []) : currentDocumentDiagnostics(doc),
+    assetDiagnostics: selected ? [] : doc._diagnosticsCurrent ? (doc.diagnostics || []) : currentDocumentDiagnostics(doc),
     typographyStats: getTypographyCacheStats(),
   };
   Object.defineProperty(sceneObj, 'nodesByScopedId', { value: nodesByScopedId, enumerable: false, configurable: true });
-  if (useCache) {
+  if (useCache && !selected) {
     docLastSceneWeakMap.set(doc, sceneObj);
   }
   return sceneObj;

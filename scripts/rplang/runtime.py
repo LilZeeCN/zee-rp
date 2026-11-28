@@ -463,7 +463,7 @@ class ReferenceRuntime:
         elif kind == "move":
             self._move_with_drag(target, act, row=row)
         elif kind == "raise-event":
-            ev_name = "OnPanelStateChange" if act.get("eventType") == 278 else "OnClick"
+            ev_name = act.get("event", "OnPanelStateChange" if act.get("eventType") == 278 else "OnClick")
             self.trigger(target, ev_name, row=row, row_index=row_index or 0, raised=True)
         elif kind in ("show", "hide", "toggle"):
             if target in self.widgets:
@@ -517,7 +517,11 @@ class ReferenceRuntime:
             self.repeaters[target]["filters"] = {act.get("label", "default_filter"): act["predicate"]}
             self.repeaters[target]["page_num"] = 1
         elif kind == "data-clear-filter" and target in self.repeaters:
-            self.repeaters[target]["filters"].clear()
+            filters = self.repeaters[target]["filters"]
+            if act.get("label"):
+                filters.pop(act["label"], None)
+            else:
+                filters.clear()
             self.repeaters[target]["page_num"] = 1
         elif kind == "data-sort" and target in self.repeaters:
             self.repeaters[target]["sort"] = {"column": act["column"], "ascending": act.get("ascending", True)}

@@ -1,5 +1,20 @@
 // These functions have no module dependencies. The code exporter embeds them
 // in its standalone script so it also works when index.html is opened directly.
+export function readComputedWidgetStyle(el, { shape = el, textNode = el, svg = null } = {}) {
+  if (!el) return {};
+  const win = el.ownerDocument.defaultView;
+  const surface = win.getComputedStyle(shape);
+  const ink = win.getComputedStyle(textNode);
+  const background = surface.backgroundColor;
+  const fill = (background === 'transparent' || background === 'rgba(0, 0, 0, 0)') && svg
+    ? win.getComputedStyle(svg).fill : background;
+  return {
+    fill, color: ink.color, opacity: Number(win.getComputedStyle(el).opacity),
+    fontFamily: ink.fontFamily, fontSize: parseFloat(ink.fontSize), fontWeight: Number(ink.fontWeight),
+    radius: parseFloat(surface.borderTopLeftRadius),
+  };
+}
+
 export function evaluatePrototypeExpression(expression, { variables, getWidgetText, getWidgetState, resolveDatasetPath, itemRow = null, getWidgetRect = null }) {
   if (expression == null) return '';
   if (typeof expression === 'number' || typeof expression === 'boolean') return expression;

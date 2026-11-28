@@ -254,6 +254,23 @@ class Frontend:
                 if isinstance(r_item, dict):
                     rid = r_item.get("id", f"rule_{idx + 1}")
                     self.declarative_rules[rid] = copy.deepcopy(r_item)
+        transactions = dict((self.spec.get("transactions") or {}))
+        if self.product_provenance:
+            transactions.update({name: value["definition"] for name, value in self.product_provenance["transactions"].items()})
+        for name, definition in transactions.items():
+            path = ptr("/transactions", name)
+            ident(name, path)
+            fields(definition, {"when", "require", "guard", "guards", "actions", "effect", "feedback",
+                                "errorMessage", "successMessage", "elseActions"}, path)
+            if name in self.declarative_rules:
+                fail("E_ID_DUPLICATE", path, "A transaction and a rule cannot have the same name")
+            rule = copy.deepcopy(definition)
+            if "actions" in rule:
+                if not isinstance(rule["actions"], list):
+                    fail("E_TYPE", ptr(path, "actions"), "Expected an array of transaction actions")
+                effect = rule.setdefault("effect", {})
+                effect["actions"] = [*(effect.get("actions") or []), *rule.pop("actions")]
+            self.declarative_rules[name] = rule
         raw_masters = self.spec.get("masters")
         if isinstance(raw_masters, dict):
             for m_def in raw_masters.values():
@@ -589,6 +606,39 @@ class Frontend:
                         w_part, ev_part = w_trig.lstrip("@").split(".", 1)
                         widget_event_rules.setdefault((w_part, ev_part), []).append((rid, robj))
 
+                def referenced_rule(act):
+                    if not isinstance(act, dict):
+                        return None
+                    if "transaction" in act or act.get("type") == "run-transaction":
+                        name = act.get("transaction")
+                        if not isinstance(name, str) or name not in transactions:
+                            fail("E_REFERENCE", "/transactions", f"Unknown transaction '{name}'", suggestions=sorted(transactions))
+                        return name, self.declarative_rules[name]
+                    if "rule" in act or act.get("type") == "apply-rule":
+                        name = act.get("rule")
+                        if isinstance(name, str) and name in self.declarative_rules:
+                            return name, self.declarative_rules[name]
+                    if "op" in act and isinstance(act["op"], str):
+                        return op_to_rule.get(act["op"])
+                    return None
+
+                def expand_rule_event(actions):
+                    if not isinstance(actions, list):
+                        return actions
+                    hits, extra = [], []
+                    for action in actions:
+                        hit = referenced_rule(action)
+                        if hit is None:
+                            extra.append(action)
+                        else:
+                            hits.append(hit)
+                    if len(hits) > 1:
+                        fail("E_EVENT", "/transactions", "Use one guarded rule or transaction per event")
+                    if not hits:
+                        return actions
+                    name, definition = hits[0]
+                    return {"cases": self._compile_declarative_rule_cases(name, definition, extra_actions=extra)}
+
                 def _expand_rules_in_node(node):
                     if not isinstance(node, dict):
                         return
@@ -601,7 +651,7 @@ class Frontend:
                                 for rid, robj in r_list:
                                     all_cases.extend(self._compile_declarative_rule_cases(rid, robj))
                                 if ev_shorthand and ev_shorthand in node and isinstance(node[ev_shorthand], list):
-                                    extra = [a for a in node[ev_shorthand] if not (isinstance(a, dict) and ("rule" in a or "op" in a or a.get("type") == "apply-rule"))]
+                                    extra = [a for a in node[ev_shorthand] if referenced_rule(a) is None]
                                     all_cases = []
                                     for rid, robj in r_list:
                                         all_cases.extend(self._compile_declarative_rule_cases(rid, robj, extra_actions=extra))
@@ -613,34 +663,9 @@ class Frontend:
                             continue
                         if ev_key == "on" and isinstance(node["on"], dict):
                             for ek, ev_val in list(node["on"].items()):
-                                if isinstance(ev_val, list):
-                                    rule_hit = None
-                                    extra = []
-                                    for act in ev_val:
-                                        if isinstance(act, dict) and ("rule" in act or act.get("type") == "apply-rule"):
-                                            rname = act.get("rule")
-                                            if rname in self.declarative_rules:
-                                                rule_hit = (rname, self.declarative_rules[rname])
-                                        elif isinstance(act, dict) and "op" in act and act["op"] in op_to_rule:
-                                            rule_hit = op_to_rule[act["op"]]
-                                        else:
-                                            extra.append(act)
-                                    if rule_hit is not None:
-                                        node["on"][ek] = {"cases": self._compile_declarative_rule_cases(rule_hit[0], rule_hit[1], extra_actions=extra)}
-                        elif ev_key in EVENT_SHORTHANDS and isinstance(node[ev_key], list):
-                            rule_hit = None
-                            extra = []
-                            for act in node[ev_key]:
-                                if isinstance(act, dict) and ("rule" in act or act.get("type") == "apply-rule"):
-                                    rname = act.get("rule")
-                                    if rname in self.declarative_rules:
-                                        rule_hit = (rname, self.declarative_rules[rname])
-                                elif isinstance(act, dict) and "op" in act and act["op"] in op_to_rule:
-                                    rule_hit = op_to_rule[act["op"]]
-                                else:
-                                    extra.append(act)
-                            if rule_hit is not None:
-                                node[ev_key] = {"cases": self._compile_declarative_rule_cases(rule_hit[0], rule_hit[1], extra_actions=extra)}
+                                node["on"][ek] = expand_rule_event(ev_val)
+                        elif ev_key in EVENT_SHORTHANDS:
+                            node[ev_key] = expand_rule_event(node[ev_key])
                     for ch in (node.get("children") if isinstance(node.get("children"), list) else []):
                         _expand_rules_in_node(ch)
                     for st in (node.get("states") if isinstance(node.get("states"), list) else []):
@@ -1348,14 +1373,19 @@ class Frontend:
                         fail("E_ACTION", ptr(ap, "set"), "set requires a nonempty assignment map")
                     for k, v in act["set"].items():
                         self.typecheck(k, "text", ptr(ap, "set"))
+                        widget_key = k.lstrip("@")
+                        prefix, dot, prop = widget_key.rpartition(".")
+                        properties = {"state": ("set-panel-state", "state"), "checked": ("set-check", "checked"),
+                                      "selected": ("set-selected", "selected"), "option": ("set-option", "value")}
                         if k.startswith("$"):
                             expanded.append({"type": "set-variable", "variable": k[1:], "value": v})
                         elif k.startswith("var."):
                             expanded.append({"type": "set-variable", "variable": k[4:], "value": v})
+                        elif dot and prop in properties:
+                            kind, field = properties[prop]
+                            expanded.append({"type": kind, "target": {"ref": prefix}, field: v})
                         elif k.startswith("@"):
-                            expanded.append({"type": "set-text", "target": {"ref": k[1:]}, "text": v})
-                        elif k.endswith(".state"):
-                            expanded.append({"type": "set-panel-state", "target": {"ref": k[:-6]}, "state": v})
+                            expanded.append({"type": "set-text", "target": {"ref": widget_key}, "text": v})
                         elif k in self.variables and not any(s.endswith("/" + k) or s == k for s in self.symbols):
                             expanded.append({"type": "set-variable", "variable": k, "value": v})
                         else:
@@ -1656,7 +1686,7 @@ class Frontend:
                 suggestions=rel_suggestions[:3],
             )
         local_ids = sorted({k.rsplit("/", 1)[-1] for k in self.symbols if k.startswith(page_prefix) and k.rsplit("/", 1)[-1] != name})
-        hint = difflib.get_close_matches(name, local_ids, n=3)
+        hint = difflib.get_close_matches(name, local_ids, n=5)
         fail("E_REFERENCE", path, f"Unknown reference '{name}' in scope '{scope}'", suggestions=hint)
 
     _COLOR_PROPS = {"fill", "stroke", "color", "trackColor", "trackFill", "barColor", "barFill",
@@ -3223,6 +3253,9 @@ class Frontend:
             if kind == "data-filter":
                 ident(action.get("name"), ptr(path, "name"))
                 out["label"] = action["name"]
+        elif kind == "data-clear-filter" and "name" in action:
+            ident(action.get("name"), ptr(path, "name"))
+            out["label"] = action["name"]
         elif kind == "data-sort":
             column = action.get("column")
             self.typecheck(column, "text", ptr(path, "column"))
@@ -3471,7 +3504,10 @@ class Frontend:
             if target["kind"] not in expected_kinds:
                 fail("E_TARGET_TYPE", path, f"{kind} target must be one of {sorted(expected_kinds)}")
             key = {"set-check": "checked", "set-selected": "selected", "set-option": "value"}[kind]
-            value = self.runtime(action.get(key), scope, ptr(path, key), expected="text" if kind == "set-option" else "boolean")
+            raw_value = action.get(key)
+            if raw_value == "toggle" and kind != "set-option":
+                raw_value = {"fn": "not", "args": [{"widget": action["target"], "accessor": key}]}
+            value = self.runtime(raw_value, scope, ptr(path, key), expected="text" if kind == "set-option" else "boolean")
             out = {"type": "set-selected" if kind == "set-option" else "set-check", "target": target["name"]}
             if value["kind"] != "literal": out["runtime"] = value
             else:
@@ -3501,6 +3537,18 @@ class Frontend:
             if page not in self.pages:
                 fail("E_PAGE", ptr(path, "page"), f"Unknown page '{page}'")
             out["page"] = self.pages[page]["name"]
+        if kind == "open-link":
+            url = action.get("url")
+            if not isinstance(url, str) or not re.match(r"^(?:https?://|mailto:|tel:)\S+$", url, re.IGNORECASE):
+                fail("E_ACTION", ptr(path, "url"), "Expected a nonempty http(s), mailto or tel URL")
+            if action.get("window", "current") not in ("current", "new"):
+                fail("E_ENUM", ptr(path, "window"), "Expected current or new")
+            out["type"] = "link"
+        if kind == "raise-event" and "event" in out:
+            event = out["event"]
+            if not isinstance(event, str) or event.lower().removeprefix("on") not in EVENTS:
+                fail("E_EVENT", ptr(path, "event"), "Expected a named RP/1 event such as click or change")
+            out["event"] = EVENTS[event.lower().removeprefix("on")]
         if kind == "wait":
             self.typecheck(action.get("ms"), "number", ptr(path, "ms"))
             if type(action["ms"]) is not int or action["ms"] < 0:
