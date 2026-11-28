@@ -269,11 +269,18 @@ function unguidKey(hex) {
 }
 
 function randomGuidHex() {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return crypto.randomUUID().replaceAll('-', '');
+  const gCrypto = globalThis.crypto;
+  if (gCrypto && typeof gCrypto.randomUUID === 'function') {
+    return gCrypto.randomUUID().replaceAll('-', '');
   }
   const b = new Uint8Array(16);
-  crypto.getRandomValues(b);
+  if (gCrypto && typeof gCrypto.getRandomValues === 'function') {
+    gCrypto.getRandomValues(b);
+  } else {
+    for (let i = 0; i < 16; i++) b[i] = Math.floor(Math.random() * 256);
+  }
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
   return bytesToHex(b);
 }
 
@@ -571,11 +578,28 @@ export async function gunzipBytes(slice) {
 }
 
 export async function gzipBytes(input) {
-  if (typeof CompressionStream !== 'function') {
-    throw new Error('CompressionStream("gzip") is unavailable in this runtime');
+  const data = toUint8Array(input);
+  if (typeof CompressionStream === 'function') {
+    const stream = new Blob([data]).stream().pipeThrough(new CompressionStream('gzip'));
+    return new Uint8Array(await new Response(stream).arrayBuffer());
   }
-  const stream = new Blob([toUint8Array(input)]).stream().pipeThrough(new CompressionStream('gzip'));
-  return new Uint8Array(await new Response(stream).arrayBuffer());
+  const parts = [new Uint8Array([0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x03])];
+  if (data.length === 0) {
+    parts.push(new Uint8Array([0x01, 0x00, 0x00, 0xff, 0xff]));
+  } else {
+    for (let off = 0; off < data.length; off += 65535) {
+      const len = Math.min(65535, data.length - off);
+      const isFinal = off + len >= data.length ? 1 : 0;
+      const nlen = (~len) & 0xffff;
+      parts.push(new Uint8Array([isFinal, len & 0xff, (len >>> 8) & 0xff, nlen & 0xff, (nlen >>> 8) & 0xff]));
+      parts.push(data.subarray(off, off + len));
+    }
+  }
+  const trailer = new Uint8Array(8);
+  writeU32LE(trailer, 0, crc32Bytes(data));
+  writeU32LE(trailer, 4, data.length >>> 0);
+  parts.push(trailer);
+  return concatU8(parts);
 }
 
 function tryDecompressGzipAtBytes(file, offset, skipLenPrefix = false) {

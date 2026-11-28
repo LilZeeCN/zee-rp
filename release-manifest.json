@@ -331,7 +331,7 @@
     "scripts/remove-panel-state-content.mjs": "d87f12dcff91d6356c4105d6e1be8e91321d9d0e7cae77b1496247972e45e9b6",
     "scripts/rename-custom-style.mjs": "1d7a135777fe116721d33fb1f53959c124cc1abd3f99887a9645c09f21df682a",
     "scripts/repair-rp.mjs": "3dba251d96651e0c4e5ed8c9c3257bcb6bd476d993063f6d07077cfe7c889204",
-    "scripts/rp-browser-core.mjs": "2a1545f516b2e1e3aace65be06e83ee55f0abcf64d9b5b766debcabab26b3632",
+    "scripts/rp-browser-core.mjs": "2cc930d84dce2e9727a82ea8404bd0348abe10c459dd0aaa22d156946c90c2ce",
     "scripts/rp-expression-check.py": "599a10f7834daae7d5201629db7df0894b9f2b9231b604795ced9e875aa58f28",
     "scripts/rp-read.mjs": "4fd76909add608fc64ec0db5af2b5f22ee35d5286616a5f26d98d4e82ced7672",
     "scripts/rp-records.mjs": "539768ad05e308c4914da2fa8422726e71d90ae2fee5dd5455e3926262012d34",
@@ -469,7 +469,7 @@
     "studio/web/styles.css": "e3e78c71b7328e647ee849f580c53b1841d899eadfe46207100cbbd9dcec2ada",
     "test/authoring-benchmark.mjs": "a7e6a574c80c148ba015e26f33f40acf678975131dfbafa30ea46e0f1b94abff",
     "test/authoring-workflow-check.mjs": "6a0c40fc5fe9bbd25ece96a996ca67bd471a97bf99b6ad32cbb427406ca77397",
-    "test/baseline-shas.json": "eab80d96edf6128481914f0d472eb43e26d06e1b50986fb9774f931dcb9889b8",
+    "test/baseline-shas.json": "b50aba9ce723af9dcef3910b3eee264d595871c7438d4b9acf7171e6884cc7d1",
     "test/blank-synthesizer-check.mjs": "3b9f0bf969a6f0d9c12e759543a50dbb6c08d307f5a448c32bfd3b3d096c06a1",
     "test/browser-core-check.mjs": "2526f1850eeba0d8621005a61314e47ea1a325281112496d7b65a2f8bc985346",
     "test/build-library-check.mjs": "87b7e4b27daeed84c5022a1ad5abb232173e4635cd32f5bd91e7d1a1e7046bb8",
@@ -641,7 +641,7 @@
     "tools/native-assembly/browser-check.mjs": "254e3c419f2b7af194253bdb2d623fff3c4c2a8924465820c407a77ae0a2d514",
     "tools/native-assembly/verify.mjs": "66586788867f0cddd7047a856c292d7aef3aed975c9f6427b031eaff2dbf2aa4",
     "tools/probe-gradient-fill.mjs": "3efce2b90bd949ea8933ab32e7da20625d4fe7a73311f76e16abf0f33772819b",
-    "tools/rp-inspector/index.html": "1e37f4b0195f6fa46a7250ca053a1f6a2206fe50196ce81f7364f73675ca4428",
+    "tools/rp-inspector/index.html": "dfb36f6b48051262e513d8edc422eec5fa6cc7e0555272e02f9234d8b978a024",
     "tools/rp9_place.py": "3d607a615908ae8573051d751efcf15473b363701c27511a51c3282ec8bdd521",
     "tools/sync-inspector.mjs": "dca23937696b74d87d9cfd18aa24c3a3d0855fa46119a223dea39359fd674132"
   }

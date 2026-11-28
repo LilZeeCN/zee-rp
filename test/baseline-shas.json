@@ -60,7 +60,7 @@
   "remove-panel-state-content.mjs": "d87f12dcff91d6356c4105d6e1be8e91321d9d0e7cae77b1496247972e45e9b6",
   "rename-custom-style.mjs": "1d7a135777fe116721d33fb1f53959c124cc1abd3f99887a9645c09f21df682a",
   "repair-rp.mjs": "3dba251d96651e0c4e5ed8c9c3257bcb6bd476d993063f6d07077cfe7c889204",
-  "rp-browser-core.mjs": "2a1545f516b2e1e3aace65be06e83ee55f0abcf64d9b5b766debcabab26b3632",
+  "rp-browser-core.mjs": "2cc930d84dce2e9727a82ea8404bd0348abe10c459dd0aaa22d156946c90c2ce",
   "rp-read.mjs": "4fd76909add608fc64ec0db5af2b5f22ee35d5286616a5f26d98d4e82ced7672",
   "rp-records.mjs": "539768ad05e308c4914da2fa8422726e71d90ae2fee5dd5455e3926262012d34",
   "runtime-expr.mjs": "e48340ea215840bad32cc5182514adf9a21bb3c63a5fb7677f16c789371f95cf",
