@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.7 — 2026-11-28
+
+- 同步生成 `references/rp-language-capabilities.md` 编译器版本词表与发版清单，全平台 `Public tests` 与 `Desktop tests` 门禁一致通过。
+
 ## 0.4.6 — 2026-11-28
 
 - 修复 `studio-html` 导出运行时初始化期注册的定时任务在虚拟时钟按页推进（`advanceTime`）时因 `window.__STUDIO_EXPORT_APP__` 尚未挂载导致页面归属错位的问题。

@@ -1,6 +1,6 @@
 # RP/1 编译器词表与版本
 
-当前安装包版本 `v0.4.5`。本表由 RP/1 编译器公开词表生成。视觉属性的宿主证据见 [四消费面对照](surface-capabilities-matrix.md)。
+当前安装包版本 `v0.4.7`。本表由 RP/1 编译器公开词表生成。视觉属性的宿主证据见 [四消费面对照](surface-capabilities-matrix.md)。
 
 ## 语法版本
 
