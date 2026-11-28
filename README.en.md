@@ -6,9 +6,9 @@
 
 **Author in RP/1. Explore with your agent. Refine together. Keep an editable `.rp`.**
 
-[Get started](#quickstart)　·　[Studio](#studio)　·　[RP/1](#rp1)　·　[简体中文](README.md)
+[Get started](#quickstart)　·　[Studio](#studio)　·　[RP/1](#rp1)　·　[Web Workbench](https://lilzeecn.github.io/zee-rp/)　·　[简体中文](README.md)
 
-[![MIT](https://img.shields.io/badge/MIT-open_source-D5FF70?style=flat-square&labelColor=202825)](LICENSE) [![Checks](https://img.shields.io/github/actions/workflow/status/LilZeeCN/zee-rp/test.yml?branch=main&style=flat-square&label=checks&labelColor=202825&color=637E51)](https://github.com/LilZeeCN/zee-rp/actions)
+[![MIT](https://img.shields.io/badge/MIT-open_source-D5FF70?style=flat-square&labelColor=202825)](LICENSE) [![Checks](https://img.shields.io/github/actions/workflow/status/LilZeeCN/zee-rp/test.yml?branch=main&style=flat-square&label=checks&labelColor=202825&color=637E51)](https://github.com/LilZeeCN/zee-rp/actions) [![Web Workbench](https://img.shields.io/badge/web_workbench-live-38BDF8?style=flat-square&labelColor=202825)](https://lilzeecn.github.io/zee-rp/)
 
 </div>
 
@@ -70,7 +70,7 @@ Generate a native **`.rp`** and continue editing supported text, controls and la
 | :--- | :--- |
 | **Studio** | A shared design document, transactions, atomic `fix_plan(apply:true)` healing and undo history |
 | **Axure** | Open native `.rp`, decompile existing `.rp` into Studio, or export back to `.rp1` via `studio_export(format:"rp1")` |
-| **Binary Toolchain** | `diff-rp` (GUID semantic diff), `repair-rp` (corrupt salvage), `downgrade-rp` (RP11→RP9), `build-library` (`.rplib`), [4-mode offline Web Workbench](tools/rp-inspector/index.html), [binary format spec](docs/rp-format-spec.md), and `native-check --compile` |
+| **Binary Toolchain** | `diff-rp` (GUID semantic diff), `repair-rp` (corrupt salvage), `downgrade-rp` (RP11→RP9), `build-library` (`.rplib`), [Live Web Workbench](https://lilzeecn.github.io/zee-rp/) ([offline standalone HTML](tools/rp-inspector/index.html)), [binary format spec](docs/rp-format-spec.md), and `native-check --compile` |
 | **The browser** | Drag/swipe/timer previews; run cross-platform Chrome verification without Axure via `verify_prototype(engine:"studio-html")` |
 | **HTML / URL / Image** | Pass local `.html`, `http(s)://` URLs or UI screenshots to `studio_open_project` / `generate_prototype` / `generate_from_image` |
 

@@ -6,9 +6,9 @@
 
 **用 RP/1 写下设计，让 AI 起稿、你来精修，交付可继续编辑的 `.rp`。**
 
-[开始使用](#quickstart)　·　[自由画布](#studio)　·　[RP/1](#rp1)　·　[English](README.en.md)
+[开始使用](#quickstart)　·　[自由画布](#studio)　·　[RP/1](#rp1)　·　[在线工作台](https://lilzeecn.github.io/zee-rp/)　·　[English](README.en.md)
 
-[![MIT](https://img.shields.io/badge/MIT-open_source-D5FF70?style=flat-square&labelColor=202825)](LICENSE) [![Checks](https://img.shields.io/github/actions/workflow/status/LilZeeCN/zee-rp/test.yml?branch=main&style=flat-square&label=checks&labelColor=202825&color=637E51)](https://github.com/LilZeeCN/zee-rp/actions)
+[![MIT](https://img.shields.io/badge/MIT-open_source-D5FF70?style=flat-square&labelColor=202825)](LICENSE) [![Checks](https://img.shields.io/github/actions/workflow/status/LilZeeCN/zee-rp/test.yml?branch=main&style=flat-square&label=checks&labelColor=202825&color=637E51)](https://github.com/LilZeeCN/zee-rp/actions) [![Web Workbench](https://img.shields.io/badge/web_workbench-live-38BDF8?style=flat-square&labelColor=202825)](https://lilzeecn.github.io/zee-rp/)
 
 </div>
 
@@ -70,7 +70,7 @@ page #notes name="手记" device=iphone-17-pro
 | :--- | :--- |
 | **Studio** | 和 AI 共用设计文档、事务、原子 `fix_plan(apply:true)` 自愈与撤销历史 |
 | **Axure** | 打开原生 `.rp`，或反编译已有 `.rp` 进 Studio，再 `studio_export(format:"rp1")` 导出源码 |
-| **二进制工程链** | `diff-rp`（GUID 对齐对比）、`repair-rp`（损坏抢救）、`downgrade-rp`（RP11→RP9 降级）、`build-library`（`.rplib` 编译）、[4 模式离线网页工作台](tools/rp-inspector/index.html)、[二进制格式规范](docs/rp-format-spec.md) 与 `native-check --compile` |
+| **二进制工程链** | `diff-rp`（GUID 对齐对比）、`repair-rp`（损坏抢救）、`downgrade-rp`（RP11→RP9 降级）、`build-library`（`.rplib` 编译）、[在线工作台](https://lilzeecn.github.io/zee-rp/)（[离线单文件版](tools/rp-inspector/index.html)）、[二进制格式规范](docs/rp-format-spec.md) 与 `native-check --compile` |
 | **浏览器** | 运行拖拽/滑动/定时切态预览；免装 Axure 即可用 `verify_prototype(engine:"studio-html")` 真机验收 |
 | **网页 / 截图** | 直接传本地 `.html` 或 `http(s)://` URL 给 `studio_open_project` / `generate_prototype`，一步提取排版与表单进画布 |
 

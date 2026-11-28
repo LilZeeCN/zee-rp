@@ -4,6 +4,7 @@
   "mcpTools": 30,
   "files": {
     ".gitattributes": "ee0a23931895cbfa18e49a5356aaabc91d7e65481a90ddbae836e2a6f90f2374",
+    ".github/workflows/pages.yml": "81053778fdd4febd18eaf517c420cbdb042f7997e981336b728c0d9a5372ff54",
     ".github/workflows/test-desktop.yml": "637cefa7a7189812d83cd8dde29345b648d7dabb4bb6c4d5f5de984cc862908d",
     ".github/workflows/test.yml": "c4c669f7f4c93fd15660a28701026373bf37a988072d57151dc3a9ae04b1fa4c",
     ".gitignore": "478efd95d86e49632d75a5ac5303ca97cfc9570619c8b8df5c14f6e6b250b468",
@@ -12,8 +13,8 @@
     "CHANGELOG.md": "42ae7be73f4f591220464377346e301c093230ef120ad379db0bfc8b7c3da4e9",
     "CONTRIBUTING.md": "28e0bdf9e1eb434f5d1d4fdd17ea211ed1e7db282188748de0f72042b8767327",
     "LICENSE": "eaf68c97ed93475e5074b4377d0da570b53f70f63b427f4e277adab6e3cfdb67",
-    "README.en.md": "d29abd7d134603f756a266b97be7e3ed9c3a90959cfda280a4b0c896d5b2b090",
-    "README.md": "ca3600e3b055a7242c3aa42c6ce812eb7304dba16816da0f6d398fc20c800d19",
+    "README.en.md": "7d0b05e5b0c5883a0b21a210814097eb4f96d81251e58bf5dbac46fdabf1b4d7",
+    "README.md": "5cd3e78b0da6de913a2c2cd8787f3d9f372141b1e2f766ee29f14527478ff300",
     "README.zh-CN.md": "cb18aa7aac4815791237ce65a41955cc8fe2e0251f8e40ceb9dac9fc5e41bc1b",
     "SKILL.md": "678042b96406daf0293aaa784429198d0cb65d369380b25652c400fc04491d71",
     "assets/dashboard-example.spec.json": "2d4f5bc2d77ee45331984f60c38205682de8dacec744270394fa9dd2754c5117",
@@ -643,7 +644,7 @@
     "tools/native-assembly/browser-check.mjs": "254e3c419f2b7af194253bdb2d623fff3c4c2a8924465820c407a77ae0a2d514",
     "tools/native-assembly/verify.mjs": "66586788867f0cddd7047a856c292d7aef3aed975c9f6427b031eaff2dbf2aa4",
     "tools/probe-gradient-fill.mjs": "3efce2b90bd949ea8933ab32e7da20625d4fe7a73311f76e16abf0f33772819b",
-    "tools/rp-inspector/index.html": "dfb36f6b48051262e513d8edc422eec5fa6cc7e0555272e02f9234d8b978a024",
+    "tools/rp-inspector/index.html": "193312d6abc87aeef070a306719f87d7c7abe91bd2a0fac9d00fb88c33090def",
     "tools/rp9_place.py": "3d607a615908ae8573051d751efcf15473b363701c27511a51c3282ec8bdd521",
     "tools/sync-inspector.mjs": "dca23937696b74d87d9cfd18aa24c3a3d0855fa46119a223dea39359fd674132"
   }
