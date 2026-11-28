@@ -92,7 +92,7 @@ npm i -g github:LilZeeCN/zee-rp                      # 或安装命令行：之�
 zee-rp doctor                                        # 自检 Node / Python / Chrome / 模板就绪状态
 ```
 
-Python 依赖只需装一次：`python3 -m pip install pillow numpy jsonschema`（截图重建另需 SciPy）。固定版本用 `github:LilZeeCN/zee-rp#v0.3.0`。
+Python 依赖只需装一次：`python3 -m pip install pillow numpy jsonschema`（截图重建另需 SciPy）。固定版本用 `github:LilZeeCN/zee-rp#v0.4.0`。
 
 ### macOS
 

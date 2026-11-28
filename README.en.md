@@ -92,7 +92,7 @@ npm i -g github:LilZeeCN/zee-rp                      # or install the CLI, then 
 zee-rp doctor                                        # check Node / Python / Chrome / template readiness
 ```
 
-Install the Python dependencies once: `python3 -m pip install pillow numpy jsonschema` (screenshot reconstruction also needs SciPy). Pin a version with `github:LilZeeCN/zee-rp#v0.3.0`.
+Install the Python dependencies once: `python3 -m pip install pillow numpy jsonschema` (screenshot reconstruction also needs SciPy). Pin a version with `github:LilZeeCN/zee-rp#v0.4.0`.
 
 ### macOS
 

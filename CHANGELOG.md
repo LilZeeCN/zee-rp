@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 — 2026-11-28
 
 - 新增五大原生产物级工具（`scripts/diff-rp.mjs`、`scripts/rp-browser-core.mjs` + `tools/rp-inspector/index.html`、`scripts/repair-rp.mjs`、`scripts/downgrade-rp.mjs`、`scripts/build-library.mjs`）及对应 CI/门禁（`test:diff-rp`、`test:browser-core`、`test:repair-rp`、`test:downgrade-rp`、`test:build-library`、`test:mcp-budget`）；另附公开净室二进制规范 [docs/rp-format-spec.md](docs/rp-format-spec.md) 与单源同步脚本 `tools/sync-inspector.mjs`。
 - `rp-browser-core.mjs` 与 `tools/rp-inspector/index.html` 升级为 4 模式纯本地 Web Worker 工作台（透视 / Diff / 损坏抢救 / RP11→RP9 降级与 `.rplib` 编译），内置纯 JS RFC 1951 `inflateRawWithEnd` 与 `CompressionStream('gzip')`，Chrome 输出通过 `native-check --compile` 与真实 RP9 GUI 往返。
