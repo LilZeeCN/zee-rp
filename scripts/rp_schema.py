@@ -388,10 +388,12 @@ def language_schema():
     for key in ("show", "hide", "toggle", "enable", "disable", "focus"):
         actions.append(obj({key: ref("reference")}, [key]))
     defs["action"] = {"anyOf": actions}
-    action_list = array(ref("action"), 1)
-    case = obj({"when": ref("value"), "else": {"type": "boolean"}, "actions": either(ref("action"), action_list), "do": either(ref("action"), action_list)})
+    case = obj({"when": ref("value"), "else": {"type": "boolean"}, "actions": either(ref("statement"), ref("statementList")), "do": either(ref("statement"), ref("statementList"))})
     case["oneOf"] = [{"required": ["actions"], "not": {"required": ["do"]}}, {"required": ["do"], "not": {"required": ["actions"]}}]
-    defs["eventValue"] = either(ref("action"), action_list, obj({"cases": array(case, 1)}, ["cases"]))
+    defs["casesBlock"] = obj({"cases": array(case, 1)}, ["cases"])
+    defs["statement"] = either(ref("action"), ref("casesBlock"))
+    defs["statementList"] = array(ref("statement"), 1)
+    defs["eventValue"] = either(ref("statement"), ref("statementList"))
     defs["events"] = {"type": "object", "propertyNames": {"enum": sorted(set(EVENTS) | set(EVENTS.values()))}, "additionalProperties": event_value}
     domain_scalar_name = {"enum": ["text", "number", "boolean", "id", "enum", "money", "phone", "date", "percent", "ref"]}
     domain_type_str = either(domain_scalar_name, {"type": "string", "pattern": "^(enum\\(.+\\)|ref<[A-Za-z_][A-Za-z0-9_-]*>)$"})

@@ -113,6 +113,12 @@ function extractVariableRefsFromNode(node, consumerScopedId, varUsageMap) {
   const scanActions = actions => {
     for (const act of actions || []) {
       if (!act || typeof act !== 'object') continue;
+      if (Array.isArray(act.cases)) {
+        for (const c of act.cases) scanActions(c.actions);
+      }
+      if (Array.isArray(act.actions)) scanActions(act.actions);
+      if (act.then) scanActions(Array.isArray(act.then) ? act.then : [act.then]);
+      if (act.else && typeof act.else === 'object') scanActions(Array.isArray(act.else) ? act.else : [act.else]);
       if ((act.type === 'setVariable' || act.type === 'set-variable') && act.variable) {
         addVar(act.variable, 'interaction:setVariable');
       }

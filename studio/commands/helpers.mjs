@@ -317,6 +317,13 @@ export function findDanglingReferences(doc, deletedNodeId) {
   const refs = [];
   function scanActions(actions, ownerId) {
     for (const act of actions || []) {
+      if (!act || typeof act !== 'object') continue;
+      if (Array.isArray(act.cases)) {
+        for (const c of act.cases) scanActions(c.actions, ownerId);
+      }
+      if (Array.isArray(act.actions)) scanActions(act.actions, ownerId);
+      if (act.then) scanActions(Array.isArray(act.then) ? act.then : [act.then], ownerId);
+      if (act.else && typeof act.else === 'object') scanActions(Array.isArray(act.else) ? act.else : [act.else], ownerId);
       const tgt = act.target || act.widget;
       if (tgt === deletedNodeId || (typeof tgt === 'string' && tgt.endsWith('/' + deletedNodeId))) {
         refs.push({ ownerId, actionType: act.type, target: tgt });

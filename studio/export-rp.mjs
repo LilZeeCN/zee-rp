@@ -246,7 +246,12 @@ function normalizeExportEventSpec(evSpec, exportCtx = null) {
     return normalizeExportEventSpec(evSpec[0], exportCtx);
   }
   if (Array.isArray(evSpec)) {
-    const mapped = evSpec.map(item => normalizeSingleExportAction(item, exportCtx)).filter(Boolean);
+    const mapped = evSpec.map(item => {
+      if (item && typeof item === 'object' && (Array.isArray(item.cases) || item.when !== undefined || item.if !== undefined)) {
+        return normalizeExportEventSpec(item, exportCtx);
+      }
+      return normalizeSingleExportAction(item, exportCtx);
+    }).filter(Boolean);
     return mapped.length > 0 ? mapped : null;
   }
   if (!evSpec || typeof evSpec !== 'object') return evSpec;
@@ -264,7 +269,7 @@ function normalizeExportEventSpec(evSpec, exportCtx = null) {
     const cases = evSpec.cases
       .map(cs => {
         const mappedActions = Array.isArray(cs.actions)
-          ? cs.actions.map(item => normalizeSingleExportAction(item, exportCtx)).filter(Boolean)
+          ? normalizeExportEventSpec(cs.actions, exportCtx) || []
           : [];
         if (mappedActions.length === 0) return null;
         return {

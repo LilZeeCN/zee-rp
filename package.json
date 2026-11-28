@@ -1,6 +1,6 @@
 {
   "name": "zee-rp",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "private": false,
   "type": "module",
   "description": "AI-native engine and MCP server to read, surgically edit, and generate editable Axure (.rp) prototypes",

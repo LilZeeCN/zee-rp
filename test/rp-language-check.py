@@ -1272,21 +1272,165 @@ class LanguageContract(unittest.TestCase):
         self.assertEqual(run_combo("home/eval_incomplete", 0, 0, 1), "inc_notA_c1")
         self.assertEqual(run_combo("home/eval_incomplete", 0, 0, 0), "inc_else")
 
+        # Tier 2: mixed prelude action + if/elif/else + sequential if + trailing action + optional ':'
+        # Compiles to native IsNewIfGroup groups with ZERO extra variables and ZERO hidden widgets.
         mixed_dsl = "\n".join([
-            'rp/1 target=9 name="MixedActionAndIf"',
-            'var a: number = 1',
+            'rp/1 target=9 name="MixedControlFlow"',
+            'var n: number = 0',
+            'var badge: text = "none"',
+            'var clicks: number = 0',
             'page #home name="首页"',
-            '  box #root [360x300] layout=column gap=12 padding=16',
+            '  box #root [360x400] layout=column gap=12 padding=16',
             '    label #out [320x28] "init"',
-            '    button #bad [160x40] "bad"',
+            '    label #vip [320x28] "普通"',
+            '    button #btn_step [160x40] "加一"',
             '      +onClick:',
-            '        set out = "prefix"',
-            '        if var.a == 1',
-            '          set out = "nested"',
+            '        set $n = var.n + 1',
+            '        if var.n >= 2:',
+            '          set out = "达标"',
+            '        else:',
+            '          set out = "未达标"',
+            '        if var.n >= 3:',
+            '          set $badge = "VIP"',
+            '          set vip = "VIP"',
+            '        set $clicks = var.clicks + 1',
         ])
-        with self.assertRaises(LanguageError) as mix_ctx:
-            dsl_to_spec(mixed_dsl)
-        self.assertEqual(mix_ctx.exception.diagnostic["code"], "E_DSL_SYNTAX")
+        mixed_spec = dsl_to_spec(mixed_dsl)
+        mixed_lowered, mixed_ir = compile_language(mixed_spec)
+        self.assertEqual(set(mixed_ir["variables"].keys()), {"n", "badge", "clicks"})
+        btn_ix = next(ix for ix in mixed_ir["pages"][0]["interactions"] if ix["trigger"].startswith("btn-btn_step"))
+        click_cases = btn_ix["events"][0]["cases"]
+        self.assertTrue(len(click_cases) >= 4)
+        self.assertTrue(click_cases[0]["isNewIfGroup"])
+        self.assertTrue(click_cases[1]["isNewIfGroup"])
+        self.assertFalse(click_cases[2]["isNewIfGroup"])
+        self.assertTrue(click_cases[3]["isNewIfGroup"])
+
+        mixed_out = next(s["name"] for s in mixed_ir["symbols"] if s["id"] == "home/out")
+        mixed_vip = next(s["name"] for s in mixed_ir["symbols"] if s["id"] == "home/vip")
+        rt_mix = ReferenceRuntime((mixed_lowered, mixed_ir))
+        rt_mix.trigger("home/btn_step", "click")
+        self.assertEqual(rt_mix.variables["n"], 1)
+        self.assertEqual(rt_mix.variables["clicks"], 1)
+        self.assertEqual(rt_mix.snapshot()["widgets"][mixed_out]["text"], "未达标")
+        self.assertEqual(rt_mix.snapshot()["widgets"][mixed_vip]["text"], "普通")
+        rt_mix.trigger("home/btn_step", "click")
+        self.assertEqual(rt_mix.variables["n"], 2)
+        self.assertEqual(rt_mix.snapshot()["widgets"][mixed_out]["text"], "达标")
+        self.assertEqual(rt_mix.snapshot()["widgets"][mixed_vip]["text"], "普通")
+        rt_mix.trigger("home/btn_step", "click")
+        self.assertEqual(rt_mix.variables["n"], 3)
+        self.assertEqual(rt_mix.variables["clicks"], 3)
+        self.assertEqual(rt_mix.variables["badge"], "VIP")
+        self.assertEqual(rt_mix.snapshot()["widgets"][mixed_vip]["text"], "VIP")
+
+        # Tier 3: inside branch, prelude action mutates variable tested by outer condition + nested if/else + tail
+        tier3_dsl = "\n".join([
+            'rp/1 target=9 name="BranchMutationSafety"',
+            'var a: number = 2',
+            'var done: number = 0',
+            'page #home name="首页"',
+            '  box #root [360x400] layout=column gap=12 padding=16',
+            '    label #out [320x28] "init"',
+            '    button #btn_dec [160x40] "扣减"',
+            '      +onClick:',
+            '        if var.a > 0:',
+            '          set $a = var.a - 1',
+            '          if var.a == 0:',
+            '            set out = "归零"',
+            '          else:',
+            '            set out = "剩余"',
+            '          set $done = 1',
+            '        else:',
+            '          set $done = -1',
+            '          set out = "本来0"',
+        ])
+        t3_lowered, t3_ir = compile_language(dsl_to_spec(tier3_dsl))
+        t3_out = next(s["name"] for s in t3_ir["symbols"] if s["id"] == "home/out")
+        rt_t3 = ReferenceRuntime((t3_lowered, t3_ir))
+        rt_t3.trigger("home/btn_dec", "click")
+        self.assertEqual(rt_t3.variables["a"], 1)
+        self.assertEqual(rt_t3.variables["done"], 1)
+        self.assertEqual(rt_t3.snapshot()["widgets"][t3_out]["text"], "剩余")
+        rt_t3.trigger("home/btn_dec", "click")
+        self.assertEqual(rt_t3.variables["a"], 0)
+        self.assertEqual(rt_t3.variables["done"], 1)
+        self.assertEqual(rt_t3.snapshot()["widgets"][t3_out]["text"], "归零")
+        rt_t3.trigger("home/btn_dec", "click")
+        self.assertEqual(rt_t3.variables["a"], 0)
+        self.assertEqual(rt_t3.variables["done"], -1)
+        self.assertEqual(rt_t3.snapshot()["widgets"][t3_out]["text"], "本来0")
+
+        # Tier 4: wait before conditional -> hoisted continuation label + raise-event
+        tier4_dsl = "\n".join([
+            'rp/1 target=9 name="WaitContinuation"',
+            'var ok: number = 1',
+            'page #home name="首页"',
+            '  box #root [360x400] layout=column gap=12 padding=16',
+            '    label #out [320x28] "idle"',
+            '    button #btn_run [160x40] "执行"',
+            '      +onClick:',
+            '        set out = "loading"',
+            '        wait 300ms',
+            '        if var.ok == 1:',
+            '          set out = "done"',
+            '        else:',
+            '          set out = "fail"',
+        ])
+        t4_lowered, t4_ir = compile_language(dsl_to_spec(tier4_dsl))
+        self.assertTrue(any(
+            act.get("type") == "raise-event"
+            for ix in t4_ir["pages"][0]["interactions"]
+            for ev in ix["events"]
+            for c in ev["cases"]
+            for act in c["actions"]
+        ))
+        t4_out = next(s["name"] for s in t4_ir["symbols"] if s["id"] == "home/out")
+        rt_t4 = ReferenceRuntime((t4_lowered, t4_ir))
+        rt_t4.trigger("home/btn_run", "click")
+        self.assertEqual(rt_t4.snapshot()["widgets"][t4_out]["text"], "done")
+        rt_t4.variables["ok"] = 0
+        rt_t4.trigger("home/btn_run", "click")
+        self.assertEqual(rt_t4.snapshot()["widgets"][t4_out]["text"], "fail")
+
+        # JSON AST direct authoring: mixed action + cases + trailing action validates against schema too
+        from jsonschema import Draft202012Validator
+        from rp_schema import language_schema
+        json_mixed = {
+            "language": "rp/1",
+            "target": 9,
+            "name": "JsonMixed",
+            "variables": {"n": {"type": "number", "value": 0}},
+            "pages": [{
+                "id": "home",
+                "name": "首页",
+                "root": {
+                    "type": "box",
+                    "id": "root",
+                    "layout": "column",
+                    "w": 360,
+                    "h": 300,
+                    "children": [
+                        {"type": "label", "id": "out", "text": "init", "w": 300, "h": 28},
+                        {"type": "button", "id": "b", "text": "Go", "w": 160, "h": 40, "on": {"click": [
+                            {"set": {"$n": "=var.n + 1"}},
+                            {"cases": [
+                                {"when": "=var.n >= 2", "actions": [{"type": "set-text", "target": "out", "text": "high"}]},
+                                {"else": True, "actions": [{"type": "set-text", "target": "out", "text": "low"}]},
+                            ]},
+                        ]}},
+                    ],
+                },
+            }],
+        }
+        Draft202012Validator(language_schema()).validate(json_mixed)
+        jm_lowered, jm_ir = compile_language(json_mixed)
+        jm_out = next(s["name"] for s in jm_ir["symbols"] if s["id"] == "home/out")
+        rt_jm = ReferenceRuntime((jm_lowered, jm_ir))
+        rt_jm.trigger("home/b", "click")
+        self.assertEqual(rt_jm.snapshot()["widgets"][jm_out]["text"], "low")
+        rt_jm.trigger("home/b", "click")
+        self.assertEqual(rt_jm.snapshot()["widgets"][jm_out]["text"], "high")
 
 
 if __name__ == "__main__":

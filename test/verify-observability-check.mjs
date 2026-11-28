@@ -196,3 +196,124 @@ test('rp/1 textarea, input multiline=true, and nested if/elif/else work end-to-e
     rmSync(work, { recursive: true, force: true });
   }
 });
+
+test('rp/1 mixed imperative control flow (actions + if/else + sequential if + wait continuation) works across dual engines', { timeout: 120_000 }, async t => {
+  try { findChromeExecutable(); } catch { return t.skip('未检测到 Chrome/Chromium'); }
+  const work = mkdtempSync(join(tmpdir(), 'zee-rp1-mixed-flow-'));
+  try {
+    const rpOut = join(work, 'mixed-flow.rp');
+    const rp1 = [
+      'rp/1 target=9 name="MixedImperativeFlow"',
+      'var n: number = 0',
+      'var a: number = 2',
+      'page #home name="首页"',
+      '  box #root [390x720] layout=column gap=12 padding=16',
+      '    label #out_n [350x28] "0"',
+      '    label #out_tier [350x28] "init"',
+      '    label #out_vip [350x28] "普通"',
+      '    label #out_branch [350x28] "a=2"',
+      '    button #btn_step [180x40] "加一分流"',
+      '      +onClick:',
+      '        set $n = var.n + 1',
+      '        if var.n >= 2:',
+      '          set out_tier = "达标"',
+      '        else:',
+      '          set out_tier = "未达标"',
+      '        if var.n >= 3:',
+      '          set out_vip = "VIP"',
+      '        set out_n = "${var.n}"',
+      '    button #btn_dec [180x40] "扣减外层变量"',
+      '      +onClick:',
+      '        if var.a > 0:',
+      '          set $a = var.a - 1',
+      '          if var.a == 0:',
+      '            set out_branch = "归零"',
+      '          else:',
+      '            set out_branch = "剩余"',
+      '        else:',
+      '          set out_branch = "本来0"',
+    ].join('\n');
+
+    const gen = generatePrototype({ rp1, output: rpOut, cwd: work });
+    assert.equal(gen.status, 'completed', JSON.stringify(gen.diagnostics));
+
+    if (HAS_RP9_APP) {
+      const nc = await nativeCheck(rpOut, { version: 9, compile: true });
+      assert.equal(nc.status, 'accepted', JSON.stringify(nc));
+      assert.equal(nc.officialCompile?.status, 'accepted', JSON.stringify(nc));
+    }
+
+    for (const engine of (HAS_RP9_APP ? ['studio-html', 'official'] : ['studio-html'])) {
+      const verifyRes = await verifyOfficialPreview({
+        rp: gen.output,
+        source: gen.source,
+        engine,
+        compact: true,
+        cwd: work,
+        steps: [
+          // Step 1: n=0 -> 1 (not >=2, not >=3)
+          { action: 'click', target: 'btn_step' },
+          { action: 'expect', target: 'out_n', expect: { text: '1' } },
+          { action: 'expect', target: 'out_tier', expect: { text: '未达标' } },
+          { action: 'expect', target: 'out_vip', expect: { text: '普通' } },
+          // Step 2: n=1 -> 2 (>=2, not >=3)
+          { action: 'click', target: 'btn_step' },
+          { action: 'expect', target: 'out_n', expect: { text: '2' } },
+          { action: 'expect', target: 'out_tier', expect: { text: '达标' } },
+          { action: 'expect', target: 'out_vip', expect: { text: '普通' } },
+          // Step 3: n=2 -> 3 (>=2 and >=3)
+          { action: 'click', target: 'btn_step' },
+          { action: 'expect', target: 'out_n', expect: { text: '3' } },
+          { action: 'expect', target: 'out_vip', expect: { text: 'VIP' } },
+          // Tier 3: a=2 -> 1 ("剩余") -> 0 ("归零") -> 0 ("本来0")
+          { action: 'click', target: 'btn_dec' },
+          { action: 'expect', target: 'out_branch', expect: { text: '剩余' } },
+          { action: 'click', target: 'btn_dec' },
+          { action: 'expect', target: 'out_branch', expect: { text: '归零' } },
+          { action: 'click', target: 'btn_dec' },
+          { action: 'expect', target: 'out_branch', expect: { text: '本来0' } },
+        ],
+      }, { runWorkflow, exportHtml: exportPrototype });
+      assert.equal(verifyRes.status, 'completed', `${engine}: ${JSON.stringify(verifyRes.diagnostics)}`);
+      assert.equal(verifyRes.passed, 17);
+    }
+
+    if (HAS_RP9_APP) {
+      const waitOut = join(work, 'wait-cont.rp');
+      const waitRp1 = [
+        'rp/1 target=9 name="WaitContinuationBrowser"',
+        'var ok: number = 1',
+        'page #home name="首页"',
+        '  box #root [390x720] layout=column gap=12 padding=16',
+        '    label #status [350x28] "idle"',
+        '    button #btn_async [180x40] "异步分支"',
+        '      +onClick:',
+        '        set status = "loading"',
+        '        wait 300ms',
+        '        if var.ok == 1:',
+        '          set status = "done"',
+        '        else:',
+        '          set status = "fail"',
+      ].join('\n');
+      const waitGen = generatePrototype({ rp1: waitRp1, output: waitOut, cwd: work });
+      assert.equal(waitGen.status, 'completed', JSON.stringify(waitGen.diagnostics));
+      const waitVerify = await verifyOfficialPreview({
+        rp: waitGen.output,
+        source: waitGen.source,
+        engine: 'official',
+        compact: true,
+        cwd: work,
+        steps: [
+          { action: 'click', target: 'btn_async' },
+          { action: 'expect', target: 'status', expect: { text: 'loading' } },
+          { action: 'advanceTime', ms: 350 },
+          { action: 'expect', target: 'status', expect: { text: 'done' } },
+        ],
+      }, { runWorkflow, exportHtml: exportPrototype });
+      assert.equal(waitVerify.status, 'completed', JSON.stringify(waitVerify.diagnostics));
+      assert.equal(waitVerify.passed, 4);
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});

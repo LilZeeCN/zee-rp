@@ -140,6 +140,15 @@ export function applyRuntimeStep(doc, runtime, step = {}) {
         next.history.push(act);
         continue;
       }
+      if (Array.isArray(act.cases)) {
+        for (const c of act.cases) {
+          if (evalCond(c.condition || c.when)) {
+            execActions(c.actions);
+            if (c.break !== false) break;
+          }
+        }
+        continue;
+      }
       const type = act.type || (act.page || act.navigate ? 'link' : act.state ? 'set-panel-state' : '');
       if (type === 'link' || type === 'navigate') {
         const targetPage = act.page || act.navigate || act.target;

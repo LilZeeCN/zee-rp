@@ -38,6 +38,9 @@ class Frontend:
         self.bridge_ops = {}
         self.bridge_var_counter = 0
         self.when_group_counter = 0
+        self._branch_var_counter = 0
+        self._cont_counter = 0
+        self._pending_cont_widgets = []
         self.current_trigger_name = None
         self.product_provenance = None
         self.declarative_rules = {}
@@ -3535,6 +3538,339 @@ class Frontend:
         value = self.runtime(condition, scope, path, expected="boolean")
         return {"left": {"runtime": value}, "op": "==", "right": {"runtime": {"kind": "literal", "value": True, "valueType": "boolean"}}}
 
+    @staticmethod
+    def _wrap_cond_ast(rt_ast):
+        return {"left": {"runtime": rt_ast}, "op": "==", "right": {"runtime": {"kind": "literal", "value": True, "valueType": "boolean"}}}
+
+    @staticmethod
+    def _and_rt_ast(parts):
+        clean = [p for p in parts if p is not None]
+        if not clean:
+            return None
+        acc = clean[0]
+        for nxt in clean[1:]:
+            acc = {"kind": "binary", "op": "&&", "left": acc, "right": nxt, "valueType": "boolean"}
+        return acc
+
+    @staticmethod
+    def _not_rt_ast(rt_ast):
+        return {"kind": "call", "fn": "not", "args": [rt_ast], "valueType": "boolean"}
+
+    def _alloc_branch_var(self):
+        existing = {str(k).lower() for k in self.variables}
+        while True:
+            self._branch_var_counter += 1
+            cand = f"rp1_b_{self._branch_var_counter}"
+            if cand.lower() not in existing:
+                self.variables[cand] = {"type": "number", "value": 0}
+                return cand
+
+    def _stmt_contains_wait(self, item):
+        kind, payload = item
+        if kind == "actions":
+            return any(isinstance(a, dict) and a.get("type") == "wait" for a in payload)
+        return any(self._stmt_contains_wait(sub) for br in payload for sub in br["items"])
+
+    @staticmethod
+    def _append_jump_to_items(items, jump):
+        if items and items[-1][0] == "actions":
+            return [*items[:-1], ("actions", [*items[-1][1], copy.deepcopy(jump)])]
+        return [*items, ("actions", [copy.deepcopy(jump)])]
+
+    def _attach_jump_to_stmt(self, item, jump, title, path):
+        kind, payload = item
+        if kind == "actions":
+            return ("actions", [*payload, copy.deepcopy(jump)])
+        new_branches = []
+        for br in payload:
+            new_branches.append({**br, "items": self._append_jump_to_items(br["items"], jump)})
+        if not new_branches or not new_branches[-1]["else"]:
+            new_branches.append({
+                "when": None,
+                "else": True,
+                "desc": title,
+                "items": [("actions", [copy.deepcopy(jump)])],
+                "path": path,
+            })
+        return ("cases", new_branches)
+
+    def _alloc_continuation(self, scope, path, tail_items, title, native):
+        page_id = scope.split("/")[0]
+        while True:
+            self._cont_counter += 1
+            cid = f"__rp1_cont_{page_id}_{self._cont_counter}"
+            logical = f"{page_id}/root/{cid}"
+            if logical not in self.symbols:
+                break
+        name = self.register(logical, "label", {"id": cid}, path)
+        node = {
+            "type": "label",
+            "id": cid,
+            "name": name,
+            "text": "",
+            "x": 0, "y": 0, "w": 1, "h": 1,
+            "hidden": True,
+            "visible": False,
+            "_hidden_lookup": True,
+            "_when_default_visible": False,
+        }
+        cases = self._lower_stmt_seq(tail_items, scope, path, title, native, guard_ast=None)
+        interaction = {
+            "trigger": name,
+            "sourceId": logical,
+            "sourcePointer": path,
+            "events": [{"event": "OnClick", "cases": cases}],
+        }
+        self._pending_cont_widgets.append((page_id, node, interaction))
+        return {"type": "raise-event", "target": name}
+
+    def _check_compiled_actions(self, raw_acts, scope, path, native):
+        compiled = []
+        for j, a in enumerate(raw_acts):
+            res = self.action(a, scope, ptr(path, j))
+            items = res if isinstance(res, list) else [res]
+            for act in items:
+                if act["type"] == "move":
+                    if act["mode"] in ("drag", "drag-x", "drag-y", "withThis") and native != "OnDrag":
+                        fail("E_EVENT_TARGET", path, f"{act['mode']} requires OnDrag")
+                    elif act["mode"] == "locationBeforeDrag" and native != "OnDragDrop":
+                        fail("E_EVENT_TARGET", path, f"{act['mode']} requires OnDragDrop")
+                compiled.append(act)
+        return compiled
+
+    def _parse_stmt_seq(self, raw_seq, scope, path, native, *, is_top_event=False):
+        if not isinstance(raw_seq, list) or not raw_seq:
+            fail("E_EVENT", path, "Event requires a nonempty action array or cases")
+        stmts = []
+        pending_acts = []
+        pending_act_paths = []
+
+        def flush_acts():
+            if not pending_acts:
+                return
+            desugared = self.desugar_action_list(pending_acts, path)
+            # Validate individually against first pointer when sugar expands cleanly
+            compiled = []
+            for j, a in enumerate(desugared):
+                ap = path if is_top_event and len(raw_seq) == 1 else (pending_act_paths[j] if j < len(pending_act_paths) else path)
+                res = self.action(a, scope, ap)
+                items = res if isinstance(res, list) else [res]
+                for act in items:
+                    if act["type"] == "move":
+                        if act["mode"] in ("drag", "drag-x", "drag-y", "withThis") and native != "OnDrag":
+                            fail("E_EVENT_TARGET", ap, f"{act['mode']} requires OnDrag")
+                        elif act["mode"] == "locationBeforeDrag" and native != "OnDragDrop":
+                            fail("E_EVENT_TARGET", ap, f"{act['mode']} requires OnDragDrop")
+                    compiled.append(act)
+            if compiled:
+                stmts.append(("actions", compiled))
+            pending_acts.clear()
+            pending_act_paths.clear()
+
+        for idx, item in enumerate(raw_seq):
+            ip = path if is_top_event and len(raw_seq) == 1 and not (isinstance(item, dict) and "cases" in item) else ptr(path, idx)
+            if isinstance(item, dict) and "cases" in item:
+                flush_acts()
+                fields(item, {"cases"}, ip)
+                raw_cases = item.get("cases")
+                if not isinstance(raw_cases, list) or not raw_cases:
+                    fail("E_EVENT", ip, "Event requires a nonempty action array or cases")
+                branches = []
+                for ci, case in enumerate(raw_cases):
+                    cp = ptr(ptr(ip, "cases"), ci)
+                    if isinstance(case, dict) and "do" in case and "actions" not in case:
+                        case = {**case, "actions": case["do"]}
+                        del case["do"]
+                    when_origin = None
+                    if isinstance(case, dict) and "_when_origin" in case:
+                        case = dict(case)
+                        when_origin = case.pop("_when_origin", None)
+                    fields(case, {"when", "else", "actions", "_program_case"}, cp)
+                    if "when" in case and isinstance(case["when"], str) and not case["when"].strip():
+                        fail("E_EXPRESSION", when_origin or ptr(cp, "when"), "Expected a nonempty condition expression")
+                    if "when" not in case and not case.get("else") and not case.get("actions"):
+                        fail("E_EXPRESSION", cp, "Case requires when/else and actions, or a nonempty unconditional action list")
+                    if "else" in case:
+                        self.typecheck(case["else"], "boolean", ptr(cp, "else"))
+                    when_ast = self.runtime(case["when"], scope, when_origin or ptr(cp, "when"), expected="boolean") if "when" in case else None
+                    raw_sub = case.get("actions")
+                    if isinstance(raw_sub, dict) or isinstance(raw_sub, str):
+                        raw_sub = [raw_sub]
+                    if not isinstance(raw_sub, list) or not raw_sub:
+                        fail("E_EVENT", cp, "Case requires nonempty actions")
+                    if case.get("else"):
+                        if ci == 0 or "when" in case or ci != len(raw_cases) - 1 or not any("when" in c for c in raw_cases[:ci]):
+                            fail("E_CONDITION", cp, "else must end a conditional chain")
+                    elif "when" not in case and len(raw_cases) > 1:
+                        fail("E_CONDITION", cp, "Multi-case events require when or final else")
+                    sub_items = self._parse_stmt_seq(raw_sub, scope, ptr(cp, "actions"), native, is_top_event=False)
+                    branches.append({
+                        "when": when_ast,
+                        "else": bool(case.get("else")),
+                        "desc": case.get("_program_case"),
+                        "items": sub_items,
+                        "path": cp,
+                    })
+                stmts.append(("cases", branches))
+            else:
+                pending_acts.append(item)
+                pending_act_paths.append(ip)
+        flush_acts()
+        return stmts
+
+    def _is_pure_decision_tree(self, branches):
+        for br in branches:
+            items = br["items"]
+            if len(items) != 1:
+                return False
+            kind, payload = items[0]
+            if kind == "cases" and not self._is_pure_decision_tree(payload):
+                return False
+        return True
+
+    def _flatten_decision_tree(self, branches, inherited_conds, title):
+        flat_cases = []
+        prior_incomplete_negations = []
+        prev_conds = []
+        all_branches_complete = True
+        for br in branches:
+            if not br["else"]:
+                branch_conds = [*inherited_conds, *prior_incomplete_negations]
+                if br["when"] is not None:
+                    branch_conds.append(br["when"])
+                items = br["items"]
+                if items[0][0] == "actions":
+                    combined = self._and_rt_ast(branch_conds)
+                    case_obj = {"description": br["desc"] or title, "actions": items[0][1]}
+                    if combined is not None:
+                        case_obj["when"] = self._wrap_cond_ast(combined)
+                    flat_cases.append(case_obj)
+                    sub_complete = True
+                else:
+                    sub_cases, sub_complete = self._flatten_decision_tree(items[0][1], branch_conds, title)
+                    flat_cases.extend(sub_cases)
+                if br["when"] is not None:
+                    prev_conds.append(br["when"])
+                if not sub_complete:
+                    all_branches_complete = False
+                    if br["when"] is not None:
+                        prior_incomplete_negations.append(self._not_rt_ast(br["when"]))
+            else:
+                items = br["items"]
+                if items[0][0] == "actions" and not inherited_conds and not prior_incomplete_negations:
+                    flat_cases.append({"description": br["desc"] or title, "else": True, "actions": items[0][1]})
+                    sub_complete = True
+                else:
+                    else_conds = [*inherited_conds, *[self._not_rt_ast(c) for c in prev_conds]]
+                    if items[0][0] == "actions":
+                        combined = self._and_rt_ast(else_conds)
+                        case_obj = {"description": br["desc"] or title, "actions": items[0][1]}
+                        if combined is not None:
+                            case_obj["when"] = self._wrap_cond_ast(combined)
+                        else:
+                            case_obj["else"] = True
+                        flat_cases.append(case_obj)
+                        sub_complete = True
+                    else:
+                        sub_cases, sub_complete = self._flatten_decision_tree(items[0][1], else_conds, title)
+                        flat_cases.extend(sub_cases)
+                if not sub_complete:
+                    all_branches_complete = False
+        chain_complete = bool(branches and branches[-1]["else"] and all_branches_complete)
+        return flat_cases, chain_complete
+
+    def _lower_cases_stmt(self, branches, scope, path, title, native, guard_ast=None):
+        if self._is_pure_decision_tree(branches):
+            flat_cases, _ = self._flatten_decision_tree(branches, [guard_ast] if guard_ast is not None else [], title)
+            out = []
+            for idx, fc in enumerate(flat_cases):
+                c_obj = {"description": fc["description"], "isNewIfGroup": idx == 0, "actions": fc["actions"]}
+                if fc.get("else"):
+                    c_obj["condition"] = "else"
+                elif "when" in fc:
+                    c_obj["when"] = fc["when"]
+                    c_obj["condition"] = "if" if idx == 0 else "else-if"
+                out.append(c_obj)
+            return out
+
+        # Tier 3: branch body contains multiple sequential statements or mixes actions with conditionals.
+        # Freeze winning branch index at entry so prelude mutations cannot clobber outer branch decisions.
+        tag_var = self._alloc_branch_var()
+        tag_ref = {"kind": "variable", "name": tag_var, "valueType": "number"}
+        entry_cases = []
+        deferred = []
+        for idx, br in enumerate(branches):
+            b_idx = idx + 1
+            b_items = br["items"]
+            lead_actions = []
+            rem_items = b_items
+            if len(b_items) == 1 and b_items[0][0] == "actions":
+                lead_actions = b_items[0][1]
+                rem_items = []
+            elif b_items[0][0] == "actions" and not self._stmt_contains_wait(b_items[0]):
+                lead_actions = b_items[0][1]
+                rem_items = b_items[1:]
+
+            if rem_items:
+                entry_acts = [{"type": "set-variable", "variable": tag_var, "value": b_idx}, *lead_actions]
+                deferred.append((b_idx, rem_items, br["path"]))
+            else:
+                entry_acts = [{"type": "set-variable", "variable": tag_var, "value": 0}, *lead_actions]
+
+            c_obj = {"description": br["desc"] or title, "isNewIfGroup": idx == 0, "actions": entry_acts}
+            if br["else"]:
+                if guard_ast is not None:
+                    c_obj["when"] = self._wrap_cond_ast(guard_ast)
+                    c_obj["condition"] = "if" if idx == 0 else "else-if"
+                else:
+                    c_obj["condition"] = "else"
+            elif br["when"] is not None:
+                cond_rt = self._and_rt_ast([guard_ast, br["when"]])
+                c_obj["when"] = self._wrap_cond_ast(cond_rt)
+                c_obj["condition"] = "if" if idx == 0 else "else-if"
+            elif guard_ast is not None:
+                c_obj["when"] = self._wrap_cond_ast(guard_ast)
+                c_obj["condition"] = "if" if idx == 0 else "else-if"
+            entry_cases.append(c_obj)
+
+        # Ensure tag_var is always cleanly reset on non-matching entry (or mismatched outer guard)
+        if guard_ast is not None or not branches[-1]["else"]:
+            if not (len(entry_cases) == 1 and "when" not in entry_cases[0] and not entry_cases[0].get("condition")):
+                entry_cases.append({
+                    "description": title,
+                    "isNewIfGroup": False,
+                    "condition": "else",
+                    "actions": [{"type": "set-variable", "variable": tag_var, "value": 0}],
+                })
+
+        out = list(entry_cases)
+        for b_idx, rem_items, b_path in deferred:
+            b_guard = {"kind": "binary", "op": "==", "left": tag_ref, "right": {"kind": "literal", "value": b_idx, "valueType": "number"}, "valueType": "boolean"}
+            out.extend(self._lower_stmt_seq(rem_items, scope, b_path, title, native, guard_ast=b_guard))
+        return out
+
+    def _lower_stmt_seq(self, items, scope, path, title, native, guard_ast=None):
+        # Tier 4: if any item prior to the final item contains a `wait`, hoist the tail into a
+        # continuation callback triggered via `raise-event` so execution order matches source order.
+        if len(items) > 1:
+            wait_idx = next((idx for idx in range(len(items) - 1) if self._stmt_contains_wait(items[idx])), None)
+            if wait_idx is not None:
+                jump = self._alloc_continuation(scope, path, items[wait_idx + 1:], title, native)
+                head_items = [*items[:wait_idx], self._attach_jump_to_stmt(items[wait_idx], jump, title, path)]
+                return self._lower_stmt_seq(head_items, scope, path, title, native, guard_ast=guard_ast)
+
+        out = []
+        for kind, payload in items:
+            if kind == "actions":
+                c_obj = {"description": title, "isNewIfGroup": True, "actions": payload}
+                if guard_ast is not None:
+                    c_obj["condition"] = "if"
+                    c_obj["when"] = self._wrap_cond_ast(guard_ast)
+                out.append(c_obj)
+            else:
+                out.extend(self._lower_cases_stmt(payload, scope, path, title, native, guard_ast=guard_ast))
+        return out
+
     def events(self, declarations, scope, path, page=False):
         if not isinstance(declarations, dict):
             fail("E_EVENT", path, "on must map event names to action arrays")
@@ -3554,64 +3890,69 @@ class Frontend:
             if native in names:
                 fail("E_EVENT", ep, f"Duplicate event alias '{event}'")
             names.add(native)
-            if isinstance(actions, str):
-                actions = [actions]
-            elif isinstance(actions, dict) and "cases" not in actions:
-                actions = [actions]
-            shorthand = isinstance(actions, list)
+            title = "页面载入" if page and native == "OnLoad" else "RP/1 " + event
             grouped = isinstance(actions, dict) and actions.get("_program_groups") is True
-            if shorthand:
-                cases = [{"actions": self.desugar_action_list(actions, ep)}]
-            else:
+            if grouped:
                 fields(actions, {"cases", "_program_groups"}, ep)
                 cases = actions.get("cases")
-            if not isinstance(cases, list) or not cases:
-                fail("E_EVENT", ep, "Event requires a nonempty action array or cases")
-            compiled_cases = []
-            previous_unconditional = False
-            for i, case in enumerate(cases):
-                cp = ep if shorthand else ptr(ptr(ep, "cases"), i)
-                if isinstance(case, dict) and "do" in case and "actions" not in case:
-                    case = {**case, "actions": case["do"]}
-                    del case["do"]
-                when_origin = None
-                if isinstance(case, dict) and "_when_origin" in case:
-                    case = dict(case)
-                    when_origin = case.pop("_when_origin", None)
-                fields(case, {"when", "else", "actions", "_program_case"}, cp)
-                if "when" in case and isinstance(case["when"], str) and not case["when"].strip():
-                    fail("E_EXPRESSION", when_origin or ptr(cp, "when"), "Expected a nonempty condition expression")
-                if not shorthand and "when" not in case and not case.get("else") and not case.get("actions"):
-                    fail("E_EXPRESSION", cp, "Case requires when/else and actions, or a nonempty unconditional action list")
-                if "else" in case:
-                    self.typecheck(case["else"], "boolean", ptr(cp, "else"))
-                checked_when = self.condition(case["when"], scope, when_origin or ptr(cp, "when")) if "when" in case else None
-                desugared_acts = self.desugar_action_list(case.get("actions"), cp) if not shorthand else case.get("actions")
-                if not isinstance(desugared_acts, list) or not desugared_acts:
-                    fail("E_EVENT", cp, "Case requires nonempty actions")
-                unconditional = "when" not in case and not case.get("else")
-                new_group = i == 0 or (grouped and (unconditional or previous_unconditional))
-                previous_unconditional = unconditional
-                title = "页面载入" if page and native == "OnLoad" else "RP/1 " + event
-                compiled = {"description": case.get("_program_case") or title,
-                            "isNewIfGroup": new_group,
-                            "actions": [item for j, a in enumerate(desugared_acts) for result in [self.action(a, scope, ptr(ep if shorthand else ptr(cp, "actions"), j))] for item in (result if isinstance(result, list) else [result])]}
-                for act in compiled["actions"]:
-                    if act["type"] == "move":
-                        if act["mode"] in ("drag", "drag-x", "drag-y", "withThis") and native != "OnDrag":
-                            fail("E_EVENT_TARGET", cp, f"{act['mode']} requires OnDrag")
-                        elif act["mode"] == "locationBeforeDrag" and native != "OnDragDrop":
-                            fail("E_EVENT_TARGET", cp, f"{act['mode']} requires OnDragDrop")
-                if case.get("else"):
-                    if i == 0 or "when" in case or i != len(cases) - 1 or not any("when" in c for c in cases[:i]):
-                        fail("E_CONDITION", cp, "else must end a conditional chain")
-                    compiled["condition"] = "else"
-                elif "when" in case:
-                    compiled["when"] = checked_when
-                    compiled["condition"] = "if" if new_group else "else-if"
-                elif len(cases) > 1 and not grouped:
-                    fail("E_CONDITION", cp, "Multi-case events require when or final else")
-                compiled_cases.append(compiled)
+                if not isinstance(cases, list) or not cases:
+                    fail("E_EVENT", ep, "Event requires a nonempty action array or cases")
+                compiled_cases = []
+                previous_unconditional = False
+                for i, case in enumerate(cases):
+                    cp = ptr(ptr(ep, "cases"), i)
+                    if isinstance(case, dict) and "do" in case and "actions" not in case:
+                        case = {**case, "actions": case["do"]}
+                        del case["do"]
+                    when_origin = None
+                    if isinstance(case, dict) and "_when_origin" in case:
+                        case = dict(case)
+                        when_origin = case.pop("_when_origin", None)
+                    fields(case, {"when", "else", "actions", "_program_case"}, cp)
+                    if "when" in case and isinstance(case["when"], str) and not case["when"].strip():
+                        fail("E_EXPRESSION", when_origin or ptr(cp, "when"), "Expected a nonempty condition expression")
+                    if "when" not in case and not case.get("else") and not case.get("actions"):
+                        fail("E_EXPRESSION", cp, "Case requires when/else and actions, or a nonempty unconditional action list")
+                    if "else" in case:
+                        self.typecheck(case["else"], "boolean", ptr(cp, "else"))
+                    checked_when = self.condition(case["when"], scope, when_origin or ptr(cp, "when")) if "when" in case else None
+                    desugared_acts = self.desugar_action_list(case.get("actions"), cp)
+                    if not isinstance(desugared_acts, list) or not desugared_acts:
+                        fail("E_EVENT", cp, "Case requires nonempty actions")
+                    unconditional = "when" not in case and not case.get("else")
+                    new_group = i == 0 or (grouped and (unconditional or previous_unconditional))
+                    previous_unconditional = unconditional
+                    compiled = {"description": case.get("_program_case") or title,
+                                "isNewIfGroup": new_group,
+                                "actions": [item for j, a in enumerate(desugared_acts) for result in [self.action(a, scope, ptr(ptr(cp, "actions"), j))] for item in (result if isinstance(result, list) else [result])]}
+                    for act in compiled["actions"]:
+                        if act["type"] == "move":
+                            if act["mode"] in ("drag", "drag-x", "drag-y", "withThis") and native != "OnDrag":
+                                fail("E_EVENT_TARGET", cp, f"{act['mode']} requires OnDrag")
+                            elif act["mode"] == "locationBeforeDrag" and native != "OnDragDrop":
+                                fail("E_EVENT_TARGET", cp, f"{act['mode']} requires OnDragDrop")
+                    if case.get("else"):
+                        if i == 0 or "when" in case or i != len(cases) - 1 or not any("when" in c for c in cases[:i]):
+                            fail("E_CONDITION", cp, "else must end a conditional chain")
+                        compiled["condition"] = "else"
+                    elif "when" in case:
+                        compiled["when"] = checked_when
+                        compiled["condition"] = "if" if new_group else "else-if"
+                    compiled_cases.append(compiled)
+                out.append({"event": native, "cases": compiled_cases})
+                continue
+
+            if isinstance(actions, str) or (isinstance(actions, dict) and "cases" not in actions):
+                raw_seq = [actions]
+                is_top_single = True
+            elif isinstance(actions, dict) and "cases" in actions:
+                raw_seq = [actions]
+                is_top_single = True
+            else:
+                raw_seq = actions
+                is_top_single = False
+            stmt_items = self._parse_stmt_seq(raw_seq, scope, ep, native, is_top_event=is_top_single)
+            compiled_cases = self._lower_stmt_seq(stmt_items, scope, ep, title, native, guard_ast=None)
             out.append({"event": native, "cases": compiled_cases})
         return out
 
@@ -4009,6 +4350,9 @@ class Frontend:
                 "sourcePointer": ops[0]["panelPointer"],
                 "events": [{"event": "OnPanelStateChange", "cases": bridge_cases}],
             })
+        for cont_page_id, cont_node, cont_ix in self._pending_cont_widgets:
+            by_id[cont_page_id]["root"].setdefault("children", []).append(cont_node)
+            by_id[cont_page_id]["interactions"].append(cont_ix)
         self.add_binding_refresh(lowered["pages"], compiled_bindings)
         for page in lowered["pages"]:
             merged = {}
@@ -4027,6 +4371,7 @@ class Frontend:
                                 case["isNewIfGroup"] = True
                                 if case.get("description") != "初始化任务状态":
                                     case["when"] = {"left": True, "op": "==", "right": True}
+                                    case.setdefault("condition", "if")
         compiled_invariants = []
         raw_invs = self.spec.get("invariants")
         default_page_id = lowered["pages"][0]["slug"] if lowered["pages"] else ""

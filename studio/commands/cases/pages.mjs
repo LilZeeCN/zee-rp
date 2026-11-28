@@ -145,8 +145,20 @@ function deletePage({ doc, cmd, cmdIdx, affectedIds }) {
           if (!n || typeof n !== 'object') return;
           if (n.on && typeof n.on === 'object') {
             for (const [, evSpec] of Object.entries(n.on)) {
-              const acts = Array.isArray(evSpec) ? evSpec : evSpec?.cases ? evSpec.cases.flatMap(c => c.actions || []) : [evSpec];
-              for (const act of acts) {
+              const collectActs = spec => {
+                if (!spec) return [];
+                if (Array.isArray(spec)) return spec.flatMap(collectActs);
+                if (typeof spec === 'object') {
+                  if (Array.isArray(spec.cases)) return spec.cases.flatMap(c => collectActs(c.actions));
+                  const sub = [];
+                  if (spec.actions) sub.push(...collectActs(spec.actions));
+                  if (spec.then) sub.push(...collectActs(spec.then));
+                  if (spec.else && typeof spec.else === 'object') sub.push(...collectActs(spec.else));
+                  return sub.length ? sub : [spec];
+                }
+                return [spec];
+              };
+              for (const act of collectActs(evSpec)) {
                 if (act && (act.page === cmd.pageId || act.navigate === cmd.pageId || act.target === cmd.pageId)) {
                   pageLinks.push(`${pgId}/${n.id}`);
                 }

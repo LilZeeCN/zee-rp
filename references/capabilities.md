@@ -9,6 +9,7 @@
 - **原生 `.rplib` 组件库编译 (`build-library`)**：将 `.rp` / `.rp1` 编译为 RP9 或 RP11 原生 `.rplib`（`DesignDocument` 标记 `document-type=2`、`SavedEdition=2`），打通 `index-library` → `clone-library-widget`/`clone-library-page-content` → `native-check --compile` 闭环。
 - **原生编译门槛 (`native-check --compile`)**：在原生加载之外追加无头官方 HTML 导出与 STO 表达式错误扫描（发现语法错误拒绝并返回 `E_OFFICIAL_COMPILE`），同时输出 `editorReadiness`（检查 `.version` 与 `DocumentSettings` 版本历史，披露升级弹窗风险）。
 - **MCP Schema 预算守卫 (`test:mcp-budget`)**：30 个公开工具（含 13 个 `studio_*` 动词）全部保留并通过 `$ref`/`$defs` 与精简描述收敛，`full` ≤ 35,000、`author` ≤ 28,000、`studio` ≤ 20,000、`core` ≤ 20,000 字符、单工具 ≤ 5,000 字符。
+- **RP/1 全命令式事件控制流（`v0.4.4`）**：`+onClick:` 等缩进事件块及 JSON AST 动作流取消“动作与条件不能混排”和“不能连续独立 `if`”限制，兼容行尾可选冒号 `:`（`if ...:` / `else:`），通过 4 档自动降级在 Axure RP9/RP11、Python `ReferenceRuntime` 与 `studio-html` 保持语义一致：纯动作与纯条件树零开销，顶层混排直出多组原生 `IsNewIfGroup`，分支内混排且改写外层条件变量时按分支锁冻结入口命中分支，跨 `wait` 后接分支自动拆出隐藏回调 + `raise-event` 续体。
 
 ## 免模板生成、元件库索引与原生加载回归
 
