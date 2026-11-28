@@ -3133,7 +3133,7 @@ def auto_locate_canvas(raw_img, ref_log_img):
     }
 
 
-def audit_proxy_vs_host(spec, proxy_log_img, host_log_img):
+def audit_proxy_vs_host(spec, proxy_log_img, host_log_img, exemptions=None):
     """
     比较薄页渲染(Proxy)与宿主预览(Host)：
       1. 逐细线/矢量元件笔画召回率审计 (BROKEN_OR_MISSING_STROKE)
@@ -3190,6 +3190,24 @@ def audit_proxy_vs_host(spec, proxy_log_img, host_log_img):
                 "proxy_vs_host_mae": round(local_mae, 1),
             })
 
+    text_region_mask = np.zeros((H_log, W_log), dtype=bool)
+    text_regions = []
+    regions = []
+    for idx, child in enumerate(frame.get("children", [])):
+        if not all(isinstance(child.get(key), (int, float)) for key in ("x", "y", "w", "h")):
+            continue
+        x, y, w, h = (float(child[key]) for key in ("x", "y", "w", "h"))
+        name = child.get("id") or child.get("name") or f"widget-{idx}"
+        regions.append((name, x + w / 2, y + h / 2))
+        if child.get("kind") in ("text", "label", "paragraph", "button", "badge") or child.get("text"):
+            size = float(child.get("fontSize") or child.get("size") or 14)
+            pad = max(6, int(round(size * 0.45)))
+            left, right = max(0, int(x) - pad), min(W_log, int(x + w) + pad)
+            top, bottom = max(0, int(y) - pad), min(H_log, int(y + h) + pad)
+            if left < right and top < bottom:
+                text_region_mask[top:bottom, left:right] = True
+                text_regions.append((left, top, right, bottom, size))
+    drift = {"subpixelFontDriftCount": 0, "totalPixels": 0}
     # 2) 平坦背景上的宿主飞线/伪影检测 (SPURIOUS_HOST_INK)
     p_gray = p_np.mean(axis=2)
     p_grad = np.hypot(
@@ -3198,6 +3216,25 @@ def audit_proxy_vs_host(spec, proxy_log_img, host_log_img):
     )
     p_flat = ~ndimage.binary_dilation(p_grad > 6.0, iterations=3)
     spurious_mask = p_flat & (diff_gray > 40.0)
+    # Inspect tight components first. Expanding a line of glyphs by four
+    # pixels joins unrelated strokes and invalidates the glyph-size threshold.
+    tight_labels, _ = ndimage.label(spurious_mask)
+    for i, bounds in enumerate(ndimage.find_objects(tight_labels), 1):
+        if bounds is None:
+            continue
+        ys, xs = bounds
+        component = tight_labels[bounds] == i
+        px = int(component.sum())
+        if not 4 <= px < 240:
+            continue
+        height, width = ys.stop - ys.start, xs.stop - xs.start
+        mid_x, mid_y = (xs.start + xs.stop - 1) / 2, (ys.start + ys.stop - 1) / 2
+        sizes = [size for left, top, right, bottom, size in text_regions if left <= mid_x < right and top <= mid_y < bottom]
+        if (sizes and height <= max(sizes) * 1.8 and width <= max(sizes) * 4
+                and np.count_nonzero(component & text_region_mask[bounds]) / px >= 0.6):
+            spurious_mask[bounds] &= ~component
+            drift["subpixelFontDriftCount"] += 1
+            drift["totalPixels"] += px
     lbl, num = ndimage.label(ndimage.binary_dilation(spurious_mask, iterations=4))
     for i in range(1, num + 1):
         comp = (lbl == i) & spurious_mask
@@ -3205,18 +3242,37 @@ def audit_proxy_vs_host(spec, proxy_log_img, host_log_img):
         if px < 25:
             continue
         ys, xs = np.where(comp)
+        height = int(ys.max() - ys.min() + 1)
+        width = int(xs.max() - xs.min() + 1)
+        mid_x, mid_y = (xs.min() + xs.max()) / 2, (ys.min() + ys.max()) / 2
+        nearest = min(regions, key=lambda item: (item[1] - mid_x) ** 2 + (item[2] - mid_y) ** 2, default=None)
         anomalies.append({
             "type": "SPURIOUS_HOST_INK",
+            "widget": nearest[0] if nearest else None,
             "x": int(xs.min()), "y": int(ys.min()),
-            "w": int(xs.max() - xs.min() + 1), "h": int(ys.max() - ys.min() + 1),
+            "w": width, "h": height,
             "spurious_pixels": px,
             "mean_diff": round(float(diff_gray[comp].mean()), 1),
         })
 
-    return anomalies
+    clusters = {}
+    active = []
+    reviewed = set(exemptions or []) if isinstance(exemptions, list) else set()
+    for anomaly in anomalies:
+        anomaly["id"] = ":".join(str(anomaly.get(field, "")) for field in ("type", "widget", "x", "y", "w", "h"))
+        if exemptions is True or anomaly["id"] in reviewed:
+            continue
+        active.append(anomaly)
+        key = (anomaly["type"], anomaly.get("widget"))
+        cluster = clusters.setdefault(key, {"type": key[0], "widget": key[1], "count": 0, "examples": []})
+        cluster["count"] += 1
+        if len(cluster["examples"]) < 5:
+            cluster["examples"].append({field: anomaly[field] for field in ("x", "y", "w", "h")})
+    drift["exemptedHostAnomalies"] = len(anomalies) - len(active)
+    return active, drift, list(clusters.values())
 
 
-def cmd_verify(spec_path, source_path, out_dir, scale=2.0, preview_path=None):
+def cmd_verify(spec_path, source_path, out_dir, scale=2.0, preview_path=None, exemptions=None):
     os.makedirs(out_dir, exist_ok=True)
     with open(spec_path, "r", encoding="utf-8") as f:
         spec = json.load(f)
@@ -3350,7 +3406,9 @@ def cmd_verify(spec_path, source_path, out_dir, scale=2.0, preview_path=None):
         out_08 = os.path.join(out_dir, "08-proxy-vs-host-diff.png")
         pvh_cmp.save(out_08)
 
-        host_anomalies = audit_proxy_vs_host(spec, render_log, host_log)
+        host_anomalies, noise_summary, anomaly_clusters = audit_proxy_vs_host(spec, render_log, host_log, exemptions)
+        report["noiseSummary"] = noise_summary
+        report["anomalyClusters"] = anomaly_clusters
 
         report["host_crop_info"] = crop_info
         report["axure_preview_mae_per_255"] = round(prev_mae, 2)
@@ -3642,6 +3700,7 @@ def main():
     p_ver.add_argument("-o", "--out-dir", required=True, help="输出证据目录")
     p_ver.add_argument("--scale", type=float, default=2.0, help="物理像素与逻辑像素比例 (默认 2.0)")
     p_ver.add_argument("--preview", help="可选：真实 Axure 预览截图路径（支持整窗截图自动定位裁切与 Proxy vs Host 异常检测）")
+    p_ver.add_argument("--exempt-host-anomalies", type=json.loads)
 
     p_rp9 = sub.add_parser("rp9-spec", help="将复杂矢量/饼图/折线转储为独立透明 PNG 图元并导出 RP9 原生兼容 spec 与待校对区域")
     p_rp9.add_argument("spec", help="输入 spec.json 路径")
@@ -3676,7 +3735,8 @@ def main():
             res = cmd_normalize_lines(args.spec, out_spec_path=args.output)
             print(json.dumps(res, ensure_ascii=False, indent=2))
         elif args.cmd == "verify":
-            res = cmd_verify(args.spec, args.source, args.out_dir, scale=args.scale, preview_path=args.preview)
+            res = cmd_verify(args.spec, args.source, args.out_dir, scale=args.scale, preview_path=args.preview,
+                             exemptions=args.exempt_host_anomalies)
             print(json.dumps(res, ensure_ascii=False, indent=2))
         elif args.cmd == "rp9-spec":
             res = cmd_rp9_spec(args.spec, out_spec_path=args.output, assets_dir=args.assets_dir)

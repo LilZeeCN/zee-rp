@@ -77,8 +77,7 @@ function rgbToHex(cssColor) {
   return `#${hex}`;
 }
 
-function extractInBrowserDomScript() {
-  return `(async () => {
+async function extractInBrowserDom() {
     const SKIP = new Set(['SCRIPT', 'STYLE', 'LINK', 'META', 'HEAD', 'TITLE', 'NOSCRIPT', 'TEMPLATE', 'OPTION', 'SOURCE', 'TRACK']);
     const INLINE_TEXT_ONLY = new Set(['SPAN', 'STRONG', 'EM', 'B', 'I', 'U', 'SMALL', 'CODE', 'MARK', 'ABBR', 'TIME', 'SUP', 'SUB']);
     const sx = window.scrollX || 0;
@@ -86,7 +85,7 @@ function extractInBrowserDomScript() {
 
     const toHex = c => {
       if (!c) return null;
-      const m = c.match(/^rgba?\\(\\s*(\\d+(?:\\.\\d+)?)[,\\s]+(\\d+(?:\\.\\d+)?)[,\\s]+(\\d+(?:\\.\\d+)?)(?:\\s*[,/]\\s*([\\d.]+))?\\s*\\)$/i);
+      const m = c.match(/^rgba?\(\s*(\d+(?:\.\d+)?)[,\s]+(\d+(?:\.\d+)?)[,\s]+(\d+(?:\.\d+)?)(?:\s*[,/]\s*([\d.]+))?\s*\)$/i);
       if (!m) return c.startsWith('#') ? c : null;
       const a = m[4] === undefined ? 1 : Number(m[4]);
       if (a < 0.04) return null;
@@ -307,7 +306,7 @@ function extractInBrowserDomScript() {
           fontSize,
         };
       }
-      if (tag === 'BUTTON' || el.getAttribute('role') === 'button' || (tag === 'A' && (fill || borders.stroke) && onlyInlineChildren(el))) {
+      if (tag === 'BUTTON' || el.getAttribute('role') === 'button' || (tag === 'A' && onlyInlineChildren(el))) {
         const txt = (el.innerText || el.textContent || '').trim().slice(0, 120);
         if (txt || el.children.length === 0) {
           return {
@@ -324,11 +323,26 @@ function extractInBrowserDomScript() {
       }
 
       if (onlyInlineChildren(el)) {
-        const txt = (el.innerText || el.textContent || '').trim().replace(/\\s+/g, ' ').slice(0, 400);
+        const txt = (el.innerText || el.textContent || '').trim().replace(/\s+/g, ' ').slice(0, 400);
         if (txt && !el.closest('label[for]')) {
-          const isPara = txt.length > 40 || h > fontSize * 2.4 || cs.whiteSpace === 'normal';
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          const ink = range.getBoundingClientRect();
+          const padL = parseFloat(cs.paddingLeft) || 0;
+          const padR = parseFloat(cs.paddingRight) || 0;
+          const spans = [...el.childNodes].map(child => {
+            const style = child.nodeType === Node.ELEMENT_NODE ? getComputedStyle(child) : cs;
+            return { text: child.textContent.replace(/\s+/g, ' '), fontSize: Math.round(parseFloat(style.fontSize) || fontSize),
+              fontWeight: Number(style.fontWeight) || fontWeight, color: toHex(style.color) || color || '#000000' };
+          }).filter(span => span.text);
+          const largestFont = Math.max(fontSize, ...spans.map(span => span.fontSize));
+          const isPara = ink.height > largestFont * 1.65;
+          const distinct = new Set(spans.map(({ fontSize, fontWeight, color }) => [fontSize, fontWeight, color].join('/')));
           return {
             ...base,
+            ...(!isPara ? { w: Math.max(w, Math.ceil(ink.width + padL + padR + 2)) } : {}),
+            textPaddingX: fill || borders.stroke ? Math.round((padL + padR) / 2) : 0,
+            ...(distinct.size > 1 ? { spans } : {}),
             kind: isPara ? 'paragraph' : 'label',
             text: txt,
             ...(color ? { color } : {}),
@@ -351,6 +365,27 @@ function extractInBrowserDomScript() {
     };
 
     const bodyCs = getComputedStyle(document.body);
+    const content = [...document.body.children].filter(el => !SKIP.has(el.tagName)).map(el => el.getBoundingClientRect())
+      .filter(r => r.width > 0 && r.height > 0);
+    const contentBounds = content.length ? {
+      x: Math.min(...content.map(r => r.left)) + sx,
+      y: Math.min(...content.map(r => r.top)) + sy,
+      right: Math.max(...content.map(r => r.right)) + sx,
+      bottom: Math.max(...content.map(r => r.bottom)) + sy,
+    } : null;
+    const behaviors = [];
+    for (const el of document.querySelectorAll('[onclick], [onchange], [oninput], [onsubmit], a[href]')) {
+      for (const trigger of ['onclick', 'onchange', 'oninput', 'onsubmit']) {
+        if (el.hasAttribute(trigger)) behaviors.push({ nodeId: el.id || null, trigger, code: el.getAttribute(trigger).slice(0, 2048) });
+      }
+      if (el.matches('a[href]')) behaviors.push({ nodeId: el.id || null, trigger: 'href', code: el.getAttribute('href') });
+    }
+    const listener = /getElementById\(\s*['"]([^'"]+)['"]\s*\)\s*\.\s*addEventListener\(\s*['"]([a-z]+)['"]/gi;
+    for (const script of document.scripts) {
+      for (const binding of script.textContent.matchAll(listener)) {
+        behaviors.push({ nodeId: binding[1], trigger: binding[2], code: binding[0], scriptListener: true });
+      }
+    }
     const rootTree = await walk(document.body, 0);
     return {
       title: document.title || 'HTML 导入页',
@@ -359,8 +394,9 @@ function extractInBrowserDomScript() {
       pageW: Math.max(320, Math.round(document.documentElement.scrollWidth || window.innerWidth)),
       pageH: Math.max(320, Math.round(document.documentElement.scrollHeight || window.innerHeight)),
       root: rootTree,
+      contentBounds,
+      behaviors,
     };
-  })()`;
 }
 
 function normalizeImportedTree(node, parentAbsX, parentAbsY, state) {
@@ -401,6 +437,7 @@ function normalizeImportedTree(node, parentAbsX, parentAbsY, state) {
     h: Math.max(4, Math.round(cur.h)),
   };
 
+  if (cur.domId && !state.nodesByDomId.has(cur.domId)) state.nodesByDomId.set(cur.domId, out);
   if (out.type === 'box') out.layout = 'stack';
   if (cur.fill) {
     out.fill = cur.fill;
@@ -476,6 +513,8 @@ function normalizeImportedTree(node, parentAbsX, parentAbsY, state) {
     }
     if (cur.fontSize) out.fontSize = cur.fontSize;
     if (cur.fontWeight) out.fontWeight = cur.fontWeight;
+    if (cur.spans) out.spans = cur.spans;
+    if (cur.textPaddingX !== undefined) out.textPaddingX = cur.textPaddingX;
     if (cur.lineHeight) out.lineHeight = cur.lineHeight;
     if (cur.textAlign) out.align = cur.textAlign;
     if (cur.fontFamily) out.fontFamily = cur.fontFamily;
@@ -490,6 +529,86 @@ function normalizeImportedTree(node, parentAbsX, parentAbsY, state) {
   return out;
 }
 
+function importHtmlBehaviors(behaviors, state, originalUrl) {
+  const id = String.raw`document\.getElementById\(\s*(['"])([\w:-]+)\1\s*\)`;
+  const getTarget = raw => state.nodesByDomId.get(raw);
+  const textAssignment = new RegExp(`^${id}\\s*\\.\\s*(?:textContent|innerText)\\s*=\\s*(.+)$`);
+  const visibleAssignment = new RegExp(`^${id}\\s*\\.\\s*(style\\.display|hidden)\\s*=\\s*(.+)$`);
+  const atom = /(?:document\.getElementById\(\s*(['"])([\w:-]+)\1\s*\)\.value)|("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*')/y;
+  const marks = { onclick: 'click', onchange: 'change', oninput: 'change', href: 'click' };
+  const literal = value => {
+    const token = value.replace(/;\s*$/, '').trim();
+    if (token.startsWith('"')) {
+      try { return JSON.parse(token); } catch { return null; }
+    }
+    if (/^'[^'\\]*'$/.test(token)) return token.slice(1, -1);
+    return null;
+  };
+  const linkAction = href => {
+    if (typeof href !== 'string') return null;
+    if (href.startsWith('#')) {
+      const target = getTarget(href.slice(1));
+      return target ? { type: 'scroll-to', target: target.id } : null;
+    }
+    try {
+      const url = new URL(href, originalUrl);
+      return ['http:', 'https:', 'mailto:', 'tel:'].includes(url.protocol)
+        ? { type: 'open-link', url: url.href, window: 'current' } : null;
+    } catch { return null; }
+  };
+  const items = [];
+  for (const signal of behaviors) {
+    const node = getTarget(signal.nodeId);
+    const code = signal.code.trim().replace(/;\s*$/, '');
+    let action;
+    if (node && marks[signal.trigger] && !signal.scriptListener) {
+      const text = code.match(textAssignment);
+      const display = code.match(visibleAssignment);
+      const nav = code.match(/^(?:window\.)?location\.href\s*=\s*(.+)$/);
+      if (signal.trigger === 'href') action = linkAction(code);
+      else if (nav) action = linkAction(literal(nav[1]));
+      else if (text && getTarget(text[2])) {
+        const expression = text[3];
+        const args = [];
+        let offset = 0;
+        while (offset < expression.length) {
+          while (/\s/.test(expression[offset] || '')) offset++;
+          atom.lastIndex = offset;
+          const found = atom.exec(expression);
+          if (!found) break;
+          const referenced = found[2] ? getTarget(found[2]) : null;
+          const value = found[3] ? literal(found[3]) : referenced && ['input', 'combobox'].includes(referenced.type) ? { widget: referenced.id } : null;
+          if (value === null) break;
+          args.push(value);
+          offset = atom.lastIndex;
+          while (/\s/.test(expression[offset] || '')) offset++;
+          if (offset < expression.length && expression[offset++] !== '+') { offset = -1; break; }
+          if (expression[offset - 1] === '+' && offset >= expression.length) { offset = -1; break; }
+        }
+        if (args.length && offset === expression.length) action = { type: 'set-text', target: getTarget(text[2]).id,
+          text: args.length === 1 ? args[0] : { fn: 'concat', args } };
+      } else if (display && getTarget(display[2])) {
+        const selector = display[3] === 'hidden' ? display[4] : literal(display[4]);
+        const hidden = display[3] === 'hidden' ? selector === 'true' : selector === 'none';
+        if ((display[3] === 'hidden' ? ['true', 'false'] : ['none', 'block', '']).includes(selector)) {
+          action = { type: hidden ? 'hide' : 'show', target: getTarget(display[2]).id };
+        }
+      }
+    }
+    if (action) {
+      const event = marks[signal.trigger];
+      node.on ??= {};
+      (node.on[event] ??= []).push(action);
+      items.push({ nodeId: node.id, trigger: signal.trigger, status: 'converted', rp1Action: action });
+    } else {
+      items.push({ nodeId: signal.nodeId, trigger: signal.trigger, status: 'dropped', source: code.slice(0, 160),
+        reason: !node ? '没有对应的可编辑源节点。' : '超出受支持的静态 DOM 动作范围。' });
+    }
+  }
+  const converted = items.filter(item => item.status === 'converted').length;
+  return { detected: items.length, converted, dropped: items.length - converted, items };
+}
+
 export async function importHtmlToRp1Spec(input, {
   viewport = null,
   cwd = null,
@@ -497,6 +616,7 @@ export async function importHtmlToRp1Spec(input, {
   name = null,
   domain = null,
   timeoutMs = 15000,
+  fitCanvas = 'auto',
 } = {}) {
   findChromeExecutable();
   const rawInput = String(input).trim();
@@ -522,7 +642,7 @@ export async function importHtmlToRp1Spec(input, {
     targetUrl = `http://127.0.0.1:${server.address().port}/${encodeURIComponent(basename(localHtmlPath))}`;
   }
 
-  const effectiveDomain = domain === 'mobile' || domain === 'web'
+  let effectiveDomain = domain === 'mobile' || domain === 'web'
     ? domain
     : ((viewport?.width && viewport.width <= 520) ? 'mobile' : 'web');
   const vp = {
@@ -535,10 +655,12 @@ export async function importHtmlToRp1Spec(input, {
   try {
     browser = await launchChrome({ headless: true, width: vp.width, height: vp.height, dpr: vp.dpr });
     const page = await browser.openPage('about:blank');
+    await page.send('Emulation.setScriptExecutionDisabled', { value: true });
     await page.navigate(targetUrl, timeoutMs);
+    await page.send('Emulation.setScriptExecutionDisabled', { value: false });
     await page.evaluate('document.fonts ? document.fonts.ready.catch(() => {}) : Promise.resolve()');
     await new Promise(r => setTimeout(r, 120));
-    const extracted = await page.evaluate(extractInBrowserDomScript(), { timeoutMs });
+    const extracted = await page.evaluate(`(${extractInBrowserDom.toString()})()`, { timeoutMs });
     if (!extracted || !extracted.root) {
       throw Object.assign(new Error(`无法从页面提取可见结构：${targetUrl}`), { code: 'E_HTML_EXTRACT_EMPTY' });
     }
@@ -553,13 +675,27 @@ export async function importHtmlToRp1Spec(input, {
       formControlCount: 0,
       imageCount: 0,
       svgCount: 0,
+      nodesByDomId: new Map(),
       bgHistogram: new Map(),
       textHistogram: new Map(),
     };
+    const bounds = extracted.contentBounds;
+    const narrow = bounds && bounds.right - bounds.x <= vp.width * 0.75;
+    const cropContent = bounds && (fitCanvas === 'content' || (fitCanvas === 'auto' && narrow));
+    if (cropContent) {
+      Object.assign(extracted.root, { absX: Math.round(bounds.x), absY: Math.round(bounds.y),
+        w: Math.max(32, Math.round(bounds.right - bounds.x)), h: Math.max(32, Math.round(bounds.bottom - bounds.y)) });
+      if (!domain && extracted.root.w <= 520) effectiveDomain = 'mobile';
+    }
     const rootNode = normalizeImportedTree(extracted.root, 0, 0, state);
     rootNode.id = 'root';
-    rootNode.w = Math.max(rootNode.w, Math.min(3840, extracted.pageW || vp.width));
-    rootNode.h = Math.max(rootNode.h, Math.min(4800, extracted.pageH || vp.height));
+    if (!cropContent) {
+      rootNode.w = Math.max(rootNode.w, Math.min(3840, extracted.pageW || vp.width));
+      rootNode.h = fitCanvas === 'auto' && bounds
+        ? Math.max(320, Math.min(4800, Math.ceil(bounds.bottom)))
+        : Math.max(rootNode.h, Math.min(4800, extracted.pageH || vp.height));
+    }
+    const behaviorReport = importHtmlBehaviors(extracted.behaviors, state, localHtmlPath ? pathToFileURL(localHtmlPath).href : extracted.url);
     rootNode.fill = rootNode.fill || extracted.bodyFill || '#FFFFFF';
 
     const topSolidColor = map => [...map.entries()].find(([c]) => /^#[0-9A-Fa-f]{6}$/.test(c))?.[0];
@@ -608,9 +744,10 @@ sys.stdout.write(spec_to_dsl(json.loads(sys.stdin.read())))
 
     return {
       spec,
-      rp1Text: dslProc.stdout,
+      rp1Text: `# HTML 行为接管：发现 ${behaviorReport.detected}，转换 ${behaviorReport.converted}，未转换 ${behaviorReport.dropped}。\n${dslProc.stdout}`,
       assets: state.savedAssets,
       summary: {
+        behaviorReport, fitCanvas,
         url: localHtmlPath ? basename(localHtmlPath) : targetUrl,
         title: extracted.title || null,
         pageW,
