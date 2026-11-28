@@ -3,7 +3,8 @@
  * （8 位深、非隔行、颜色类型 2=RGB / 6=RGBA）。
  * 目的是"读回真实像素"，而不是做一个通用图片库。
  */
-import { inflateSync } from 'node:zlib';
+import { deflateSync, inflateSync } from 'node:zlib';
+import { crc32Bytes } from '../scripts/rp-browser-core.mjs';
 
 export function decodePng(buffer) {
   if (buffer.readUInt32BE(0) !== 0x89504e47) throw new Error('不是 PNG');
@@ -79,4 +80,27 @@ export function pixelAt(image, x, y) {
   const py = Math.max(0, Math.min(image.height - 1, Math.round(y)));
   const i = (py * image.width + px) * 4;
   return { r: image.pixels[i], g: image.pixels[i + 1], b: image.pixels[i + 2], a: image.pixels[i + 3] / 255 };
+}
+
+export function encodeRgbaPng({ width, height, pixels }) {
+  const chunk = (type, data) => {
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const header = Buffer.alloc(4);
+    header.writeUInt32BE(data.length);
+    const crc = Buffer.alloc(4);
+    crc.writeUInt32BE(crc32Bytes(body));
+    return Buffer.concat([header, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  const stride = width * 4;
+  const raw = Buffer.alloc((stride + 1) * height);
+  for (let y = 0; y < height; y++) pixels.copy(raw, y * (stride + 1) + 1, y * stride, (y + 1) * stride);
+  return Buffer.concat([
+    Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr),
+    chunk('IDAT', deflateSync(raw)), chunk('IEND', Buffer.alloc(0)),
+  ]);
 }

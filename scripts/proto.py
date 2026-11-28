@@ -56,6 +56,8 @@ def main():
     p_comp.add_argument("--title", default=None, help="页面主标题覆盖")
     p_comp.add_argument("--no-interactions", action="store_true", help="静态交付模式：清空所有交互事件，生成纯静态原型")
     p_comp.add_argument("--strict-audit", action="store_true", help="严格审计模式：将审美与令牌告警升级为硬失败 (exit 1)")
+    p_comp.add_argument("--skip-previews", action="store_true")
+    p_comp.add_argument("--page-cache-dir", default=None)
     p_comp.add_argument("--auto-heal", nargs="?", const="safe", default=None, choices=["safe", "off", "true", "false"], help="安全自愈模式：自动修复文字裁切、容器溢出与非标令牌")
     p_check = sub.add_parser("check", help="检查 RP/1 类型、作用域、数据、交互语义与统一 10 项空间/审美门禁")
     p_check.add_argument("spec_pos", nargs="?", default=None, help="声明式源码路径 (.json/.rp1)")
@@ -217,6 +219,8 @@ def main():
                     strict_audit=args.strict_audit,
                     source_path=spec_abs,
                     auto_heal=args.auto_heal,
+                    skip_previews=args.skip_previews,
+                    page_cache_dir=args.page_cache_dir,
                 )
             except LanguageError as error:
                 if program_map is not None:

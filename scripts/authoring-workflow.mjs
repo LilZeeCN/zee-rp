@@ -8,11 +8,24 @@ import { promisify } from 'node:util';
 import { assertNotProtected, assertWritable, resolveWorkDir } from './engine.mjs';
 import { pythonInvocation } from './python.mjs';
 import { appExists, supportedVersions, templateCandidates, tryDetectFileVersion } from './version.mjs';
-import { captureOfficialHtmlScreenshot, previewPrototype, verifyOfficialPreview } from './preview-runtime.mjs';
-export { captureOfficialHtmlScreenshot, verifyOfficialPreview } from './preview-runtime.mjs';
+import { captureOfficialHtmlScreenshot, previewPrototype, verifyOfficialPreview as replayOfficialPreview } from './preview-runtime.mjs';
+export { captureOfficialHtmlScreenshot };
+
+export function verifyOfficialPreview(input, services = { runWorkflow, exportHtml: exportPrototype }) {
+  if (input.rp) {
+    const rp = resolve(resolveWorkDir(input.cwd ?? input.projectDir), input.rp);
+    assertNotProtected(rp);
+    const moved = renamedCompanion(rp);
+    if (moved) {
+      const error = companionRenamedError(moved);
+      return Promise.resolve({ status: 'failed', code: error.code, message: error.message, nextAction: error.nextAction });
+    }
+  }
+  return replayOfficialPreview(input, services);
+}
 import { reviewImageStructure } from './image-structure.mjs';
 import { findChromeExecutable } from '../studio/cdp.mjs';
-import { listImplementationFiles } from '../studio/source-fingerprint.mjs';
+import { listImplementationFiles, updateFileHash } from '../studio/source-fingerprint.mjs';
 
 import { readNativeWidgetMap } from './native-widget-identity.mjs';
 import { scanOfficialInteractions, officialWidgetMapFile } from './official-interactions.mjs';
@@ -21,6 +34,8 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const RECIPE_DIR = join(ROOT, 'examples/authoring');
 const ASSEMBLY_BRIDGE = 'tools/native-assembly/bridge.mjs';
 const ASSEMBLY_WORKER = 'tools/native-assembly/Worker.cs';
+import { acquireOutputLock } from './file-lock.mjs';
+
 const invoke = promisify(execFile);
 
 export function isInlineRp1Text(value) {
@@ -73,6 +88,10 @@ export const verifyStepItemsSchema = {
         top: { type: 'number' }, bottom: { type: 'number' }, dx: { type: 'number' }, dy: { type: 'number' },
         tolerance: { type: 'number', minimum: 0, maximum: 50 },
         page: { type: 'string' }, variable: { type: 'string' }, equals: {},
+        fill: { type: 'string' }, color: { type: 'string' }, fontFamily: { type: 'string' },
+        fontSize: { type: 'number' }, fontWeight: { type: 'number' }, radius: { type: 'number' },
+        opacity: { type: 'number', minimum: 0, maximum: 1 },
+        visualBaseline: { type: 'string' }, maxDiffPct: { type: 'number', minimum: 0, maximum: 100 }, saveBaselineIfMissing: { type: 'boolean' },
       },
       additionalProperties: false,
     },
@@ -93,7 +112,8 @@ export const packageVersion = JSON.parse(readFileSync(join(ROOT, 'package.json')
 function implementation() {
   const sourceDirs = ['scripts', 'bin', 'studio', 'examples/authoring'];
   const files = ['package.json', 'references/rp-language.schema.json', ...sourceDirs.flatMap(listImplementationFiles),
-    ...[ASSEMBLY_BRIDGE, ASSEMBLY_WORKER, 'examples/rp-language/native-gestures.rp1', 'examples/rp-language/carousel-slider-captcha.rp1'].filter(path => existsSync(join(ROOT, path)))];
+    ...['scripts/surface-capabilities.json', 'references/versioned-capabilities.md', ASSEMBLY_BRIDGE, ASSEMBLY_WORKER,
+      'examples/rp-language/native-gestures.rp1', 'examples/rp-language/carousel-slider-captcha.rp1'].filter(path => existsSync(join(ROOT, path)))];
   const packsRoot = join(ROOT, 'examples/studio/reference-packs');
   if (existsSync(packsRoot)) for (const name of readdirSync(packsRoot)) {
     for (const file of ['manifest.json','source.json']) {
@@ -101,7 +121,12 @@ function implementation() {
       if (existsSync(join(ROOT, relative))) files.push(relative);
     }
   }
-  return Object.fromEntries(files.sort().map(file => [file, fileHash(join(ROOT, file))]));
+  const scratch = Buffer.allocUnsafe(64 * 1024);
+  return Object.fromEntries(files.sort().map(file => {
+    const path = join(ROOT, file);
+    assertNotProtected(path);
+    return [file, updateFileHash(createHash('sha256'), path, scratch).digest('hex')];
+  }));
 }
 const loadedFiles = implementation();
 const loadedFingerprint = digest(JSON.stringify(loadedFiles));
@@ -242,6 +267,8 @@ export function runtimeInfo(toolList) {
   const compilerKeys = ['scripts/rp_language.py', 'scripts/rp_dsl.py', 'scripts/proto.py', 'scripts/rp_workflow.py', 'scripts/mcp-tools.mjs', 'scripts/authoring-workflow.mjs'];
   const compilerHashes = Object.fromEntries(compilerKeys.filter(k => disk[k] || loadedFiles[k]).map(k => [k, { loaded: loadedFiles[k] ?? null, disk: disk[k] ?? null }]));
   return { status: 'completed', name: 'zee-rp', version: packageVersion, root: ROOT, pid: process.pid, startedAt,
+    capabilitiesMatrixPath: join(ROOT, 'references', 'versioned-capabilities.md'),
+    languageFeatureVersion: '0.4.5',
     fingerprint: loadedFingerprint, diskFingerprint: digest(JSON.stringify(disk)),
     trackedFileCount: Object.keys(disk).length, compilerHashes,
     restartRequired: changedFiles.length > 0, changedFiles,
@@ -304,6 +331,32 @@ function copyTreeExclusive(fromDir, toDir, onRootCreated) {
   copyChildren(fromDir, toDir);
 }
 
+export function renamedCompanion(rpPath) {
+  if (!existsSync(rpPath) || existsSync(`${rpPath}.baseline.json`)) return null;
+  const rpSha256 = fileHash(rpPath);
+  const dir = dirname(rpPath);
+  const candidates = [];
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith('.rp.baseline.json')) continue;
+    const path = join(dir, name);
+    try {
+      assertNotProtected(path);
+      const baseline = JSON.parse(readFileSync(path, 'utf8'));
+      const from = path.slice(0, -'.baseline.json'.length);
+      if (baseline.rpSha256 === rpSha256 && !existsSync(from)) candidates.push({ from, to: rpPath, baseline: path, source: baseline.sourcePath });
+    } catch { /* Ignore unrelated or invalid metadata. */ }
+  }
+  if (candidates.length !== 1) return null;
+  return candidates[0];
+}
+
+export function companionRenamedError(companion) {
+  return Object.assign(new Error(`原型已从 ${basename(companion.from)} 改名为 ${basename(companion.to)}，共同基线仍使用原文件名。请使用 sync_prototype 的 relocate 模式迁移配套文件。`), {
+    code: 'E_COMPANION_RENAMED', companion,
+    nextAction: { tool: 'sync_prototype', arguments: { mode: 'relocate', from: companion.from, to: companion.to } },
+  });
+}
+
 export function revisePrototype(input, { generate, sync }) {
   const { source, rp, operations, expectedHash, expectedRpSha256, dryRun = false, prefer = 'fail', resolutions, cwd, projectDir } = input;
   const explicitWorkDir = cwd ?? projectDir;
@@ -311,6 +364,8 @@ export function revisePrototype(input, { generate, sync }) {
   const resolveInWork = p => (isAbsolute(p) ? resolve(p) : resolve(workDir, p));
   const sourcePath = resolveInWork(source), rpPath = resolveInWork(rp);
   assertNotProtected(sourcePath); assertNotProtected(rpPath);
+  const renamed = renamedCompanion(rpPath);
+  if (renamed) throw companionRenamedError(renamed);
   if (!existsSync(`${rpPath}.baseline.json`))
     throw Object.assign(new Error('缺少共同基线；请先使用 generate_prototype 创建带基线的工程，或对已有文件使用原生编辑工具。'), { code: 'E_BASELINE_MISSING' });
   const interactionSource = readNativeInteractionSource(sourcePath);
@@ -326,7 +381,7 @@ export function revisePrototype(input, { generate, sync }) {
     for (let v = 2; ; v++) {
       const candRp = `${stem}-v${v}.rp`;
       const candSrc = `${stem}-v${v}${extname(sourcePath)}`;
-      if (!pathOccupied(candRp) && !pathOccupied(candSrc) && !pathOccupied(`${candRp}.baseline.json`) && !pathOccupied(`${candRp}.assets`)) {
+      if (!pathOccupied(candRp) && !pathOccupied(candSrc) && !pathOccupied(`${candRp}.baseline.json`) && !pathOccupied(candRp.replace(/\.rp$/i, '.assets'))) {
         output = candRp;
         break;
       }
@@ -335,7 +390,7 @@ export function revisePrototype(input, { generate, sync }) {
   const outSource = input.outSource ? resolveInWork(input.outSource) : output ? output.slice(0, -3) + extname(sourcePath) : null;
   if (!dryRun && (!output || extname(output) !== '.rp')) throw new Error('改稿需要新的 output .rp 路径；只查看影响请传 dryRun:true。');
   if (outSource && !['.rp1', '.json'].includes(extname(outSource))) throw new Error('outSource 必须是 .rp1 或 .json。');
-  const assets = output && `${output}.assets`;
+  const assets = output && output.replace(/\.rp$/i, '.assets');
   const outInteractions = interactionSource && outSource ? `${outSource}.interactions.json` : null;
   const destinations = [output, outSource, outInteractions, output && `${output}.baseline.json`, assets].filter(Boolean);
   for (const path of destinations) {
@@ -345,9 +400,11 @@ export function revisePrototype(input, { generate, sync }) {
   const parent = dirname(output ?? rpPath);
   assertWritable(join(parent, '.revision'));
   mkdirSync(parent, { recursive: true });
-  const stage = mkdtempSync(join(parent, '.revision-'));
+  const stage = mkdtempSync(join(tmpdir(), 'zee-revision-'));
   const published = [];
+  let unlock;
   try {
+    if (output && !dryRun) unlock = acquireOutputLock(output);
     const patched = runWorkflow('patch', sourcePath, { operations, expectedHash, format: extname(sourcePath) });
     if (!patched.ok) return { status: 'failed', stage: 'source-patch', ...patched };
     const candidateSource = join(stage, 'candidate' + extname(sourcePath));
@@ -363,7 +420,8 @@ export function revisePrototype(input, { generate, sync }) {
       operations: patched.operations, restoredTokenReferences: restored.restoredTokenReferences, originalFilesPreserved: true };
     if (dryRun) return { ...summary, verification: { semantic: true, nativePreview: false } };
     if (interactionSource) copyFileSync(interactionSource.path, `${mergedSource}.interactions.json`, constants.COPYFILE_EXCL);
-    const built = generate({ source: mergedSource, output: join(stage, 'result.rp'), compact: false });
+    const built = generate({ source: mergedSource, output: join(stage, 'result.rp'), compact: false,
+      verifyMode: input.verifyMode, noCache: input.noCache }, { cacheRoot: join(parent, '.zee-cache') });
     if (built.status !== 'completed') return built;
     for (const [path, hash] of originalHashes) if (fileHash(path) !== hash)
       throw Object.assign(new Error(`改稿过程中输入已被修改：${path}`), { code: 'E_CONCURRENT_MODIFICATION' });
@@ -395,6 +453,9 @@ export function revisePrototype(input, { generate, sync }) {
     const baseline = rebase(JSON.parse(readFileSync(built.baseline, 'utf8')));
     baseline.outputRp = output; baseline.sourcePath = outSource;
     baseline.rpSha256 = fileHash(output); baseline.sourceSha256 = fileHash(outSource);
+    const previousBaseline = JSON.parse(readFileSync(`${rpPath}.baseline.json`, 'utf8'));
+    baseline.projectUuid = previousBaseline.projectUuid ?? baseline.projectUuid;
+    baseline.companionFiles = { rp: basename(output), source: basename(outSource), assetsDir: basename(assets) };
     try { writeFileSync(`${output}.baseline.json`, JSON.stringify(baseline, null, 2) + '\n', { flag: 'wx' }); }
     catch (error) { failIfOutputExists(error, `${output}.baseline.json`); }
     published.push(`${output}.baseline.json`);
@@ -413,6 +474,7 @@ export function revisePrototype(input, { generate, sync }) {
     throw error;
   } finally {
     rmSync(stage, { recursive: true, force: true });
+    unlock?.();
   }
 }
 
@@ -560,8 +622,13 @@ export function authoringTools({ generate, sync, listTools }) {
         includeImage: { type: 'boolean' },
         storyboard: { type: 'string', minLength: 1 },
         includeStoryboard: { type: 'boolean' },
-        compact: { type: 'boolean', description: '默认 true：精简 initial 元件快照，避免大回包截断' },
-        steps: { type: 'array', minItems: 0, maxItems: 120, items: compactVerifyStepSchema, description: '验证步骤（0–120）' },
+        compact: { type: 'boolean' },
+        failFast: { type: 'boolean' },
+        fast: { type: 'boolean' },
+        noCache: { type: 'boolean' },
+        stepDetail: { enum: ['failures-only', 'compact', 'full'] },
+        clockScope: { enum: ['page', 'global'] },
+        steps: { type: 'array', minItems: 0, maxItems: 120, items: compactVerifyStepSchema },
       }, additionalProperties: false },
       handler: input => verifyOfficialPreview({ compact: true, ...input }, { runWorkflow, exportHtml: exportPrototype }), readOnly: false },
     { name: 'preview_prototype', description: '在 ego lite 空间验证真实 Axure 预览（优先使用 export_prototype + verify_prototype 做无头 Chrome 验收）。',
@@ -585,18 +652,26 @@ export function authoringTools({ generate, sync, listTools }) {
     { name: 'prototype_recipe', description: '查看 RP/1 创作范例与语法速查表（只读）。',
       inputSchema: { type: 'object', properties: { recipe: { type: 'string', enum: recipes.map(r => r.id) }, includeSource: { type: 'boolean' } }, additionalProperties: false },
       handler: recipeCatalog, readOnly: true },
-    { name: 'diagnose_prototype', description: '只读诊断：静态诊断 rp1/source、解释 target 绑定或审阅图片 spec。',
+    { name: 'diagnose_prototype', description: '静态诊断 RP/1、查询能力、追踪绑定和审阅图片分层。',
       inputSchema: { type: 'object', properties: {
-        mode: { type: 'string', enum: ['diagnose', 'binding', 'image'] },
+        mode: { type: 'string', enum: ['diagnose', 'binding', 'image', 'capabilities'] },
         rp1: { type: 'string' },
         source: sourceSchema,
         target: { type: 'string' },
+        query: { type: 'string' },
+        baseline: { type: 'string' },
+        exemptReviewed: { type: 'boolean' },
         spec: { oneOf: [{ type: 'string' }, { type: 'object' }] },
         limit: { type: 'integer' },
         cwd: { type: 'string' },
         projectDir: { type: 'string' },
       }, additionalProperties: false },
-      handler: ({ mode, rp1, source, target, spec, limit, cwd, projectDir } = {}) => {
+      handler: ({ mode, rp1, source, target, query, spec, limit, cwd, projectDir, baseline, exemptReviewed } = {}) => {
+        if (mode === 'capabilities') {
+          const registry = JSON.parse(readFileSync(join(ROOT, 'scripts', 'surface-capabilities.json'), 'utf8'));
+          return { ok: true, ...registry, properties: registry.properties.filter(entry =>
+            !query || entry.property.toLowerCase().includes(query.toLowerCase())).slice(0, limit ?? registry.properties.length) };
+        }
         const workDir = resolveWorkDir(cwd ?? projectDir);
         const resolveInput = val => {
           if (typeof val !== 'string') return val;
@@ -605,6 +680,26 @@ export function authoringTools({ generate, sync, listTools }) {
         };
         const effectiveMode = mode ?? (target !== undefined ? 'binding' : (rp1 === undefined && source === undefined && spec !== undefined ? 'image' : 'diagnose'));
         if (effectiveMode === 'image') {
+          if (exemptReviewed) {
+            const path = resolveInput(baseline);
+            if (typeof path !== 'string' || !path.endsWith('.rp.baseline.json')) throw new Error('请提供截图反推的 baseline 路径。');
+            const rp = path.slice(0, -'.baseline.json'.length);
+            assertNotProtected(path);
+            assertWritable(path);
+            const unlock = acquireOutputLock(rp);
+            try {
+              const metadata = JSON.parse(readFileSync(path, 'utf8'));
+              if (metadata.originKind !== 'image-trace-spec') throw new Error('只可在截图反推的共同基线中记录已审阅异常。');
+              const evidence = join(rp.replace(/\.rp$/i, '.assets'), 'diff-report.json');
+              assertNotProtected(evidence);
+              const report = JSON.parse(readFileSync(evidence, 'utf8'));
+              const current = (report.host_anomalies ?? []).map(anomaly => anomaly.id).filter(Boolean);
+              const earlier = Array.isArray(metadata.exemptHostAnomalies) ? metadata.exemptHostAnomalies : [];
+              metadata.exemptHostAnomalies = [...new Set([...earlier, ...current])];
+              writeFileSync(path, JSON.stringify(metadata, null, 2) + '\n');
+              return { ok: true, baseline: path, exemptHostAnomalies: metadata.exemptHostAnomalies };
+            } finally { unlock(); }
+          }
           const traceInput = spec ?? source;
           if (traceInput === undefined) throw new Error('diagnose_prototype(mode="image") 需要提供 spec。');
           return reviewImageStructure({ spec: typeof traceInput === 'string' && !traceInput.trimStart().startsWith('{') ? resolveInput(traceInput) : traceInput, limit });
@@ -629,7 +724,7 @@ export function authoringTools({ generate, sync, listTools }) {
           return runWorkflow('binding', rpSource, { target, cwd, projectDir });
         }
         return runWorkflow('diagnose', rpSource, { limit, cwd, projectDir });
-      }, readOnly: true },
+      }, readOnly: false },
     { name: 'runtime_info', description: '读取 MCP 版本、实现指纹与本机 Axure 宿主发现结果。',
       inputSchema: { type: 'object', properties: {}, additionalProperties: false }, handler: () => runtimeInfo(listTools()), readOnly: true },
     { name: 'revise_prototype', description: '最小源码改稿、漂移检查、三方合并并重编 .rp 与共同基线。',
@@ -645,7 +740,15 @@ export function authoringTools({ generate, sync, listTools }) {
         }, additionalProperties: false } },
         async: { type: 'boolean' }, dryRun: { type: 'boolean' }, prefer: { type: 'string', enum: ['fail', 'source', 'native'] }, resolutions: { type: 'object' },
         expectedHash: { type: 'string' }, expectedRpSha256: { type: 'string' },
+        verify: { type: 'boolean' }, verifyMode: { enum: ['fast', 'full'] }, noCache: { type: 'boolean' },
       }, required: ['source', 'rp', 'operations'], additionalProperties: false },
-      handler: input => revisePrototype(input, { generate, sync }), readOnly: false },
+      handler: async input => {
+        const result = revisePrototype(input, { generate, sync });
+        if (!input.verify || result.status !== 'completed') return result;
+        const bv = await verifyOfficialPreview({ rp: result.output, source: result.source, cwd: dirname(result.output),
+          compact: true, proofStoryboard: true, fast: input.verifyMode === 'fast', noCache: input.noCache },
+          { runWorkflow, exportHtml: exportPrototype });
+        return { ...result, status: bv.status, behaviorVerification: bv, ...(bv.proofReport ? { proofReport: bv.proofReport } : {}) };
+      }, readOnly: false },
   ];
 }

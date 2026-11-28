@@ -182,7 +182,9 @@ try {
     assert.equal(report.stage, 'native', JSON.stringify(report));
     assert.match(report.message, /不是可识别的 Axure 容器/);
     assert.equal(dirname(report.artifacts.directory), realpathSync.native(outputRoot));
-    assert.ok(existsSync(join(report.artifacts.directory, 'compile-plan.json')));
+    const failure = JSON.parse(readFileSync(join(report.artifacts.directory, 'last-failure.json'), 'utf8'));
+    assert.equal(failure.stage, 'native');
+    assert.match(failure.message, /不是可识别的 Axure 容器/);
     assert.ok(!existsSync(join(outputRoot, '原型.rp')));
   });
   check('release selection excludes native files, symlinks, and fixture payloads', () => {
@@ -283,19 +285,19 @@ try {
     const explicit = revisePrototype({ source: srcPath, rp: rpPath, output: join(revDir, 'explicit.rp'), operations: ops },
       { sync, generate: makeGenerate() });
     assert.equal(explicit.status, 'completed');
-    assert.ok(existsSync(join(revDir, 'explicit.rp.assets/states/nested/preview.png')));
+    assert.ok(existsSync(join(revDir, 'explicit.assets/states/nested/preview.png')));
     assert.ok(existsSync(explicit.report));
     assert.ok(!readFileSync(explicit.artifacts.ir, 'utf8').includes('.revision-'));
     assert.ok(!readdirSync(revDir).some(name => name.startsWith('.revision-')));
 
-    // Pre-occupy app-v2.rp.assets: auto naming must skip v2 without touching it and publish v3.
-    mkdirSync(join(revDir, 'app-v2.rp.assets'));
-    writeFileSync(join(revDir, 'app-v2.rp.assets/keep.txt'), 'keep');
+    // A pre-existing asset directory reserves the version even if the RP is absent.
+    mkdirSync(join(revDir, 'app-v2.assets'));
+    writeFileSync(join(revDir, 'app-v2.assets/keep.txt'), 'keep');
     const auto = revisePrototype({ source: srcPath, rp: rpPath, output: 'auto', operations: ops },
       { sync, generate: makeGenerate() });
     assert.equal(auto.output, join(revDir, 'app-v3.rp'));
-    assert.ok(existsSync(join(revDir, 'app-v3.rp.assets/revision-report.json')));
-    assert.equal(readFileSync(join(revDir, 'app-v2.rp.assets/keep.txt'), 'utf8'), 'keep');
+    assert.ok(existsSync(join(revDir, 'app-v3.assets/revision-report.json')));
+    assert.equal(readFileSync(join(revDir, 'app-v2.assets/keep.txt'), 'utf8'), 'keep');
 
     // Concurrent .assets creation during build must throw E_OUTPUT_EXISTS and never delete the pre-existing directory.
     const raceOut = join(revDir, 'race.rp');
@@ -303,13 +305,13 @@ try {
       () => revisePrototype({ source: srcPath, rp: rpPath, output: raceOut, operations: ops }, {
         sync,
         generate: makeGenerate(() => {
-          mkdirSync(`${raceOut}.assets`);
-          writeFileSync(`${raceOut}.assets/foreign.txt`, 'foreign');
+          mkdirSync(join(revDir, 'race.assets'));
+          writeFileSync(join(revDir, 'race.assets/foreign.txt'), 'foreign');
         }),
       }),
       err => err.code === 'E_OUTPUT_EXISTS'
     );
-    assert.equal(readFileSync(`${raceOut}.assets/foreign.txt`, 'utf8'), 'foreign');
+    assert.equal(readFileSync(join(revDir, 'race.assets/foreign.txt'), 'utf8'), 'foreign');
     assert.ok(!existsSync(raceOut) && !existsSync(`${raceOut}.baseline.json`));
     assert.ok(!readdirSync(revDir).some(name => name.startsWith('.revision-')));
   });

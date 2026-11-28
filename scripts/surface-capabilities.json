@@ -1,0 +1,20 @@
+{
+  "surfaces": ["full-rp1-native-rp9", "official-html-preview", "studio-canvas", "studio-html"],
+  "properties": [
+    {"property":"fill","sinceVersion":"0.4.4","modes":["native","native","native","native"],"detail":"实色填充。"},
+    {"property":"stroke","sinceVersion":"0.4.4","modes":["native","native","native","native"],"detail":"实色描边。"},
+    {"property":"radius","sinceVersion":"0.4.4","modes":["native","native","native","native"],"detail":"普通几何节点圆角。"},
+    {"property":"opacity","sinceVersion":"0.4.4","modes":["native","native","native","native"],"detail":"普通几何节点不透明度。"},
+    {"property":"fontFamily","sinceVersion":"0.4.5","modes":["native","host-bounded","native","host-bounded"],"detail":"保留字体族名称，浏览器渲染依赖机器已安装的字体。"},
+    {"property":"gradient","sinceVersion":"0.4.4","modes":["rasterized-asset","rasterized-asset","native","native"],"detail":"RP/1 装配将渐变渲染为图层贴图。"},
+    {"property":"aurora","sinceVersion":"0.4.4","modes":["rasterized-asset","rasterized-asset","native","native"],"detail":"原生文件嵌入光效图层。"},
+    {"property":"noise","sinceVersion":"0.4.4","modes":["rasterized-asset","rasterized-asset","native","native"],"detail":"原生文件嵌入噪声图层。"},
+    {"property":"innerGlow","sinceVersion":"0.4.4","modes":["rasterized-asset","rasterized-asset","native","native"],"detail":"原生文件嵌入内发光图层。"},
+    {"property":"backdropBlur","sinceVersion":"0.4.4","modes":["rasterized-asset","rasterized-asset","native","native"],"detail":"Axure 中为静态背景采样的位图，浏览器 CSS 版实时采样。"},
+    {"property":"image.radius","nodeType":"image","field":"radius","sinceVersion":"0.4.4","modes":["rasterized-asset","rasterized-asset","native","native"],"detail":"原生文件在图片像素中烘焙圆角。"},
+    {"property":"input.rotation","nodeType":"input","field":"rotation","sinceVersion":"0.4.4","modes":["host-bounded","host-bounded","native","native"],"detail":"原生预览由页面载入动作旋转输入框，编辑器静态外观受限。"},
+    {"property":"statusBar","sinceVersion":"0.4.4","modes":["studio-shell-meta","studio-shell-meta","studio-shell-meta","studio-shell-meta"],"detail":"控制设备外壳状态区域。"},
+    {"property":"darkIsland","sinceVersion":"0.4.4","modes":["studio-shell-meta","studio-shell-meta","studio-shell-meta","studio-shell-meta"],"detail":"控制设备外壳顶部装饰。"},
+    {"property":"showHomeIndicator","sinceVersion":"0.4.4","modes":["studio-shell-meta","studio-shell-meta","studio-shell-meta","studio-shell-meta"],"detail":"控制设备外壳底部指示条。"}
+  ]
+}

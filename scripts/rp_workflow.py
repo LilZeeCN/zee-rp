@@ -1,6 +1,9 @@
 """Author-facing diagnostics and binding explanations. No source or native writes."""
 import copy
+import json
+from pathlib import Path
 import re
+from rplang.zh_messages import localize_diagnostic
 from rp_language import Frontend, LanguageError, SHORTHAND_NODE_KINDS, _resolve_pointer, DEVICE_CANVAS_PRESETS, validate_source_tree, MAX_FONT_SIZE
 
 
@@ -10,6 +13,55 @@ def _node_identity(node):
     kind = node.get("type") or next((k for k in SHORTHAND_NODE_KINDS if isinstance(node.get(k), str)), None)
     identity = node.get("id", node.get(kind))
     return identity if isinstance(identity, str) else None
+
+
+def source_degradations(spec):
+    registry = json.loads(Path(__file__).with_name("surface-capabilities.json").read_text(encoding="utf-8"))
+    degraded = [entry for entry in registry["properties"] if entry["modes"][0] in ("rasterized-asset", "host-bounded")]
+    found = []
+
+    def visit(value, pointer):
+        if isinstance(value, dict):
+            node_id = _node_identity(value)
+            if node_id:
+                for entry in degraded:
+                    node_type = entry.get("nodeType")
+                    field = entry.get("field", entry["property"])
+                    if value.get(field) and (not node_type or value.get("type") == node_type or node_type in value):
+                        found.append({"nodeId": node_id, "pointer": pointer + "/" + field,
+                                      "property": entry["property"], "mode": entry["modes"][0], "detail": entry["detail"]})
+            for key, child in value.items():
+                visit(child, pointer + "/" + str(key).replace("~", "~0").replace("/", "~1"))
+        elif isinstance(value, list):
+            for index, child in enumerate(value):
+                visit(child, pointer + "/" + str(index))
+
+    visit(spec, "")
+    return found
+
+
+def branch_mutation_hints(value, pointer=""):
+    if isinstance(value, list):
+        return [hint for i, child in enumerate(value) for hint in branch_mutation_hints(child, f"{pointer}/{i}")]
+    if not isinstance(value, dict):
+        return []
+    hints = []
+    cases = value.get("cases")
+    if isinstance(cases, list) and len(cases) >= 2 and all(isinstance(case, dict) and "when" in case and not case.get("else") for case in cases):
+        first = cases[0].get("actions")
+        action = first[0] if isinstance(first, list) and first else None
+        if isinstance(action, dict) and action.get("type") == "set-variable":
+            name = action.get("variable")
+            rhs = action.get("value")
+            # A self-referencing assignment is the counter pattern this hint addresses.
+            same_variable = isinstance(name, str) and (f"${name}" in str(rhs) or f"var.{name}" in str(rhs) or f"'variable': '{name}'" in str(rhs))
+            if same_variable:
+                hints.append({"code": "W_BRANCH_FIRST_CASE_MUTATION", "severity": "warning",
+                              "pointer": pointer + "/cases/0/actions/0",
+                              "message": f"变量 {name} 只在首个分支命中时执行这条赋值。若所有路径都应执行，请把赋值提到 if 之前。"})
+    for key, child in value.items():
+        hints.extend(branch_mutation_hints(child, pointer + "/" + str(key).replace("~", "~0").replace("/", "~1")))
+    return hints
 
 
 def contextualize(diagnostic, spec, spans=None, source_text=None):
@@ -51,6 +103,10 @@ def contextualize(diagnostic, spec, spans=None, source_text=None):
             if 0 < line <= len(lines):
                 out["snippet"] = lines[line - 1]
     code = out.get("code", "")
+    if code == "E_REFERENCE" and out.get("suggestions"):
+        out["candidates"] = out["suggestions"]
+    if code == "W_DEPRECATED_SYNTAX":
+        out["nextAction"] = f"使用推荐写法 {out['canonical']}。"
     fixes = out.get("candidatePatches", [])
     for fix in fixes:
         fix["requiresReview"] = True
@@ -83,7 +139,7 @@ def contextualize(diagnostic, spec, spans=None, source_text=None):
     if "requires a native input" in out.get("message", ""):
         out["nextAction"] = "enable/disable/focus 用于原生表单控件（input/checkbox/radio/combobox/listbox）；普通按钮的提交拦截请使用条件 Case 守卫或显隐状态。"
     out["location"] = " → ".join(str(v) for v in (out.get("pageName"), out.get("widgetName"), out.get("field")) if v)
-    return out
+    return localize_diagnostic(out)
 
 
 def authoring_hints(spec, spans=None, source_text=None):
@@ -150,15 +206,19 @@ def diagnose_spec(spec, max_diagnostics=20, spans=None, source_text=None):
     if frontend and frontend.issues:
         issues = frontend.issues
     unique = {(d.get("code"), d.get("pointer"), d.get("message")): d for d in issues}
-    diagnostics = [contextualize(d, spec, spans, source_text) for d in unique.values()]
+    errors = [contextualize(d, spec, spans, source_text) for d in unique.values()]
+    warnings = [contextualize(d, spec, spans, source_text)
+                for d in [*getattr(spans, "warnings", []), *branch_mutation_hints(spec)]]
+    diagnostics = errors + warnings
     return {
-        "ok": not diagnostics,
+        "ok": not errors,
         "stage": "semantic-check",
         "diagnostics": diagnostics[:max_diagnostics],
         "total": len(diagnostics), "truncated": len(diagnostics) > max_diagnostics,
-        "dependentChecksComplete": not diagnostics,
-        "semanticHash": ir["semanticHash"] if not diagnostics and ir else None,
-        "verification": {"semantic": not diagnostics, "nativePreview": False},
+        "dependentChecksComplete": not errors,
+        "semanticHash": ir["semanticHash"] if not errors and ir else None,
+        "verification": {"semantic": not errors, "nativePreview": False},
+        "audit": {"degradations": source_degradations(spec)},
         "hints": authoring_hints(spec, spans, source_text)[:max_diagnostics],
     }
 

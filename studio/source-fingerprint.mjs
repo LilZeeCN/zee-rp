@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -20,8 +20,21 @@ export function listImplementationFiles(directory) {
 
 export function studioSourceFingerprint() {
   const hash = createHash('sha256');
+  const scratch = Buffer.allocUnsafe(64 * 1024);
   for (const file of listImplementationFiles('studio').sort()) {
-    hash.update(file).update('\0').update(readFileSync(join(root, file))).update('\0');
+    hash.update(file).update('\0');
+    updateFileHash(hash, join(root, file), scratch);
+    hash.update('\0');
   }
   return hash.digest('hex');
+}
+
+export function updateFileHash(hash, path, scratch) {
+  const fd = openSync(path, 'r');
+  try {
+    for (let bytes; (bytes = readSync(fd, scratch, 0, scratch.length, null)) > 0;) {
+      hash.update(scratch.subarray(0, bytes));
+    }
+  } finally { closeSync(fd); }
+  return hash;
 }

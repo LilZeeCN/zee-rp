@@ -13,7 +13,7 @@
 //   node proto.mjs selftest
 import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +23,8 @@ import { createNativeRepeater } from './native-repeater.mjs';
 import { writeNativeScene } from './native-scene.mjs';
 import { materializeNativeControl, applyNativeWidgetStyles } from './native-forms.mjs';
 import { createBlankProject } from './create-blank-project.mjs';
+import { readBlankTemplate } from './blank-template.mjs';
+import { cacheDirectory, touchCache } from './build-cache.mjs';
 import { createPanel } from './create-panel-clone.mjs';
 import { fillPanelState } from './fill-panel-state.mjs';
 import { synthesizeNativeFormWidget } from './native-widget-synthesizer.mjs';
@@ -383,7 +385,8 @@ export function reportPrototypeProgress(phase, completed, total) {
 export function buildInteractiveRp(
   planPath,
   outputRpPath,
-  { cacheDir = DEFAULT_CACHE_DIR, backend, noInteractions = false, verbose = false, skipBaseline = false, sourcePath = null } = {}
+  { cacheDir = DEFAULT_CACHE_DIR, backend, noInteractions = false, verbose = false, skipBaseline = false, sourcePath = null,
+    buildCacheRoot = null, pageCompileKeys = {} } = {}
 ) {
   const buildT0 = Date.now();
   const absOut = resolve(outputRpPath);
@@ -412,6 +415,16 @@ export function buildInteractiveRp(
   const interactionReports = [];
   const deferredInteractions = [];
   const builtPageInputs = [];
+  const reusedNativePages = [];
+  const nativeCache = backend === 'native' && buildCacheRoot && Object.keys(pageCompileKeys).length
+    ? cacheDirectory(buildCacheRoot, 'native') : null;
+  let cacheSalt;
+  if (nativeCache) {
+    const template = readBlankTemplate(9);
+    const digest = createHash('sha256').update(template.path ? template.buffer : template.source);
+    for (const file of readdirSync(HERE).filter(path => path.endsWith('.mjs')).sort()) digest.update(readFileSync(join(HERE, file)));
+    cacheSalt = digest.digest('hex');
+  }
 
   const materializeInputs = (buf, inputs, pageLabel) => {
     if (!inputs.length) return buf;
@@ -469,7 +482,42 @@ export function buildInteractiveRp(
     const targetPageName = pPlan.pageName || `Page ${pIdx + 1}`;
     const pageSlug = pPlan.slug || `p${pIdx + 1}`;
     const pageStatic = Boolean(staticMode || pPlan.static || pPlan.noInteractions);
-    let pageBuf = assemble(pPlan,targetPageName,pageSlug);
+    const pageKey = pageCompileKeys[pageSlug];
+    const cacheEntry = nativeCache && pageKey
+      ? join(nativeCache, createHash('sha256').update(cacheSalt + pageKey).digest('hex')) : null;
+    let pageBuf;
+    if (cacheEntry) {
+      try {
+        const buffer = readFileSync(join(cacheEntry, 'page.rp'));
+        const saved = JSON.parse(readFileSync(join(cacheEntry, 'page.json'), 'utf8'));
+        if (createHash('sha256').update(buffer).digest('hex') === saved.sha256) {
+          pageBuf = buffer;
+          stageReport.push(...saved.stages.map(stage => ({ ...stage, cached: true, elapsedMs: 0 })));
+          panelReports.push(...saved.panels);
+          inputReports.push(...saved.inputs);
+          reusedNativePages.push(pageSlug);
+          touchCache(cacheEntry);
+        }
+      } catch { /* Missing, incomplete or evicted page bundle. */ }
+    }
+    if (!pageBuf) {
+      const starts = [stageReport.length, panelReports.length, inputReports.length];
+      pageBuf = assemble(pPlan, targetPageName, pageSlug);
+      if (cacheEntry && !existsSync(cacheEntry)) {
+        let staging;
+        try {
+          mkdirSync(nativeCache, { recursive: true });
+          staging = mkdtempSync(join(nativeCache, '.stage-'));
+          writeFileSync(join(staging, 'page.rp'), pageBuf);
+          writeFileSync(join(staging, 'page.json'), JSON.stringify({
+            sha256: createHash('sha256').update(pageBuf).digest('hex'),
+            stages: stageReport.slice(starts[0]), panels: panelReports.slice(starts[1]), inputs: inputReports.slice(starts[2]),
+          }));
+          renameSync(staging, cacheEntry);
+        } catch { /* A cache miss cannot change the assembly result. */ }
+        finally { if (staging) rmSync(staging, { recursive: true, force: true }); }
+      }
+    }
 
     // Bind all events after the final page/global-variable identities exist.
     if (!pageStatic) {
@@ -770,6 +818,7 @@ export function buildInteractiveRp(
     version: finalSummary.version,
     static: staticMode,
     elapsedMs: totalElapsedMs,
+    reusedNativePages,
     counts: {
       ...finalSummary.counts,
       containedWidgets: (finalSummary.containedWidgets ?? []).length,
@@ -795,8 +844,8 @@ export function buildInteractiveRp(
   };
 }
 
-export function compilePrototype(specPath, outDir, { strictAudit = false, autoHeal = false, theme, title, nativeProgram } = {}) {
-  return runPy(buildCompileArgs({ spec: specPath, nativeProgram, 'strict-audit': strictAudit, 'auto-heal': autoHeal, theme, title }, outDir), { allowAuditFailure: true });
+export function compilePrototype(specPath, outDir, { strictAudit = false, autoHeal = false, theme, title, nativeProgram, skipPreviews = false, pageCacheDir } = {}) {
+  return runPy(buildCompileArgs({ spec: specPath, nativeProgram, 'strict-audit': strictAudit, 'auto-heal': autoHeal, 'skip-previews': skipPreviews, pageCacheDir, theme, title }, outDir), { allowAuditFailure: true });
 }
 
 function buildCompileArgs(flags, outDir) {
@@ -808,6 +857,8 @@ function buildCompileArgs(flags, outDir) {
   if (flags.title) pyArgs.push('--title', String(flags.title));
   if (flags['no-interactions']) pyArgs.push('--no-interactions');
   if (flags['strict-audit']) pyArgs.push('--strict-audit');
+  if (flags['skip-previews']) pyArgs.push('--skip-previews');
+  if (flags.pageCacheDir) pyArgs.push('--page-cache-dir', resolve(flags.pageCacheDir));
   if (flags['auto-heal']) pyArgs.push('--auto-heal', typeof flags['auto-heal'] === 'string' ? flags['auto-heal'] : 'safe');
   return pyArgs;
 }

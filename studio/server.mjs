@@ -1,12 +1,12 @@
 import { StudioSelections } from './selection.mjs';
 import { studioSourceFingerprint } from './source-fingerprint.mjs';
 import { createServer } from 'node:http';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
+import { rmSync, existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, extname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
-import { canonicalJson, computeContentHash, sha256 } from './document.mjs';
+import { canonicalJson, computeContentHash, importCompatibility, sha256 } from './document.mjs';
 import { resolveDocumentScene, RENDERER_VERSION } from './scene-resolver.mjs';
 import { StudioPersistence } from './persistence.mjs';
 import {
@@ -200,6 +200,7 @@ const ROUTE_HANDLERS = {
   'POST /api/project/bundle': 'routePostProjectBundle',
   'POST /api/project/merge': 'routePostProjectMerge',
   'POST /api/project/open': 'routePostProjectOpen',
+  'POST /api/shutdown': 'routePostShutdown',
   'GET /api/component-contracts': 'routeComponentContracts',
   'POST /api/component-contracts': 'routeComponentContracts',
   'GET /api/scenarios': 'routeGetScenarios',
@@ -281,6 +282,7 @@ export class StudioServer {
       durableRevision: this.store.durableRevision,
       renderedRevision: this.renderedRevision,
       contentHash: this.store.doc.contentHash,
+      importCompatibility: importCompatibility(this.store.doc),
       rendererVersion: RENDERER_VERSION,
       sourceFingerprint: loadedSourceFingerprint,
       // T-J-2：recoveryReport.durableRevision 是恢复/启动时的持久化基线，不随编辑推进；
@@ -1731,6 +1733,17 @@ export class StudioServer {
     };
   }
 
+  async routePostShutdown(req, res) {
+    const caller = req.socket.remoteAddress;
+    const body = await readJsonBody(req);
+    if (!['127.0.0.1', '::ffff:127.0.0.1', '::1'].includes(caller) || body.instanceId !== this.instanceId) {
+      sendJson(res, 403, { ok: false, code: 'E_STUDIO_INSTANCE', message: '关闭请求必须来自本机并匹配实例身份。' });
+      return;
+    }
+    res.once('finish', () => this.close().catch(() => {}));
+    sendJson(res, 200, { ok: true, instanceId: this.instanceId, status: 'closing' });
+  }
+
   async stop() {
     return this.close();
   }
@@ -1738,6 +1751,11 @@ export class StudioServer {
   async close() {
     try { this.persistence?.flushPendingSnapshot?.(); } catch {}
     unregisterInstanceRecord(this.instanceId);
+    const instanceFile = join(this.projectDir, '.studio-instance.json');
+    try {
+      const owner = JSON.parse(readFileSync(instanceFile, 'utf8'));
+      if (owner.instanceId === this.instanceId) rmSync(instanceFile);
+    } catch { /* The record might already have been removed. */ }
     for (const w of this.renderWaiters) {
       clearTimeout(w.timer);
       try { w.reject(Object.assign(new Error('Studio 服务已关闭'), { code: 'E_SERVER_CLOSED' })); } catch {}
@@ -1757,11 +1775,12 @@ export class StudioServer {
       this.managedPage = null;
     }
     if (this.server) {
-      if (typeof this.server.closeAllConnections === 'function') {
-        this.server.closeAllConnections();
-      }
-      await new Promise(r => this.server.close(r));
+      const server = this.server;
       this.server = null;
+      await new Promise(resolve => {
+        server.close(resolve);
+        server.closeAllConnections?.();
+      });
     }
   }
 }

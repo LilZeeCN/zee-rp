@@ -12,7 +12,16 @@ export function validateInput(schema, value, at = 'arguments', root = schema) {
   if (schema.enum && !schema.enum.some(item => JSON.stringify(item) === JSON.stringify(value))) throw new Error(`${at} 不在允许值内`);
   const matches = branch => { try { validateInput(branch, value, at, root); return true; } catch { return false; } };
   if (schema.not && matches(schema.not)) throw new Error(`${at} 包含互斥参数`);
-  if (schema.oneOf && schema.oneOf.filter(matches).length !== 1) throw new Error(`${at} 必须满足且仅满足一种参数形式，不能混用`);
+  if (schema.oneOf) {
+    const forms = schema.oneOf.map((branch, index) => {
+      const title = branch.title ?? (branch.required?.length ? branch.required.join('、') : branch.type) ?? String(index + 1);
+      try { validateInput(branch, value, at, root); return { title }; }
+      catch (error) { return { title, reason: error.message }; }
+    });
+    const accepted = forms.filter(form => !form.reason);
+    if (accepted.length > 1) throw new Error(`${at} 同时满足多个互斥的参数形式（${accepted.map(form => form.title).join('、')}），请只保留一种`);
+    if (!accepted.length) throw new Error(`${at} 未满足任一参数形式。请按以下原因修正后再试：${forms.slice(0, 8).map(form => `「${form.title}」${form.reason}`).join('；')}`);
+  }
   if (schema.anyOf && !schema.anyOf.some(matches)) throw new Error(`${at} 不符合允许的参数形式`);
   for (const branch of schema.allOf || []) validateInput(branch, value, at, root);
   if (value && typeof value === 'object' && !Array.isArray(value)) {

@@ -12,6 +12,7 @@ from .expander import expand_chart_state, expand_kpi_card, expand_modal_new_dish
 from .layout import compose_device_shell, emit_tree_to_axvg, is_fill, is_hug, layout_node, measure_node, resolve_size
 from .audit import audit_prototype, ensure_unique_names, render_flat_children_png, render_structure_overlay_png, summarize_scene_audits, text_ink_geometry
 from .builder import compile_prototype_bundle
+from . import page_cache
 
 # -------------------- 6. DECLARATIVE SPEC COMPILER & MOBILE COMPONENTS --------------------
 def expand_mobile_navbar(node, prefix="p1"):
@@ -806,7 +807,7 @@ KNOWN_NODE_TYPES = {
 KNOWN_NODE_PROPS = {
     "type", "name", "prefix", "x", "y", "w", "h", "flex", "layout", "padding", "gap", "rotation",
     "columnGap", "rowGap", "align", "justify", "equalHeight", "fill", "stroke", "color",
-    "radius", "isGroup", "bgName", "isModal", "children", "text", "content", "fontSize",
+    "radius", "isGroup", "bgName", "isModal", "children", "text", "content", "fontSize", "fontFamily",
     "size", "fontWeight", "weight", "lineHeight", "lineGap", "maxLines", "variant",
     "placeholder", "value", "native", "maxLength", "textPaddingX", "caption", "src", "image", "file",
     "states", "root", "tree", "title", "titleAlign", "subtitle", "leftIcon", "leftText",
@@ -937,7 +938,7 @@ def _expand_declarative_tree_core(node, prefix="p1"):
             "borderSides", "borderTop", "borderBottom", "borderLeft", "borderRight",
             "backdropBlur", "innerGlow", "noise", "gradient", "shadow", "aurora",
             "x", "y", "right", "bottom", "anchor", "colSpan", "rowSpan",
-            "spans", "italic", "underline", "strikethrough", "letterSpacing",
+            "spans", "italic", "underline", "strikethrough", "letterSpacing", "fontFamily",
             "after", "afterGap", "alignX", "z",
         ):
             if k in node and node.get(k) is not None:
@@ -994,7 +995,7 @@ def _expand_declarative_tree_core(node, prefix="p1"):
                 "stroke": node.get("stroke", "$line-strong"),
                 "radius": snap_token(node.get("radius", 6), RADIUS_TOKENS),
             }
-            for key in ("fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX", "rotation", "x", "y", "right", "bottom", "anchor", "maxLength"):
+            for key in ("fontFamily", "fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX", "rotation", "x", "y", "right", "bottom", "anchor", "maxLength"):
                 if key in node:
                     out_ni[key] = node[key]
             if "flex" in node:
@@ -1939,15 +1940,16 @@ def _heal_property_changes(before, after, pointer=""):
     return changes
 
 
-def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, no_interactions=False, strict_audit=False, source_path=None, ink_sink=None, auto_heal=False):
+def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, no_interactions=False, strict_audit=False, source_path=None, ink_sink=None, auto_heal=False, skip_previews=False, page_cache_dir=None):
     """Treat automatic changes as a transaction, checked against the original gates."""
     import copy
     import tempfile
     options = dict(theme_override=theme_override, base_dir=base_dir,
-                   no_interactions=no_interactions, strict_audit=strict_audit, source_path=source_path)
+                   no_interactions=no_interactions, strict_audit=strict_audit, source_path=source_path,
+                   skip_previews=skip_previews)
     enabled = bool(auto_heal and str(auto_heal).lower() not in ("false", "off", "0", "none"))
     if not enabled:
-        return _compile_spec_bundle(spec_data, out_dir, ink_sink=ink_sink, **options)
+        return _compile_spec_bundle(spec_data, out_dir, ink_sink=ink_sink, page_cache_dir=page_cache_dir, **options)
     from rp_language import validate_source_tree
     validate_source_tree(spec_data)
     original = copy.deepcopy(spec_data)
@@ -2009,7 +2011,7 @@ def compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, 
         return result
 
 
-def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, no_interactions=False, strict_audit=False, source_path=None, ink_sink=None, auto_heal=False):
+def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None, no_interactions=False, strict_audit=False, source_path=None, ink_sink=None, auto_heal=False, skip_previews=False, page_cache_dir=None):
     STATE_PREVIEWS.clear()  # 每次编译先清空，避免跨次残留
     """通用声明式多页/多状态原型编译器：支持 --spec <spec.json>、数据绑定、静态模式与两级审计门禁。"""
     import copy
@@ -2048,6 +2050,15 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
     page_plans = []
     page_audits = []
     all_previews = {}
+    cache_keys, reused_pages = {}, []
+    cache_context = None
+    if page_cache_dir and not master_defs and ink_sink is None and not heal_enabled:
+        cache_context = {
+            "compiler": page_cache.fingerprint(), "theme": theme_dict, "themeName": theme_name,
+            "domain": domain, "static": is_static, "strict": is_strict, "previews": not skip_previews,
+            "adaptiveViews": spec_data.get("adaptiveViews"), "pages": known_page_names,
+            "variables": (language_ir or {}).get("variables"),
+        }
 
     for idx, p_spec in enumerate(raw_pages):
         p_name = p_spec.get("name", f"Page {idx+1}")
@@ -2057,6 +2068,23 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
         page_static = bool(is_static or p_spec.get("static") or p_spec.get("noInteractions"))
         canvas = p_spec.get("canvas") or ({"w": 375, "h": 812} if dev_shell else {"w": 1440, "h": 900})
         cw, ch = int(canvas["w"]), int(canvas["h"])
+        source_symbols = [s for s in language_ir["symbols"] if s["pageId"] == p_slug] if language_ir else []
+        cache_key = None
+        state_previews_start = len(STATE_PREVIEWS)
+        if cache_context is not None and not page_cache.has_external_assets(p_spec.get("root")):
+            cache_key = page_cache.page_key(cache_context, p_spec, p_slug, p_name)
+            cache_keys[p_slug] = cache_key
+            cached = page_cache.restore(page_cache_dir, cache_key, out_dir)
+            if cached:
+                p_plan, page_audit, state_previews = cached
+                p_plan["sourceSymbols"] = source_symbols
+                page_plans.append(p_plan)
+                page_audits.append(page_audit)
+                STATE_PREVIEWS.extend(state_previews)
+                if p_plan["previews"]["preview2x"]:
+                    all_previews[p_slug] = p_plan["previews"]
+                reused_pages.append(p_slug)
+                continue
 
         p_schema_warnings = []
         if "root" not in p_spec or not isinstance(p_spec["root"], dict):
@@ -2199,21 +2227,25 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
             spec_path = os.path.join(states_dir, f"{tag}.spec.json")
             _stable_tag = re.sub(r"-[0-9a-f]{8,}", "", str(tag))  # 去掉原生 hash 后缀，便于稳定引用
             png_path = os.path.join(states_dir, f"{_stable_tag}@2x.png")
-            STATE_PREVIEWS.append({
-                "page": str(tag).split("__")[0],
-                "scene": str(tag),
-                "stable": _stable_tag,
-                "png": png_path,
-                "panel": context.get("panel"),
-                "state": context.get("state"),
-                "repeater": context.get("repeater"),
-                "modal": context.get("modal"),
-                "viewport": {"w": int(stage_canvas["w"]), "h": int(stage_canvas["h"])},
-                "content": {"w": int(stage_tree.get("_mw", sw)), "h": int(stage_tree.get("_mh", sh))},
-            })
+            if not skip_previews:
+                STATE_PREVIEWS.append({
+                    "page": str(tag).split("__")[0],
+                    "scene": str(tag),
+                    "stable": _stable_tag,
+                    "png": png_path,
+                    "panel": context.get("panel"),
+                    "state": context.get("state"),
+                    "repeater": context.get("repeater"),
+                    "modal": context.get("modal"),
+                    "viewport": {"w": int(stage_canvas["w"]), "h": int(stage_canvas["h"])},
+                    "content": {"w": int(stage_tree.get("_mw", sw)), "h": int(stage_tree.get("_mh", sh))},
+                })
             with open(axvg_path, "w", encoding="utf-8") as f: json.dump(emitted["axvg"], f, ensure_ascii=False, indent=2)
             with open(spec_path, "w", encoding="utf-8") as f: json.dump(emitted["spec"], f, ensure_ascii=False, indent=2)
-            render_flat_children_png(sw, sh, resolve_color("$surface", theme_dict), preview["flatChildren"], include_modal=False, scale=2).save(png_path)
+            if skip_previews:
+                png_path = None
+            else:
+                render_flat_children_png(sw, sh, resolve_color("$surface", theme_dict), preview["flatChildren"], include_modal=False, scale=2).save(png_path)
             scene["audit"] = audit_prototype(stage_tree, preview, {
                 "pageName": p_name, "language": "rp/1" if language_ir else None,
                 "domain": p_domain, "theme": theme_name, "dynamicPanels": panels, "auditScope": "container-local",
@@ -2264,25 +2296,18 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
         out_w = em_main["device"]["w"] if em_main.get("device") else cw
         out_h = em_main["device"]["h"] if em_main.get("device") else ch
         bg_hex = "#FFFFFF" if em_main.get("device") else resolve_color(root_main.get("fill", "$bg"), theme_dict)
-        img_2x = render_flat_children_png(out_w, out_h, bg_hex, preview_flat, include_modal=False, scale=2)
-        p_prev_path = os.path.join(out_dir, f"{p_slug}@2x.png")
-        img_2x.save(p_prev_path)
-        img_1x = render_flat_children_png(out_w, out_h, bg_hex, preview_flat, include_modal=False, scale=1)
-        dx = em_main["device"]["screenX"] if em_main.get("device") else 0
-        dy = em_main["device"]["screenY"] if em_main.get("device") else 0
-        img_struct = render_structure_overlay_png(img_1x, root_prev, em_main["dynamicPanels"], dx=dx, dy=dy)
-        p_struct_path = os.path.join(out_dir, f"{p_slug}-structure.png")
-        img_struct.save(p_struct_path)
-
-        if idx == 0:
-            p01 = os.path.join(out_dir, "01-preview.png")
-            p02 = os.path.join(out_dir, "02-structure.png")
-            img_2x.save(p01)
-            img_struct.save(p02)
-            all_previews["preview"] = p01
-            all_previews["structure"] = p02
-
-        all_previews[p_slug] = {"preview2x": p_prev_path, "structure": p_struct_path}
+        p_prev_path = p_struct_path = None
+        if not skip_previews:
+            img_2x = render_flat_children_png(out_w, out_h, bg_hex, preview_flat, include_modal=False, scale=2)
+            p_prev_path = os.path.join(out_dir, f"{p_slug}@2x.png")
+            img_2x.save(p_prev_path)
+            img_1x = render_flat_children_png(out_w, out_h, bg_hex, preview_flat, include_modal=False, scale=1)
+            dx = em_main["device"]["screenX"] if em_main.get("device") else 0
+            dy = em_main["device"]["screenY"] if em_main.get("device") else 0
+            img_struct = render_structure_overlay_png(img_1x, root_prev, em_main["dynamicPanels"], dx=dx, dy=dy)
+            p_struct_path = os.path.join(out_dir, f"{p_slug}-structure.png")
+            img_struct.save(p_struct_path)
+            all_previews[p_slug] = {"preview2x": p_prev_path, "structure": p_struct_path}
         p_interactions = [] if page_static else [ix for ix in p_spec.get("interactions", []) if ix["trigger"] not in master_node_names]
 
         p_plan = {
@@ -2306,7 +2331,7 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
             "adaptiveOverrides": adaptive_overrides,
             "knownPageNames": known_page_names,
             "schemaWarnings": p_schema_warnings,
-            "sourceSymbols": [s for s in language_ir["symbols"] if s["pageId"] == p_slug] if language_ir else [],
+            "sourceSymbols": source_symbols,
             "previews": {"preview2x": p_prev_path, "structure": p_struct_path},
         }
         page_scene["audit"] = audit_prototype(root_prev, em_prev, p_plan, strict_audit=is_strict)
@@ -2329,6 +2354,21 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
             "static": page_static,
             **p_audit,
         })
+        if cache_key:
+            files = {os.path.relpath(scene[key], out_dir) for scene in page_scenes
+                     for key in ("axvgPath", "specPath", "pngPath") if scene.get(key)}
+            if p_struct_path:
+                files.add(os.path.relpath(p_struct_path, out_dir))
+            page_cache.store(page_cache_dir, cache_key, out_dir, files, [
+                {**p_plan, "sourceSymbols": []}, page_audits[-1], STATE_PREVIEWS[state_previews_start:],
+            ])
+
+    if page_plans and page_plans[0]["previews"]["preview2x"]:
+        import shutil
+        for key, first, name in (("preview", "preview2x", "01-preview.png"),
+                                 ("structure", "structure", "02-structure.png")):
+            all_previews[key] = os.path.join(out_dir, name)
+            shutil.copyfile(page_plans[0]["previews"][first], all_previews[key])
 
     # Stitch multi-page contact sheet and panel/repeater states sheet for single-shot visual inspection
     page_sheet_items = [
@@ -2376,7 +2416,12 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
     overall_ok = all(pa["ok"] for pa in page_audits)
     overall_structural_ok = all(pa["structural_ok"] for pa in page_audits)
     overall_aesthetic_ok = all(pa["aesthetic_ok"] for pa in page_audits)
-    all_warnings = []
+    from rp_workflow import branch_mutation_hints, source_degradations
+    source_warnings = branch_mutation_hints(raw_source_spec)
+    if isinstance(source_path, str) and source_path.endswith(".rp1"):
+        from rp_language_cli import _LAST_SPAN_MAP
+        source_warnings = [*getattr(_LAST_SPAN_MAP, "warnings", []), *source_warnings]
+    all_warnings = [f"[{hint['code']}] {hint['message']}" for hint in source_warnings]
     # 光效样式（gradient/shadow/aurora/noise）会被"光效层"渲染成嵌入位图，再以 ImageBox 写入原生，
     # 因此不是"预览专属"；只有 backdropBlur 采样的是静态背景，叠在动态内容上会失真，需要提示。
     _backdrop_hits = {}
@@ -2496,6 +2541,8 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
         "strict_audit": is_strict,
         "static": is_static,
         "warnings": all_warnings,
+        "sourceDiagnostics": source_warnings,
+        "degradations": source_degradations(raw_source_spec),
         "statePreviews": list(STATE_PREVIEWS),
         "pageCount": len(page_audits),
         "metrics": agg_metrics,
@@ -2506,6 +2553,12 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
         "pages": page_audits,
     }
     all_scenes = [scene for page in page_plans for scene in page.get("scenes", [])]
+    layout_reports = [pa["applicability"] for pa in page_audits if pa.get("applicability")]
+    if layout_reports:
+        combined_audit["applicability"] = {
+            "detectedLayouts": sorted({mode for report in layout_reports for mode in report["detectedLayouts"]}),
+            "rulesByLayout": layout_reports[0]["rulesByLayout"],
+        }
     scene_summary = summarize_scene_audits(all_scenes, strict_audit=is_strict)
     for key in ("scenes", "sceneCoverage", "metricScope"):
         combined_audit[key] = scene_summary[key]
@@ -2550,6 +2603,8 @@ def _compile_spec_bundle(spec_data, out_dir, theme_override=None, base_dir=None,
         "auditPath": audit_path,
         "previews": all_previews,
         "audit": combined_audit,
+        "cacheStats": {"pageCompileKeys": cache_keys, "reusedPages": reused_pages,
+                       "compiledPages": [page["slug"] for page in page_plans if page["slug"] not in reused_pages]},
     }
 
 

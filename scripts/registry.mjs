@@ -281,7 +281,7 @@ const COMMANDS = [
     "command": "diff-rp",
     "script": "diff-rp.mjs",
     "summary": "语义对比两份 .rp 文件的页面、全局变量、元件与交互树差异（按原生 GUID 对齐）",
-    "usage": "node diff-rp.mjs <before.rp> <after.rp> [--json]",
+    "usage": "node diff-rp.mjs <before.rp> <after.rp> [--json] [--limit N] [--offset N] [--page NAME] [--summary]",
     "output": "none",
     "evidence": "structure"
   },
@@ -339,6 +339,10 @@ const COMMANDS = [
 const LIB_SCRIPTS = [
   { "script": "prototype-worker.mjs", "summary": "异步原型生成子进程；返回结构化生成结果并保持 MCP 可响应", "evidence": "internal" },
   { "script": "image-structure.mjs", "summary": "图片重建分组、重复模式、共享样式和编辑边界的只读审阅", "evidence": "structure" },
+  { "script": "proof-report.mjs", "summary": "生成原型行为证明与证据索引", "evidence": "preview" },
+  { "script": "file-lock.mjs", "summary": "保护原型发布路径的排他写锁", "evidence": "structure" },
+  { "script": "build-cache.mjs", "summary": "管理内容寻址构建和验证缓存", "evidence": "structure" },
+  { "script": "diagnostics-i18n.mjs", "summary": "统一工具与编译诊断语言", "evidence": "structure" },
   { "script": "preview-runtime.mjs", "summary": "真实 Axure 浏览器预览操作、运行变量观测及源码映射诊断", "evidence": "preview" },
   { "script": "interaction-lint.mjs", "summary": "原生交互公式、条件分组和全局变量用法静态检查", "evidence": "structure" },
   { "script": "official-interactions.mjs", "summary": "静态解码 Axure 官方 HTML 页数据并定位 STO 编译错误", "evidence": "preview" },
@@ -531,13 +535,20 @@ const LIB_SCRIPTS = [
           "type": "object",
           "properties": {
             "before": { "type": "string", "minLength": 1 },
-            "after": { "type": "string", "minLength": 1 }
+            "after": { "type": "string", "minLength": 1 },
+            "limit": { "type": "integer", "minimum": 1 },
+            "offset": { "type": "integer", "minimum": 0 },
+            "page": { "type": "string" },
+            "summaryOnly": { "type": "boolean" },
+            "maxBytes": { "type": "integer", "minimum": 1024 }
           },
           "required": ["before", "after"],
           "additionalProperties": false
         },
         "positionals": ["before", "after"],
-        "constants": ["--json"]
+        "constants": ["--json"],
+        "values": { "limit": "--limit", "offset": "--offset", "page": "--page" },
+        "flags": { "summaryOnly": "--summary" }
       },
       "repair-rp": {
         "inputSchema": {

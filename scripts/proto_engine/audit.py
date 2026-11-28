@@ -427,11 +427,49 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
         align_errors.append(ex)
     alignment_error_px = round(max(align_errors) if align_errors else 0.0, 3)
 
+    flow_layouts = {"row", "column", "grid"}
+    detected_layouts = set()
+    layout_by_name = {}
+    ancestry_by_name = {}
+
+    def collect_context(node, inherited="column", ancestors=()):
+        name = node.get("name")
+        if name:
+            ancestry_by_name[name] = ancestors
+        layout = node.get("layout") or inherited
+        if node.get("children"):
+            detected_layouts.add(layout)
+        if name:
+            layout_by_name[name] = inherited
+        below = (*ancestors, name) if name else ancestors
+        for child in node.get("children", []):
+            collect_context(child, layout, below)
+        for state in node.get("states", []):
+            tree = state.get("tree")
+            if isinstance(tree, dict):
+                collect_context(tree, layout, below)
+
+    collect_context(root_node)
+    if not detected_layouts:
+        detected_layouts.add(root_node.get("layout") or "column")
+    applicability = {
+        "detectedLayouts": sorted(detected_layouts),
+        "rulesByLayout": {
+            "flow(column/row/grid)": ["no_text_clip", "no_text_overlap", "no_container_overflow", "no_box_overlap", "spacing_ok", "font_ok", "whitespace_ok"],
+            "free(stack)": ["no_text_clip", "no_text_overlap", "declared_position_ok"],
+        },
+    }
+
     # 2. 间距与圆角令牌合规率
     spacing_checks = []
     spacing_violations = []
-    def check_tree_tokens(n):
+    def check_tree_tokens(n, inherited="column"):
         nm = n.get("name") or n.get("type") or "node"
+        layout = n.get("layout") or inherited
+        if layout not in flow_layouts:
+            for ch in n.get("children", []):
+                check_tree_tokens(ch, layout)
+            return
         if "gap" in n and n["gap"] is not None and "_paragraphGap" not in n:
             ok = int(n["gap"]) in SPACING_TOKENS
             spacing_checks.append(ok)
@@ -449,7 +487,7 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
             if not ok:
                 spacing_violations.append(f"{nm}.radius={n['radius']}")
         for ch in n.get("children", []):
-            check_tree_tokens(ch)
+            check_tree_tokens(ch, layout)
     check_tree_tokens(root_node)
     spacing_passed = sum(1 for ok in spacing_checks if ok)
     spacing_total = len(spacing_checks)
@@ -459,7 +497,8 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
     font_checks = []
     font_violations = []
     for c in flat:
-        if c.get("text"):
+        name = re.sub(r"-l\d+$", "", str(c.get("name", "")))
+        if c.get("text") and layout_by_name.get(name, root_node.get("layout") or "column") in flow_layouts:
             sz = int(c.get("size", 14))
             wt = int(c.get("weight", 400))
             ok = sz in FONT_SIZE_TOKENS and wt in FONT_WEIGHT_TOKENS
@@ -740,6 +779,48 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
 
     walk_spatial_bounds(root_node)
 
+    overflow_failures = [item for item in failures if item.get("gate") == "no_container_overflow"]
+    if overflow_failures:
+        independent = []
+        for failure in failures:
+            if failure.get("gate") in {"no_text_overlap", "no_box_overlap"}:
+                names = [re.sub(r"-l\d+$", "", failure.get(key, "")) for key in ("widget", "widget2")]
+                source = next((root for root in overflow_failures for child, other in (names, names[::-1])
+                               if (child == root["widget"] or root["widget"] in ancestry_by_name.get(child, ()))
+                               and other != root["container"] and root["container"] not in ancestry_by_name.get(other, ())), None)
+                if source:
+                    downstream = source.setdefault("causedDownstream", [])
+                    entry = next((item for item in downstream if item["gate"] == failure["gate"]), None)
+                    if entry is None:
+                        entry = {"gate": failure["gate"], "count": 0, "targets": []}
+                        downstream.append(entry)
+                    entry["count"] += 1
+                    entry["targets"].append(names)
+                    continue
+            independent.append(failure)
+        failures = independent
+
+    collisions = {}
+    for failure in failures:
+        if failure.get("gate") != "no_box_overlap":
+            continue
+        for widget, other in ((failure["widget"], failure["widget2"]), (failure["widget2"], failure["widget"])):
+            siblings = ancestry_by_name.get(other, ())
+            if siblings:
+                collisions.setdefault((widget, siblings), []).append((failure, other))
+    dominated = set()
+    for (widget, _), related in sorted(collisions.items(), key=lambda pair: -len(pair[1])):
+        remaining = [(failure, other) for failure, other in related if id(failure) not in dominated
+                     and "collidedTargets" not in failure]
+        if len(remaining) < 2:
+            continue
+        primary = remaining[0][0]
+        primary["widget"] = widget
+        primary["widget2"] = remaining[0][1]
+        primary["collidedTargets"] = [{"widget": other, "overlap": item["overlap"]} for item, other in remaining]
+        dominated.update(id(failure) for failure, _ in remaining[1:])
+    failures = [failure for failure in failures if id(failure) not in dominated]
+
     # 7. B 层结构质量 (原生编组覆盖率 + 语义命名率 + 0 重名检查)
     struct_stats = count_axvg_group_coverage(emitted_preview["axvg"])
     group_applicable = bool(struct_stats["totalNodes"]) and not (
@@ -906,7 +987,7 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
         "group_coverage_ok": not group_applicable or struct_stats["groupCoveragePct"] >= 80.0,
         "interaction_targets_ok": dangling_targets == 0,
     }
-    whitespace_applicable = compile_plan.get("auditScope") != "container-local"
+    whitespace_applicable = compile_plan.get("auditScope") != "container-local" and bool(detected_layouts & flow_layouts)
     aesthetic_gates = {
         "alignment_ok": alignment_error_px <= 1.0,
         "spacing_ok": not spacing_total or spacing_compliance_pct >= 95.0,
@@ -943,6 +1024,7 @@ def audit_prototype(root_node, emitted_preview, compile_plan, strict_audit=False
         "aesthetic_ok": aesthetic_ok,
         "strict_audit": bool(strict_audit),
         "warnings": warnings,
+        "applicability": applicability,
         "metrics": metrics,
         "coverage": {"fourState": four_state_coverage,
                      "spacing": {"status": ("pass" if aesthetic_gates["spacing_ok"] else "fail") if spacing_total else "not-applicable",
@@ -1030,9 +1112,13 @@ def summarize_scene_audits(scenes, strict_audit=False):
     page_whitespace = [check for check in page_whitespace if check.get("applicable")]
     coverage["whitespace"] = {"status": ("pass" if all(check["status"] == "pass" for check in page_whitespace) else "fail") if page_whitespace else "not-applicable",
                               "applicable": len(page_whitespace), "scope": "page-composition"}
+    layouts = [audit["applicability"] for audit in audits if audit.get("applicability")]
+    applicability = {"detectedLayouts": sorted({mode for report in layouts for mode in report["detectedLayouts"]}),
+                     "rulesByLayout": layouts[0]["rulesByLayout"]} if layouts else None
     return {"ok": structural_ok and (aesthetic_ok or not strict_audit), "structural_ok": structural_ok,
             "aesthetic_ok": aesthetic_ok, "strict_audit": bool(strict_audit), "metrics": metrics,
             "coverage": coverage,
+            "applicability": applicability,
             "sceneCoverage": {"expected": expected, "audited": audited, "missing": len(missing),
                               "passed": sum(scene["status"] == "pass" for scene in scenes),
                               "failed": sum(scene["status"] == "fail" for scene in scenes),

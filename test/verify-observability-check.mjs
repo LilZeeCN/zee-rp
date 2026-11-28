@@ -68,8 +68,10 @@ test('verify-observability: compact 瘦身、无静默丢步、失败置顶与�
     }, { runWorkflow, exportHtml: exportPrototype });
     assert.equal(unresolvedFail.status, 'failed');
     assert.equal(unresolvedFail.passed, 1);
+    assert.equal(unresolvedFail.failed, 2);
+    assert.equal(unresolvedFail.notRun, 0);
     assert.equal(unresolvedFail.total, 3);
-    assert.equal(unresolvedFail.steps.length, 2);
+    assert.equal(unresolvedFail.steps.length, 3);
     assert.equal(unresolvedFail.steps[0].status, 'passed');
     assert.equal(unresolvedFail.steps[1].status, 'failed');
     assert.ok(unresolvedFail.steps[1].code);

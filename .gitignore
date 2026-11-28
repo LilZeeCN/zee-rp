@@ -11,3 +11,4 @@ release/
 gui-jobs-check/
 benchmarks/studio/trials-local/
 output/
+.zee-cache/

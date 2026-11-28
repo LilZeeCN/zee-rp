@@ -331,7 +331,7 @@ function summarizeInteractions(raw) {
   }));
 }
 
-export function diffRp(beforeInput, afterInput) {
+export function diffRp(beforeInput, afterInput, options = {}) {
   const beforeData = loadInput(beforeInput, 'before');
   const afterData = loadInput(afterInput, 'after');
   const before = extractSnapshot(beforeData.bytes, beforeData.path);
@@ -493,7 +493,7 @@ export function diffRp(beforeInput, afterInput) {
   }
 
   const totalChanges = pageChanges.length + varChanges.length + widgetChanges.length + interactionChanges.length;
-  return {
+  const result = {
     ok: true,
     evidence: 'structure',
     hasChanges: totalChanges > 0,
@@ -541,6 +541,31 @@ export function diffRp(beforeInput, afterInput) {
       interactions: interactionChanges,
     },
   };
+  return paginateDiffRp(result, options);
+}
+
+export function paginateDiffRp(diff, { limit, offset = 0, summaryOnly = false, page } = {}) {
+  if (limit !== undefined && (!Number.isInteger(limit) || limit < 0)) throw new Error('limit 需要非负整数');
+  if (!Number.isInteger(offset) || offset < 0) throw new Error('offset 需要非负整数');
+  if (limit === undefined && offset === 0 && !summaryOnly && page === undefined) return diff;
+  const grouped = Object.entries(diff.changes).map(([category, changes]) =>
+    [category, page === undefined ? changes : changes.filter(item => item.page === page)]);
+  const countsByPage = {};
+  for (const [, changes] of grouped) for (const item of changes) {
+    const name = item.page ?? '(全局)';
+    countsByPage[name] = Object.hasOwn(countsByPage, name) ? countsByPage[name] + 1 : 1;
+  }
+  const totalChanges = grouped.reduce((n, [, changes]) => n + changes.length, 0);
+  const end = summaryOnly ? offset : limit === undefined ? totalChanges : offset + limit;
+  let cursor = 0;
+  const changes = Object.fromEntries(grouped.map(([key, rows]) => {
+    const first = cursor;
+    cursor += rows.length;
+    return [key, rows.slice(Math.max(0, offset - first), Math.max(0, end - first))];
+  }));
+  return { ...diff, hasChanges: totalChanges > 0, summary: { ...diff.summary, ...(page !== undefined ? { totalChanges, page } : {}), countsByPage },
+    changes, pagination: { offset, limit: limit ?? null, totalChanges, truncated: offset > 0 || end < totalChanges,
+      nextOffset: !summaryOnly && end < totalChanges ? end : null } };
 }
 
 export function formatDiffRp(diff) {
@@ -593,11 +618,23 @@ export function formatDiffRp(diff) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const argv = process.argv.slice(2);
   const json = argv.includes('--json');
-  const files = argv.filter(a => !a.startsWith('--'));
+  const files = [];
+  const options = {};
+  for (let i = 0; i < argv.length; i++) {
+    const arg = argv[i];
+    if (arg === '--json') continue;
+    if (arg === '--summary') options.summaryOnly = true;
+    else if (arg === '--page') {
+      if (!argv[i + 1] || argv[i + 1].startsWith('--')) throw new Error('--page 需要页面名称');
+      options.page = argv[++i];
+    } else if (arg === '--limit' || arg === '--offset') options[arg.slice(2)] = Number(argv[++i]);
+    else if (arg.startsWith('--')) throw new Error(`未知参数 ${arg}`);
+    else files.push(arg);
+  }
   if (files.length !== 2) {
-    console.error('用法: node diff-rp.mjs <before.rp> <after.rp> [--json]');
+    console.error('用法: node diff-rp.mjs <before.rp> <after.rp> [--json] [--limit N] [--offset N] [--page NAME] [--summary]');
     process.exit(1);
   }
-  const result = diffRp(files[0], files[1]);
+  const result = diffRp(files[0], files[1], options);
   console.log(json ? JSON.stringify(result, null, 2) : formatDiffRp(result));
 }

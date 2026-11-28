@@ -35,7 +35,11 @@ async function check(name, action) {
   try { await action(); results.push({ name, passed: true }); console.log(`PASS ${name}`); }
   catch (error) { results.push({ name, passed: false, detail: error.message }); console.log(`FAIL ${name}: ${error.message}`); }
 }
-const native = async path => JSON.parse((await request('rp_command', { action: 'run', command: 'rp-read', args: [path, '--json'] })).stdout);
+const native = async path => {
+  const result = await request('rp_command', { action: 'run', command: 'rp-read', args: [path, '--json'] });
+  const full = result.fullReportPath ? JSON.parse(readFileSync(result.fullReportPath, 'utf8')) : result;
+  return JSON.parse(full.stdout);
+};
 const nodes = rp => [...rp.pages.flatMap(p => p.widgets), ...(rp.containedWidgets ?? [])];
 
 try {
@@ -51,7 +55,7 @@ try {
     assert.equal(tools.length, 30);
     assert.equal(new Set(tools.map(t => t.name)).size, tools.length);
     for (const name of ['rp_inspect', 'rp_patch', 'rp_command', 'jobs']) assert(tools.some(t => t.name === name));
-    assert(tools.find(t => t.name === 'diagnose_prototype').annotations.readOnlyHint);
+    assert.equal(tools.find(t => t.name === 'diagnose_prototype').annotations.readOnlyHint, false);
     assert.equal(tools.find(t => t.name === 'revise_prototype').annotations.readOnlyHint, false);
   });
   await check('recipe discovery provides complete scenarios without expanding source by default', async () => {

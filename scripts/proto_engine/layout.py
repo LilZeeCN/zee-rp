@@ -1347,6 +1347,7 @@ def emit_tree_to_axvg(root_node, theme_dict, include_dynamic_panel_placeholders=
                 "w": nw,
                 "h": nh,
                 "style": {
+                    **({"fontFamily": node["fontFamily"]} if node.get("fontFamily") else {}),
                     "fontSize": node.get("fontSize", node.get("size", 13)),
                     "fontWeight": node.get("fontWeight", node.get("weight", 400)),
                     "color": resolve_color(node.get("color", "$ink"), theme_dict),

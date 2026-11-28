@@ -51,6 +51,58 @@ async function probeInstance(record, expectedProjectDir = null) {
   }
 }
 
+async function liveStudioInstances() {
+  const records = new Map();
+  try {
+    for (const record of JSON.parse(readFileSync(INSTANCE_REGISTRY_PATH, 'utf8'))) records.set(record.projectDir, record);
+  } catch { /* Registry is optional until an instance starts. */ }
+  for (const [projectDir, entry] of inProcessServers) {
+    const record = instanceRecordFor(projectDir);
+    if (record) records.set(projectDir, record);
+    else if (entry.kind === 'local' && !entry.studio.server?.listening) inProcessServers.delete(projectDir);
+  }
+  const live = await Promise.all([...records.values()].map(async record => {
+    if (!/^http:\/\/(?:127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(record.url)) return null;
+    const body = await probeInstance(record, record.projectDir);
+    return body ? {
+      instanceId: record.instanceId, projectDir: record.projectDir, pid: record.pid,
+      url: record.url, port: record.port, revision: body.appliedRevision ?? body.revision ?? body.doc?.revision,
+    } : null;
+  }));
+  return live.filter(Boolean);
+}
+
+async function manageStudioInstances(action, { projectDir, port, url, cwd }) {
+  const instances = await liveStudioInstances();
+  if (action === 'list') return { ok: true, instances };
+  if (action !== 'close' && action !== 'close_all') throw new Error(`未知 Studio 实例操作：${action}`);
+  if (action === 'close' && !projectDir && !port && !url) throw new Error('关闭 Studio 时请提供 projectDir、port 或 url。');
+  const expectedDir = projectDir ? resolve(resolveWorkDir(cwd), projectDir) : null;
+  const selected = action === 'close_all' ? instances : instances.filter(record =>
+    (!expectedDir || record.projectDir === expectedDir) && (!port || record.port === port) &&
+    (!url || record.url === url.replace(/\/$/, '')));
+  const results = await Promise.all(selected.map(async record => {
+    const entry = inProcessServers.get(record.projectDir);
+    if (entry?.kind === 'local' && entry.studio.instanceId === record.instanceId) await entry.studio.close();
+    else {
+      const result = await callServerJson(record.url, '/api/shutdown', 'POST', { instanceId: record.instanceId });
+      if (!result.ok) return { ...record, ...result, portReleased: false };
+    }
+    inProcessServers.delete(record.projectDir);
+    if (record.projectDir === lastActiveProjectDir) lastActiveProjectDir = null;
+    let portReleased = false;
+    for (let attempt = 0; attempt < 20; attempt++) {
+      try { await fetch(record.url + '/api/context', { signal: AbortSignal.timeout(200) }); }
+      catch (error) {
+        if (error.cause?.code === 'ECONNREFUSED') { portReleased = true; break; }
+      }
+      await new Promise(resolve => setTimeout(resolve, 40));
+    }
+    return { ...record, portReleased };
+  }));
+  return { ok: results.every(result => result.portReleased), closed: results };
+}
+
 async function resolveServerUrl({ url = null, port = null, projectDir = null } = {}) {
   if (url) return url.replace(/\/$/, '');
   if (port) return `http://127.0.0.1:${port}`;
@@ -332,7 +384,12 @@ export const studioHandlers = {
   },
 
   async studio_describe(args = {}) {
-    try { return describeAuthoring(args); }
+    try {
+      const description = describeAuthoring(args);
+      if (args.topic !== 'rp1') return description;
+      const surfaces = JSON.parse(readFileSync(new URL('../scripts/surface-capabilities.json', import.meta.url), 'utf8'));
+      return { ...description, surfaceCapabilities: surfaces };
+    }
     catch (error) {
       const contracts = args.topic === 'command' && Array.isArray(args.names) ? args.names.flatMap(name => {
         try { return [describeAuthoring({ topic: 'command', name })]; } catch { return []; }
@@ -349,6 +406,7 @@ export const studioHandlers = {
   },
 
   async studio_open_project({
+    action = 'open',
     projectDir,
     cwd = null,
     sourcePath = null,
@@ -361,7 +419,9 @@ export const studioHandlers = {
     includeDoc = false,
     includeScene = false,
     maxBytes = null,
+    fitCanvas,
   } = {}) {
+    if (action !== 'open') return manageStudioInstances(action, { projectDir, port, url, cwd });
     if (!projectDir) {
       throw Object.assign(new Error('projectDir 参数必填'), { code: 'E_PROJECT_DIR_REQUIRED' });
     }
@@ -389,6 +449,7 @@ export const studioHandlers = {
         assetsDir: join(absDir, 'assets'),
         name: name && name !== 'Studio Project' ? name : undefined,
         domain,
+        fitCanvas,
       });
       const importedSpecFile = join(absDir, '.imported-html.spec.json');
       writeFileSync(importedSpecFile, JSON.stringify(imported.spec, null, 2) + '\n', 'utf8');
@@ -427,6 +488,7 @@ export const studioHandlers = {
           },
         }, { verbose, includeDoc, includeScene, maxBytes }),
         ...extra,
+        ...(body.importCompatibility ? { importCompatibility: body.importCompatibility } : {}),
         ...(htmlImportSummary ? { htmlImport: htmlImportSummary } : {}),
         openInstances: instanceSummary(),
       };
@@ -661,6 +723,7 @@ export const studioHandlers = {
         status: bv.status === 'completed' ? 'completed' : 'failed',
         ok: Boolean(expRes.ok && bv.status === 'completed'),
         behaviorVerification: bvSummary,
+        ...(bv.proofReport ? { proofReport: bv.proofReport } : {}),
         ...(bv.status !== 'completed' ? { diagnostics: bv.diagnostics } : {}),
         ...(verifyImgs?.length ? { mcpImages: verifyImgs } : {}),
       };
@@ -1026,16 +1089,17 @@ export const studioTools = [
     inputSchema: {
       type: 'object',
       properties: {
+        action: { enum: ['open', 'list', 'close', 'close_all'] },
         projectDir: { type: 'string', minLength: 1 },
         cwd: { type: 'string' },
         sourcePath: { type: 'string' },
+        fitCanvas: { enum: ['auto', 'content', 'viewport'] },
         rp1: { type: 'string' },
         name: { type: 'string' },
         domain: { type: 'string', enum: ['mobile', 'web'] },
         port: { type: 'integer', minimum: 0, maximum: 65535 },
         url: { type: 'string' },
       },
-      required: ['projectDir'],
       additionalProperties: false,
     },
     handler: studioHandlers.studio_open_project,
