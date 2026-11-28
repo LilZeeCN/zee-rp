@@ -194,6 +194,7 @@ const MIME_TYPES = {
 // passive listeners; never evaluates source expressions or writes test values.
 export function observeAxure({ names = [], officialIds = [], variables = [], waitForInitialization = false } = {}) {
   const windows = [window];
+  let lastFrameError;
   const wantFilter = names.length > 0 || officialIds.length > 0;
   for (let i = 0; i < windows.length && i < 20; i++) {
     const w = windows[i];
@@ -227,68 +228,86 @@ export function observeAxure({ names = [], officialIds = [], variables = [], wai
           const nativeElements = (ax.getAllElementIds?.() ?? []).map(id => d.getElementById(id)).filter(Boolean);
           const identities = new Set(officialIds);
           const labels = new Set(names);
+          const baseRect = d.getElementById('base')?.getBoundingClientRect();
+          const probe = w.__zeeRpPreviewProbe;
           const widgets = [...new Set([...labelElements, ...nativeElements])]
-            .filter(el => !el.classList.contains('panel_state'))
+            .filter(el => el.tagName !== 'SCRIPT' && !el.classList.contains('panel_state'))
             .flatMap(el => {
-              const officialId = el.id ? ax.getObjectFromElementId?.(el.id)?.id : null;
-              if (wantFilter && !labels.has(el.getAttribute('data-label')) && !identities.has(officialId)) return [];
-              let r = el.getBoundingClientRect();
-              // Axure Layer wrappers have zero CSS size while their children are
-              // visible and receive the group's click. Measure actual children.
-              if ((!r.width || !r.height) && (/^grp-/.test(el.getAttribute('data-label') || '') || el.classList.contains('ax_default'))) {
-                const rects = [...el.querySelectorAll('[data-label]')].filter(child => {
-                  for (let cur = child; cur && cur !== el; cur = cur.parentElement) {
-                    const cs = w.getComputedStyle(cur);
-                    if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+              try {
+                // Axure's static object table contains the template ID only.
+                const clone = el.id.match(/^(u\d+)-(\d+)$/);
+                const baseId = clone?.[1] ?? el.id;
+                let officialId = baseId || null;
+                if (baseId) {
+                  try { officialId = ax.getObjectFromElementId?.(baseId)?.id ?? baseId; } catch { /* Keep the DOM ID. */ }
+                }
+                if (wantFilter && !labels.has(el.getAttribute('data-label')) && !identities.has(officialId)) return [];
+                let r = el.getBoundingClientRect();
+                // Axure Layer wrappers have zero CSS size while their children are
+                // visible and receive the group's click. Measure actual children.
+                if ((!r.width || !r.height) && (/^grp-/.test(el.getAttribute('data-label') || '') || el.classList.contains('ax_default'))) {
+                  const rects = [...el.querySelectorAll('[data-label]')].filter(child => {
+                    for (let cur = child; cur && cur !== el; cur = cur.parentElement) {
+                      const cs = w.getComputedStyle(cur);
+                      if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') return false;
+                    }
+                    return true;
+                  }).map(child => child.getBoundingClientRect()).filter(rect => rect.width && rect.height);
+                  if (rects.length) {
+                    const left = Math.min(...rects.map(rc => rc.left));
+                    const top = Math.min(...rects.map(rc => rc.top));
+                    const right = Math.max(...rects.map(rc => rc.right));
+                    const bottom = Math.max(...rects.map(rc => rc.bottom));
+                    r = { left, top, right, bottom, width: right - left, height: bottom - top };
                   }
-                  return true;
-                }).map(child => child.getBoundingClientRect()).filter(rect => rect.width && rect.height);
-                if (rects.length) {
-                  const left = Math.min(...rects.map(rc => rc.left));
-                  const top = Math.min(...rects.map(rc => rc.top));
-                  const right = Math.max(...rects.map(rc => rc.right));
-                  const bottom = Math.max(...rects.map(rc => rc.bottom));
-                  r = { left, top, right, bottom, width: right - left, height: bottom - top };
                 }
-              }
-              const input = el.matches('input,textarea,select') ? el : el.querySelector('input,textarea,select');
-              let visible = r.width > 0 && r.height > 0;
-              for (let cur = el; cur; cur = cur.parentElement) {
-                const cs = w.getComputedStyle(cur);
-                if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') visible = false;
-              }
-              let panelState = null;
-              if (el.querySelector(':scope > .panel_state')) {
-                const sid = ax.visibility?.GetPanelState?.(el.id);
-                const stateEl = sid ? d.getElementById(sid) : null;
-                panelState = stateEl?.getAttribute('data-label') ?? null;
-                if (!panelState) {
-                  const st = [...el.children].find(c => c.classList.contains('panel_state') && w.getComputedStyle(c).display !== 'none' && w.getComputedStyle(c).visibility !== 'hidden');
-                  panelState = st?.getAttribute('data-label') ?? null;
+                const input = el.matches('input,textarea,select') ? el : el.querySelector('input,textarea,select');
+                let visible = r.width > 0 && r.height > 0;
+                for (let cur = el; cur; cur = cur.parentElement) {
+                  const cs = w.getComputedStyle(cur);
+                  if (cs.display === 'none' || cs.visibility === 'hidden' || cs.opacity === '0') visible = false;
                 }
+                let panelState = null;
+                if (el.querySelector(':scope > .panel_state')) {
+                  const sid = ax.visibility?.GetPanelState?.(el.id);
+                  const stateEl = sid ? d.getElementById(sid) : null;
+                  panelState = stateEl?.getAttribute('data-label') ?? null;
+                  if (!panelState) {
+                    const st = [...el.children].find(c => c.classList.contains('panel_state') && w.getComputedStyle(c).display !== 'none' && w.getComputedStyle(c).visibility !== 'hidden');
+                    panelState = st?.getAttribute('data-label') ?? null;
+                  }
+                }
+                let info = null;
+                if (!clone && el.id) {
+                  try { info = ax.getWidgetInfo?.(el.id); } catch { /* Use DOM geometry if the assembly lacks widget metadata. */ }
+                }
+                const x = typeof info?.x === 'number' ? info.x : r.left - (baseRect?.left ?? 0);
+                const y = typeof info?.y === 'number' ? info.y : r.top - (baseRect?.top ?? 0);
+                const width = typeof info?.width === 'number' && info.width > 0 ? info.width : r.width;
+                const height = typeof info?.height === 'number' && info.height > 0 ? info.height : r.height;
+                const textVal = input ? input.value : (el.innerText?.trim() ?? '');
+                return [{
+                  id: el.id, officialId: officialId ?? null,
+                  ...(clone ? { domRowSuffix: Number(clone[2]), rowKey: clone[2] } : {}),
+                  name: el.getAttribute('data-label'),
+                  text: textVal,
+                  value: textVal,
+                  visible,
+                  enabled: !input?.disabled && el.getAttribute('aria-disabled') !== 'true' && !el.classList.contains('disabled'),
+                  checked: Boolean(input?.checked),
+                  inputId: input?.id ?? null,
+                  inputTag: input?.tagName?.toLowerCase() ?? null,
+                  panelState,
+                  x, y, left: x, top: y, right: x + width, bottom: y + height,
+                  width, height,
+                  centerX: offX + r.left + r.width / 2,
+                  centerY: offY + r.top + r.height / 2,
+                }];
+              } catch (error) {
+                probe.errors.push({ message: String(error?.message ?? error), element: el.id });
+                if (probe.errors.length > 50) probe.errors.shift();
+                return [];
               }
-              const info = typeof ax.getWidgetInfo === 'function' ? ax.getWidgetInfo(el.id) : null;
-              const x = typeof info?.x === 'number' ? info.x : r.left;
-              const y = typeof info?.y === 'number' ? info.y : r.top;
-              const width = typeof info?.width === 'number' && info.width > 0 ? info.width : r.width;
-              const height = typeof info?.height === 'number' && info.height > 0 ? info.height : r.height;
-              const textVal = input ? input.value : (el.innerText?.trim() ?? '');
-              return [{
-                id: el.id, officialId: officialId ?? null,
-                name: el.getAttribute('data-label'),
-                text: textVal,
-                value: textVal,
-                visible,
-                enabled: !input?.disabled && el.getAttribute('aria-disabled') !== 'true' && !el.classList.contains('disabled'),
-                checked: Boolean(input?.checked),
-                inputId: input?.id ?? null,
-                inputTag: input?.tagName?.toLowerCase() ?? null,
-                panelState,
-                x, y, left: x, top: y, right: x + width, bottom: y + height,
-                width, height,
-                centerX: offX + r.left + r.width / 2,
-                centerY: offY + r.top + r.height / 2,
-              }];
             });
           const values = {};
           const defined = ax.globalVariableProvider.getDefinedVariables();
@@ -313,9 +332,14 @@ export function observeAxure({ names = [], officialIds = [], variables = [], wai
         }
       }
       for (let n = 0; n < w.frames.length; n++) { try { if (w.frames[n].document) windows.push(w.frames[n]); } catch {} }
-    } catch {}
+    } catch (error) {
+      lastFrameError = String(error?.stack ?? error);
+    }
   }
-  return { ready: false, reason: '当前页面尚未加载可读取的 Axure 原生运行时。' };
+  return {
+    ready: false, reason: '当前页面尚未加载可读取的 Axure 原生运行时。',
+    ...(lastFrameError ? { internalError: lastFrameError } : {}),
+  };
 }
 
 function initialStateKey(observation) {
@@ -634,6 +658,9 @@ function findWidgetMatch(observation, symbol, target, { allowHidden = false, row
       return widgetKeys.some(k => targetKeys.has(k)) && (allowHidden || w.visible);
     })
     : pool.filter(w => [w.name, w.id, w.scopedId, w.label].includes(target) && (allowHidden || w.visible));
+  if (candidates.some(w => w.rowKey !== undefined)) {
+    candidates.sort((a, b) => (a.y - b.y) || (a.x - b.x) || ((a.domRowSuffix ?? 0) - (b.domRowSuffix ?? 0)));
+  }
   return { candidates, widget: candidates[rowIndex] };
 }
 
@@ -1257,7 +1284,9 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       expected: step?.expect ?? null,
       failures: failedEntry?.failures ?? null,
       ...(availableTargets.length ? { availableTargets } : {}),
-      actual: observed ? {
+      actual: observed?.ready === false ? {
+        ready: false, reason: observed.reason, internalError: observed.internalError,
+      } : observed ? {
         page: observed.page,
         variables: observed.variables,
         widgets: (observed.widgets ?? []).slice(0, 12).map(w => ({

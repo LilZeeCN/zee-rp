@@ -4,7 +4,18 @@ const target = value => {
   if (value && typeof value === 'object' && !Array.isArray(value) && Object.keys(value).length === 1 && typeof value.ref === 'string' && value.ref) return value.ref;
   fail('交互目标需要节点ID字符串或 {ref:"节点ID"}，不能把未解析对象当成目标', 'target');
 };
+export const RP1_DATA_ACTION_FIELDS = Object.freeze({
+  'data-add': ['target', 'rows'],
+  'data-update': ['target', 'where', 'set'],
+  'data-delete': ['target', 'where'],
+  'data-filter': ['target', 'name', 'where'],
+  'data-clear-filter': ['target', 'name'],
+  'data-sort': ['target', 'column', 'direction'],
+  'data-clear-sort': ['target'],
+  'data-page': ['target', 'page'],
+});
 const typed = new Set(['set-var', 'set-variable', 'show', 'hide', 'toggle', 'set-text', 'set-panel-state', 'set-check', 'set-selected', 'set-option', 'move', 'link', 'navigate',
+  ...Object.keys(RP1_DATA_ACTION_FIELDS),
   ...['dataset', 'repeater'].flatMap(prefix => ['add', 'update', 'delete', 'select', 'toggle-select', 'filter', 'sort', 'page'].map(op => `${prefix}-${op}`))]);
 
 function parseInlineActionString(raw) {
@@ -108,7 +119,7 @@ export function normalizeInteractionSpec(spec, context = null) {
   }
   const conditional = ['type','when','if','condition','then','else','actions','cases','break'];
   const dataFields = ['dataset','repeater','op','rowId','clearOthers','row','patch','requireNonEmpty','onEmptyShow','onEmptySelectionShow','query','field','operator','order','page'];
-  const knownFields = ({show:['target'],hide:['target'],toggle:['target'],'set-text':['target','value','text'],
+  const knownFields = (Object.hasOwn(RP1_DATA_ACTION_FIELDS, out.type) ? RP1_DATA_ACTION_FIELDS[out.type] : null) || ({show:['target'],hide:['target'],toggle:['target'],'set-text':['target','value','text'],
     'set-var':['name','variable','value','expr'],'set-variable':['name','variable','value','expr'],
     'set-panel-state':['target','panel','state','mode','loop','repeat','repeatInterval','repeatSkipFirst','enterAnimation','exitAnimation','duration'],
     'set-check':['target','checked','value'],
@@ -125,6 +136,14 @@ export function normalizeInteractionSpec(spec, context = null) {
     if (keys.every(key=>out[key]!==undefined) && JSON.stringify(out[keys[0]])!==JSON.stringify(out[keys[1]])) fail(`动作字段 ${keys.join('/')} 冲突`,keys[1]);
   }
   if (out.target !== undefined) out.target = target(out.target);
+  if (Object.hasOwn(RP1_DATA_ACTION_FIELDS, out.type)) {
+    if (!out.target) fail(`${out.type} 缺少 target`, 'target');
+    if (out.type === 'data-add' && (!Array.isArray(out.rows) || !out.rows.length || out.rows.some(row => !row || typeof row !== 'object' || Array.isArray(row)))) fail('data-add 需要非空记录数组', 'rows');
+    if (['data-update', 'data-delete', 'data-filter'].includes(out.type) && out.where === undefined) fail(`${out.type} 缺少 where`, 'where');
+    if (out.type === 'data-update' && (!out.set || typeof out.set !== 'object' || Array.isArray(out.set))) fail('data-update 需要 set 字段对象', 'set');
+    if (out.type === 'data-sort' && typeof out.column !== 'string') fail('data-sort 需要 column', 'column');
+    if (out.type === 'data-page' && !['next', 'previous', 'first', 'last'].includes(out.page) && !(Number.isInteger(out.page) && out.page >= 1)) fail('data-page 需要页码或翻页方向', 'page');
+  }
   if (out.panel !== undefined) out.panel = target(out.panel);
   if (out.type === 'set-panel-state') {
     if (!out.target && out.panel) { out.target = out.panel; delete out.panel; }

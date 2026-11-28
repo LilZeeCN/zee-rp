@@ -317,3 +317,54 @@ test('rp/1 mixed imperative control flow (actions + if/else + sequential if + wa
     rmSync(work, { recursive: true, force: true });
   }
 });
+
+test('repeater actions follow visual rows and refresh visible and dataset aggregates in both browsers', { timeout: 90_000 }, async t => {
+  try { findChromeExecutable(); } catch { return t.skip('未检测到 Chrome/Chromium'); }
+  const work = mkdtempSync(join(tmpdir(), 'zee-verify-repeater-'));
+  try {
+    const eq = (name, value) => ({ op: '==', left: { item: name }, right: value });
+    const action = (id, data) => ({
+      type: 'button', id, text: id, w: 90,
+      on: { click: { target: 'items', ...data } },
+    });
+    const total = (id, scope) => ({
+      id, type: 'label', text: { fn: 'text', args: [{ variable: scope }] }, w: 110,
+    });
+    const spec = {
+      language: 'rp/1', target: 9, name: 'Repeater replay',
+      models: { Item: { id: 'id', qty: 'number' } },
+      datasets: { goods: { model: 'Item', rows: ['a', 'b', 'c'].map((id, i) => ({ id, qty: i + 1 })) } },
+      computed: Object.fromEntries(['visible', 'dataset'].map(scope => [scope, { dataset: 'goods', scope, op: 'sum', field: 'qty' }])),
+      pages: [{
+        id: 'home', canvas: { w: 480, h: 520 }, root: {
+          type: 'box', id: 'root', layout: 'column', gap: 12, padding: 16, children: [
+            { type: 'repeater', id: 'items', dataset: 'goods', key: 'id', rowHeight: 40, pageSize: 2, w: 300, h: 100,
+              template: { type: 'label', id: 'row_label', text: '=item.id', w: 80, h: 30 } },
+            total('visible_total', 'visible'), total('dataset_total', 'dataset'),
+            action('sort', { type: 'data-sort', column: 'id', direction: 'descending' }),
+            action('filter', { type: 'data-filter', name: 'only_c', where: eq('id', 'c') }),
+            action('update', { type: 'data-update', where: eq('id', 'c'), set: { qty: 7 } }),
+          ],
+        },
+      }],
+    };
+    const generated = generatePrototype({ spec, output: join(work, 'repeater.rp'), cwd: work });
+    assert.equal(generated.status, 'completed', JSON.stringify(generated.diagnostics));
+    const click = target => ({ action: 'click', target });
+    const expectText = (target, text, rowIndex) => ({ action: 'expect', target, rowIndex, expect: { text } });
+    const steps = [
+      expectText('row_label', 'a', 0), expectText('visible_total', '3'), expectText('dataset_total', '6'),
+      click('sort'), expectText('row_label', 'c', 0), expectText('row_label', 'b', 1), expectText('visible_total', '5'),
+      click('filter'), expectText('visible_total', '3'), expectText('dataset_total', '6'),
+      click('update'), expectText('visible_total', '7'), expectText('dataset_total', '10'),
+    ];
+    for (const engine of HAS_RP9_APP ? ['official', 'studio-html'] : ['studio-html']) {
+      const verified = await verifyOfficialPreview({
+        rp: generated.output, source: generated.source, engine, cwd: work, steps,
+      }, { runWorkflow, exportHtml: exportPrototype });
+      assert.equal(verified.passed, steps.length, JSON.stringify(verified.failedStep ?? verified.diagnostics));
+    }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});

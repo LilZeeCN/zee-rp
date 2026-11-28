@@ -172,6 +172,9 @@ function normalizeSingleExportAction(act, exportCtx = null) {
     delete c.target;
     return c;
   }
+  if (typeof c.type === 'string' && c.type.startsWith('data-')) {
+    return { ...c, target: { ref: typeof c.target === 'string' ? c.target : c.target.ref } };
+  }
   if (typeof c.type === 'string' && (c.type.startsWith('dataset-') || c.type.startsWith('repeater-'))) {
     const op = c.type.replace(/^(?:dataset|repeater)-/, '');
     const targetRepeater =

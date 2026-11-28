@@ -1,5 +1,5 @@
 import { resolveDocumentScene } from './scene-resolver.mjs';
-import { evaluatePrototypeExpression, executePrototypeInteraction } from './prototype-runtime.mjs';
+import { evaluatePrototypeExpression, executePrototypeInteraction, refreshRp1Bindings } from './prototype-runtime.mjs';
 import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
 import { lintDocumentInteractions } from './interaction-lint.mjs';
 
@@ -75,6 +75,7 @@ export class StudioRuntimeSession {
     for (const pg of pages) {
       this._initTreeState(pg.root, pg.id);
     }
+    this._refreshRp1Bindings();
     this._triggerPageLoadEvents(this.currentPageId);
 
     return this.getState();
@@ -288,11 +289,11 @@ export class StudioRuntimeSession {
       const opts = Array.isArray(node.options) ? node.options : [];
       return String(opts[node.selectedIndex ?? 0] ?? '');
     }
-    const raw = String(node.text ?? node.value ?? '');
-    if (raw.startsWith('=')) {
+    const raw = node.text ?? node.value ?? '';
+    if (typeof raw === 'object' || typeof raw === 'string' && raw.startsWith('=')) {
       return String(this.evaluateExpression(raw, { pageId: entry.pageId, scopePrefix: entry.scopePrefix }) ?? '');
     }
-    return raw;
+    return String(raw);
   }
 
   getWidgetState(widgetId, prop, { pageId = this.currentPageId, scopePrefix = this.interactionScope } = {}) {
@@ -390,7 +391,7 @@ export class StudioRuntimeSession {
     return null;
   }
 
-  evaluateExpression(expr, context = {}) {
+  evaluateExpression(expr, itemRow = null, context = itemRow ?? {}) {
     const ctx = context && typeof context === 'object' ? context : {};
     return evaluatePrototypeExpression(expr, {
       variables: this.variables,
@@ -398,6 +399,7 @@ export class StudioRuntimeSession {
       getWidgetState: (target, prop) => this.getWidgetState(target, prop, ctx),
       getWidgetRect: target => this.getWidgetRect(target, ctx),
       resolveDatasetPath: (name, prop) => this.resolveDatasetPath(name, prop),
+      itemRow,
     });
   }
 
@@ -454,7 +456,10 @@ export class StudioRuntimeSession {
     return '';
   }
 
+  _refreshRp1Bindings() { refreshRp1Bindings(this, this.docSnapshot); }
+
   _refreshDatasetBoundText() {
+    this._refreshRp1Bindings();
     for (const [scopedId, info] of Object.entries(this.textFormulas || {})) {
       this.textOverrides[scopedId] = String(this.evaluateExpression(info.expr, info));
     }
@@ -472,7 +477,9 @@ export class StudioRuntimeSession {
     }));
 
     if (filterSpec) {
-      if (typeof filterSpec === 'function') {
+      if (typeof filterSpec === 'object' && Object.hasOwn(filterSpec, 'where')) {
+        rows = rows.filter(row => Boolean(this.evaluateExpression(filterSpec.where, row)));
+      } else if (typeof filterSpec === 'function') {
         rows = rows.filter(filterSpec);
       } else if (typeof filterSpec === 'string' && filterSpec.trim() !== '') {
         const q = filterSpec.trim().toLowerCase();
@@ -640,6 +647,7 @@ export class StudioRuntimeSession {
     }
     this.currentPageId = targetPage.id;
     this.panelTimers = {};
+    this._refreshRp1Bindings();
     this._triggerPageLoadEvents(this.currentPageId);
     this.trace.push({
       step: this.trace.length + 1,

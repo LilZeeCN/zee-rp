@@ -811,6 +811,8 @@ export function importToStudioDocument(sourcePathOrObject, { projectDir = null, 
         h: canvasH,
       },
       root: rootNode,
+      ...(pg.views ? { views: structuredClone(pg.views) } : {}),
+      ...(pg.bindings ? { bindings: structuredClone(pg.bindings) } : {}),
       interactions: structuredClone(pg.interactions || []),
       explorations: structuredClone(pg.explorations || []),
     };

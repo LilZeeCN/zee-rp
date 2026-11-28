@@ -2,10 +2,11 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from
 import { basename, dirname, extname, isAbsolute, join, resolve } from 'node:path';
 import { sha256 } from './document.mjs';
 import { resolveDocumentScene } from './scene-resolver.mjs';
-import { evaluatePrototypeExpression, executePrototypeInteraction } from './prototype-runtime.mjs';
+import { evaluatePrototypeExpression, executePrototypeInteraction, executeRp1DataAction, refreshRp1Bindings } from './prototype-runtime.mjs';
 import { textLayout, textSpanCss, visualCss } from './visual-style.mjs';
 import { repeaterDatasetName, repeaterInlineRows } from './repeater-view.mjs';
 import { locateDiagnostic } from './diagnostics.mjs';
+import { RP1_DATA_ACTION_FIELDS } from './interactions.mjs';
 import { computeDependencyClosure } from './project-bundle.mjs';
 
 export const CODE_EXPORTER_VERSION = '1.0.0';
@@ -28,6 +29,7 @@ const SUPPORTED_ACTION_TYPES = new Set([
   'set-selected',
   'set-option',
   'move',
+  ...Object.keys(RP1_DATA_ACTION_FIELDS),
   'dataset-select',
   'dataset-toggle-select',
   'dataset-add',
@@ -265,6 +267,7 @@ function serializePageNode(n, assetRewriteMap, nodeUnsupportedMap, nodeSupported
     text: n.text ?? '',
     ...(!n.truncated && n.spans?.length ? { spans: n.spans.map(span => ({ text: span.text, css: textSpanCss(span, n.fontStackCss) })) } : {}),
     rawText: n.rawText ?? n.text ?? '',
+    ...(n.when !== undefined ? { when: n.when } : {}),
     placeholder: n.placeholder || '',
     value: n.value ?? n.text ?? '',
     ...(Number.isInteger(n.maxLength) && n.maxLength >= 0 ? { maxLength: n.maxLength } : {}),
@@ -347,8 +350,9 @@ function collectRawVisibilityMap(doc) {
     const scopedId = `${scopePath}/${node.id}`;
     const ownVis = node.visible !== false && node.hidden !== true;
     map.set(scopedId, ownVis);
+    if (node.when !== undefined) map.set(`when:${scopedId}`, node.when);
     map.set(`sizing:${scopedId}`, Object.fromEntries(['w', 'h', 'minW', 'maxW', 'minH', 'maxH', 'layout', 'justify', 'align'].filter(key => node[key] !== undefined).map(key => [key, node[key]])));
-    if (typeof node.text === 'string' && node.text.startsWith('=')) {
+    if (node.text && typeof node.text === 'object' || typeof node.text === 'string' && node.text.startsWith('=')) {
       map.set(`rawText:${scopedId}`, node.text);
     }
     if (Array.isArray(node.children)) {
@@ -695,6 +699,8 @@ function buildAppJs(bundlePayload) {
   'use strict';
 
   ${evaluatePrototypeExpression.toString()}
+  ${refreshRp1Bindings.toString()}
+  ${executeRp1DataAction.toString()}
   ${executePrototypeInteraction.toString()}
 
   const BUNDLE = ${JSON.stringify(bundlePayload)};
@@ -811,6 +817,7 @@ function buildAppJs(bundlePayload) {
           if (n.on?.click) collectFormulas(n.on.click, { pageId: pg.id, scopePrefix: this.nodeScope(n) });
         }
       }
+      this._refreshRp1Bindings();
       this._triggerPageLoadEvents(this.currentPageId);
       this.render();
       this._syncTimers();
@@ -932,7 +939,7 @@ function buildAppJs(bundlePayload) {
       while (cur && !visited.has(cur.scopedId)) {
         visited.add(cur.scopedId);
         const ownVis = cur.scopedId in this.visibility ? Boolean(this.visibility[cur.scopedId]) : cur.ownVisible;
-        if (!ownVis) return false;
+        if (!ownVis || (cur.when !== undefined && !this.evaluateExpression(cur.when))) return false;
         cur = cur.parentScopedId ? byScoped.get(cur.parentScopedId) : null;
       }
       return true;
@@ -952,11 +959,11 @@ function buildAppJs(bundlePayload) {
         const opts = Array.isArray(node.options) ? node.options : [];
         return String(opts[node.selectedIndex ?? 0] ?? '');
       }
-      const raw = String(node.rawText ?? node.text ?? node.value ?? '');
-      if (raw.startsWith('=')) {
+      const raw = node.rawText ?? node.text ?? node.value ?? '';
+      if (typeof raw === 'object' || typeof raw === 'string' && raw.startsWith('=')) {
         return String(this.evaluateExpression(raw, null, { pageId: node.pageId, scopePrefix: this.nodeScope(node) }) ?? '');
       }
-      return raw;
+      return String(raw);
     }
 
     getWidgetState(widgetId, prop, { pageId = this.currentPageId, scopePrefix = this.interactionScope } = {}) {
@@ -1061,7 +1068,10 @@ function buildAppJs(bundlePayload) {
       return '';
     }
 
+    _refreshRp1Bindings() { refreshRp1Bindings(this, this.bundle); }
+
     _refreshDatasetBoundText() {
+      this._refreshRp1Bindings();
       for (const [key, info] of Object.entries(this.textFormulas)) {
         this.textOverrides[key] = String(this.evaluateExpression(info.expr, null, info));
       }
@@ -1078,7 +1088,9 @@ function buildAppJs(bundlePayload) {
       }));
 
       if (filterSpec) {
-        if (typeof filterSpec === 'string' && filterSpec.trim() !== '') {
+        if (typeof filterSpec === 'object' && Object.hasOwn(filterSpec, 'where')) {
+          rows = rows.filter(row => Boolean(this.evaluateExpression(filterSpec.where, row)));
+        } else if (typeof filterSpec === 'string' && filterSpec.trim() !== '') {
           const q = filterSpec.trim().toLowerCase();
           rows = rows.filter(r =>
             Object.entries(r).some(([k, v]) => !k.startsWith('_') && String(v).toLowerCase().includes(q))
@@ -1119,6 +1131,7 @@ function buildAppJs(bundlePayload) {
       this.currentPageId = target.id;
       this.panelTimers = {};
       this._clearTimers();
+      this._refreshRp1Bindings();
       this._triggerPageLoadEvents(this.currentPageId);
       this.trace.push({ step: this.trace.length + 1, type: 'navigate', pageId: this.currentPageId });
       this.render();
@@ -1470,6 +1483,25 @@ function buildAppJs(bundlePayload) {
           centerX: r ? (r.left + r.width / 2) : (bx + x + w / 2),
           centerY: r ? (r.top + r.height / 2) : (by + y + h / 2),
           ...(el?.id ? { inputId: el.id } : {}),
+        });
+      }
+      for (const el of boardEl?.querySelectorAll('[data-template-node-id]') || []) {
+        const r = el.getBoundingClientRect();
+        const x = r.left - bx;
+        const y = r.top - by;
+        widgets.push({
+          id: el.dataset.nodeId,
+          scopedId: el.dataset.templateScopedId,
+          name: el.dataset.templateNodeId,
+          rowKey: el.dataset.repeaterRowId,
+          domRowSuffix: Number(el.dataset.templateRowIndex),
+          text: el.innerText.trim(),
+          value: 'value' in el ? String(el.value) : el.innerText.trim(),
+          visible: r.width > 0 && r.height > 0,
+          enabled: !el.disabled && el.getAttribute('aria-disabled') !== 'true',
+          x, y, left: x, top: y, right: x + r.width, bottom: y + r.height, width: r.width, height: r.height,
+          centerX: r.left + r.width / 2, centerY: r.top + r.height / 2,
+          ...(el.id ? { inputId: el.id } : {}),
         });
       }
       return {
@@ -1905,9 +1937,12 @@ function buildAppJs(bundlePayload) {
             renderOrder: baseZ + tplIdx,
             text: String(this.evaluateExpression(tn.rawText || tn.text || '', row)),
           };
-          const childEl = this._createNodeElement(clone, true, row);
+          const visible = tn.ownVisible && (tn.when === undefined || Boolean(this.evaluateExpression(tn.when, row)));
+          const childEl = this._createNodeElement(clone, visible, row);
           childEl.setAttribute('data-repeater-row-id', String(row._rowId));
           childEl.setAttribute('data-template-node-id', tn.id);
+          childEl.setAttribute('data-template-scoped-id', tn.scopedId);
+          childEl.setAttribute('data-template-row-index', String(idx));
           if (tplIdx === 0) childEl.classList.add('export-repeater-row');
           if (tplIdx === 0 && row._selected) {
             childEl.style.outline = '2px solid #2E6F57';
@@ -2408,11 +2443,12 @@ export async function exportStudioDocumentToCode(
   // Build serialized pages, dynamic panel state subtrees, and repeater template blueprints
   const serializedPages = [];
   for (const pg of scene.pages || []) {
+    const sourcePage = doc.pages.find(page => page.id === pg.id);
     const enrichNode = n => {
       const ownVisible = rawVisMap.has(n.scopedId) ? rawVisMap.get(n.scopedId) : Boolean(n.visible);
       const rawText = rawVisMap.get(`rawText:${n.scopedId}`) || n.text || '';
       return serializePageNode(
-        { ...n, ownVisible, rawText, sourceSizing: rawVisMap.get(`sizing:${n.scopedId}`) },
+        { ...n, ownVisible, rawText, when: rawVisMap.get(`when:${n.scopedId}`), sourceSizing: rawVisMap.get(`sizing:${n.scopedId}`) },
         assetRewriteMap,
         layoutAnalysis.nodeUnsupportedMap,
         layoutAnalysis.nodeSupportedMap
@@ -2487,6 +2523,7 @@ export async function exportStudioDocumentToCode(
       device: pg.device || null,
       board: pg.board,
       ...(pg.on ? { on: pg.on } : {}),
+      ...Object.fromEntries(['views', 'bindings'].filter(key => sourcePage?.[key]).map(key => [key, sourcePage[key]])),
       nodes: allNodes,
       repeaterTemplates,
       panelStateNodes,
@@ -2524,6 +2561,8 @@ export async function exportStudioDocumentToCode(
     contentHash: doc.contentHash,
     domain: doc.domain || 'web',
     variables: structuredClone(doc.variables || {}),
+    computed: structuredClone(doc.computed || {}),
+    views: structuredClone(doc.views || {}),
     datasets,
     pages: serializedPages,
   };

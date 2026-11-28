@@ -2829,6 +2829,10 @@ class Frontend:
                                 predicate = {"kind": "aggregate-scan", "valueType": "boolean", "aggregates": [a]} if a["scope"] == "dataset" else {"kind": "literal", "valueType": "boolean", "value": False}
                                 actions.append({"type": "data-delete", "target": a["repeaterName"], "selectionType": 2, "predicate": predicate})
                                 changed_variables.add(a["name"])
+                            # The official player refreshes its queued repeater rows when this
+                            # event yields. Close the OnItemLoad guards only after that refresh.
+                            if guards_to_close:
+                                actions.append({"type": "wait", "ms": 0})
                             for guard in sorted(guards_to_close):
                                 actions.append({"type": "set-variable", "variable": guard, "value": 0})
                             for b in page_bindings:
@@ -3227,7 +3231,7 @@ class Frontend:
             direction = action.get("direction", "ascending")
             if not isinstance(direction, str) or direction not in {"ascending", "descending"}:
                 fail("E_ENUM", path, "Sort direction must be ascending or descending")
-            out.update(column=column, ascending=direction == "ascending", sortType=1 if context["model"][column] == "number" else 0)
+            out.update(column=column, ascending=direction == "ascending", sortType=1 if context["model"][column] == "number" else 2)
         elif kind == "data-page":
             page = action.get("page")
             if not (isinstance(page, str) and page in {"next", "previous", "first", "last"}) and (type(page) is not int or page < 1):

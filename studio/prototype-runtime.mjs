@@ -3,6 +3,37 @@
 export function evaluatePrototypeExpression(expression, { variables, getWidgetText, getWidgetState, resolveDatasetPath, itemRow = null, getWidgetRect = null }) {
   if (expression == null) return '';
   if (typeof expression === 'number' || typeof expression === 'boolean') return expression;
+  const args = { variables, getWidgetText, getWidgetState, resolveDatasetPath, itemRow, getWidgetRect };
+  if (typeof expression === 'object') {
+    const literal = value => {
+      if (typeof value === 'string') return '"' + value.replace(/["\\]/g, ch => '\\' + ch) + '"';
+      return JSON.stringify(value ?? '');
+    };
+    const encode = value => {
+      if (typeof value !== 'object' || value === null) {
+        return typeof value === 'string' && value.startsWith('=') ? '(' + value.slice(1) + ')' : literal(value);
+      }
+      if (Object.hasOwn(value, 'literal')) return literal(value.literal);
+      if (typeof (value.variable ?? value.var) === 'string') return literal(variables?.[value.variable ?? value.var]);
+      if (typeof value.expr === 'string') return '(' + value.expr.replace(/^=/, '') + ')';
+      if (Object.hasOwn(value, 'item')) return literal(itemRow?.[value.item]);
+      if (value.op && value.left !== undefined && value.right !== undefined) {
+        const op = value.op === '==' ? '===' : value.op === '!=' ? '!==' : value.op;
+        return '(' + encode(value.left) + ' ' + op + ' ' + encode(value.right) + ')';
+      }
+      if (value.fn && Array.isArray(value.args)) return value.fn + '(' + value.args.map(encode).join(',') + ')';
+      if (value.widget) {
+        const reference = value.widget?.ref ?? value.widget;
+        const accessor = value.prop || value.accessor;
+        if (typeof reference !== 'string') return '""';
+        if (['checked', 'selected', 'disabled', 'state'].includes(accessor)) return literal(getWidgetState?.(reference, accessor));
+        if (['x', 'y', 'left', 'right', 'top', 'bottom', 'width', 'height'].includes(accessor)) return literal(getWidgetRect?.(reference)?.[accessor]);
+        return literal(getWidgetText?.(reference));
+      }
+      return '""';
+    };
+    return evaluatePrototypeExpression('=' + encode(expression), args);
+  }
   const source = String(expression).trim();
   if (!source.startsWith('=')) {
     let out = itemRow ? source.replace(/\$\{\s*item\.([a-zA-Z0-9_]+)\s*\}|\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g,
@@ -360,6 +391,99 @@ export function evaluatePrototypeExpression(expression, { variables, getWidgetTe
   }
 }
 
+
+// Recalculate declarations in both Studio runtime implementations.
+export function refreshRp1Bindings(runtime, document) {
+  const computed = document.computed || {};
+  for (const [name, config] of Object.entries(computed)) {
+    const definition = config?.compute ?? config;
+    if (!['count', 'sum'].includes(definition?.op)) {
+      runtime.variables[name] = runtime.evaluateExpression(definition);
+      continue;
+    }
+    const target = definition.dataset ?? definition.target ?? definition.repeater;
+    const node = runtime.findNodeInPage(runtime.currentPageId, target);
+    const dataset = Object.hasOwn(runtime.datasets, target) ? target : node?.dataset || node?.source || node?.id;
+    const rows = definition.scope === 'dataset' ? runtime.datasets[dataset] || [] : runtime.getPagedDatasetRows(dataset);
+    const field = definition.field ?? definition.expr;
+    const value = typeof field === 'string' && !field.startsWith('=') ? { item: field } : field;
+    runtime.variables[name] = rows.reduce((sum, row) => {
+      if (definition.where != null && !runtime.evaluateExpression(definition.where, row)) return sum;
+      return sum + (definition.op === 'count' ? 1 : Number(runtime.evaluateExpression(value, row)));
+    }, 0);
+  }
+
+  const pageId = runtime.currentPageId;
+  const current = document.pages?.find(page => page.id === pageId);
+  const bindings = [...Object.values(document.views || {}), ...Object.values(current?.views || {}), ...(current?.bindings || [])];
+  for (const view of bindings) {
+    if (view.page && view.page !== pageId) continue;
+    const dataset = view.source || view.dataset;
+    const selector = (view.selector || view.variable || ('selected_' + dataset)).replace(/^\$/, '');
+    const chosen = (runtime.datasets[dataset] || []).find(row => row[view.key || 'id'] === runtime.variables[selector]);
+    if (!chosen) continue;
+    for (const [target, field] of Object.entries(view.fields || view.targets || {})) {
+      if (runtime.findNodeInPage(pageId, target)) {
+        runtime.textOverrides[runtime.targetKey(target)] = String(chosen[field] ?? '');
+      }
+    }
+  }
+}
+
+export function executeRp1DataAction(runtime, action, executed, rowContext) {
+  const repeater = runtime.findNodeInPage(runtime.currentPageId, action.target);
+  const dataset = typeof repeater?.dataset === 'string' ? repeater.dataset : repeater?.source || repeater?.id;
+  if (repeater?.type !== 'repeater' || !Object.hasOwn(runtime.datasets, dataset)) {
+    throw Object.assign(new Error('未找到中继器数据源: ' + action.target), { code: 'E_RUNTIME_NODE_NOT_FOUND', target: action.target });
+  }
+  const rows = runtime.datasets[dataset];
+  const matches = row => Boolean(runtime.evaluateExpression(action.where, row));
+  switch (action.type) {
+    case 'data-add':
+      for (const record of action.rows) {
+        const row = Object.fromEntries(Object.entries(record).map(([key, value]) => [key, runtime.evaluateExpression(value, rowContext)]));
+        rows.push({ ...row, _rowId: row[repeater.key || 'id'] ?? ('row_' + (rows.length + 1)) });
+      }
+      break;
+    case 'data-update':
+      for (const row of rows.filter(matches)) {
+        for (const [key, value] of Object.entries(action.set)) row[key] = runtime.evaluateExpression(value, row);
+      }
+      break;
+    case 'data-delete': {
+      const remaining = rows.filter(row => {
+        if (!matches(row)) return true;
+        runtime.selectedRows[dataset]?.delete(row._rowId);
+        runtime.selectedRows[dataset]?.delete(row.id);
+        return false;
+      });
+      runtime.datasets[dataset] = remaining;
+      break;
+    }
+    case 'data-filter':
+      runtime.datasetFilters[dataset] = { where: action.where, name: action.name };
+      runtime.datasetPages[dataset] = 1;
+      break;
+    case 'data-clear-filter':
+      if (!action.name || runtime.datasetFilters[dataset]?.name === action.name) {
+        runtime.datasetFilters[dataset] = null;
+        runtime.datasetPages[dataset] = 1;
+      }
+      break;
+    case 'data-sort':
+      runtime.datasetSorts[dataset] = { field: action.column, order: action.direction === 'descending' ? 'desc' : 'asc' };
+      break;
+    case 'data-clear-sort':
+      runtime.datasetSorts[dataset] = null;
+      break;
+    case 'data-page':
+      runtime._executeDatasetAction({ op: 'page', dataset, page: action.page }, [], rowContext);
+      break;
+  }
+  runtime._refreshDatasetBoundText();
+  executed.push({ action: action.type, target: action.target, dataset });
+}
+
 export function executePrototypeInteraction(runtime, spec, executed, { declaredVariables, rowContext } = {}) {
   const evaluate = expr => runtime.evaluateExpression(expr, rowContext);
   const navigate = page => {
@@ -381,6 +505,7 @@ export function executePrototypeInteraction(runtime, spec, executed, { declaredV
       });
     }
     runtime.variables[name] = value;
+    runtime._refreshRp1Bindings?.();
     executed.push({ action: 'set-var', name, value });
   };
   const setVisibility = (kind, targetId) => {
@@ -497,6 +622,7 @@ export function executePrototypeInteraction(runtime, spec, executed, { declaredV
     if (type === 'move' && typeof runtime.moveWidget === 'function') {
       runtime.moveWidget(action.target, action, executed, { evaluate, rowContext });
     }
+    if (type?.startsWith('data-')) executeRp1DataAction(runtime, action, executed, rowContext);
     if (action.datasetAction || type?.startsWith('dataset-') || type?.startsWith('repeater-')) {
       runtime._executeDatasetAction(action.datasetAction || action, executed, rowContext);
     }
