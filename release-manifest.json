@@ -1,5 +1,5 @@
 {
-  "version": "0.4.0",
+  "version": "0.4.1",
   "commands": 40,
   "mcpTools": 30,
   "files": {
@@ -233,8 +233,8 @@
     "examples/studio/transfer/learning.json": "77d544b90c4b093ff7652844d8a130feb3856d42f2ae2bda7258b817c42724ec",
     "examples/studio/transfer/museum.json": "7b32c0df5c118c293f980acadbb21ffe7426af3a5e956ef1cce9590232c9dd78",
     "examples/table.json": "73180f1014a4a2ab6a95d5e7dae5c41d7a113f82e686c2eb4837ee8651287564",
-    "package-lock.json": "91f800defbb3dd12dc4567685132dc1cad72e570d6ed013142011405fcc7b6b2",
-    "package.json": "ce13717562b24591d7b142bb93a4d99dc7d59cfd5584c193ed93cfc10997aed2",
+    "package-lock.json": "9990440f5f53223e5ff59011e1472c0b93b086831224a1db95ab29d81ec59f0e",
+    "package.json": "e1d44485ff3f8e70f3523d5243ff587c9203c3ce43092ad6fe3dac460c1d55bc",
     "references/adaptive-views.md": "af968ecb764dff826e3bd7b2b3cf102051bef958de5e3878f3c33193fa2467de",
     "references/authoring-workflow.md": "cf76f55d87264849a6009319f46781acc0b18e92118f2baec7fbe5c6e7ce957f",
     "references/axvg-format.md": "0567431bd8ae8cf84ed15ccc152366d979e4c51bdbe287ef1e6f3c2ce0569370",
@@ -471,7 +471,7 @@
     "test/authoring-workflow-check.mjs": "6a0c40fc5fe9bbd25ece96a996ca67bd471a97bf99b6ad32cbb427406ca77397",
     "test/baseline-shas.json": "eab80d96edf6128481914f0d472eb43e26d06e1b50986fb9774f931dcb9889b8",
     "test/blank-synthesizer-check.mjs": "3b9f0bf969a6f0d9c12e759543a50dbb6c08d307f5a448c32bfd3b3d096c06a1",
-    "test/browser-core-check.mjs": "3eba53475404f4d9d824d6d8cd1fddf1e60446006428c25147c85c1b6dc06aab",
+    "test/browser-core-check.mjs": "2526f1850eeba0d8621005a61314e47ea1a325281112496d7b65a2f8bc985346",
     "test/build-library-check.mjs": "87b7e4b27daeed84c5022a1ad5abb232173e4635cd32f5bd91e7d1a1e7046bb8",
     "test/canvas-boost-20261031-check.mjs": "5ee3719bd815ac79e3f67910c0d0e07f61f6711a5aa12dfb0ca38638de231fb8",
     "test/canvas-fix-g7-check.mjs": "8771dbbb102b7c9f932b04b9da6c6218b7fe1a41ef774b888b5160392c45b9b3",
@@ -484,9 +484,9 @@
     "test/creation-quality-check.mjs": "33d32f5dab92a7fc71742efa87e21051233e357cabc59c77a3d93e3b70712991",
     "test/creation-quality-check.py": "0d0a6cd715acdf00e9d1ca2b207d466f2c5023e8933ab3995ea57c80736b2fa7",
     "test/custom-styles-check.mjs": "8d04aa1b80cd1ce5b5cc322b0e74138566fc4016daa7d65d8af3ffb9e0f0f9ae",
-    "test/diff-rp-check.mjs": "1d1aef4d9969b8432d54b57da51ec9cf1bde478e9ad7e9506b9ba69b8a821b32",
+    "test/diff-rp-check.mjs": "a65589eee8d96e2957687529b4b329262155096609747db0a09cad901c3419ad",
     "test/direct-image-check.mjs": "fb0ccbfe01ad456fd913c0c1e2537b2d7740f35a74990e017b55596c4572d5c4",
-    "test/downgrade-rp-check.mjs": "b02d714c68687eaec27909083d49258279106132c42757279f25d9f0affb2724",
+    "test/downgrade-rp-check.mjs": "232e206ae64658995301eb63769b46133f8b5c0f634ce7e3fe8235b4667d9a36",
     "test/fixture-summary.mjs": "8df5331e83897a4d64254a16bb2dd84c3838c76c5344de040da4d8c752f2ba5f",
     "test/fixtures/fonts/LICENSE.txt": "50f5b20bd115c783cf249ba953fe3db19d997ece72a1da6ae569aa242fa78d9c",
     "test/fixtures/fonts/studio-test-sans.ttf": "6af0d167168c3a39dc6a15d42751e6e865448dab77cc6ba7db8caaa093f0149b",
@@ -532,7 +532,7 @@
     "test/payload-unknown-tag-check.mjs": "c72eb626382b273809550f3227f7980de554ad8b6d9f66fbaee9dc1218a40eb5",
     "test/proto-v21-check.mjs": "186b9002a3920156c6ba3c2a82ffd817e1b236542139c5f30396f8da80b868d6",
     "test/regression.mjs": "cadb84673ed6e603abeac0f48708f79532fdf4530acc94ea860d17eef4557bc7",
-    "test/repair-rp-check.mjs": "c8d7ed9338f909cdfa1a6cf6317119f8f5f4a62e3c2b7b2e2f5adb14fd62ea1c",
+    "test/repair-rp-check.mjs": "c638c2289bfb3f1a94000038dc1acb339d2783fdc563f64bde8a3674455524ef",
     "test/report-mcp-check.mjs": "220c9da17ce520d610f2f3a73bd63358eba56527a5ef73053876f1c4d9cf15f6",
     "test/report-regressions-check.py": "98dc833f29d8b710a552c9e255e687ed94ad236b549544fcdad8a21817c7226a",
     "test/report-round3-check.mjs": "57301eb608436f27b96ac4bc1984fb94e5a93d8fe7d01f94d550f6cc7197ddec",
@@ -643,6 +643,6 @@
     "tools/probe-gradient-fill.mjs": "3efce2b90bd949ea8933ab32e7da20625d4fe7a73311f76e16abf0f33772819b",
     "tools/rp-inspector/index.html": "1e37f4b0195f6fa46a7250ca053a1f6a2206fe50196ce81f7364f73675ca4428",
     "tools/rp9_place.py": "3d607a615908ae8573051d751efcf15473b363701c27511a51c3282ec8bdd521",
-    "tools/sync-inspector.mjs": "625240b713e18a4018c2c7955aa167b4bdaf8fe8ef97539636b57e5546e52f0f"
+    "tools/sync-inspector.mjs": "dca23937696b74d87d9cfd18aa24c3a3d0855fa46119a223dea39359fd674132"
   }
 }

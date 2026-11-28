@@ -11,14 +11,14 @@ const START_MARK = '<script id="rp-worker-core" type="text/plain">';
 const END_MARK = '</script>';
 
 export function syncInspectorHtml({ check = false } = {}) {
-  const core = readFileSync(CORE_PATH, 'utf8').trimEnd();
+  const core = readFileSync(CORE_PATH, 'utf8').replace(/\r\n/g, '\n').trimEnd();
   const html = readFileSync(HTML_PATH, 'utf8');
   const startIdx = html.indexOf(START_MARK);
   if (startIdx < 0) throw new Error(`Missing ${START_MARK} in tools/rp-inspector/index.html`);
   const bodyStart = startIdx + START_MARK.length;
   const endIdx = html.indexOf(END_MARK, bodyStart);
   if (endIdx < 0) throw new Error('Missing closing </script> after rp-worker-core');
-  const current = html.slice(bodyStart, endIdx).replace(/^\r?\n|\r?\n$/g, '');
+  const current = html.slice(bodyStart, endIdx).replace(/\r\n/g, '\n').replace(/^\n|\n$/g, '');
   if (check) {
     if (current !== core) {
       throw new Error('tools/rp-inspector/index.html is out of sync with scripts/rp-browser-core.mjs; run node tools/sync-inspector.mjs');

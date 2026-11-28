@@ -18,10 +18,11 @@ import { setWidgetText } from '../scripts/set-widget-text.mjs';
 import { adaptNodesForVersion } from '../scripts/version-adapt.mjs';
 import { RP11_ONLY_DOA_CODES, RP11_ONLY_EVENTS } from '../scripts/version-fields.mjs';
 import { lintVersionKeys } from '../scripts/version-lint.mjs';
+import { installRoot } from '../scripts/version.mjs';
 
 const REPO = fileURLToPath(new URL('..', import.meta.url));
 const IPHONE_RP11 = '/Users/lilzee/axure-exp/outputs/dimensional-strike-20261127/review-remediation/exercise2-iphone-shell-repaired.rp';
-const TRAINING_RP11 = '/Applications/Axure RP 11.app/Contents/Resources/DefaultSettings/Training/Prototyping Basics.rp';
+const TRAINING_RP11 = join(installRoot(11), 'Training', 'Prototyping Basics.rp');
 
 function rp9To11(buf) {
   const b11 = synthesizeBlankProject({ version: 11, pageName: 'P1' });

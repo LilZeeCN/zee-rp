@@ -21,20 +21,47 @@ import {
 import { readRp } from '../scripts/rp-read.mjs';
 import { setWidgetText } from '../scripts/set-widget-text.mjs';
 import { lintVersionKeys } from '../scripts/version-lint.mjs';
+import { installRoot } from '../scripts/version.mjs';
 import { findChromeExecutable, launchChrome } from '../studio/cdp.mjs';
 import { syncInspectorHtml } from '../tools/sync-inspector.mjs';
 
 const corePath = fileURLToPath(new URL('../scripts/rp-browser-core.mjs', import.meta.url));
 const inspectorPath = fileURLToPath(new URL('../tools/rp-inspector/index.html', import.meta.url));
-const TRAINING_RP11 = '/Applications/Axure RP 11.app/Contents/Resources/DefaultSettings/Training/Prototyping Basics.rp';
+const TRAINING_RP11 = join(installRoot(11), 'Training', 'Prototyping Basics.rp');
+const HAS_RP9_PANEL_TPL = existsSync(join(installRoot(9), 'Training', 'RP9 Tour.rp'));
+
+const TEMPLATE_FREE_MULTI_RP1 = [
+  'rp/1 target=9 name="BrowserCoreFallback"',
+  'page #home name="首页"',
+  '  box #root1 [360x640] layout=column gap=10 padding=16',
+  '    label #h_title [300x32] "总览看板"',
+  '    label #h_sub1 [300x24] "指标说明卡片一"',
+  '    label #h_sub2 [300x24] "指标说明卡片二"',
+  '    label #h_sub3 [300x24] "指标说明卡片三"',
+  '    button #h_btn [180x40] "前往详情" goto="details"',
+  'page #details name="详情页"',
+  '  box #root2 [360x640] layout=column gap=10 padding=16',
+  '    label #d_title [300x32] "明细信息"',
+  '    label #d_row1 [300x24] "明细行文本一"',
+  '    label #d_row2 [300x24] "明细行文本二"',
+  '    label #d_row3 [300x24] "明细行文本三"',
+  '    button #d_btn [180x40] "前往设置" goto="settings"',
+  'page #settings name="设置页"',
+  '  box #root3 [360x640] layout=column gap=10 padding=16',
+  '    label #s_title [300x32] "系统设置"',
+  '    label #s_row1 [300x24] "配置项说明一"',
+  '    label #s_row2 [300x24] "配置项说明二"',
+  '    label #s_row3 [300x24] "配置项说明三"',
+  '    button #s_btn [180x40] "返回首页" goto="home"',
+].join('\n');
 
 test('rp-browser-core: 零 node:* 依赖，嵌入页面逐字同步，SHA-256 与同构解析/修复/降级/元件库一致', async () => {
-  const coreText = readFileSync(corePath, 'utf8');
+  const coreText = readFileSync(corePath, 'utf8').replace(/\r\n/g, '\n');
   const codeOnly = coreText.replace(/\/\/.*$/gm, '');
   assert.doesNotMatch(codeOnly, /from\s+['"]node:|require\s*\(\s*['"]node:/);
   assert.doesNotMatch(codeOnly, /\bBuffer\b/);
   assert.equal(syncInspectorHtml({ check: true }).synced, true);
-  const htmlText = readFileSync(inspectorPath, 'utf8');
+  const htmlText = readFileSync(inspectorPath, 'utf8').replace(/\r\n/g, '\n');
   const embedded = htmlText.match(/<script id="rp-worker-core" type="text\/plain">\n([\s\S]*?)\n<\/script>/)?.[1];
   assert.equal(embedded, coreText.trimEnd(), 'tools/rp-inspector/index.html 嵌入的核心必须与 scripts/rp-browser-core.mjs 一致');
 
@@ -81,8 +108,12 @@ test('rp-inspector: 无头 Chrome file:// 0 网络请求，全能 Worker 透视/
   let page = null;
   try {
     const blank = synthesizeBlankProject({ version: 9 });
-    const gen = generatePrototype({ recipe: 'mobile-cards', output: join(work, 'cards.rp'), cwd: work });
-    assert.equal(gen.status, 'completed');
+    const gen = generatePrototype(
+      HAS_RP9_PANEL_TPL
+        ? { recipe: 'mobile-cards', output: join(work, 'cards.rp'), cwd: work }
+        : { rp1: TEMPLATE_FREE_MULTI_RP1, output: join(work, 'cards.rp'), cwd: work },
+    );
+    assert.equal(gen.status, 'completed', JSON.stringify(gen.diagnostics));
     const cardsBytes = readFileSync(gen.output);
     const cardsModPath = join(work, 'cards-v2.rp');
     const firstNamed = readRp(cardsBytes).pages[0].widgets.find(w => w.name && w.text);

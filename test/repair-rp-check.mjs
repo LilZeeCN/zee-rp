@@ -11,9 +11,11 @@ import { generatePrototype } from '../scripts/mcp-tools.mjs';
 import { nativeCheck } from '../scripts/native-check.mjs';
 import { readManifest, readRecords } from '../scripts/rp-records.mjs';
 import { formatRepairReport, repairRp } from '../scripts/repair-rp.mjs';
+import { installRoot } from '../scripts/version.mjs';
 
 const sha256 = buf => createHash('sha256').update(buf).digest('hex');
-const TRAINING_RP11 = '/Applications/Axure RP 11.app/Contents/Resources/DefaultSettings/Training/Prototyping Basics.rp';
+const TRAINING_RP11 = join(installRoot(11), 'Training', 'Prototyping Basics.rp');
+const HAS_RP9_PANEL_TPL = existsSync(join(installRoot(9), 'Training', 'RP9 Tour.rp'));
 
 function makeFixture(dir, version) {
   const rpPath = join(dir, `fixture-rp${version}.rp`);
@@ -26,6 +28,18 @@ function makeFixture(dir, version) {
     writeFileSync(rpPath, step3);
     return { rpPath, buf: step3, expectPanels: existsSync(TRAINING_RP11) };
   }
+  const detailsBlock = HAS_RP9_PANEL_TPL
+    ? [
+        '    panel #dp [300x120]',
+        '      state #s1',
+        '        label #s1_txt [200x30] "状态一"',
+        '      state #s2',
+        '        label #s2_txt [200x30] "状态二"',
+      ]
+    : [
+        '    label #s1_txt [200x30] "无模板兜底状态文本一"',
+        '    button #s2_btn [180x40] "切换状态"',
+      ];
   const res = generatePrototype({
     rp1: [
       `rp/1 target=9 name="RepairFixtureV${version}"`,
@@ -37,11 +51,7 @@ function makeFixture(dir, version) {
       'page #details name="详情页"',
       '  box #root2 [360x400] layout=column gap=12 padding=16',
       '    label #dtitle [300x32] "详情标题"',
-      '    panel #dp [300x120]',
-      '      state #s1',
-      '        label #s1_txt [200x30] "状态一"',
-      '      state #s2',
-      '        label #s2_txt [200x30] "状态二"',
+      ...detailsBlock,
       'page #settings name="设置页"',
       '  box #root3 [360x400] layout=column gap=12 padding=16',
       '    label #stitle [300x32] "设置标题"',
@@ -51,7 +61,7 @@ function makeFixture(dir, version) {
     cwd: dir,
   });
   assert.equal(res.status, 'completed', JSON.stringify(res.diagnostics));
-  return { rpPath: res.output, buf: readFileSync(res.output), expectPanels: true };
+  return { rpPath: res.output, buf: readFileSync(res.output), expectPanels: HAS_RP9_PANEL_TPL };
 }
 
 test('repairRp salvages multi-page + dynamic panel prototypes across 4 corruption modes on RP9 & RP11', async t => {
