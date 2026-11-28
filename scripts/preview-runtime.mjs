@@ -715,7 +715,7 @@ export async function captureOfficialHtmlScreenshot({
     return outPng;
   } finally {
     try { await browser?.close(); } catch {}
-    try { server.close(); server.closeAllConnections?.(); } catch {}
+    try { server.close(); server.closeAllConnections?.(); server.unref?.(); } catch {}
   }
 }
 
@@ -878,6 +878,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
   const server = startStaticServer(activeHtmlDir, entryHtmlFile);
   let browser = null;
   let page = null;
+  let before = null;
   const history = [];
   const result = {
     status: 'completed',
@@ -938,28 +939,41 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       page = await browser.openPage(startUrl);
     }
 
+    const compact = Boolean(input.compact);
     const observe = () => page.evaluate(observeExpr);
+    const safeObserve = async () => {
+      try {
+        return await observe();
+      } catch (err) {
+        const msg = String(err?.message || err || '');
+        if (/Execution context was destroyed|Cannot find context|Frame was detached|Inspected target navigated|detached|navigat/i.test(msg)) {
+          return { ready: false, animating: true, navigating: true, widgets: [], variables: {}, errors: [] };
+        }
+        throw err;
+      }
+    };
     const waitForRuntime = (expectedPage = null) => page.waitForFunction(`(() => {
       const r = ${observeExpr}, expected = ${JSON.stringify(expectedPage)};
       return Boolean(r && r.ready && (!expected || r.page === expected));
     })()`, { timeoutMs, pollMs: 50 });
     const settle = async (waitMs = Math.min(timeoutMs, 2500)) => {
       const deadline = Date.now() + waitMs;
+      let latest = { ready: false, animating: true, widgets: [], variables: {}, errors: [] };
       while (Date.now() < deadline) {
-        const obs = await observe();
+        const obs = await safeObserve();
+        latest = obs;
         if (obs.ready && !obs.animating) return obs;
         await new Promise(r => setTimeout(r, 40));
       }
-      return observe();
+      return await safeObserve();
     };
 
     const captureInitial = wantStoryboard
       ? () => captureFramedScreenshot(page, { frame: frameMode, activeEngine, canvasW, canvasH, vp })
       : null;
-    let before;
     let initialKey = null;
     if (activeEngine === 'official') {
-      const initial = await captureStableAxureInitial(observe, captureInitial, timeoutMs);
+      const initial = await captureStableAxureInitial(safeObserve, captureInitial, timeoutMs);
       before = initial.observation;
       initialKey = initialStateKey(before);
       if (initial.png) storyboardFrames.push({ label: '#0 Initial', png: initial.png, failed: false });
@@ -969,10 +983,20 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       if (captureInitial) storyboardFrames.push({ label: '#0 Initial', png: await captureInitial(), failed: false });
     }
     result.verification.browserLoaded = true;
-    result.initial = before;
+    result.initial = compact
+      ? {
+          page: before.page,
+          url: before.url,
+          variables: before.variables,
+          widgetCount: before.widgets?.length ?? 0,
+          errors: before.errors ?? [],
+        }
+      : before;
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
+      const entry = { index: i, action: step.action, target: step.target ?? null, status: 'running' };
+      history.push(entry);
       if (step.action !== 'expect') initialKey = null;
       const checkInitialState = current => {
         if (initialKey !== null && initialStateKey(current) !== initialKey) {
@@ -989,12 +1013,11 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
           if (!direct) throw Object.assign(err, { stepIndex: i });
         }
       }
+      if (symbol?.id) entry.target = symbol.id;
       const allowHidden = step.action === 'expect' && step.expect?.visible === false;
       let { candidates, widget } = step.target
         ? findWidgetMatch(before, symbol, step.target, { allowHidden, rowIndex: step.rowIndex ?? 0 })
         : { candidates: [], widget: null };
-      const entry = { index: i, action: step.action, target: symbol?.id ?? step.target ?? null, status: 'running' };
-      history.push(entry);
       if (step.target && step.rowIndex === undefined && candidates.length > 1) {
         throw Object.assign(new Error(`目标 "${step.target}" 在预览中匹配到 ${candidates.length} 个实例，请指定 rowIndex。`), { code: 'E_PREVIEW_AMBIGUOUS', stepIndex: i });
       }
@@ -1121,7 +1144,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       let current = await settle();
       let failures = [];
       do {
-        current = await observe();
+        current = await safeObserve();
         if (!current.ready || current.animating) {
           await new Promise(r => setTimeout(r, 50));
           continue;
@@ -1136,7 +1159,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       } while (Date.now() < deadline);
 
       if (!current.ready || current.animating) {
-        current = await observe();
+        current = await settle();
       }
       checkInitialState(current);
       const finalMatch = step.target
@@ -1193,14 +1216,36 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
     result.passed = history.filter(s => s.status === 'passed').length;
     const index = error.stepIndex ?? history.at(-1)?.index ?? null;
     const step = index !== null ? steps[index] : null;
-    if (history.at(-1)?.status === 'running') history.at(-1).status = 'failed';
-    const observed = error.actual;
+    const failedEntry = (index !== null ? history.find(h => h.index === index) : null) ?? history.at(-1);
+    if (failedEntry && failedEntry.status === 'running') {
+      failedEntry.status = 'failed';
+      failedEntry.code = error.code ?? 'E_VERIFY_BROWSER';
+      failedEntry.error = error.message;
+    } else if (failedEntry) {
+      failedEntry.code ??= error.code ?? 'E_VERIFY_BROWSER';
+      failedEntry.error ??= error.message;
+    }
+    const observed = error.actual ?? (before?.widgets ? before : null);
     const errCanvas = map?.pages?.[0]?.canvas;
     const canvasW = Array.isArray(errCanvas) ? Number(errCanvas[0]) : errCanvas?.w;
     const canvasH = Array.isArray(errCanvas) ? Number(errCanvas[1]) : errCanvas?.h;
-    const coordFail = (history.at(-1)?.failures ?? []).find(f => ['x', 'left', 'right'].includes(f.field));
+    const coordFail = (failedEntry?.failures ?? []).find(f => ['x', 'left', 'right'].includes(f.field));
     const centerShift = canvasW && vp.width > canvasW ? Math.round((vp.width - canvasW) / 2) : 0;
     const isCenterHint = Boolean(coordFail && centerShift && Math.abs((Number(coordFail.actual) - Number(coordFail.expected)) - centerShift) <= 3);
+    const targetNameList = observed?.widgets?.filter(w => w.visible && w.name).map(w => w.name) ?? [];
+    const symbolIdList = (map?.symbols ?? [])
+      .filter(s => !observed?.page || !s.page || s.page === observed.page)
+      .map(s => s.id)
+      .filter(Boolean);
+    const availableTargets = [...new Set([...symbolIdList, ...targetNameList])].slice(0, 15);
+    result.failedStep = {
+      index,
+      action: step?.action ?? null,
+      target: failedEntry?.target ?? step?.target ?? null,
+      code: error.code ?? 'E_VERIFY_BROWSER',
+      message: error.message,
+      ...(failedEntry?.failures?.length ? { failures: failedEntry.failures } : {}),
+    };
     result.diagnostics = [{
       code: error.code ?? 'E_VERIFY_BROWSER',
       message: error.message,
@@ -1208,7 +1253,8 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       target: step?.target ?? null,
       ...(error.symbol?.context?.line ? { sourceSpan: { line: error.symbol.context.line, column: error.symbol.context.column, snippet: error.symbol.context.snippet } } : {}),
       expected: step?.expect ?? null,
-      failures: history.at(-1)?.failures ?? null,
+      failures: failedEntry?.failures ?? null,
+      ...(availableTargets.length ? { availableTargets } : {}),
       actual: observed ? {
         page: observed.page,
         variables: observed.variables,
@@ -1219,7 +1265,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       } : null,
       nextAction: error.code === 'E_PREVIEW_OUTSIDE_VIEWPORT' ? '增大 viewport，让目标中心进入浏览器可见范围。' : isCenterHint
         ? `检测到 Axure Web 页面在 ${vp.width}px 视口中居中产生了 +${centerShift}px 水平偏移；请传 viewport: { width: ${canvasW}, height: ${Math.max(320, Math.round(canvasH ?? 700))}, dpr: 1 } 以 1:1 对齐画布坐标。`
-        : '对照 actual 中的真实面板状态、坐标与变量，调整 RP/1 交互或 bounds/expression 后重新生成并验证。',
+        : '对照 actual 与 availableTargets 中的真实目标、面板状态、坐标与变量，调整 RP/1 交互或步骤目标后重新验证。',
     }];
   } finally {
     if (page && (screenshotPath || input.includeImage)) {
@@ -1258,8 +1304,22 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       }
     }
     try { await browser?.close(); } catch {}
-    try { server.close(); server.closeAllConnections?.(); } catch {}
+    try { server.close(); server.closeAllConnections?.(); server.unref?.(); } catch {}
     if (tempStageDir) rmSync(tempStageDir, { recursive: true, force: true });
+  }
+  if (result.status === 'failed') {
+    const { status, passed, total, failedStep, diagnostics, engine: eng, frame, evidence, ...rest } = result;
+    return {
+      status,
+      passed,
+      total,
+      ...(failedStep ? { failedStep } : {}),
+      ...(diagnostics ? { diagnostics } : {}),
+      engine: eng,
+      frame,
+      evidence,
+      ...rest,
+    };
   }
   return result;
 }

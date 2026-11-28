@@ -62,7 +62,7 @@ test('parallel official replays capture the initialized first frame and guard le
     const base = { html: dir, engine: 'official', frame: 'artboard', viewport: { width: 320, height: 240, dpr: 1 } };
     const steps = [{ action: 'expect', expect: { text: { word: 'abandon' }, visible: { answer: false } } }];
     const results = await Promise.all([1, 2].map(i => mcpToolMap.verify_prototype({
-      ...base, steps, storyboard: join(dir, `first-${i}.png`), includeStoryboard: true,
+      ...base, compact: false, steps, storyboard: join(dir, `first-${i}.png`), includeStoryboard: true,
     })));
     for (const result of results) {
       assert.equal(result.status, 'completed', JSON.stringify(result.diagnostics));
@@ -195,8 +195,8 @@ test('Studio and RP9 preserve plain and rich text alignment', { skip: chromeSkip
     await checkBrowserAlignment(official, variants.map(node => nativeNames[node.id]), 'data-label');
     const sharedSteps = [{ action: 'expect', expect: { visible: { answer: false }, text: { alignment_0: 'Plain text', alignment_1: 'Two runs' } } }];
     const [provided, generated] = await Promise.all([
-      mcpToolMap.verify_prototype({ rp, html: exported.output, engine: 'official', frame: 'artboard', steps: sharedSteps, includeStoryboard: true }),
-      mcpToolMap.verify_prototype({ rp, cwd: dir, engine: 'official', frame: 'artboard', steps: sharedSteps, includeStoryboard: true }),
+      mcpToolMap.verify_prototype({ rp, html: exported.output, engine: 'official', frame: 'artboard', compact: false, steps: sharedSteps, includeStoryboard: true }),
+      mcpToolMap.verify_prototype({ rp, cwd: dir, engine: 'official', frame: 'artboard', compact: false, steps: sharedSteps, includeStoryboard: true }),
     ]);
     for (const [result, source] of [[provided, 'provided'], [generated, 'exported']]) {
       assert.equal(result.status, 'completed', JSON.stringify(result.diagnostics));

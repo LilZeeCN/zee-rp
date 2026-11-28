@@ -221,7 +221,7 @@ node scripts/proto.mjs build-rp --plan ./bundle/compile-plan.json --out ./anothe
 `enable/disable/focus` 仅接受原生 input。普通按钮要拦截提交，请使用条件 Case 守卫或显隐状态。
 `next` 和 `previous` 支持 `loop:true` 首尾循环、`repeatInterval` 定时和可选的 `repeatSkipFirst`。配置了间隔时，默认等一整个间隔再切换。用 `mode:"current"` 停止轮播并保持当前卡片，重新触发定时动作即可恢复。切换支持 `enterAnimation`、`exitAnimation` 和对应的 `enterDuration`、`exitDuration`。动画可用 `none`、`fade`、`slideLeft`、`slideRight`、`slideUp`、`slideDown`，时长以整数毫秒为单位。
 
-表达式还支持读取同页任意元件几何（`@w.x` / `@w.y` / `@w.left` / `@w.right` / `@w.top` / `@w.bottom` / `@w.width` / `@w.height`，数值型）、读取动态面板当前状态名（`@panel.state`，文本型；可在 `onStateChange` 或文本绑定中使用并自动刷新）以及矩形重叠判断 `isOver(@a, @b)` / `isNotOver(@a, @b)`（布尔型，编译为原生 `IsOver(GetWidgetRectangles(a), GetWidgetRectangles(b))`）。完整“同步轮播 + 有界滑块拼图 ±2px 自动吸附”单源示例见 [carousel-slider-captcha.rp1](../examples/rp-language/carousel-slider-captcha.rp1)。
+表达式还支持读取同页任意元件几何（`@w.x` / `@w.y` / `@w.left` / `@w.right` / `@w.top` / `@w.bottom` / `@w.width` / `@w.height`，数值型——**均返回页面绝对坐标，而非父容器相对坐标**）、读取动态面板当前状态名（`@panel.state`，文本型；可在 `onStateChange` 或文本绑定中使用并自动刷新）以及矩形重叠判断 `isOver(@a, @b)` / `isNotOver(@a, @b)`（布尔型，编译为原生 `IsOver(GetWidgetRectangles(a), GetWidgetRectangles(b))`）。完整“同步轮播 + 有界滑块拼图 ±2px 自动吸附”单源示例见 [carousel-slider-captcha.rp1](../examples/rp-language/carousel-slider-captcha.rp1)。
 
 原生 `input` 的 `maxLength` 为非负整数，浏览器按 UTF-16 代码单元限制手动键入。原生动作样例可直接用 [native-gestures.rp1](../examples/rp-language/native-gestures.rp1) 与 [carousel-slider-captcha.rp1](../examples/rp-language/carousel-slider-captcha.rp1) 生成 .rp。参考运行器用 `{"advanceMs":450}` 推进虚拟时钟，拖动步骤用 `{"target":"horizontal","event":"drag","dx":90,"dy":40}` 表示从开始位置累计的拖动量。参考运行器报告状态与位移，视觉运动用 Axure 生成的播放器或 `verify_prototype` 验证。
 
@@ -433,7 +433,7 @@ CLI `proto.mjs check` 的成功与失败诊断均为 stdout 上的单个 JSON；
         move thumb locationBeforeDrag duration=0
         set status = "验证失败"
   ```
-  动作短语句支持 `set <widgetId> = expr`、`set $var = expr`、`setPanelState <panelId> to <state>|next|previous|current`、`move <widgetId> to x=... y=... | drag-x within <container> | delta x=... y=... | locationBeforeDrag | withThis`、`show|hide|toggle|enable|disable|focus <id>`、`wait 300`、`goto <page_id>`。
+  动作短语句支持 `set <widgetId> = expr`、`set $var = expr`、`setPanelState <panelId> to <state>|next|previous|current`（同义简写 `panel <panelId> <state>|next|previous|current`）、`move <widgetId> to x=... y=... | drag-x within <container> | delta x=... y=... | locationBeforeDrag | withThis`、`show|hide|toggle|enable|disable|focus <id>`、`wait 300`、`goto <page_id>`。
 - **一等交互模式宏（`carousel` / `slider-captcha`）**：
   - `carousel #banner [400x160] slides=["s1","s2","s3"] interval=3000 indicator=true`：自动展开 `#banner_panel`（带各页状态的 `dynamic-panel`）、左右滑动切页与续播定时器、`#banner_indicator` 状态同步（`=@banner_panel.state`）及页面级 `+onLoad` 自动启动轮播；
   - `slider-captcha #captcha [360x240] targetX=200 tolerance=2`：自动展开背景框 `#captcha_scene`、缺口槽 `#captcha_target`、拼图块 `#captcha_piece`、轨道 `#captcha_track`、滑块 `#captcha_thumb` 与状态文本 `#captcha_status`（含 `BoundaryDirectionLiteral` 钳位、容差吸附与松手回位逻辑）。

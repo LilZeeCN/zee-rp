@@ -2964,6 +2964,7 @@ async function generateFromImageAsync(options = {}) {
         steps: options.verify,
         engine: options.verifyEngine || 'auto',
         cwd: options.cwd ?? options.projectDir,
+        compact: true,
         includeStoryboard: true,
         includeImage: false,
       }, {
@@ -3633,6 +3634,7 @@ export const sessionTools = [
             steps: verifySteps ?? result.verifySteps,
             viewport: verifyViewport,
             virtualClock,
+            compact: input.compact !== false,
             includeStoryboard,
           }, { runWorkflow, exportHtml: exportPrototype });
           const { mcpImages: verifyImgs, ...bvSummary } = bv;

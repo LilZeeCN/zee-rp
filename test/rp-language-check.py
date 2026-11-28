@@ -1135,6 +1135,41 @@ class LanguageContract(unittest.TestCase):
         self.assertEqual(lifted_loc["x"], "=@slot.x")
         self.assertEqual(lifted_loc["y"], 200)
 
+    def test_set_panel_state_shorthand_with_to_and_current(self):
+        from rp_dsl import dsl_to_spec
+        dsl = "\n".join([
+            'rp/1 target=9 name="PanelShorthand"',
+            'page #home name="首页"',
+            '  box #root [360x400] layout=column gap=12 padding=16',
+            '    panel #dp [320x120]',
+            '      state #s1',
+            '        label #l1 [200x28] "态一"',
+            '      state #s2',
+            '        label #l2 [200x28] "态二"',
+            '    button #b1 [140x40] "停止"',
+            '      +onClick:',
+            '        setPanelState dp to current',
+            '    button #b2 [140x40] "切态二"',
+            '      +onClick:',
+            '        setPanelState dp to s2',
+        ])
+        parsed = dsl_to_spec(dsl)
+        lowered, _ = compile_language(parsed)
+        self.assertEqual(len(lowered["pages"]), 1)
+        buttons = parsed["pages"][0]["root"]["children"]
+        self.assertEqual(buttons[1]["onClick"], [{"type": "set-panel-state", "target": "dp", "mode": "current"}])
+        self.assertEqual(buttons[2]["onClick"], [{"type": "set-panel-state", "target": "dp", "state": "s2"}])
+        actions = [
+            act
+            for ix in lowered["pages"][0].get("interactions", [])
+            for ev in ix.get("events", [])
+            for case in ev.get("cases", [])
+            for act in case.get("actions", [])
+        ]
+        self.assertEqual(len(actions), 2)
+        self.assertEqual(actions[0]["stateMode"], "current")
+        self.assertEqual(actions[1]["state"], "s2")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

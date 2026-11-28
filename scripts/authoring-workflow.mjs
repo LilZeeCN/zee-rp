@@ -560,9 +560,10 @@ export function authoringTools({ generate, sync, listTools }) {
         includeImage: { type: 'boolean' },
         storyboard: { type: 'string', minLength: 1 },
         includeStoryboard: { type: 'boolean' },
+        compact: { type: 'boolean', description: '默认 true：精简 initial 元件快照，避免大回包截断' },
         steps: { type: 'array', minItems: 0, maxItems: 120, items: compactVerifyStepSchema, description: '验证步骤（0–120）' },
       }, additionalProperties: false },
-      handler: input => verifyOfficialPreview(input, { runWorkflow, exportHtml: exportPrototype }), readOnly: false },
+      handler: input => verifyOfficialPreview({ compact: true, ...input }, { runWorkflow, exportHtml: exportPrototype }), readOnly: false },
     { name: 'preview_prototype', description: '在 ego lite 空间验证真实 Axure 预览（优先使用 export_prototype + verify_prototype 做无头 Chrome 验收）。',
       inputSchema: { type: 'object', properties: {
         source: { type: 'string' }, output: { type: 'string' },

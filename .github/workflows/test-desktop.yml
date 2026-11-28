@@ -40,5 +40,6 @@ jobs:
       - run: npm run test:downgrade-rp
       - run: npm run test:build-library
       - run: npm run test:mcp-budget
+      - run: npm run test:verify-observability
       - run: npm run test:language
       - run: npm run test:source-contract

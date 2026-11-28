@@ -530,9 +530,11 @@ def _parse_action_stmt(line, line_no):
         lhs = rest[:eq_idx].strip()
         rhs_raw = rest[eq_idx + 1:].strip()
         return {"set": {lhs: _norm_expr_val(rhs_raw, line_no)}}
-    if tok in ("panel", "set-panel-state"):
+    if tok in ("panel", "set-panel-state", "setPanelState"):
         t_tok, pos = _scan_token(s, pos, line_no)
         st_tok, pos = _scan_token(s, pos, line_no)
+        if st_tok == "to":
+            st_tok, pos = _scan_token(s, pos, line_no)
         if not t_tok or not st_tok:
             raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"{tok} requires target and state/mode at line {line_no}"), line_no, 1)
         act = {"type": "set-panel-state", "target": t_tok.lstrip("@#")}

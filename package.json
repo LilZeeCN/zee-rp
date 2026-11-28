@@ -99,6 +99,7 @@
     "test:downgrade-rp": "node --test test/downgrade-rp-check.mjs",
     "test:build-library": "node --test test/build-library-check.mjs",
     "test:template-free": "node --test test/template-free-synthesis-check.mjs",
+    "test:verify-observability": "node --test test/verify-observability-check.mjs",
     "test:mcp-budget": "node --test test/mcp-budget-check.mjs"
   },
   "optionalDependencies": {
@@ -740,7 +741,8 @@
     "test/build-library-check.mjs",
     "test/mcp-budget-check.mjs",
     "scripts/native-widget-synthesizer.mjs",
-    "test/template-free-synthesis-check.mjs"
+    "test/template-free-synthesis-check.mjs",
+    "test/verify-observability-check.mjs"
   ],
   "repository": {
     "type": "git",

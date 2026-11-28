@@ -256,6 +256,19 @@ export async function closeAssemblyDaemons() {
   await Promise.all(entries.map(([k, entry]) => stopDaemonEntry(k, entry)));
 }
 
+function setDaemonRef(child, active) {
+  if (!child) return;
+  const method = active ? 'ref' : 'unref';
+  try { child[method]?.(); } catch {}
+  for (const stream of [child.stdin, child.stdout, child.stderr]) {
+    if (!stream) continue;
+    try {
+      if (typeof stream[method] === 'function') stream[method]();
+      else stream._handle?.[method]?.();
+    } catch {}
+  }
+}
+
 async function getDaemon(installation, profile) {
   if (!exitHookRegistered) {
     exitHookRegistered = true;
@@ -279,7 +292,7 @@ async function getDaemon(installation, profile) {
   const child = spawn(runtime, [
     executable, installation.entry, profile.mvid, 'daemon', installation.resources, scratch,
   ], { env, cwd: home, stdio: ['pipe', 'pipe', 'pipe'] });
-  child.unref?.();
+  setDaemonRef(child, true);
 
   let buffer = '';
   let stderr = '';
@@ -301,9 +314,11 @@ async function getDaemon(installation, profile) {
           return;
         }
         entry.refreshIdle();
+        setDaemonRef(child, true);
         collected = [];
         const timer = setTimeout(() => {
           waiter = null;
+          setDaemonRef(child, false);
           void stopDaemonEntry(key, entry);
           rejectCall(code('E_ASSEMBLY_PROCESS', `Assembly daemon timeout in ${op}`));
         }, 120_000);
@@ -313,6 +328,7 @@ async function getDaemon(installation, profile) {
             if (row.kind === 'done') {
               clearTimeout(timer);
               waiter = null;
+              setDaemonRef(child, false);
               if (row.values[0] !== 'ok') {
                 rejectCall(code('E_ASSEMBLY_PROCESS', row.values[1] || `Daemon ${op} failed`));
               } else {
@@ -325,6 +341,7 @@ async function getDaemon(installation, profile) {
           onError(err) {
             clearTimeout(timer);
             waiter = null;
+            setDaemonRef(child, false);
             rejectCall(err);
           },
         };
@@ -339,6 +356,7 @@ async function getDaemon(installation, profile) {
 
   entry.ready = new Promise((resolveReady, rejectReady) => {
     const bootTimer = setTimeout(() => {
+      setDaemonRef(child, false);
       void stopDaemonEntry(key, entry);
       rejectReady(code('E_ASSEMBLY_PROCESS', `Assembly daemon boot timed out: ${stderr.trim()}`));
     }, 120_000);
@@ -351,6 +369,7 @@ async function getDaemon(installation, profile) {
           if (build !== profile.build || mvid !== profile.mvid || architecture !== profile.workerArch) {
             clearTimeout(bootTimer);
             waiter = null;
+            setDaemonRef(child, false);
             rejectReady(code('E_ASSEMBLY_IDENTITY', 'The native worker did not confirm the selected build and process architecture.'));
             return;
           }
@@ -359,17 +378,20 @@ async function getDaemon(installation, profile) {
           clearTimeout(bootTimer);
           waiter = null;
           if (!bootIdentity) {
+            setDaemonRef(child, false);
             rejectReady(code('E_ASSEMBLY_IDENTITY', 'Missing daemon identity banner.'));
             return;
           }
           identity = bootIdentity;
           entry.refreshIdle();
+          setDaemonRef(child, false);
           resolveReady(entry);
         }
       },
       onError(err) {
         clearTimeout(bootTimer);
         waiter = null;
+        setDaemonRef(child, false);
         rejectReady(err);
       },
     };
@@ -390,6 +412,7 @@ async function getDaemon(installation, profile) {
   });
   child.on('exit', (exitCode, signal) => {
     entry.closed = true;
+    setDaemonRef(child, false);
     if (entry.idleTimer) clearTimeout(entry.idleTimer);
     if (daemons.get(key) === entry) daemons.delete(key);
     try { rmSync(temp, { force: true, recursive: true }); } catch {}
