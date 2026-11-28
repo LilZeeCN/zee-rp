@@ -121,7 +121,7 @@ def language_schema():
             return numeric
         if name in {"visible", "hidden", "showValue", "darkIsland", "showHomeIndicator"}:
             return {"type": "boolean"}
-        if name in {"checked", "selected", "disabled", "multiple"}:
+        if name in {"checked", "selected", "disabled", "multiple", "multiline"}:
             return {"type": "boolean"}
         if name == "options":
             return array(nonempty, 1)

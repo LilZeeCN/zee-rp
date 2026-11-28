@@ -154,7 +154,7 @@ test('template-free: RP9 & RP11 DynamicPanel + Repeater + 5 native forms + full 
       assert.equal(repSummary.counts.widgets, 1);
       outFiles.repPath = repPath;
 
-      // 4. All 5 native form controls (TextBox + RadioButton + Checkbox + ComboBox + ListBox)
+      // 4. All 6 native form controls (TextBox + TextArea + RadioButton + Checkbox + ComboBox + ListBox)
       let formCursor = join(work, 'form-step-0.rp');
       writeFileSync(formCursor, synthesizeBlankProject({ version: 9, pageName: 'Page 1' }));
 
@@ -172,55 +172,65 @@ test('template-free: RP9 & RP11 DynamicPanel + Repeater + 5 native forms + full 
         inputStyle: { fontSize: 14, fontWeight: 400, color: '#111827', align: 'left', textPaddingX: 8 },
       });
       materializeNativeControl(nextStep(1), nextStep(2), {
+        kind: 'textarea',
+        pageName: 'Page 1',
+        name: 'notesArea',
+        x: 20,
+        y: 66,
+        width: 240,
+        height: 76,
+        placeholder: '输入多行备注',
+      });
+      materializeNativeControl(nextStep(2), nextStep(3), {
         kind: 'radio',
         pageName: 'Page 1',
         name: 'optA',
         x: 20,
-        y: 72,
+        y: 152,
         width: 120,
         height: 20,
         text: '选项 A',
         group: 'g1',
         checked: true,
       });
-      materializeNativeControl(nextStep(2), nextStep(3), {
+      materializeNativeControl(nextStep(3), nextStep(4), {
         kind: 'checkbox',
         pageName: 'Page 1',
         name: 'agreeBox',
         x: 20,
-        y: 104,
+        y: 184,
         width: 140,
         height: 20,
         text: '同意条款',
         checked: false,
       });
-      materializeNativeControl(nextStep(3), nextStep(4), {
+      materializeNativeControl(nextStep(4), nextStep(5), {
         kind: 'combobox',
         pageName: 'Page 1',
         name: 'cityDrop',
         x: 20,
-        y: 136,
+        y: 216,
         width: 200,
         height: 32,
         options: ['北京', '上海', '深圳'],
         selectedIndex: 1,
       });
-      materializeNativeControl(nextStep(4), nextStep(5), {
+      materializeNativeControl(nextStep(5), nextStep(6), {
         kind: 'listbox',
         pageName: 'Page 1',
         name: 'roleList',
         x: 20,
-        y: 184,
+        y: 264,
         width: 200,
         height: 96,
         options: ['Admin', 'Editor', 'Viewer'],
         multiple: true,
         selectedIndices: [0, 2],
       });
-      const formsPath = nextStep(5);
+      const formsPath = nextStep(6);
       const formsBuf = readFileSync(formsPath);
       const formsSummary = readRp(formsBuf);
-      assert.equal(formsSummary.counts.widgets, 5);
+      assert.equal(formsSummary.counts.widgets, 6);
       assert.equal(formsSummary.counts.danglingRefs, 0);
       assert.equal(formsSummary.counts.problems, 0);
       assert.equal(lintVersionKeys(formsBuf, { version: 9 }).errors.length, 0);
@@ -242,6 +252,7 @@ test('template-free: RP9 & RP11 DynamicPanel + Repeater + 5 native forms + full 
         '  box #root [375x812] layout=column gap=12 padding=16',
         '    label #ttl [340x28] "无模板全量控件"',
         '    input #kw [340x40] placeholder="搜索"',
+        '    textarea #ta [340x96] placeholder="多行备注"',
         '    checkbox #chk [160x24] "启用筛选" checked=true',
         '    radio #r1 [120x24] "全部" group="f" checked=true',
         '    combobox #cb [200x36] options=["高","中","低"] selectedIndex=0',

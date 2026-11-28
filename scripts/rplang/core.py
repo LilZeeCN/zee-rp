@@ -288,7 +288,8 @@ NODE_PROPS = {
     "paragraph": TEXT | {"lineGap", "lineHeight", "maxLines", "padding", "fill", "stroke", "radius"} | STYLE_EXTRAS,
     "button": TEXT | {"variant", "fill", "stroke", "radius", "icon"} | STYLE_EXTRAS,
     "badge": TEXT | {"variant", "fill", "stroke", "radius", "icon"} | STYLE_EXTRAS,
-    "input": {"value", "placeholder", "maxLength", "native", "fill", "stroke", "radius", "fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX"} | STYLE_EXTRAS,
+    "input": {"value", "placeholder", "maxLength", "multiline", "native", "fill", "stroke", "radius", "fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX"} | STYLE_EXTRAS,
+    "textarea": {"value", "placeholder", "native", "fill", "stroke", "radius", "fontSize", "size", "fontWeight", "weight", "color", "align", "textPaddingX"} | STYLE_EXTRAS,
     "divider": {"direction", "color", "fill", "opacity"},
     "image": {"src", "radius", "opacity", "shadow", "rotation"},
     "icon": {"icon", "color", "fill", "stroke", "radius", "strokeWidth"} | STYLE_EXTRAS,
@@ -342,14 +343,15 @@ NODE_SOURCE_ALIASES = {
 
 SHORTHAND_NODE_KINDS = {
     "box", "card", "row", "column", "grid", "stack", "label", "paragraph",
-    "button", "badge", "input", "divider", "image", "icon", "sparkline", "dynamic-panel", "panel",
+    "button", "badge", "input", "textarea", "divider", "image", "icon", "sparkline", "dynamic-panel", "panel",
     "repeater", "repeat", "use", "when",
     "data-table", "searchable-list", "form-card", "kv-list",
     "detail-card", "wizard-card", "master-detail",
     "tab-bar", "nav-bar", "progress-bar", "phone-shell",
     "stat-row", "list-item", "carousel", "slider-captcha",
 }
-FORM_KINDS = {"input", "radio", "checkbox", "combobox", "listbox"}
+TEXT_INPUT_KINDS = {"input", "textarea"}
+FORM_KINDS = {"input", "textarea", "radio", "checkbox", "combobox", "listbox"}
 CHECK_KINDS = {"radio", "checkbox"}
 OPTION_KINDS = {"combobox", "listbox"}
 STATE_STYLE_KEYS = {"fill", "stroke", "color", "fontFamily", "fontSize", "fontWeight", "radius", "strokeWidth", "opacity"}

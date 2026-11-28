@@ -8,7 +8,7 @@ import re
 import string
 from .core import fixed_decimal
 from .core import BOUND_OPS, BOUND_SIDES, DRAG_MODES, MOVE_EASINGS, MOVE_MODES, PANEL_ANIMATIONS, PANEL_GESTURES, PANEL_MODES, WIDGET_GEOM_ACCESSORS
-from .core import ACTION_PROPS, BOX_ALIGN_ALIASES, BOX_TEXT_CONTAINER_KEYS, BOX_TEXT_STYLE_KEYS, CARD_CONTENT_KEYS, CHECK_KINDS, COLOR_TOKENS, DEVICE_CANVAS_PRESETS, EVENTS, EVENT_SHORTHANDS, FORM_KINDS, GEOMETRY, INLINE_EXPR_HINT_RE, JUSTIFY_ALIASES, LanguageError, MACRO_ITEM_PROPS, MACRO_PROPS, MACRO_SLOTS, NODE_PROPS, NODE_SOURCE_ALIASES, OPTION_KINDS, SCALARS, SHORTHAND_NODE_KINDS, STATE_STYLE_KEYS, TEXT_ALIGN_ALIASES, THEMES, _estimate_visual_px, _resolve_pointer, are_when_asts_mutually_exclusive, expand_carousel_macro, expand_data_table_macro, expand_detail_card_macro, expand_form_card_macro, expand_kv_list_macro, expand_list_item_macro, expand_master_detail_macro, expand_nav_bar_macro, expand_phone_shell_macro, expand_progress_bar_macro, expand_searchable_list_macro, expand_slider_captcha_macro, expand_stat_row_macro, expand_tab_bar_macro, expand_wizard_card_macro, fail, fields, ident, normalize_color_token, normalize_font_weight, normalize_panel_state_dict, normalize_panel_states_in_tree, parse_domain_type, parse_font_shorthand, parse_inline_expr, parse_template_string, ptr, sanitize_dingbats, validate_device, validate_font_size, validate_source_tree, validate_statecharts
+from .core import ACTION_PROPS, BOX_ALIGN_ALIASES, BOX_TEXT_CONTAINER_KEYS, BOX_TEXT_STYLE_KEYS, CARD_CONTENT_KEYS, CHECK_KINDS, COLOR_TOKENS, DEVICE_CANVAS_PRESETS, EVENTS, EVENT_SHORTHANDS, FORM_KINDS, GEOMETRY, INLINE_EXPR_HINT_RE, JUSTIFY_ALIASES, LanguageError, MACRO_ITEM_PROPS, MACRO_PROPS, MACRO_SLOTS, NODE_PROPS, NODE_SOURCE_ALIASES, OPTION_KINDS, SCALARS, SHORTHAND_NODE_KINDS, STATE_STYLE_KEYS, TEXT_ALIGN_ALIASES, TEXT_INPUT_KINDS, THEMES, _estimate_visual_px, _resolve_pointer, are_when_asts_mutually_exclusive, expand_carousel_macro, expand_data_table_macro, expand_detail_card_macro, expand_form_card_macro, expand_kv_list_macro, expand_list_item_macro, expand_master_detail_macro, expand_nav_bar_macro, expand_phone_shell_macro, expand_progress_bar_macro, expand_searchable_list_macro, expand_slider_captcha_macro, expand_stat_row_macro, expand_tab_bar_macro, expand_wizard_card_macro, fail, fields, ident, normalize_color_token, normalize_font_weight, normalize_panel_state_dict, normalize_panel_states_in_tree, parse_domain_type, parse_font_shorthand, parse_inline_expr, parse_template_string, ptr, sanitize_dingbats, validate_device, validate_font_size, validate_source_tree, validate_statecharts
 
 class Frontend:
     def __init__(self, spec):
@@ -1692,7 +1692,7 @@ class Frontend:
             suspect = [k for k in source if isinstance(k, str) and k not in reserved and not k.startswith("_")]
             known = sorted(set(NODE_PROPS.keys()) | set(MACRO_PROPS.keys())
                            | {"use", "repeat", "when", "row", "column", "grid", "stack", "label", "paragraph",
-                              "button", "badge", "icon", "image", "input", "divider", "spacer"})
+                              "button", "badge", "icon", "image", "input", "textarea", "divider", "spacer"})
             hints = []
             for key in suspect:
                 hints.extend(difflib.get_close_matches(str(key), known, n=1, cutoff=0.6))
@@ -1953,7 +1953,7 @@ class Frontend:
                     valid_rgba = bool(re.fullmatch(r"rgba?\(\s*\d+\s*,\s*\d+\s*,\s*\d+(?:\s*,\s*(?:0|1|0?\.\d+))?\s*\)", value))
                     if not (valid_token or valid_hex or valid_rgba or value == "transparent"):
                         fail("E_COLOR", pp, "Expected a known $color-token, #RGB, #RRGGBB, #RRGGBBAA, or rgba(...)")
-            elif key in {"native", "equalHeight", "wrap", "italic", "underline", "strikethrough", "smooth", "borderTop", "borderBottom", "borderLeft", "borderRight", "visible", "hidden", "checked", "selected", "disabled", "multiple"}:
+            elif key in {"native", "multiline", "equalHeight", "wrap", "italic", "underline", "strikethrough", "smooth", "borderTop", "borderBottom", "borderLeft", "borderRight", "visible", "hidden", "checked", "selected", "disabled", "multiple"}:
                 self.typecheck(value, "boolean", pp)
             elif key == "maxLength":
                 if type(value) is not int or not 0 <= value <= 2147483647:
@@ -1996,7 +1996,13 @@ class Frontend:
             choices = {"start", "center", "end", "stretch"} if kind in {"box", "card"} else {"left", "center", "right"}
             if values["align"] not in choices:
                 fail("E_ENUM", ptr(path, "align"), f"Expected one of {sorted(choices)}")
-        if kind == "input":
+        if kind == "input" and values.get("multiline") is True:
+            if "maxLength" in values:
+                fail("E_PROPERTY", ptr(path, "maxLength"), "Multiline textarea does not support native maxLength")
+            kind = "textarea"
+            values["type"] = "textarea"
+        if kind in TEXT_INPUT_KINDS:
+            values.pop("multiline", None)
             if values.get("native") is False:
                 fail("E_INPUT", path, "RP/1 inputs are native; use a box/label for decoration")
             values["native"] = True
@@ -2056,7 +2062,7 @@ class Frontend:
         if kind == "paragraph":
             values["_rp1_single_shape"] = True
         values["name"] = self.register(logical, kind, source, path)
-        if kind == "input" and values.get("rotation"):
+        if kind in TEXT_INPUT_KINDS and values.get("rotation"):
             self.input_rotations.append((logical, values["name"], values["rotation"], path))
         if "children" in source:
             if not isinstance(source["children"], list):
@@ -2124,7 +2130,7 @@ class Frontend:
         if logical in self.symbols:
             fail("E_DUPLICATE_ID", ptr(path, "id"), f"Duplicate identity '{logical}'")
         prefix = {"box": "grp", "card": "grp", "label": "txt", "paragraph": "txt",
-                  "button": "btn", "badge": "badge", "input": "inp", "radio": "radio", "checkbox": "check", "combobox": "combo", "listbox": "list", "image": "img",
+                  "button": "btn", "badge": "badge", "input": "inp", "textarea": "ta", "radio": "radio", "checkbox": "check", "combobox": "combo", "listbox": "list", "image": "img",
                   "icon": "img", "sparkline": "img",
                   "dynamic-panel": "panel", "repeater": "rep", "divider": "line"}[kind]
         name = prefix + "-" + re.sub(r"[^A-Za-z0-9_-]", "-", logical.rsplit("/", 1)[-1]) + "-" + hashlib.sha256(logical.encode()).hexdigest()[:12]
@@ -2328,7 +2334,7 @@ class Frontend:
             if node["type"] in OPTION_KINDS:
                 indices = node.get("selectedIndices", [node.get("selectedIndex", 0)])
                 return node["options"][indices[0]] if indices else ""
-            return node.get("value" if node["type"] == "input" else "text", "")
+            return node.get("value" if node["type"] in TEXT_INPUT_KINDS else "text", "")
         if kind in ("item", "caller_item"):
             if row_override is not None and ast["field"] in row_override:
                 return row_override[ast["field"]]
@@ -3355,8 +3361,8 @@ class Frontend:
             target_row = self.row_context(target["id"])[0]
             if target_row and self.row_context(scope)[0] != target_row:
                 fail("E_ROW_SCOPE", path, "Row widgets are only accessible from their own row events")
-            if kind == "set-text" and target["kind"] not in {"label", "paragraph", "button", "badge", "input"}:
-                fail("E_TARGET_TYPE", path, "set-text requires label/paragraph/button/badge/input")
+            if kind == "set-text" and target["kind"] not in ({"label", "paragraph", "button", "badge"} | TEXT_INPUT_KINDS):
+                fail("E_TARGET_TYPE", path, "set-text requires label/paragraph/button/badge/input/textarea")
             if kind == "focus" and target["kind"] not in FORM_KINDS:
                 fail("E_TARGET_TYPE", path, f"{kind} requires a native input")
             if kind == "set-panel-state":
@@ -3834,7 +3840,7 @@ class Frontend:
                 for target_id, field_name in targets.items():
                     self.typecheck(field_name, "text", ptr(ptr(bp, "targets"), target_id))
                     symbol = self.resolve({"ref": target_id}, pid, ptr(ptr(bp, "targets"), target_id))
-                    if symbol["pageId"] != pid or symbol["kind"] not in {"label", "paragraph", "button", "badge", "input"}:
+                    if symbol["pageId"] != pid or symbol["kind"] not in ({"label", "paragraph", "button", "badge"} | TEXT_INPUT_KINDS):
                         fail("E_TARGET_TYPE", bp, "Binding requires text-capable targets in this page")
                     if field_name not in self.models[dataset["model"]]:
                         fail("E_DATA_FIELD", ptr(ptr(bp, "targets"), target_id), f"Unknown field '{field_name}'")
@@ -3853,7 +3859,7 @@ class Frontend:
 
                 def initialize(node):
                     if node.get("name") in initial:
-                        node["value" if node["type"] == "input" else "text"] = initial[node["name"]]
+                        node["value" if node["type"] in TEXT_INPUT_KINDS else "text"] = initial[node["name"]]
                     for child in node.get("children", []):
                         initialize(child)
                     for state in node.get("states", []):

@@ -433,7 +433,8 @@ CLI `proto.mjs check` 的成功与失败诊断均为 stdout 上的单个 JSON；
         move thumb locationBeforeDrag duration=0
         set status = "验证失败"
   ```
-  动作短语句支持 `set <widgetId> = expr`、`set $var = expr`、`setPanelState <panelId> to <state>|next|previous|current`（同义简写 `panel <panelId> <state>|next|previous|current`）、`move <widgetId> to x=... y=... | drag-x within <container> | delta x=... y=... | locationBeforeDrag | withThis`、`show|hide|toggle|enable|disable|focus <id>`、`wait 300`、`goto <page_id>`。
+  动作短语句支持 `set <widgetId> = expr`、`set $var = expr`、`setPanelState <panelId> to <state>|next|previous|current`（同义简写 `panel <panelId> <state>|next|previous|current`）、`move <widgetId> to x=... y=... | drag-x within <container> | delta x=... y=... | locationBeforeDrag | withThis`、`show|hide|toggle|enable|disable|focus <id>`、`wait 300`、`goto <page_id>`；事件块支持纯条件树嵌套 `if / elif / else`（自动去糖为互斥原生 Case，同分支内动作与嵌套 `if` 混排报 `E_DSL_SYNTAX`）。
+- **原生多行文本域**：完整 RP/1 与 Studio 均支持 `textarea` 与 `input multiline=true`（完整 RP/1 编译为原生 `DiagramObject:TextArea`，官方 HTML 渲染为 `<textarea>`，不支持 `maxLength`）。
 - **一等交互模式宏（`carousel` / `slider-captcha`）**：
   - `carousel #banner [400x160] slides=["s1","s2","s3"] interval=3000 indicator=true`：自动展开 `#banner_panel`（带各页状态的 `dynamic-panel`）、左右滑动切页与续播定时器、`#banner_indicator` 状态同步（`=@banner_panel.state`）及页面级 `+onLoad` 自动启动轮播；
   - `slider-captcha #captcha [360x240] targetX=200 tolerance=2`：自动展开背景框 `#captcha_scene`、缺口槽 `#captcha_target`、拼图块 `#captcha_piece`、轨道 `#captcha_track`、滑块 `#captcha_thumb` 与状态文本 `#captcha_status`（含 `BoundaryDirectionLiteral` 钳位、容差吸附与松手回位逻辑）。

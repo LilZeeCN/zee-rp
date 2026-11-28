@@ -5,6 +5,7 @@
 ## 控件声明
 
 ```text
+textarea #notes [280x96] value="" placeholder="多行备注"
 radio #seller_all [160x32] "全部" group="seller" checked=true
 radio #seller_self [160x32] "自营" group="seller" checked=false
 checkbox #shipping [160x32] "包邮" checked=false
@@ -12,7 +13,7 @@ combobox #price [280x40] options=["全部价格","0-50","50-200","200以上"] se
 listbox #choices [280x120] options=["一","二","三"] multiple=true selectedIndices=[0,2]
 ```
 
-`droplist` 是 `combobox` 的别名。以上分别生成真实 RadioButton、Checkbox、ComboBox 和 ListBox；原有 `input` 仍生成 TextBox。模板读取使用者本机 RP9 的 `Default.rplib`，不把 Axure 元件库打进发行包。
+`droplist` 是 `combobox` 的别名，`input multiline=true` 会自动正规化为 `textarea`。以上分别生成真实 TextArea、RadioButton、Checkbox、ComboBox 和 ListBox；原有单行 `input` 仍生成 TextBox（`textarea` 不支持 `maxLength`）。所有表单控件均由内置净室合成器生成，无需本机预装 Axure 或读取 `Default.rplib`。
 
 `group` 定义单选互斥组；`checked` 定义勾选初态。列表 `options` 是非空字符串数组，`selectedIndex` 从 0 开始。ListBox 默认单选；多选使用 `multiple=true`，`selectedIndices` 可为空，且不能与 `selectedIndex` 同时声明。`disabled=true` 设置禁用初态。
 

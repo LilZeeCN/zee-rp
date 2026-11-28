@@ -782,6 +782,7 @@ KNOWN_NODE_TYPES = {
     "icon",
     "sparkline",
     "input",
+    "textarea",
     "native-input",
     "native-form",
     "radio", "checkbox", "combobox", "listbox",
@@ -964,14 +965,16 @@ def _expand_declarative_tree_core(node, prefix="p1"):
         if isinstance(node.get("id"), str):
             _btn_out.setdefault("id", node["id"])  # 保留逻辑 id，after/引用才能命中
         return _btn_out
-    if ntype in ("radio", "checkbox", "combobox", "listbox") or (ntype == "input" and node.get("native") is True and node.get("styles")):
+    if ntype in ("textarea", "radio", "checkbox", "combobox", "listbox") or (ntype == "input" and node.get("native") is True and node.get("styles")):
         out_form = {**node, "type": "native-form", "kind": ntype, "name": node.get("name", f"{pfx}-{ntype}")}
-        out_form.setdefault("h", 120 if ntype == "listbox" else 36)
-        out_form.setdefault("w", 240 if ntype in ("input", "combobox", "listbox") else 160)
-        if ntype in ("input", "combobox", "listbox"):
+        out_form.setdefault("h", 120 if ntype == "listbox" else (96 if ntype == "textarea" else 36))
+        out_form.setdefault("w", 240 if ntype in ("input", "textarea", "combobox", "listbox") else 160)
+        if ntype in ("input", "textarea", "combobox", "listbox"):
             out_form.setdefault("fill", "$surface")
             out_form.setdefault("stroke", "$line")
             out_form.setdefault("strokeWidth", 1)
+            if ntype == "textarea":
+                out_form.setdefault("radius", 6)
         return _preserve_when_attrs(node, out_form)
     if ntype == "input":
         inp_name = node.get("name", f"{pfx}-input")

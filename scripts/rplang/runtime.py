@@ -2,7 +2,7 @@ import copy
 import math
 import re
 from .core import fixed_decimal
-from .core import CHECK_KINDS, EVENTS, FORM_KINDS, OPTION_KINDS, WIDGET_GEOM_ACCESSORS, fail
+from .core import CHECK_KINDS, EVENTS, FORM_KINDS, OPTION_KINDS, TEXT_INPUT_KINDS, WIDGET_GEOM_ACCESSORS, fail
 from .frontend import compile_language
 
 class ReferenceRuntime:
@@ -49,7 +49,7 @@ class ReferenceRuntime:
             self.base_rects[name] = (abs_x, abs_y, nw, nh)
             self.widgets[name] = {
                 "name": name, "kind": kind, "page": page_slug, "repeater": rep_name,
-                "text": str(node.get("value" if kind == "input" else "text", "")),
+                "text": str(node.get("value" if kind in TEXT_INPUT_KINDS else "text", "")),
                 "visible": (node.get("visible", True) is not False) and not bool(node.get("hidden", False)), "enabled": True,
                 "parent": parent, "panelStates": list(panel_states),
                 "selected": node.get("selected", node.get("checked", False)),

@@ -3,7 +3,7 @@ import copy
 import hashlib
 import math
 import re
-from .core import ACTION_PROPS, COLOR_TOKENS, EVENTS, EVENT_SHORTHANDS, GEOMETRY, LanguageError, MACRO_PROPS, NODE_PROPS, SHORTHAND_NODE_KINDS, THEMES, _array_index, _pointer_parts, _resolve_pointer, fail, fields, ident, ptr
+from .core import ACTION_PROPS, COLOR_TOKENS, EVENTS, EVENT_SHORTHANDS, GEOMETRY, LanguageError, MACRO_PROPS, NODE_PROPS, SHORTHAND_NODE_KINDS, TEXT_INPUT_KINDS, THEMES, _array_index, _pointer_parts, _resolve_pointer, fail, fields, ident, ptr
 from .frontend import Frontend, compile_language
 from .runtime import ReferenceRuntime
 
@@ -132,7 +132,7 @@ def explore_state_space(spec, max_depth=5, max_states=48, input_samples=None):
         page = rt.pages_by_slug[rt.current_page]
         candidate_steps = []
         for wname, winfo in rt.widgets.items():
-            if winfo["kind"] == "input" and rt.is_operable(wname):
+            if winfo["kind"] in TEXT_INPUT_KINDS and rt.is_operable(wname):
                 samples = (input_samples or {}).get(wname) or (input_samples or {}).get(rt.symbols_by_name.get(wname, {}).get("id", "").rsplit("/", 1)[-1]) or ["sample_val", ""]
                 input_sampling = input_sampling or len(samples) > 2
                 for value in samples[:2]:
@@ -586,7 +586,7 @@ def _effective_node_props(node, th, _res_col):
             out["stroke"] = "$line" if var == "secondary" else None
     elif ntype == "label":
         out.setdefault("color", "$ink")
-    elif ntype == "input":
+    elif ntype in TEXT_INPUT_KINDS:
         out.setdefault("fill", "$surface-2")
         out.setdefault("stroke", "$line-strong" if out.get("native") is True else "$line")
         out.setdefault("color", "$ink" if ("value" in out or "text" in out) else "$ink-2")

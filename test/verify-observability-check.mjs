@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { exportPrototype, runWorkflow, verifyOfficialPreview } from '../scripts/authoring-workflow.mjs';
-import { generatePrototype } from '../scripts/mcp-tools.mjs';
+import { generatePrototype, sessionTools } from '../scripts/mcp-tools.mjs';
+import { nativeCheck } from '../scripts/native-check.mjs';
+import { readRp } from '../scripts/rp-read.mjs';
 import { findChromeExecutable } from '../studio/cdp.mjs';
 
 const HAS_RP9_APP = existsSync('/Applications/Axure RP 9.app');
@@ -110,6 +112,84 @@ test('verify-observability: compact 瘦身、无静默丢步、失败置顶与�
       assert.equal(crossOfficial.status, 'completed', JSON.stringify(crossOfficial.diagnostics));
       assert.equal(crossOfficial.passed, 2);
     }
+  } finally {
+    rmSync(work, { recursive: true, force: true });
+  }
+});
+
+test('rp/1 textarea, input multiline=true, and nested if/elif/else work end-to-end across native RP, Chrome, and decompile', { timeout: 120_000 }, async t => {
+  try { findChromeExecutable(); } catch { return t.skip('未检测到 Chrome/Chromium'); }
+  const work = mkdtempSync(join(tmpdir(), 'zee-rp1-textarea-nested-'));
+  try {
+    const rpOut = join(work, 'textarea-nested.rp');
+    const rp1 = [
+      'rp/1 target=9 name="TextareaAndNestedIf"',
+      'var mode: number = 1',
+      'var sub: number = 0',
+      'page #home name="首页"',
+      '  box #root [390x720] layout=column gap=12 padding=16',
+      '    textarea #bio [350x96] value="" placeholder="请输入简介"',
+      '      +onChange:',
+      '        set bio_out = @bio',
+      '    input #notes [350x96] multiline=true value="初始多行"',
+      '    label #bio_out [350x28] "等待输入"',
+      '    label #branch_out [350x28] "待判定"',
+      '    button #btn_toggle_mode [160x40] "切换mode=0"',
+      '      +onClick:',
+      '        set $mode = 0',
+      '    button #btn_eval [160x40] "执行嵌套判断"',
+      '      +onClick:',
+      '        if var.mode == 1',
+      '          if var.sub == 1',
+      '            set branch_out = "hit_m1_s1"',
+      '        else',
+      '          if var.sub == 1',
+      '            set branch_out = "hit_m0_s1"',
+      '          else',
+      '            set branch_out = "hit_m0_s0"',
+    ].join('\n');
+
+    const gen = generatePrototype({ rp1, output: rpOut, cwd: work });
+    assert.equal(gen.status, 'completed', JSON.stringify(gen.diagnostics));
+
+    const summary = readRp(readFileSync(rpOut));
+    const bioWidget = summary.pages[0].widgets.find(w => w.name?.includes('bio-'));
+    const notesWidget = summary.pages[0].widgets.find(w => w.name?.includes('notes-'));
+    assert.equal(bioWidget?.type, 'TextArea');
+    assert.equal(notesWidget?.type, 'TextArea');
+
+    if (HAS_RP9_APP) {
+      const nc = await nativeCheck(rpOut, { version: 9, compile: true });
+      assert.equal(nc.status, 'accepted', JSON.stringify(nc));
+      assert.equal(nc.officialCompile?.status, 'accepted', JSON.stringify(nc));
+    }
+
+    const syncTool = sessionTools.find(tool => tool.name === 'sync_prototype');
+    const decompiled = await syncTool.handler({ mode: 'decompile', rp: rpOut, outSource: join(work, 'lifted.rp1'), output: join(work, 'lifted-editable.rp'), cwd: work });
+    assert.equal(decompiled.ok, true, JSON.stringify(decompiled));
+    const liftedText = readFileSync(join(work, 'lifted.rp1'), 'utf8');
+    assert.match(liftedText, /textarea #/);
+
+    const verifyRes = await verifyOfficialPreview({
+      rp: gen.output,
+      source: gen.source,
+      engine: HAS_RP9_APP ? 'official' : 'studio-html',
+      compact: true,
+      cwd: work,
+      steps: [
+        { action: 'fill', target: 'bio', value: '多行反馈文本' },
+        { action: 'expect', target: 'bio_out', expect: { text: '多行反馈文本' } },
+        // mode=1, sub=0: incomplete inner if must NOT fall into outer else ("hit_m0_s0")
+        { action: 'click', target: 'btn_eval' },
+        { action: 'expect', target: 'branch_out', expect: { text: '待判定' } },
+        // switch mode=0 -> hits outer else -> inner else ("hit_m0_s0")
+        { action: 'click', target: 'btn_toggle_mode' },
+        { action: 'click', target: 'btn_eval' },
+        { action: 'expect', target: 'branch_out', expect: { text: 'hit_m0_s0' } },
+      ],
+    }, { runWorkflow, exportHtml: exportPrototype });
+    assert.equal(verifyRes.status, 'completed', JSON.stringify(verifyRes.diagnostics));
+    assert.equal(verifyRes.passed, 7);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

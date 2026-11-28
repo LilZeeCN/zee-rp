@@ -9,7 +9,7 @@ import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
 import { parsePayload, encodePayload, field, walkNodes } from './parse-payload.mjs';
 import { detectFileVersion } from './version.mjs';
 
-const LIBRARY_PAGES = { input: 'Text Field', radio: 'Radio Button', checkbox: 'Checkbox', combobox: 'Droplist', listbox: 'List Box' };
+const LIBRARY_PAGES = { input: 'Text Field', textarea: 'Text Area', radio: 'Radio Button', checkbox: 'Checkbox', combobox: 'Droplist', listbox: 'List Box' };
 const STATE_NAMES = { hover: 'MouseOver', selected: 'Selected', disabled: 'Disabled', focused: 'Focused' };
 const STYLE_KEYS = new Set(['fill', 'stroke', 'color', 'fontFamily', 'fontSize', 'fontWeight', 'radius', 'strokeWidth', 'align', 'textPaddingX', 'opacity']);
 
@@ -221,8 +221,8 @@ export function materializeNativeControl(sourceFile, outputFile, config) {
     const graph = parsePayload(record), strings = [...record.strings], e = editor(graph, strings);
     const widget = graph.objects.get(report.id);
     const { kind, checked, group, options, selectedIndex = 0, multiple = false, selectedIndices = [selectedIndex], style } = config;
-    if (['input', 'radio', 'checkbox'].includes(kind)) writeText(e, widget, config.text ?? config.value ?? '', style);
-    if (kind === 'input' && config.placeholder !== undefined) e.put(widget.body, 'PlaceholderText', e.str(config.placeholder));
+    if (['input', 'textarea', 'radio', 'checkbox'].includes(kind)) writeText(e, widget, config.text ?? config.value ?? '', style);
+    if ((kind === 'input' || kind === 'textarea') && config.placeholder !== undefined) e.put(widget.body, 'PlaceholderText', e.str(config.placeholder));
     if (['radio', 'checkbox'].includes(kind) && checked !== undefined) e.put(widget.body, 'Selected', e.bool(checked));
     if (kind === 'radio') e.put(widget.body, 'radio-group', e.str(group ?? ''));
     if (kind === 'combobox' || kind === 'listbox') {

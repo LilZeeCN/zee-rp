@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.3 — 2026-11-28
+
+- **完整 RP/1 原生 `textarea` 与 `input multiline=true`**：`scripts/native-widget-synthesizer.mjs` 与 `scripts/native-forms.mjs` 新增免模板 `Axure:DiagramObject:TextArea` 净室合成；打通 `rp_schema.py` / `rplang` / `proto_engine` / `rp_decompile.py`，完整 RP/1 支持 `textarea` 及 `input multiline=true`（自动正规化为 `textarea` 且不支持 `maxLength`，在官方 HTML 中渲染为原生 `<textarea>` 并可 `decompile` 往返）。
+- **事件块嵌套 `if / elif / else` 自动展开**：`scripts/rp_dsl.py` 将事件块内任意深度的纯条件树（`if` / `elif` / `else if` / `else`）去糖为等价互斥的原生 `cases`，对不完整内层分支（无内层 `else`）自动向后续兄弟与外层 `else` 注入否定守卫 `!(`...`)`，彻底防止错落入外层 `else`；同一分支混排动作与嵌套 `if` 明确报 `E_DSL_SYNTAX`。
+- **AI 压测可观测性与跨页验收修复**：MCP `verify_prototype` / `generate_prototype` / `generate_from_image` 默认开启 `compact: true`（剥离全量 `initial.widgets[]`，失败时置顶 `failedStep` 与 `diagnostics` + `availableTargets`）；`preview-runtime.mjs` 先登记步骤轨迹再解析目标并新增 `safeObserve()` 吸收跨页 `goto` 导航瞬态销毁异常；`tools/native-assembly/bridge.mjs` 新增 `setDaemonRef` 对空闲守护进程管道调用 `unref()`；`scripts/rp_dsl.py` 支持 `setPanelState <id> [to] <target>`。
+- **GitHub Pages 在线纯浏览器工作台**：新增 `.github/workflows/pages.yml`，[tools/rp-inspector/index.html](tools/rp-inspector/index.html) 零后端部署至 https://lilzeecn.github.io/zee-rp/ 。
+
+## 0.4.2 — 2026-11-28
+
+- 全链路彻底免模板合成：新增 `scripts/native-widget-synthesizer.mjs` 并接入 `create-panel-clone.mjs`、`native-repeater.mjs`、`native-forms.mjs` 与 `proto.mjs`，无本机 `RP9 Tour.rp`、`Quick Win.rp` 与 `Libraries/Default.rplib` 即可全功能编译 RP9/RP11 多态 `DynamicPanel`+`PanelState`、`Repeater` 与全部原生表单控件，并纳入 CI `test:template-free`。
+
+## 0.4.1 — 2026-11-28
+
+- 修复零 Axure 环境 CI 适配（`test:diff-rp`/`test:repair-rp`/`test:browser-core`/`test:downgrade-rp`）与 Node 18 无全局 `crypto`/`CompressionStream` 纯 JS 回退。
+
 ## 0.4.0 — 2026-11-28
 
 - 新增五大原生产物级工具（`scripts/diff-rp.mjs`、`scripts/rp-browser-core.mjs` + `tools/rp-inspector/index.html`、`scripts/repair-rp.mjs`、`scripts/downgrade-rp.mjs`、`scripts/build-library.mjs`）及对应 CI/门禁（`test:diff-rp`、`test:browser-core`、`test:repair-rp`、`test:downgrade-rp`、`test:build-library`、`test:mcp-budget`）；另附公开净室二进制规范 [docs/rp-format-spec.md](docs/rp-format-spec.md) 与单源同步脚本 `tools/sync-inspector.mjs`。

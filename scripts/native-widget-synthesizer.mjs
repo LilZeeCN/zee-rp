@@ -311,6 +311,13 @@ const FORM_SPECS = {
     defaultW: 300,
     defaultH: 25,
   },
+  textarea: {
+    sourcePage: 'Text Area',
+    className: 'Axure:DiagramObject:TextArea',
+    caps: '9f8f777f0bbfa132',
+    defaultW: 300,
+    defaultH: 170,
+  },
   radio: {
     sourcePage: 'Radio Button',
     className: 'Axure:DiagramObject:RadioButton',
@@ -345,11 +352,13 @@ const FORM_SPECS = {
 
 const FORM_KIND_ALIASES = {
   'text field': 'input',
+  'text area': 'textarea',
   'radio button': 'radio',
   checkbox: 'checkbox',
   droplist: 'combobox',
   'list box': 'listbox',
   input: 'input',
+  textarea: 'textarea',
   radio: 'radio',
   combobox: 'combobox',
   listbox: 'listbox',
@@ -406,7 +415,7 @@ export function synthesizeFormTemplate(kindOrPageName) {
     reserveGuids(guids, 11);
 
     const stateMapEntries = { Disabled: ref(6) };
-    if (normalized === 'input') stateMapEntries.Hint = ref(7);
+    if (normalized === 'input' || normalized === 'textarea') stateMapEntries.Hint = ref(7);
 
     const styleEnabled = {
       101: fields({ X: num(100), Y: num(100) }),
@@ -417,6 +426,10 @@ export function synthesizeFormTemplate(kindOrPageName) {
       styleEnabled[6] = solid(0xff000000);
       styleEnabled[9] = int(0);
       styleEnabled[10] = int(1);
+    } else if (normalized === 'textarea') {
+      styleEnabled[6] = solid(0xff000000);
+      styleEnabled[9] = int(0);
+      styleEnabled[10] = int(0);
     } else if (normalized === 'radio' || normalized === 'checkbox') {
       styleEnabled[12] = num(0);
       styleEnabled[14] = num(0);
@@ -504,6 +517,16 @@ export function synthesizeFormTemplate(kindOrPageName) {
         Type: int(0),
         MaxLength: int(2147483647),
       };
+    } else if (normalized === 'textarea') {
+      widgetBody = {
+        ...commonWidget,
+        TextBlock: plainTextBlock,
+        WordWrap: bool(true),
+        ReadOnly: bool(false),
+        PlaceholderText: str(''),
+        HideHintOnFocus: bool(false),
+        Type: int(0),
+      };
     } else if (normalized === 'radio') {
       widgetBody = {
         ...commonWidget,
@@ -552,7 +575,7 @@ export function synthesizeFormTemplate(kindOrPageName) {
       }),
       buildStateStyleObject(context, 6, 9, 11, 'Disabled', { 7: solid(0xfff0f0f0) }),
     ];
-    if (normalized === 'input') {
+    if (normalized === 'input' || normalized === 'textarea') {
       out.push(buildStateStyleObject(context, 7, 10, 11, 'Hint', { 6: solid(0xff999999) }));
     }
     return out;

@@ -102,8 +102,10 @@ def _infer_widget_kind(w):
         return "dynamic-panel"
     if wtype == "Repeater":
         return "repeater"
-    if wtype in ("TextBox", "TextArea"):
+    if wtype == "TextBox":
         return "input"
+    if wtype == "TextArea":
+        return "textarea"
     if wtype == "Checkbox":
         return "checkbox"
     if wtype == "RadioButton":
@@ -530,9 +532,9 @@ def decompile_rp(rp_path_or_dict):
                     "root": {"type": "box", "id": "root", "layout": "stack", "w": width, "h": height,
                              "children": [make_node(member, in_panel=True) for member in members]},
                 } for state_id, members in states]
-            elif kind == "input":
+            elif kind in ("input", "textarea"):
                 node["value"] = str(w.get("text") or "")
-                if type(w.get("maxLength")) is int and w["maxLength"] < 2147483647:
+                if kind == "input" and type(w.get("maxLength")) is int and w["maxLength"] < 2147483647:
                     node["maxLength"] = w["maxLength"]
             elif kind in ("checkbox", "radio"):
                 node["text"] = str(w.get("text") or lid)
@@ -625,7 +627,7 @@ def find_ast_node_by_id(node, target_id):
         return None
     if not isinstance(node, dict):
         return None
-    for k in ("id", "as", "button", "label", "badge", "input", "checkbox", "radio", "combobox", "droplist", "listbox", "card", "box", "row", "column", "stack", "grid", "divider"):
+    for k in ("id", "as", "button", "label", "badge", "input", "textarea", "checkbox", "radio", "combobox", "droplist", "listbox", "card", "box", "row", "column", "stack", "grid", "divider"):
         if node.get(k) == target_id:
             return node
     for ch_key in ("children", "layout"):
@@ -1046,7 +1048,7 @@ def _extract_node_prop(target, prop):
         return raw
     node = target["node"]
     if prop in ("text", "value"):
-        tkey = "value" if (node.get("type") == "input" or "input" in node) else "text"
+        tkey = "value" if (node.get("type") in ("input", "textarea") or "input" in node or "textarea" in node) else "text"
         return node.get(tkey)
     if prop == "on":
         if "on" in node and isinstance(node["on"], dict):
@@ -1072,7 +1074,7 @@ def _remove_ast_node(spec_obj, target_sym, target_node):
             if isinstance(item, dict):
                 item_id = item.get("id")
                 if not item_id:
-                    for k in ("box", "column", "row", "stack", "grid", "card", "label", "paragraph", "button", "input", "checkbox", "radio", "combobox", "droplist", "listbox", "image", "repeater", "panel", "badge", "divider", "use"):
+                    for k in ("box", "column", "row", "stack", "grid", "card", "label", "paragraph", "button", "input", "textarea", "checkbox", "radio", "combobox", "droplist", "listbox", "image", "repeater", "panel", "badge", "divider", "use"):
                         if isinstance(item.get(k), str):
                             item_id = item.get(k)
                             break
@@ -1148,7 +1150,7 @@ def _apply_prop_to_target(target, sym, prop, new_val, old_val=None, coordinate_s
     if prop in ("text", "value"):
         if sym.get("kind") in ("combobox", "listbox") or ast_node.get("type") in ("combobox", "droplist", "listbox") or any(k in ast_node for k in ("combobox", "droplist", "listbox")):
             return None
-        tkey = "value" if (ast_node.get("type") == "input" or "input" in ast_node) else "text"
+        tkey = "value" if (ast_node.get("type") in ("input", "textarea") or "input" in ast_node or "textarea" in ast_node) else "text"
         cur_txt = ast_node.get(tkey)
         if isinstance(cur_txt, str) and ("${" in cur_txt or cur_txt.startswith("=")):
             return {
@@ -1666,9 +1668,9 @@ def lift_rp_into_spec(base_spec, base_rp_path_or_dict, gui_rp_path_or_dict=None,
                 }
             if wname and wname != lid and not HASH_SUFFIX_RE.match(wname):
                 new_item["name"] = wname
-            if kind == "input":
+            if kind in ("input", "textarea"):
                 new_item["value"] = str(gw.get("text") or "")
-                if type(gw.get("maxLength")) is int and gw["maxLength"] < 2147483647:
+                if kind == "input" and type(gw.get("maxLength")) is int and gw["maxLength"] < 2147483647:
                     new_item["maxLength"] = gw["maxLength"]
             elif kind in ("checkbox", "radio"):
                 new_item["text"] = str(gw.get("text") if gw.get("text") is not None else lid)
@@ -1740,7 +1742,7 @@ def lift_rp_into_spec(base_spec, base_rp_path_or_dict, gui_rp_path_or_dict=None,
 
         # 2. Check text / value modification
         if sym.get("kind") not in ("combobox", "listbox") and (gw.get("text") or "") != (bw.get("text") or ""):
-            tprop = "value" if sym.get("kind") == "input" else "text"
+            tprop = "value" if sym.get("kind") in ("input", "textarea") else "text"
             old_t = bw.get("text") if bw.get("text") is not None else ""
             new_t = gw.get("text") if gw.get("text") is not None else ""
             res = _apply_prop_to_target(target, sym, tprop, new_t, old_t)
@@ -2170,7 +2172,7 @@ def three_way_merge_rp(
                 conflicts.append(entry)
         else:
             t_pg = matches[0]
-            nid = new_node.get("id") or next((new_node[k] for k in ("label", "button", "input", "checkbox", "radio", "combobox", "droplist", "listbox", "image", "badge", "divider", "card") if k in new_node), None)
+            nid = new_node.get("id") or next((new_node[k] for k in ("label", "button", "input", "textarea", "checkbox", "radio", "combobox", "droplist", "listbox", "image", "badge", "divider", "card") if k in new_node), None)
             if nid and find_ast_node_by_id(t_pg.get("root") or t_pg.get("layout"), nid):
                 conflicts.append({"property": "__added__", "pageId": nw_entry.get("pageId"), "pageName": page_id_to_name.get(nw_entry.get("pageId")),
                                   "reason": f"Native addition '{nid}' collides with a source widget."})

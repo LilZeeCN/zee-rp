@@ -1170,6 +1170,124 @@ class LanguageContract(unittest.TestCase):
         self.assertEqual(actions[0]["stateMode"], "current")
         self.assertEqual(actions[1]["state"], "s2")
 
+    def test_textarea_and_multiline_input(self):
+        from rp_dsl import dsl_to_spec
+        dsl = "\n".join([
+            'rp/1 target=9 name="TextareaSupport"',
+            'page #home name="首页"',
+            '  box #root [360x500] layout=column gap=12 padding=16',
+            '    textarea #ta1 [320x96] value="初始" placeholder="输入说明" fill="#FFFFFF" stroke="#CBD5E1" radius=6',
+            '      +onChange:',
+            '        set preview = "输入=${@ta1}"',
+            '    input #ta2 [320x96] multiline=true value="二号"',
+            '    label #preview [320x28] "初始预览"',
+            '    button #btn_reset [160x40] "写入多行"',
+            '      +onClick:',
+            '        set ta1 = "第一行"',
+        ])
+        parsed = dsl_to_spec(dsl)
+        lowered, ir = compile_language(parsed)
+        syms = {s["id"]: s for s in ir["symbols"]}
+        self.assertEqual(syms["home/ta1"]["kind"], "textarea")
+        self.assertEqual(syms["home/ta2"]["kind"], "textarea")
+        self.assertEqual(lowered["pages"][0]["root"]["children"][0]["type"], "textarea")
+        self.assertEqual(lowered["pages"][0]["root"]["children"][1]["type"], "textarea")
+
+        rt = ReferenceRuntime((lowered, ir))
+        rt.set_input("home/ta1", "第一行\n第二行")
+        self.assertEqual(rt.snapshot()["widgets"][syms["home/preview"]["name"]]["text"], "输入=第一行\n第二行")
+        rt.trigger("home/btn_reset", "click")
+        self.assertEqual(rt.snapshot()["widgets"][syms["home/ta1"]["name"]]["text"], "第一行")
+
+        bad_dsl = "\n".join([
+            'rp/1 target=9 name="BadMultilineMaxLen"',
+            'page #home name="首页"',
+            '  box #root [360x300] layout=column gap=12 padding=16',
+            '    input #bad [300x80] multiline=true maxLength=10',
+        ])
+        with self.assertRaises(LanguageError) as ctx:
+            compile_language(dsl_to_spec(bad_dsl))
+        self.assertEqual(ctx.exception.diagnostic["code"], "E_PROPERTY")
+
+    def test_nested_if_elif_else_desugaring(self):
+        from rp_dsl import dsl_to_spec
+        dsl = "\n".join([
+            'rp/1 target=9 name="NestedIf"',
+            'var a: number = 1',
+            'var b: number = 0',
+            'var c: number = 0',
+            'page #home name="首页"',
+            '  box #root [360x400] layout=column gap=12 padding=16',
+            '    label #out [320x28] "未触发"',
+            '    button #eval_complete [160x40] "完整三层"',
+            '      +onClick:',
+            '        if var.a == 1',
+            '          if var.b == 1',
+            '            if var.c == 1',
+            '              set out = "a1b1c1"',
+            '            else',
+            '              set out = "a1b1c0"',
+            '          elif var.b == 2',
+            '            set out = "a1b2"',
+            '          else',
+            '            set out = "a1b0"',
+            '        else',
+            '          if var.c == 1',
+            '            set out = "a0c1"',
+            '          else',
+            '            set out = "a0c0"',
+            '    button #eval_incomplete [160x40] "不完整内层"',
+            '      +onClick:',
+            '        if var.a == 1',
+            '          if var.b == 1',
+            '            set out = "inc_a1b1"',
+            '        elif var.c == 1',
+            '          set out = "inc_notA_c1"',
+            '        else',
+            '          set out = "inc_else"',
+        ])
+        parsed = dsl_to_spec(dsl)
+        lowered, ir = compile_language(parsed)
+        out_name = next(s["name"] for s in ir["symbols"] if s["id"] == "home/out")
+
+        def run_combo(btn_id, a_val, b_val, c_val):
+            rt = ReferenceRuntime((lowered, ir))
+            rt.variables["a"] = a_val
+            rt.variables["b"] = b_val
+            rt.variables["c"] = c_val
+            rt.trigger(btn_id, "click")
+            return rt.snapshot()["widgets"][out_name]["text"]
+
+        self.assertEqual(run_combo("home/eval_complete", 1, 1, 1), "a1b1c1")
+        self.assertEqual(run_combo("home/eval_complete", 1, 1, 0), "a1b1c0")
+        self.assertEqual(run_combo("home/eval_complete", 1, 2, 0), "a1b2")
+        self.assertEqual(run_combo("home/eval_complete", 1, 0, 1), "a1b0")
+        self.assertEqual(run_combo("home/eval_complete", 0, 1, 1), "a0c1")
+        self.assertEqual(run_combo("home/eval_complete", 0, 1, 0), "a0c0")
+
+        # Incomplete inner if: a==1 && b==0 must NOT fall into elif or outer else
+        self.assertEqual(run_combo("home/eval_incomplete", 1, 1, 0), "inc_a1b1")
+        self.assertEqual(run_combo("home/eval_incomplete", 1, 0, 1), "未触发")
+        self.assertEqual(run_combo("home/eval_incomplete", 1, 0, 0), "未触发")
+        self.assertEqual(run_combo("home/eval_incomplete", 0, 0, 1), "inc_notA_c1")
+        self.assertEqual(run_combo("home/eval_incomplete", 0, 0, 0), "inc_else")
+
+        mixed_dsl = "\n".join([
+            'rp/1 target=9 name="MixedActionAndIf"',
+            'var a: number = 1',
+            'page #home name="首页"',
+            '  box #root [360x300] layout=column gap=12 padding=16',
+            '    label #out [320x28] "init"',
+            '    button #bad [160x40] "bad"',
+            '      +onClick:',
+            '        set out = "prefix"',
+            '        if var.a == 1',
+            '          set out = "nested"',
+        ])
+        with self.assertRaises(LanguageError) as mix_ctx:
+            dsl_to_spec(mixed_dsl)
+        self.assertEqual(mix_ctx.exception.diagnostic["code"], "E_DSL_SYNTAX")
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

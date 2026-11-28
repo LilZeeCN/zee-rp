@@ -572,38 +572,139 @@ def _parse_action_stmt(line, line_no):
     return s
 
 
-def _parse_event_block(raw_lines, idx, parent_indent, ev_ptr, span_map):
+def _parse_cond_header(cnt, line_no, indent, ev_ptr):
+    for prefix, kind in (("if ", "if"), ("elif ", "elif"), ("else if ", "elif")):
+        if cnt.startswith(prefix):
+            cond_raw = cnt[len(prefix):].strip()
+            if not cond_raw:
+                raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ev_ptr, f"Expected condition after '{prefix.strip()}' at line {line_no}"), line_no, indent + 1)
+            cond_val = cond_raw if cond_raw.startswith(("=", "[[")) else f"={cond_raw}"
+            return kind, cond_val
+    if cnt == "else":
+        return "else", None
+    if cnt in ("if", "elif", "else if"):
+        raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ev_ptr, f"Expected condition after '{cnt}' at line {line_no}"), line_no, indent + 1)
+    return None, None
+
+
+def _unwrap_cond_expr(cond_str):
+    s = str(cond_str).strip()
+    if s.startswith("[[") and s.endswith("]]") and len(s) >= 4:
+        return s[2:-2].strip()
+    if s.startswith("=") and not s.startswith("=="):
+        return s[1:].strip()
+    return s
+
+
+def _combine_and_conds(parts):
+    clean = [p for p in parts if p]
+    if not clean:
+        return None
+    if len(clean) == 1:
+        p = clean[0]
+        return p if p.startswith(("=", "[[")) else f"={p}"
+    return "=" + " && ".join(f"({_unwrap_cond_expr(p)})" for p in clean)
+
+
+def _negate_cond(cond_str):
+    return f"!({_unwrap_cond_expr(cond_str)})"
+
+
+def _parse_branch_block(raw_lines, idx, parent_indent, ev_ptr):
     n_lines = len(raw_lines)
-    cases = []
-    actions = []
+    if idx >= n_lines or raw_lines[idx][1] <= parent_indent:
+        return "empty", [], idx
+    block_indent = raw_lines[idx][1]
+    mode = None
+    items = []
     while idx < n_lines and raw_lines[idx][1] > parent_indent:
         lno, ind, cnt = raw_lines[idx]
-        if cnt.startswith(("if ", "elif ", "else if ")):
-            cond_raw = cnt[3:].strip() if cnt.startswith("if ") else (cnt[5:].strip() if cnt.startswith("elif ") else cnt[8:].strip())
-            cond_val = cond_raw if cond_raw.startswith(("=", "[[")) else f"={cond_raw}"
-            span_map[f"{ev_ptr}/cases/{len(cases)}"] = {"line": lno, "column": ind + 1}
+        if ind > block_indent:
+            raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ev_ptr, f"Unexpected indentation at line {lno}"), lno, ind + 1)
+        if ind < block_indent:
+            raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ev_ptr, f"Unexpected dedent at line {lno}"), lno, ind + 1)
+        cond_kind, cond_val = _parse_cond_header(cnt, lno, ind, ev_ptr)
+        if cond_kind is not None:
+            if mode == "actions":
+                raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ev_ptr, f"Cannot mix actions and conditional '{cnt}' in the same branch at line {lno}; place actions inside if/else branches"), lno, ind + 1)
+            mode = "branches"
+            if cond_kind == "if" and items and any(b["kind"] == "else" for b in items):
+                raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ev_ptr, f"Unexpected 'if' after 'else' at line {lno}"), lno, ind + 1)
+            if cond_kind == "if" and items:
+                raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ev_ptr, f"Use 'elif' instead of sequential 'if' in the same event block at line {lno}"), lno, ind + 1)
+            if cond_kind in ("elif", "else") and (not items or items[-1]["kind"] == "else"):
+                raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ev_ptr, f"'{cond_kind}' without preceding 'if'/'elif' at line {lno}"), lno, ind + 1)
             idx += 1
-            branch_actions = []
-            while idx < n_lines and raw_lines[idx][1] > ind:
-                a_lno, _, a_cnt = raw_lines[idx]
-                branch_actions.append(_parse_action_stmt(a_cnt, a_lno))
-                idx += 1
-            cases.append({"when": cond_val, "actions": branch_actions})
-        elif cnt == "else":
-            span_map[f"{ev_ptr}/cases/{len(cases)}"] = {"line": lno, "column": ind + 1}
-            idx += 1
-            branch_actions = []
-            while idx < n_lines and raw_lines[idx][1] > ind:
-                a_lno, _, a_cnt = raw_lines[idx]
-                branch_actions.append(_parse_action_stmt(a_cnt, a_lno))
-                idx += 1
-            cases.append({"else": True, "actions": branch_actions})
+            body_mode, body_items, idx = _parse_branch_block(raw_lines, idx, ind, ev_ptr)
+            if body_mode == "empty" or not body_items:
+                raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ev_ptr, f"Empty conditional branch at line {lno}"), lno, ind + 1)
+            items.append({
+                "kind": cond_kind,
+                "when": cond_val,
+                "line": lno,
+                "col": ind + 1,
+                "body_mode": body_mode,
+                "body": body_items,
+            })
         else:
-            if cases:
+            if mode == "branches":
                 raise _set_diag_span(LanguageError("E_DSL_SYNTAX", ev_ptr, f"Action statement after if/else must be indented inside a branch at line {lno}"), lno, ind + 1)
-            actions.append(_parse_action_stmt(cnt, lno))
+            mode = "actions"
+            items.append(_parse_action_stmt(cnt, lno))
             idx += 1
-    return ({"cases": cases} if cases else actions), idx
+    return mode, items, idx
+
+
+def _flatten_branch_tree(branches, inherited_conds):
+    flat_cases = []
+    prior_incomplete_negations = []
+    prev_conds = []
+    all_branches_complete = True
+    for b in branches:
+        if b["kind"] in ("if", "elif"):
+            branch_conds = [*inherited_conds, *prior_incomplete_negations, b["when"]]
+            if b["body_mode"] == "actions":
+                flat_cases.append({"when": _combine_and_conds(branch_conds), "actions": b["body"], "_src": (b["line"], b["col"])})
+                sub_complete = True
+            else:
+                sub_cases, sub_complete = _flatten_branch_tree(b["body"], branch_conds)
+                flat_cases.extend(sub_cases)
+            prev_conds.append(b["when"])
+            if not sub_complete:
+                all_branches_complete = False
+                prior_incomplete_negations.append(_negate_cond(b["when"]))
+        else:
+            if b["body_mode"] == "actions" and not inherited_conds and not prior_incomplete_negations:
+                flat_cases.append({"else": True, "actions": b["body"], "_src": (b["line"], b["col"])})
+                sub_complete = True
+            else:
+                else_conds = [*inherited_conds, *[_negate_cond(c) for c in prev_conds]]
+                if b["body_mode"] == "actions":
+                    flat_cases.append({"when": _combine_and_conds(else_conds), "actions": b["body"], "_src": (b["line"], b["col"])})
+                    sub_complete = True
+                else:
+                    sub_cases, sub_complete = _flatten_branch_tree(b["body"], else_conds)
+                    flat_cases.extend(sub_cases)
+            if not sub_complete:
+                all_branches_complete = False
+    chain_complete = bool(branches and branches[-1]["kind"] == "else" and all_branches_complete)
+    return flat_cases, chain_complete
+
+
+def _parse_event_block(raw_lines, idx, parent_indent, ev_ptr, span_map):
+    mode, items, idx = _parse_branch_block(raw_lines, idx, parent_indent, ev_ptr)
+    if mode == "empty":
+        return [], idx
+    if mode == "actions":
+        return items, idx
+    flat_cases, _ = _flatten_branch_tree(items, [])
+    out_cases = []
+    for ci, c in enumerate(flat_cases):
+        src = c.pop("_src", None)
+        if src:
+            span_map[f"{ev_ptr}/cases/{ci}"] = {"line": src[0], "column": src[1]}
+        out_cases.append(c)
+    return {"cases": out_cases}, idx
 
 
 def _parse_verify_step(line, line_no):

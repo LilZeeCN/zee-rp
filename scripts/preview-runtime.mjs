@@ -1081,6 +1081,8 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
               try {
                 const el = w.document.getElementById(${JSON.stringify(widget.inputId)});
                 if (el) {
+                  el.dispatchEvent(new Event('input', { bubbles: true }));
+                  el.dispatchEvent(new w.KeyboardEvent('keyup', { bubbles: true, key: 'Unidentified' }));
                   el.dispatchEvent(new Event('change', { bubbles: true }));
                   el.blur();
                   return true;
