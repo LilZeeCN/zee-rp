@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { listCommands } from './registry.mjs';
 import { assertWritable } from './engine.mjs';
+import { spawnPythonSync } from './python.mjs';
 
 export function generateCapabilities() {
   // LIB_SCRIPTS 未导出；用既有 dump 接口取数据，保持注册表逻辑和导出契约不变。
@@ -43,10 +44,67 @@ export function generateCapabilities() {
   return lines.join('\n');
 }
 
+const matrix = JSON.parse(readFileSync(new URL('./surface-capabilities.json', import.meta.url), 'utf8'));
+const target = new URL('../references/surface-capabilities-matrix.md', import.meta.url);
+const languageTarget = new URL('../references/versioned-capabilities.md', import.meta.url);
+const rows = matrix.properties.map(row =>
+  `| \`${row.property}\` | ${row.sinceVersion} | ${row.modes.join(' | ')} | ${row.detail} |`);
+const document = [
+  '# RP/1 与 Studio 视觉能力对照',
+  '',
+  '由 `scripts/gen-capabilities.mjs --surfaces` 从 `scripts/surface-capabilities.json` 生成。运行时可用 `diagnose_prototype({ mode: "capabilities", query: "backdropBlur" })` 查询。',
+  '',
+  `| 属性 | 起始版本 | ${matrix.surfaces.join(' | ')} | 行为 |`,
+  `| --- | --- | ${matrix.surfaces.map(() => '---').join(' | ')} | --- |`,
+  ...rows,
+  '',
+].join('\n');
+
+export function generateLanguageCapabilities() {
+  const proc = spawnPythonSync(['-B', '-c', `
+import json
+import sys
+sys.path.insert(0, sys.argv[1])
+from rplang.core import ACTION_PROPS, MACRO_PROPS, NODE_PROPS, SHORTHAND_NODE_KINDS
+print(json.dumps({
+  'nodes': sorted(set(NODE_PROPS) | set(SHORTHAND_NODE_KINDS)),
+  'macros': sorted(MACRO_PROPS),
+  'actions': sorted(ACTION_PROPS),
+}))
+`, fileURLToPath(new URL('.', import.meta.url))], { encoding: 'utf8' });
+  if (proc.status !== 0) throw new Error(proc.stderr || proc.error?.message || '读取 RP/1 词表失败');
+  const { nodes, macros, actions } = JSON.parse(proc.stdout);
+  const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+  const words = entries => entries.map(word => `\`${word}\``).join('、');
+  return [
+    '# RP/1 编译器词表与版本',
+    '',
+    `当前安装包版本 \`v${version}\`。本表由 RP/1 编译器公开词表生成。视觉属性的宿主证据见 [四消费面对照](surface-capabilities-matrix.md)。`,
+    '',
+    '## 语法版本',
+    '',
+    '- `v0.4.4` 支持同一事件块混排动作、连续条件、嵌套分支和等待后的续体。',
+    '- `v0.4.5` 增加原生表单动作短写、同一事件内内联 JSON 动作、弃用提示及带前置守卫的事务。',
+    '',
+    '## 元件类型与缩写',
+    '', words(nodes), '',
+    '## 宏', '', words(macros), '',
+    '## 规范动作', '', words(actions), '',
+  ].join('\n');
+}
+
 if (import.meta.url === pathToFileURL(process.argv[1] || '').href) {
-  if (process.argv.length !== 4 || process.argv[2] !== '-o') throw new Error('Usage: node scripts/gen-capabilities.mjs -o <new.md>');
-  const output = process.argv[3];
-  assertWritable(output);
-  writeFileSync(output, generateCapabilities(), { flag: 'wx' });
-  console.log(`已生成 ${output}`);
+  if (process.argv.length === 3 && process.argv[2] === '--check-surfaces') {
+    if (readFileSync(target, 'utf8') !== document) throw new Error('视觉能力对照表已过期。');
+    if (readFileSync(languageTarget, 'utf8') !== generateLanguageCapabilities()) throw new Error('RP/1 编译器版本词表已过期。');
+  } else if (process.argv.length === 3 && process.argv[2] === '--surfaces') {
+    writeFileSync(target, document, 'utf8');
+    writeFileSync(languageTarget, generateLanguageCapabilities(), 'utf8');
+  } else {
+    if (process.argv.length !== 4 || process.argv[2] !== '-o') throw new Error('Usage: node scripts/gen-capabilities.mjs -o <new.md>');
+    const output = process.argv[3];
+    assertWritable(output);
+    writeFileSync(output, generateCapabilities(), { flag: 'wx' });
+    console.log(`已生成 ${output}`);
+  }
 }

@@ -1,0 +1,29 @@
+rp/1 target=9 name="表达力探针" domain=web theme=enterprise-light
+
+page #probe [620x720] name="表达力"
+  column #root [fillxfill] padding=24 gap=12 fill=$bg
+    label #title [fillx40] "样式与原生交互" fontFamily="PingFang SC" fontSize=24 fontWeight=600
+    label #gradient_probe [fillx56] "线性渐变" gradient="linear(180deg,#FEE8C8,#B1D4FC)" radius=12
+    box #glass [fillx70] layout=stack fill=#FFFFFF radius=12 backdropBlur=14
+      label #glass_text [200x36] x=12 y=16 "玻璃卡"
+    image #photo [160x104] src="rp-language/assets/native-probe.png" radius=12 opacity=80
+    sparkline #trend [180x44] points=[2,6,3,8,5] color=$brand
+    input #rotated [220x40] value="可编辑旋转输入框" rotation=25
+    button #switch_state [160x40] "切换面板"
+      +onClick:
+        setPanelState animated to done enterAnimation=slideLeft enterDuration=160 exitAnimation=fade exitDuration=160
+    dynamic-panel #animated [220x70]
+      :state start
+        box #a [220x70] layout=column padding=12
+          label #initial [180x44] "切换前"
+      :state done
+        box #b [220x70] layout=column padding=12
+          label #finished [180x44] "切换后"
+
+verify:
+  expect title text="样式与原生交互"
+  expect rotated value="可编辑旋转输入框"
+  expect animated panelState=start
+  click switch_state
+  expect animated panelState=done
+  expect finished text="切换后"

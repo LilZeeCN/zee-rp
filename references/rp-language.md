@@ -433,7 +433,7 @@ CLI `proto.mjs check` 的成功与失败诊断均为 stdout 上的单个 JSON；
         move thumb locationBeforeDrag duration=0
         set status = "验证失败"
   ```
-  动作短语句支持 `set <widgetId> = expr`、`set $var = expr`、`setPanelState <panelId> to <state>|next|previous|current`（同义简写 `panel <panelId> <state>|next|previous|current`）、`move <widgetId> to x=... y=... | drag-x within <container> | delta x=... y=... | locationBeforeDrag | withThis`、`show|hide|toggle|enable|disable|focus <id>`、`wait 300`、`goto <page_id>`；事件块支持完整命令式控制流（动作与 `if / elif / else` 自由混排、行尾可选冒号 `:`、连续独立 `if`、任意深度嵌套与分支内变量改写、以及 `wait` 后接条件分支，按复杂度 4 档自动降级为原生 `IsNewIfGroup` / 分支锁 / 续体）。
+  动作短语句支持 `set <widgetId> = expr`、`set $var = expr`、`setPanelState <panelId> to <state>|next|previous|current`（旧 `panel` 写法兼容并返回 `W_DEPRECATED_SYNTAX`）、`move <widgetId> to x=... y=... | drag-x within <container> | delta x=... y=... | locationBeforeDrag | withThis`、`show|hide|toggle|enable|disable|focus <id>`、`wait 300`、`goto <page_id>`；事件块支持完整命令式控制流（动作与 `if / elif / else` 自由混排、行尾可选冒号 `:`、连续独立 `if`、任意深度嵌套与分支内变量改写、以及 `wait` 后接条件分支，按复杂度 4 档自动降级为原生 `IsNewIfGroup` / 分支锁 / 续体）。
 - **原生多行文本域**：完整 RP/1 与 Studio 均支持 `textarea` 与 `input multiline=true`（完整 RP/1 编译为原生 `DiagramObject:TextArea`，官方 HTML 渲染为 `<textarea>`，不支持 `maxLength`）。
 - **一等交互模式宏（`carousel` / `slider-captcha`）**：
   - `carousel #banner [400x160] slides=["s1","s2","s3"] interval=3000 indicator=true`：自动展开 `#banner_panel`（带各页状态的 `dynamic-panel`）、左右滑动切页与续播定时器、`#banner_indicator` 状态同步（`=@banner_panel.state`）及页面级 `+onLoad` 自动启动轮播；
@@ -442,3 +442,32 @@ CLI `proto.mjs check` 的成功与失败诊断均为 stdout 上的单个 JSON；
   `.rp1` 顶层支持 `verify:` 缩进块（如 `expect #banner panelState=s1`、`swipe #banner left distance=160`、`wait 3100`、`drag #thumb dx=179 dy=0`、`click #btn`、`expect #status text="验证成功"`），`rp_dsl.py` 自动无损往返并于 `generate_prototype({ verify: true })` / `verify_prototype` 时自动执行行为验收。
 - **全量 `.rp → .rp1` 逆编译（`decompile` / `lift`）**：
   `rp-read.mjs` 解码 `BoundaryCondition`（`Axure:Expr:BoundaryDirectionLiteral`）及 7 种 `move` 模式为结构化 `rp1` 字段；`rp_decompile.py` 剥离原生表达式机械类型转换（如 `IsOver(...)` → `isOver(...)`、`((@w.x)*1)` → `@w.x`）并重新映射逻辑 ID，可直接使用 `proto.mjs check` 编译回 `.rp`。
+
+
+### 命令式事件流与分支变量快照语义
+
+事件块按声明顺序执行。前置 `set` 完成后，后面的 `if` 读取更新值。
+`if / elif / else` 选择同一个入口分支。该分支修改入口条件使用的变量时，
+同一组的 `elif` 和 `else` 不会重新参与选择。后续独立的 `if`、分支内部的
+嵌套 `if` 以及等待后的续体读取当时的变量值。
+
+### 面板状态动作
+
+`setPanelState panel_id to state_id` 为推荐写法。将状态名换成 `next`、
+`previous` 或 `current` 可切换轮播方向或停止轮播。
+
+### 节点属性
+
+节点头推荐使用 `fill=`、`stroke=`、`radius=` 等标准属性。编译诊断会给出旧别名
+的迁移位置。可用 `diagnose_prototype({"mode":"capabilities","query":"backdropBlur"})`
+核对四个消费面的交付行为。
+
+### 元件寻址与版本词表
+
+`#id` 是源码中的逻辑 ID。跨页或跨容器引用使用 `pageId/nodeId`，动态面板中的完整路径包括状态 ID，例如 `home/deck/front/title`。预览步骤写短 ID 时优先匹配当前页。命令的 `page` 可使用源码页面 ID 或 Axure 页面名称。
+
+外部 HTML 的 `data-label` 是导出 DOM 中的原生元件名称，对应 Axure 大纲中的元件。可用 `guid:<hex>` 指定原生 GUID，也可在提供对应 .rp 时用 `{record,id}` 组合指定文件内的记录与对象号。
+
+`transactions` 支持 `require`、`guard` 或 `guards`、`actions` 及反馈字段。通过 `{"transaction":"commit_qty"}` 在事件中调用。守卫在变量和数据写入前求值。拒绝分支可单独写入反馈，成功分支按声明顺序执行动作。
+
+完整元件、宏和规范动作词表见 [编译器版本词表](versioned-capabilities.md)。视觉属性及各出口的降级规则见 [四消费面对照](surface-capabilities-matrix.md)。

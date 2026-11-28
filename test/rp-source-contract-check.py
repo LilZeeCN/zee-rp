@@ -2,6 +2,7 @@
 import copy
 import json
 from pathlib import Path
+import re
 import sys
 import unittest
 
@@ -12,11 +13,33 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from rp_language import compile_language
 from rp_schema import language_schema
 from rp_language_cli import read_source
+from rp_dsl import dsl_to_spec
 
 
 class SourceContractTests(unittest.TestCase):
     def test_generated_schema_is_current(self):
         self.assertEqual(language_schema(), json.loads((ROOT / "references/rp-language.schema.json").read_text()))
+
+    def test_complete_documented_sources_compile(self):
+        checked = 0
+        for relative in ("SKILL.md", "references/rp-language.md"):
+            doc = (ROOT / relative).read_text(encoding="utf-8")
+            for match in re.finditer(r"^```[^\n]*\n(.*?)^```\s*$", doc, re.M | re.S):
+                body = match[1].strip()
+                if body.startswith("rp/1 "):
+                    with self.subTest(document=relative, source=body.splitlines()[0]):
+                        compile_language(dsl_to_spec(body))
+                    checked += 1
+                elif body.startswith("{"):
+                    try:
+                        entry = json.loads(body)
+                    except json.JSONDecodeError:
+                        continue  # Field- and action-level excerpts are not projects.
+                    if entry.get("language") == "rp/1" and isinstance(entry.get("pages"), list):
+                        with self.subTest(document=relative):
+                            compile_language(entry)
+                        checked += 1
+        self.assertGreater(checked, 0)
 
     def test_native_gesture_fixture_matches_source_schema(self):
         spec = read_source(ROOT / "examples/rp-language/native-gestures.rp1")

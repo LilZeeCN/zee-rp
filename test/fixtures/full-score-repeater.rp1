@@ -1,0 +1,65 @@
+rp/1 target=9 name="运行期数据验收" domain=web theme=enterprise-light
+model Task id=text title=text prio="enum(高|中|低)" score=number
+dataset tasks model=Task
+  - id="a" title="Alpha" prio="中" score=30
+  - id="b" title="Beta" prio="低" score=40
+  - id="c" title="Gamma" prio="高" score=80
+  - id="d" title="Delta" prio="中" score=20
+  - id="e" title="Epsilon" prio="高" score=90
+  - id="f" title="Zeta" prio="低" score=10
+  - id="g" title="Eta" prio="中" score=60
+  - id="h" title="Theta" prio="高" score=70
+dataset lookup model=Task
+  - id="a" title="Alpha" prio="中" score=30
+  - id="b" title="Beta" prio="低" score=40
+  - id="c" title="Gamma" prio="高" score=80
+  - id="d" title="Delta" prio="中" score=20
+  - id="e" title="Epsilon" prio="高" score=90
+  - id="f" title="Zeta" prio="低" score=10
+  - id="g" title="Eta" prio="中" score=60
+  - id="h" title="Theta" prio="高" score=70
+var selected: text = ""
+computed total op=count dataset=tasks scope=dataset
+page #home [600x520] name="任务"
+  column #body [fillxfill] padding=16 gap=8
+    repeater #items [fillx180] dataset=tasks key=id rowHeight=44 rowGap=4 pageSize=3
+      :template
+        row #task [fillx44] gap=8
+          label #title [145x40] "=item.title"
+          label #score [50x40] "=text(item.score)"
+          badge #high [60x30] "高" when="=item.prio == \"高\""
+          button #pick [100x40] "选定并加分"
+            +onClick:
+              set $selected = item.id
+              {"type":"data-update","target":{"ref":"items"},"where":"=item.id == var.selected","set":{"score":"=item.score + 55","prio":"高"}}
+    label #selection [140x32] "=concat('选中 ', var.selected)"
+    label #count [140x32] "=text(var.total)"
+    row #actions [fillx48] gap=8
+      button #add [70x40] "新增"
+        +onClick [{"type":"data-add","target":{"ref":"items"},"rows":[{"id":"i","title":"Iota","prio":"高","score":95}]}]
+      button #remove [70x40] "删除"
+        +onClick [{"type":"data-delete","target":{"ref":"items"},"where":"=item.id == var.selected"}]
+      button #filter [70x40] "高分"
+        +onClick [{"type":"data-filter","target":{"ref":"items"},"name":"score","where":"=item.prio == \"高\" && item.score >= 80"}]
+      button #empty [70x40] "空筛"
+        +onClick [{"type":"data-filter","target":{"ref":"items"},"name":"score","where":"=item.score > 999"}]
+      button #clear [70x40] "清筛"
+        +onClick [{"type":"data-clear-filter","target":{"ref":"items"}}]
+      button #desc [70x40] "降序"
+        +onClick [{"type":"data-sort","target":{"ref":"items"},"column":"score","direction":"descending"}]
+      button #asc [70x40] "升序"
+        +onClick [{"type":"data-sort","target":{"ref":"items"},"column":"score","direction":"ascending"}]
+    row #pages [fillx48] gap=8
+      button #next [74x40] "下一页"
+        +onClick [{"type":"data-page","target":{"ref":"items"},"page":"next"}]
+      button #last [74x40] "末页"
+        +onClick [{"type":"data-page","target":{"ref":"items"},"page":"last"}]
+      button #first [74x40] "首页"
+        +onClick [{"type":"data-page","target":{"ref":"items"},"page":"first"}]
+      button #go [96x40] "搜索页"
+        +onClick [{"type":"link","page":"search"}]
+page #search [600x520] name="搜索"
+  column #search_root [fillxfill] padding=16 gap=12
+    searchable-list #quick [fillxhug] dataset=lookup key=id searchField=title filterField=prio filters=auto rowHeight=40 repeaterHeight=168 pageSize=3
+      :template
+        label #result [200x30] "=item.title"

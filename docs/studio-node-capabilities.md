@@ -39,3 +39,9 @@ Studio 的 `label`、`paragraph`、`badge`、`button` 使用 `textAlign` 对齐�
 原生出口保留可编辑Repeater与行模板、导出真实行数据。静态filter/sort和容器on目前没有完整等价的原生转换，兼容报告明确记unsupported；结构三零不能当作这些行为通过。不同页的隐式同名数据集行值冲突会明确拒绝导出，避免后一个覆盖前一个；这不代表所有运行态数据命名问题已经关闭。
 
 本机样本覆盖真实浏览器、模板源改稿、RP9保存关闭重开和原生预览。未据此声明任意模板、GUI手工编辑、其他Axure版本或跨平台全部支持。
+
+## Full RP/1 导入和导出
+
+`studio_open_project` 的 `importCompatibility` 列出当前可运行的已识别动作数量和保留给原生出口的动作。 `open-link`、`scroll-to`、`raise-event` 和 `wait` 的声明可随源码再次导出。对这些动作以及宿主动画效果的验证可使用官方 HTML。
+
+`studio_export({ format:"rp1" })` 返回严格编译结果。`bidirectional-strict-clean` 表示该次导出通过结构及审美门禁、警告数为零。`strict-audit-findings` 提供阻塞该结论的编译结果。各消费面的视觉能力见 [四消费面对照](../references/surface-capabilities-matrix.md)。

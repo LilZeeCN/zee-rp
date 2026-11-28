@@ -4,13 +4,18 @@ import json
 from pathlib import Path
 import re
 from rplang.zh_messages import localize_diagnostic
-from rp_language import Frontend, LanguageError, SHORTHAND_NODE_KINDS, _resolve_pointer, DEVICE_CANVAS_PRESETS, validate_source_tree, MAX_FONT_SIZE
+from rp_language import Frontend, LanguageError, NODE_PROPS, SHORTHAND_NODE_KINDS, EVENT_SHORTHANDS, _resolve_pointer, DEVICE_CANVAS_PRESETS, validate_source_tree, MAX_FONT_SIZE
 
 
 def _node_identity(node):
     if not isinstance(node, dict):
         return None
-    kind = node.get("type") or next((k for k in SHORTHAND_NODE_KINDS if isinstance(node.get(k), str)), None)
+    kind = node.get("type")
+    if kind is None:
+        kind = next((k for k in SHORTHAND_NODE_KINDS if isinstance(node.get(k), str)
+                     and (k != "when" or "children" in node)), None)
+    if not isinstance(kind, str) or kind not in NODE_PROPS and kind not in SHORTHAND_NODE_KINDS:
+        return None
     identity = node.get("id", node.get(kind))
     return identity if isinstance(identity, str) else None
 
@@ -91,8 +96,16 @@ def contextualize(diagnostic, spec, spans=None, source_text=None):
         out["expected"] = expected.group(1)
     cur = pointer
     while cur:
-        if spans and cur in spans:
-            out["sourceSpan"] = spans[cur]
+        candidates = [cur]
+        owner, marker, event_path = cur.rpartition("/on/")
+        if marker:
+            event, slash, suffix = event_path.partition("/")
+            candidates.extend(owner + "/" + shorthand + slash + suffix for shorthand, native in EVENT_SHORTHANDS.items()
+                              if native.removeprefix("On").lower() == event.lower())
+            candidates.append(owner + "/" + event + slash + suffix)
+        located = next((item for item in candidates if spans and item in spans), None)
+        if located:
+            out["sourceSpan"] = spans[located]
             break
         cur = cur.rpartition("/")[0]
     if isinstance(out.get("sourceSpan"), dict):

@@ -159,3 +159,13 @@
 - **批量交互 + 基线逻辑 ID 解析 + 一键清理保存**：`rp_command({ action: "run", command: "add-interaction", params: { items: [{ target, event, actions }, ...] } })` 在单个工作节点内一次追加多组事件，并自动通过旁路 `.baseline.json` 将 RP/1 逻辑 ID（如 `thumb`、`check_overlap`）解析为原生控件名；`axure_save({ as, cleanup: true })` 在另存终稿后自动清理同一链条产生的 `.work-N.rp` 临时中间文件。
 
 测试：`npm run test:mcp-generate`、`npm run test:mcp-verify`、`npm run test:sync`、`npm run test:20261114`。
+
+## 页面和元件定位
+
+页面参数接受源码页面 ID（如 `home`）和 Axure 页面名称（如 `首页`）。元件可使用短 ID、`pageId/nodeId` 或含动态面板与状态的完整路径。在 Chrome 回放中优先消费当前页的短 ID。外部 HTML 可使用导出 DOM 的 `data-label`，其内容对应 Axure 大纲中的元件名称。原生定位支持 `guid:<hex>`，以及与对应 .rp 一同使用的 `{record,id}`。
+
+回放默认执行全部步骤。`failFast:true` 会停在首个失败，保留其余步骤为 `not_run`。`stepDetail` 控制回包的观测详情，`proofReport` 指向可保存的完整证明。报告区分经真实交互抵达的页面和测试器直接打开的页面。
+
+`verify_prototype({ source, fast:true })` 使用 Studio 离线 HTML 和 Chrome。`generate_prototype({ verify:true, verifyMode:"fast" })` 保留原生结构与几何审计，跳过编译预览图，通过同一路径重放。正式原生回放可指定 `engine:"official"`。可用 `noCache:true` 做全量复验。
+
+`sync_prototype({ mode:"relocate", from, to })` 迁移原型、共同基线、同名前缀源码及伴随资产。`rp_command({ command:"clean-artifacts", params:{ output:"app.rp" } })` 清理对应前缀的旧版构建中间目录。

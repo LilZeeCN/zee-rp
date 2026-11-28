@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.5 — 2026-11-28
+
+- 统一 RP/1 表单短写、事件块 JSON 动作、Repeaters、规则守卫、事务和 Studio 数据宏。按当前页面解析短 ID，原生与 Studio HTML 依据可见行位置读取中继器。
+- 原型回放默认收集全部步骤的通过与失败结果。增加画布样式和像素断言、按页虚拟时钟、页面路径证据，以及明确标记来源的 `PROOF.md` 和 `proof.json`。
+- 通过页面编译、原生页面、官方 HTML 与可复用行为缓存加速改稿。纯前景色改动可复用已证明等价的行为，视觉断言或 `noCache:true` 可请求现场回放。
+- 增加导入行为台账、截图异常聚类和审阅记录、确定性伴随资产目录、产物迁移、并发写锁及 Studio 实例关闭管理。
+
 ## 0.4.3 — 2026-11-28
 
 - **完整 RP/1 原生 `textarea` 与 `input multiline=true`**：`scripts/native-widget-synthesizer.mjs` 与 `scripts/native-forms.mjs` 新增免模板 `Axure:DiagramObject:TextArea` 净室合成；打通 `rp_schema.py` / `rplang` / `proto_engine` / `rp_decompile.py`，完整 RP/1 支持 `textarea` 及 `input multiline=true`（自动正规化为 `textarea` 且不支持 `maxLength`，在官方 HTML 中渲染为原生 `<textarea>` 并可 `decompile` 往返）。
