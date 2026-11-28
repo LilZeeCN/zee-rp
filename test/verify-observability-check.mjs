@@ -170,26 +170,28 @@ test('rp/1 textarea, input multiline=true, and nested if/elif/else work end-to-e
     const liftedText = readFileSync(join(work, 'lifted.rp1'), 'utf8');
     assert.match(liftedText, /textarea #/);
 
-    const verifyRes = await verifyOfficialPreview({
-      rp: gen.output,
-      source: gen.source,
-      engine: HAS_RP9_APP ? 'official' : 'studio-html',
-      compact: true,
-      cwd: work,
-      steps: [
-        { action: 'fill', target: 'bio', value: '多行反馈文本' },
-        { action: 'expect', target: 'bio_out', expect: { text: '多行反馈文本' } },
-        // mode=1, sub=0: incomplete inner if must NOT fall into outer else ("hit_m0_s0")
-        { action: 'click', target: 'btn_eval' },
-        { action: 'expect', target: 'branch_out', expect: { text: '待判定' } },
-        // switch mode=0 -> hits outer else -> inner else ("hit_m0_s0")
-        { action: 'click', target: 'btn_toggle_mode' },
-        { action: 'click', target: 'btn_eval' },
-        { action: 'expect', target: 'branch_out', expect: { text: 'hit_m0_s0' } },
-      ],
-    }, { runWorkflow, exportHtml: exportPrototype });
-    assert.equal(verifyRes.status, 'completed', JSON.stringify(verifyRes.diagnostics));
-    assert.equal(verifyRes.passed, 7);
+    for (const engine of (HAS_RP9_APP ? ['studio-html', 'official'] : ['studio-html'])) {
+      const verifyRes = await verifyOfficialPreview({
+        rp: gen.output,
+        source: gen.source,
+        engine,
+        compact: true,
+        cwd: work,
+        steps: [
+          { action: 'fill', target: 'bio', value: '多行反馈文本' },
+          { action: 'expect', target: 'bio_out', expect: { text: '多行反馈文本' } },
+          // mode=1, sub=0: incomplete inner if must NOT fall into outer else ("hit_m0_s0")
+          { action: 'click', target: 'btn_eval' },
+          { action: 'expect', target: 'branch_out', expect: { text: '待判定' } },
+          // switch mode=0 -> hits outer else -> inner else ("hit_m0_s0")
+          { action: 'click', target: 'btn_toggle_mode' },
+          { action: 'click', target: 'btn_eval' },
+          { action: 'expect', target: 'branch_out', expect: { text: 'hit_m0_s0' } },
+        ],
+      }, { runWorkflow, exportHtml: exportPrototype });
+      assert.equal(verifyRes.status, 'completed', `${engine}: ${JSON.stringify(verifyRes.diagnostics)}`);
+      assert.equal(verifyRes.passed, 7);
+    }
   } finally {
     rmSync(work, { recursive: true, force: true });
   }

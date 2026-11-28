@@ -609,12 +609,26 @@ export class StudioRuntimeSession {
       ? rawStr.slice(0, entry.node.maxLength)
       : rawStr;
     this.inputs[scoped] = nextVal;
+    const node = entry.node;
+    const changeSpec = node.on?.change || node.on?.input || node.interactions?.change || node.interactions?.input;
+    const executed = [];
+    const isDisabled = Boolean(node.disabled) || ['disabled', 'loading'].includes(node.state);
+    if (changeSpec && !isDisabled) {
+      const previousScope = this.interactionScope;
+      this.interactionScope = entry.scopePrefix;
+      try {
+        executePrototypeInteraction(this, changeSpec, executed, { declaredVariables: this.docSnapshot.variables });
+      } finally {
+        this.interactionScope = previousScope;
+      }
+    }
     this.trace.push({
       step: this.trace.length + 1,
       type: 'input',
       pageId: this.currentPageId,
       targetId: scoped,
       value: nextVal,
+      executed,
     });
     return this.getState();
   }

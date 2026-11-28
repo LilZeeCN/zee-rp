@@ -1217,7 +1217,19 @@ function buildAppJs(bundlePayload) {
         ? rawStr.slice(0, node.maxLength)
         : rawStr;
       this.inputs[stripped] = nextVal;
-      this.trace.push({ step: this.trace.length + 1, type: 'input', pageId: this.currentPageId, targetId: stripped, value: nextVal });
+      const changeSpec = node.on?.change || node.on?.input;
+      const executed = [];
+      const isDisabled = Boolean(node.disabled) || ['disabled', 'loading'].includes(node.state);
+      if (changeSpec && !isDisabled) {
+        const before = this.interactionScope;
+        this.interactionScope = this.nodeScope(node);
+        try {
+          executePrototypeInteraction(this, changeSpec, executed, { declaredVariables: this.bundle.variables });
+        } finally {
+          this.interactionScope = before;
+        }
+      }
+      this.trace.push({ step: this.trace.length + 1, type: 'input', pageId: this.currentPageId, targetId: stripped, value: nextVal, executed });
       this.render();
       return this.getState();
     }
@@ -2069,6 +2081,9 @@ function buildAppJs(bundlePayload) {
         el.addEventListener('input', e => {
           const v = e.target.value;
           this.inputs[n.scopedId] = v;
+        });
+        el.addEventListener('change', e => {
+          this.setInput(n.scopedId, e.target.value);
         });
       } else if (n.type === 'checkbox' || n.type === 'radio') {
         const isChecked = n.scopedId in this.checked ? Boolean(this.checked[n.scopedId]) : Boolean(n.checked);

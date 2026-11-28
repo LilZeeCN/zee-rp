@@ -536,12 +536,12 @@ const EVENT_SHORTHAND_MAP = [
   ['onInput', 'input'],
 ];
 
-export function nodeEvents(node) {
-  const on = Object.fromEntries(Object.entries(node.on || {}).map(([event, spec]) => [event, normalizeInteractionSpec(spec)]));
+export function nodeEvents(node, context = null) {
+  const on = Object.fromEntries(Object.entries(node.on || {}).map(([event, spec]) => [event, normalizeInteractionSpec(spec, context)]));
   for (const [aliasKey, evKey] of EVENT_SHORTHAND_MAP) {
     for (const spec of [node[aliasKey], node.interactions?.[evKey]]) {
       if (spec === undefined) continue;
-      const normalizedSpec = normalizeInteractionSpec(spec);
+      const normalizedSpec = normalizeInteractionSpec(spec, context);
       if (evKey === 'click') {
         if (on.click !== undefined && canonicalJson(on.click) !== canonicalJson(normalizedSpec)) {
           throw Object.assign(new Error(`节点 ${node.id} 的 on.click 与点击别名冲突，请只保留一种写法`), { code: 'E_INTERACTION_ALIAS_CONFLICT', nodeId: node.id });
@@ -562,11 +562,11 @@ export function nodeEvents(node) {
   return Object.keys(on).length ? on : null;
 }
 
-export function normalizeNodeInteractions(node) {
+export function normalizeNodeInteractions(node, context = null) {
   if (!node || typeof node !== 'object') return;
   const hasAlias = EVENT_SHORTHAND_MAP.some(([aliasKey, evKey]) => node[aliasKey] !== undefined || node.interactions?.[evKey] !== undefined);
   if (node.on || hasAlias || (node.goto !== undefined && supportsGotoSugar(node))) {
-    node.on = nodeEvents(node);
+    node.on = nodeEvents(node, context);
     for (const [aliasKey, evKey] of EVENT_SHORTHAND_MAP) {
       delete node[aliasKey];
       if (node.interactions?.[evKey] !== undefined) delete node.interactions[evKey];
@@ -574,15 +574,27 @@ export function normalizeNodeInteractions(node) {
     if (supportsGotoSugar(node)) delete node.goto;
     if (node.interactions && !Object.keys(node.interactions).length) delete node.interactions;
   }
-  for (const child of node.children || []) normalizeNodeInteractions(child);
-  for (const state of node.states || []) normalizeNodeInteractions(state.root);
-  normalizeNodeInteractions(node.template);
+  for (const child of node.children || []) normalizeNodeInteractions(child, context);
+  for (const state of node.states || []) normalizeNodeInteractions(state.root, context);
+  normalizeNodeInteractions(node.template, context);
 }
 
-function normalizeNode(node, pageId, seenIds, pathPtr, assetCollector) {
+function collectRawWidgetIds(node, out = new Set()) {
+  if (!node || typeof node !== 'object') return out;
+  if (typeof node.id === 'string' && node.id) out.add(node.id);
+  for (const ch of node.children || []) collectRawWidgetIds(ch, out);
+  for (const st of node.states || []) {
+    collectRawWidgetIds(st?.root, out);
+    for (const ch of st?.children || []) collectRawWidgetIds(ch, out);
+  }
+  collectRawWidgetIds(node.template, out);
+  return out;
+}
+
+function normalizeNode(node, pageId, seenIds, pathPtr, assetCollector, interactionContext = null) {
   if (!node || typeof node !== 'object') return node;
   const copy = structuredClone(node);
-  normalizeNodeInteractions(copy);
+  normalizeNodeInteractions(copy, interactionContext);
   const rawId = String(copy.id || copy.name || `node_${seenIds.size + 1}`);
   let nodeId = rawId;
   if (seenIds.has(nodeId)) {
@@ -637,7 +649,7 @@ function normalizeNode(node, pageId, seenIds, pathPtr, assetCollector) {
 
   if (Array.isArray(copy.children)) {
     copy.children = copy.children.map((ch, i) =>
-      normalizeNode(ch, pageId, seenIds, `${pathPtr}/children/${i}`, assetCollector)
+      normalizeNode(ch, pageId, seenIds, `${pathPtr}/children/${i}`, assetCollector, interactionContext)
     );
   }
 
@@ -649,7 +661,7 @@ function normalizeNode(node, pageId, seenIds, pathPtr, assetCollector) {
       stCopy.name = stCopy.name || stId;
       const stateSeen = new Set(seenIds);
       if (stCopy.root) {
-        stCopy.root = normalizeNode(stCopy.root, pageId, stateSeen, `${pathPtr}/states/${sIdx}/root`, assetCollector);
+        stCopy.root = normalizeNode(stCopy.root, pageId, stateSeen, `${pathPtr}/states/${sIdx}/root`, assetCollector, interactionContext);
       } else if (Array.isArray(stCopy.children)) {
         stCopy.root = normalizeNode({
           type: 'box',
@@ -659,7 +671,7 @@ function normalizeNode(node, pageId, seenIds, pathPtr, assetCollector) {
           w: 'fill',
           h: 'fill',
           children: stCopy.children,
-        }, pageId, stateSeen, `${pathPtr}/states/${sIdx}/root`, assetCollector);
+        }, pageId, stateSeen, `${pathPtr}/states/${sIdx}/root`, assetCollector, interactionContext);
         delete stCopy.children;
       }
       return stCopy;
@@ -668,7 +680,7 @@ function normalizeNode(node, pageId, seenIds, pathPtr, assetCollector) {
 
   if (copy.template && typeof copy.template === 'object') {
     const tplSeen = new Set(seenIds);
-    copy.template = normalizeNode(copy.template, pageId, tplSeen, `${pathPtr}/template`, assetCollector);
+    copy.template = normalizeNode(copy.template, pageId, tplSeen, `${pathPtr}/template`, assetCollector, interactionContext);
   }
 
   return copy;
@@ -774,12 +786,17 @@ export function importToStudioDocument(sourcePathOrObject, { projectDir = null, 
     boardCursorX = boardX + canvasW + (preset ? preset.shellPad * 2 : 0) + 80;
 
     const seenIds = new Set();
+    const interactionContext = {
+      variableNames: new Set(Object.keys(raw.variables || {})),
+      widgetIds: collectRawWidgetIds(pg.root),
+    };
     const rootNode = normalizeNode(
       pg.root || { type: 'box', id: `${pageId}_root`, name: pageName, layout: 'stack', w: canvasW, h: canvasH, children: [] },
       pageId,
       seenIds,
       `/pages/${idx}/root`,
-      handleAssetNode
+      handleAssetNode,
+      interactionContext
     );
 
     return {

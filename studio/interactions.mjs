@@ -41,7 +41,7 @@ function parseInlineActionString(raw) {
   return obj;
 }
 
-function expandSetShorthand(setMap) {
+function expandSetShorthand(setMap, context = null) {
   if (!setMap || typeof setMap !== 'object' || Array.isArray(setMap)) fail('set 简写需要键值对象，例如 {"$count":"=$count+1","@lbl":"完成"}', 'set');
   const actions = [];
   for (const [rawKey, val] of Object.entries(setMap)) {
@@ -58,6 +58,10 @@ function expandSetShorthand(setMap) {
       actions.push({ type: 'set-selected', target: rawKey.slice(0, -9), selected: val });
     } else if (rawKey.endsWith('.option')) {
       actions.push({ type: 'set-option', target: rawKey.slice(0, -7), value: val });
+    } else if (context?.variableNames?.has(rawKey)) {
+      actions.push({ type: 'set-var', name: rawKey, value: val });
+    } else if (context?.widgetIds?.has(rawKey)) {
+      actions.push({ type: 'set-text', target: rawKey, value: val });
     } else {
       actions.push({ type: 'set-var', name: rawKey, value: val });
     }
@@ -65,10 +69,10 @@ function expandSetShorthand(setMap) {
   return actions;
 }
 
-export function normalizeInteractionSpec(spec) {
+export function normalizeInteractionSpec(spec, context = null) {
   if (spec === null) return null;
-  if (typeof spec === 'string') return normalizeInteractionSpec([parseInlineActionString(spec)]);
-  if (Array.isArray(spec)) return spec.map(normalizeInteractionSpec).flat();
+  if (typeof spec === 'string') return normalizeInteractionSpec([parseInlineActionString(spec)], context);
+  if (Array.isArray(spec)) return spec.map(item => normalizeInteractionSpec(item, context)).flat();
   if (!spec || typeof spec !== 'object') fail('交互需要动作对象、数组或cases对象', 'on');
   const out = structuredClone(spec);
   if (out.type === 'goto') out.type = 'link';
@@ -96,11 +100,11 @@ export function normalizeInteractionSpec(spec) {
     out.state = stateId;
   }
   if (out.set !== undefined && !out.type && !out.cases && out.when === undefined && out.if === undefined && out.condition === undefined) {
-    const setActions = expandSetShorthand(out.set);
+    const setActions = expandSetShorthand(out.set, context);
     const rest = { ...out };
     delete rest.set;
-    if (!Object.keys(rest).length) return normalizeInteractionSpec(setActions);
-    return normalizeInteractionSpec([...setActions, rest]);
+    if (!Object.keys(rest).length) return normalizeInteractionSpec(setActions, context);
+    return normalizeInteractionSpec([...setActions, rest], context);
   }
   const conditional = ['type','when','if','condition','then','else','actions','cases','break'];
   const dataFields = ['dataset','repeater','op','rowId','clearOthers','row','patch','requireNonEmpty','onEmptyShow','onEmptySelectionShow','query','field','operator','order','page'];
@@ -147,18 +151,18 @@ export function normalizeInteractionSpec(spec) {
   if (['link', 'navigate'].includes(out.type) && ![out.page, out.to, out.target].some(value => typeof value === 'string' && value)) fail('跳页动作缺少目标page', 'page');
   for (const key of ['actions', 'then', 'else']) {
     if (out[key] !== undefined && !(key === 'else' && out.else === true && Array.isArray(out.actions))) {
-      out[key] = normalizeInteractionSpec(out[key]);
+      out[key] = normalizeInteractionSpec(out[key], context);
     }
   }
   if (out.setPanelState) {
     const payloads = Array.isArray(out.setPanelState) ? out.setPanelState : [out.setPanelState];
-    out.setPanelState = payloads.map(item => normalizeInteractionSpec({ type: 'set-panel-state', ...item }));
+    out.setPanelState = payloads.map(item => normalizeInteractionSpec({ type: 'set-panel-state', ...item }, context));
   }
   if (out.cases) {
     if (!Array.isArray(out.cases) || !out.cases.length) fail('cases需要非空数组','cases');
-    out.cases = out.cases.map(branch => normalizeInteractionSpec({ ...branch, actions: branch.actions || [] }));
+    out.cases = out.cases.map(branch => normalizeInteractionSpec({ ...branch, actions: branch.actions || [] }, context));
   }
-  if (out.datasetAction) out.datasetAction = normalizeInteractionSpec({ ...out.datasetAction, type: `dataset-${out.datasetAction.op}` });
+  if (out.datasetAction) out.datasetAction = normalizeInteractionSpec({ ...out.datasetAction, type: `dataset-${out.datasetAction.op}` }, context);
   const conditions = ['when', 'if', 'condition'].filter(key => out[key] !== undefined);
   if (conditions.length > 1 && conditions.some(key => JSON.stringify(out[key]) !== JSON.stringify(out[conditions[0]]))) fail('when/if/condition 条件冲突，请只保留一个条件', conditions[1]);
   if (conditions.length) {
