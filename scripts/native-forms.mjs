@@ -4,10 +4,10 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { cloneLibraryWidget } from './clone-library-widget.mjs';
+import { synthesizeNativeFormWidget } from './native-widget-synthesizer.mjs';
 import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
 import { parsePayload, encodePayload, field, walkNodes } from './parse-payload.mjs';
-import { detectFileVersion, installRoot } from './version.mjs';
+import { detectFileVersion } from './version.mjs';
 
 const LIBRARY_PAGES = { input: 'Text Field', radio: 'Radio Button', checkbox: 'Checkbox', combobox: 'Droplist', listbox: 'List Box' };
 const STATE_NAMES = { hover: 'MouseOver', selected: 'Selected', disabled: 'Disabled', focused: 'Focused' };
@@ -211,8 +211,8 @@ export function materializeNativeControl(sourceFile, outputFile, config) {
   const work = mkdtempSync(join(tmpdir(), 'zee-native-form-'));
   try {
     const cloneFile = join(work, 'clone.rp');
-    const report = cloneLibraryWidget(join(installRoot(9), 'Libraries/Default.rplib'), sourceFile, cloneFile, {
-      sourcePageName, targetPageName: config.pageName, name: config.name,
+    const report = synthesizeNativeFormWidget(sourceFile, cloneFile, {
+      kind: config.kind, targetPageName: config.pageName, name: config.name,
       x: config.x, y: config.y, width: config.width, height: config.height, maxLength: config.maxLength,
     });
     let output = readFileSync(cloneFile);

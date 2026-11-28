@@ -929,6 +929,11 @@ const LIB_SCRIPTS = [
     "evidence": "internal"
   },
   {
+    "script": "native-widget-synthesizer.mjs",
+    "summary": "净室原生控件合成器：不依赖本机 Axure 教学件或 Default.rplib 直接构建 DynamicPanel/PanelState（RP9/RP11）、Repeater 与 5 类原生表单控件",
+    "evidence": "internal"
+  },
+  {
     "script": "native-forms.mjs",
     "summary": "RP/1 原生表单控件、选项、初态与交互状态样式装配库",
     "evidence": "internal"

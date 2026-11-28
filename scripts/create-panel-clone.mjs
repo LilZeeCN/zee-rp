@@ -31,6 +31,7 @@ import { resolvePageRecord } from './ix-actions.mjs';
 import { guidKey } from './duplicate-page.mjs';
 import { detectFileVersion, installRoot, versionLabel } from './version.mjs';
 import { fixPanelRegistry } from './fix-panel-registry.mjs';
+import { synthesizeDynamicPanelTemplate } from './native-widget-synthesizer.mjs';
 import { join } from 'node:path';
 
 // 面板模板取自「与目标文件同版本」的 Axure 安装资源；跨版本模板会带来版本专属字段。
@@ -49,8 +50,6 @@ function panelTemplateName(file) {
 // TEMPLATE_PANEL_NAME 现在按目标文件版本解析，见 panelTemplateName()。
 
 export function createPanel(file, { pageName, pageIndex, name, states = ['State 1'], x = 100, y = 100, width = 300, height = 200, copyTemplateStates = false }) {
-  const TEMPLATE = panelTemplate(file);
-  const TEMPLATE_PANEL_NAME = panelTemplateName(file);
   const records = readRecords(file);
   const pageRec = pageIndex === undefined ? resolvePageRecord(file, pageName)
     : records.find(r => r.index === Number(pageIndex) && r.className === 'Axure:Page');
@@ -70,52 +69,64 @@ export function createPanel(file, { pageName, pageIndex, name, states = ['State 
   const intern = text => { let i = strings.indexOf(text); if (i < 0) { i = strings.length; strings.push(text); } return { tag: 8, value: i + 1, text }; };
   const page = [...graph.objects.values()].find(o => o.className === 'Axure:Page');
   const diagram = graph.objects.get(field(page.body, 'diagram').value);
-  const source = readRecords(readFileSync(TEMPLATE));
-  const allowUnnamed = process.platform === 'win32' && detectFileVersion(file) === 9
-    && !process.env.AXURE_PANEL_TEMPLATE && !process.env.AXURE_PANEL_TEMPLATE_NAME;
-  const unnamedPanels = [];
-  let templateRecord, templateGraph, templateWidget;
-  for (const r of source.filter(r => r.className === 'Axure:Page')) {
-    const g = parsePayload(r);
-    for (const widget of g.objects.values()) {
-      if (widget.className !== 'Axure:DiagramObject:DynamicPanel') continue;
-      const templateName = field(field(widget.body, 'name-block'), 'text')?.text;
-      if (templateName === TEMPLATE_PANEL_NAME) {
-        [templateRecord, templateGraph, templateWidget] = [r, g, widget];
-        break;
-      }
-      if (allowUnnamed && templateName === '') unnamedPanels.push([r, g, widget]);
-    }
-    if (templateWidget) break;
-  }
-  if (!templateWidget && unnamedPanels.length && (!copyTemplateStates || unnamedPanels.length === 1)) {
-    [templateRecord, templateGraph, templateWidget] = unnamedPanels[0];
-    // The built-in Windows Tour can contain several unnamed panels. For an
-    // empty shell only their shape is needed, so use document order and drop events.
-    if (!copyTemplateStates) templateWidget.body.entries = templateWidget.body.entries.filter(([key]) => key.text !== 'InteractionMap');
-  }
-  if (!templateWidget) {
-    const hint = unnamedPanels.length > 1 ? ' (multiple unnamed panels in RP9 Tour; supply a template with a named panel)' : '';
-    throw new Error(`Missing template panel: ${TEMPLATE_PANEL_NAME}${hint}`);
-  }
+  const version = detectFileVersion(file);
+  const useTemplateFile = Boolean(process.env.AXURE_PANEL_TEMPLATE || process.env.AXURE_PANEL_TEMPLATE_NAME || copyTemplateStates);
+  let source = null;
+  let templateRecord, templateGraph, templateWidget, synthesizedStateRecord = null;
   let templateStateRecords = [];
-  if (copyTemplateStates) {
-    const templateGuids = templateGraph.roots.find(n => n.tag === 0x1e).values;
-    const refs = field(templateWidget.body, 'panel-diagrams').items.map(item => item.values?.[1]);
-    templateStateRecords = refs.map(index => {
-      const stateGuid = templateGuids[index - 1];
-      return source.find(record => record.className === 'Axure:PanelState'
-        && parsePayload(record).roots.find(n => n.tag === 0x1e)?.values?.[1] === stateGuid);
-    });
-    if (!templateStateRecords.length || templateStateRecords.some(record => !record)) {
-      throw new Error(`Could not resolve all states for template panel: ${TEMPLATE_PANEL_NAME}`);
+
+  if (!useTemplateFile) {
+    const synth = synthesizeDynamicPanelTemplate(version);
+    ({ templateRecord, templateGraph, templateWidget } = synth);
+    synthesizedStateRecord = synth.stateRecord;
+  } else {
+    const TEMPLATE = panelTemplate(file);
+    const TEMPLATE_PANEL_NAME = panelTemplateName(file);
+    source = readRecords(readFileSync(TEMPLATE));
+    const allowUnnamed = process.platform === 'win32' && version === 9
+      && !process.env.AXURE_PANEL_TEMPLATE && !process.env.AXURE_PANEL_TEMPLATE_NAME;
+    const unnamedPanels = [];
+    for (const r of source.filter(r => r.className === 'Axure:Page')) {
+      const g = parsePayload(r);
+      for (const w of g.objects.values()) {
+        if (w.className !== 'Axure:DiagramObject:DynamicPanel') continue;
+        const templateName = field(field(w.body, 'name-block'), 'text')?.text;
+        if (templateName === TEMPLATE_PANEL_NAME) {
+          [templateRecord, templateGraph, templateWidget] = [r, g, w];
+          break;
+        }
+        if (allowUnnamed && templateName === '') unnamedPanels.push([r, g, w]);
+      }
+      if (templateWidget) break;
     }
-    if (states.length !== templateStateRecords.length) {
-      throw new Error(`Template panel has ${templateStateRecords.length} states; received ${states.length} state names`);
+    if (!templateWidget && unnamedPanels.length && (!copyTemplateStates || unnamedPanels.length === 1)) {
+      [templateRecord, templateGraph, templateWidget] = unnamedPanels[0];
+      // The built-in Windows Tour can contain several unnamed panels. For an
+      // empty shell only their shape is needed, so use document order and drop events.
+      if (!copyTemplateStates) templateWidget.body.entries = templateWidget.body.entries.filter(([key]) => key.text !== 'InteractionMap');
+    }
+    if (!templateWidget) {
+      const hint = unnamedPanels.length > 1 ? ' (multiple unnamed panels in RP9 Tour; supply a template with a named panel)' : '';
+      throw new Error(`Missing template panel: ${TEMPLATE_PANEL_NAME}${hint}`);
+    }
+    if (copyTemplateStates) {
+      const templateGuids = templateGraph.roots.find(n => n.tag === 0x1e).values;
+      const refs = field(templateWidget.body, 'panel-diagrams').items.map(item => item.values?.[1]);
+      templateStateRecords = refs.map(index => {
+        const stateGuid = templateGuids[index - 1];
+        return source.find(record => record.className === 'Axure:PanelState'
+          && parsePayload(record).roots.find(n => n.tag === 0x1e)?.values?.[1] === stateGuid);
+      });
+      if (!templateStateRecords.length || templateStateRecords.some(record => !record)) {
+        throw new Error(`Could not resolve all states for template panel: ${TEMPLATE_PANEL_NAME}`);
+      }
+      if (states.length !== templateStateRecords.length) {
+        throw new Error(`Template panel has ${templateStateRecords.length} states; received ${states.length} state names`);
+      }
     }
   }
   const closure = closureOf(templateGraph, templateWidget.id);
-  const cloned = cloneInto({ version: detectFileVersion(file),
+  const cloned = cloneInto({ version,
     srcGraph: templateGraph, srcStrings: templateRecord.strings,
     dstGraph: graph, dstStrings: strings, closure, rootOldId: templateWidget.id });
   const widget = graph.objects.get(cloned.rootNewId);
@@ -144,7 +155,7 @@ export function createPanel(file, { pageName, pageIndex, name, states = ['State 
   setProp(3221225577, { Width: width, Height: height });
   field(widget.body, 'fit-to-content').value = false;
   // A real PanelState record is required for every requested state. An empty GUID is not a state.
-  const stateTemplate = source.find(r => r.className === 'Axure:PanelState');
+  const stateTemplate = synthesizedStateRecord ?? source.find(r => r.className === 'Axure:PanelState');
   const packages = [], pairs = [];
   const stateNames = states.length ? states : ['State 1'];
   for (let stateIndex = 0; stateIndex < stateNames.length; stateIndex++) {

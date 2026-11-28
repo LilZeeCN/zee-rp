@@ -1,30 +1,15 @@
-import { readFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { readRecords, encodeRecord, replaceRecord } from './rp-records.mjs';
 import { parsePayload, encodePayload, field, walkNodes } from './parse-payload.mjs';
 import { closureOf, cloneInto } from './clone-closure.mjs';
-import { installRoot, detectFileVersion } from './version.mjs';
+import { synthesizeRepeaterTemplate } from './native-widget-synthesizer.mjs';
+import { detectFileVersion } from './version.mjs';
 
-// Only the native Repeater shell/style comes from the installed library.
-// Its example rows, events and row widgets are replaced before cloning.
+// 使用净室合成的中继器原生外壳，不再依赖本机安装的 Libraries/Default.rplib。
 export function createNativeRepeater(file, rowFile, plan) {
   if (detectFileVersion(file) !== 9) throw new Error('Native Repeater requires RP 9');
-  const library = readFileSync(join(installRoot(9), 'Libraries/Default.rplib'));
-  let sourceRecord, sourceGraph, repeater;
-  for (const record of readRecords(library).filter(r => r.className === 'Axure:Page')) {
-    const graph = parsePayload(record);
-    const found = [...graph.objects.values()].find(o => o.className === 'Axure:DiagramObject:Repeater');
-    if (found) { sourceRecord = record; sourceGraph = graph; repeater = found; break; }
-  }
-  if (!repeater) throw new Error('Installed Default library has no Repeater');
-  repeater.body.entries = repeater.body.entries.filter(([key]) => key.text !== 'InteractionMap');
-  field(repeater.body, 'AdaptiveStyles').items = [];
-  const sourceRow = sourceGraph.objects.get(field(repeater.body, 'BaseDiagram').value);
-  const sourceData = sourceGraph.objects.get(field(repeater.body, 'Data').value);
-  field(sourceRow.body, 'diagram-objects').items = [];
-  field(sourceData.body, 'columns').items = [];
-  field(sourceData.body, 'rows').items = [];
+  const { sourceRecord, sourceGraph, repeater } = synthesizeRepeaterTemplate();
   const record = readRecords(file).find(r => r.className === 'Axure:Page');
   const graph = parsePayload(record), strings = [...record.strings];
   const page = [...graph.objects.values()].find(o => o.className === 'Axure:Page');

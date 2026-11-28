@@ -11,9 +11,6 @@ import { addInteractions } from '../scripts/ix-actions.mjs';
 import { generatePrototype } from '../scripts/mcp-tools.mjs';
 import { writeNativeScene } from '../scripts/native-scene.mjs';
 import { setWidgetText } from '../scripts/set-widget-text.mjs';
-import { installRoot } from '../scripts/version.mjs';
-
-const HAS_RP9_PANEL_TPL = existsSync(join(installRoot(9), 'Training', 'RP9 Tour.rp'));
 
 test('diff-rp: 真阴性对比报告零噪音，真阳性精确命中两处已知修改', () => {
   const work = mkdtempSync(join(tmpdir(), 'zee-diff-rp-'));
@@ -79,30 +76,14 @@ test('diff-rp: 真阴性对比报告零噪音，真阳性精确命中两处已�
   }
 });
 
-const TEMPLATE_FREE_CARDS_RP1 = [
-  'rp/1 target=9 name="DiffCardsFallback"',
-  'page #home name="首页"',
-  '  box #root1 [360x400] layout=column gap=12 padding=16',
-  '    label #h_title [300x32] "首页概览"',
-  '    button #h_go [180x40] "查看详情" goto="details"',
-  'page #details name="详情页"',
-  '  box #root2 [360x400] layout=column gap=12 padding=16',
-  '    label #d_title [300x32] "详情列表"',
-  '    button #d_back [180x40] "返回" goto="home"',
-  'page #settings name="设置页"',
-  '  box #root3 [360x400] layout=column gap=12 padding=16',
-  '    label #s_title [300x32] "偏好设置"',
-  '    button #s_save [180x40] "保存设置"',
-].join('\n');
-
 test('diff-rp: 多页 RP/1 性能与 GUI 重存真阴性（存在本地样本时）', () => {
   const work = mkdtempSync(join(tmpdir(), 'zee-diff-perf-'));
   try {
-    const gen = generatePrototype(
-      HAS_RP9_PANEL_TPL
-        ? { recipe: 'mobile-cards', output: join(work, 'cards.rp'), cwd: work }
-        : { rp1: TEMPLATE_FREE_CARDS_RP1, output: join(work, 'cards.rp'), cwd: work },
-    );
+    const gen = generatePrototype({
+      recipe: 'mobile-cards',
+      output: join(work, 'cards.rp'),
+      cwd: work,
+    });
     assert.equal(gen.status, 'completed', JSON.stringify(gen.diagnostics));
     const t0 = performance.now();
     const selfDiff = diffRp(gen.output, gen.output);

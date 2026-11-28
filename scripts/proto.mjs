@@ -25,7 +25,7 @@ import { materializeNativeControl, applyNativeWidgetStyles } from './native-form
 import { createBlankProject } from './create-blank-project.mjs';
 import { createPanel } from './create-panel-clone.mjs';
 import { fillPanelState } from './fill-panel-state.mjs';
-import { cloneLibraryWidget } from './clone-library-widget.mjs';
+import { synthesizeNativeFormWidget } from './native-widget-synthesizer.mjs';
 import { createInteractionWriter } from './ix-actions.mjs';
 import { mergePages } from './merge-pages.mjs';
 import { placeMaster } from './place-master.mjs';
@@ -37,7 +37,6 @@ import { setWidgetNames } from './name-widget.mjs';
 import { readRecords, encodeRecord, replaceRecord, appendPackage } from './rp-records.mjs';
 import { parsePayload, encodePayload, field } from './parse-payload.mjs';
 import { guidKey } from './duplicate-page.mjs';
-import { installRoot } from './version.mjs';
 import { assertNotProtected } from './engine.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -418,7 +417,6 @@ export function buildInteractiveRp(
     if (!inputs.length) return buf;
     const tmpWork = mkdtempSync(join(tmpdir(), 'proto-inputs-'));
     try {
-      const rplibPath = join(installRoot(9), 'Libraries', 'Default.rplib');
       let step = 0;
       for (const inp of inputs) {
         const input = join(tmpWork, `step-${step++}.rp`);
@@ -431,8 +429,8 @@ export function buildInteractiveRp(
           inputReports.push({ page: pageLabel, name: inp.name, kind: inp.kind, id: report.id, geometry: report.geometry });
           continue;
         }
-        const report = cloneLibraryWidget(rplibPath, input, output, {
-          sourcePageName: 'Text Field', targetPageName: 'Page 1', name: inp.name,
+        const report = synthesizeNativeFormWidget(input, output, {
+          kind: 'input', targetPageName: 'Page 1', name: inp.name,
           x: inp.x, y: inp.y, width: inp.w, height: inp.h,
           inputStyle: inp.style, placeholder: inp.placeholder, maxLength: inp.maxLength,
         });

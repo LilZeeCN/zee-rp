@@ -35,6 +35,7 @@ jobs:
       - run: npm run test:layers
       - run: npm run test:studio-parity
       - run: npm run test:diff-rp
+      - run: npm run test:template-free
       - run: npm run test:repair-rp
       - run: npm run test:downgrade-rp
       - run: npm run test:build-library

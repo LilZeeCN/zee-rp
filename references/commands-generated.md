@@ -126,6 +126,7 @@
 | native-scene.mjs | RP/1 矩形场景直接写入 RP 9 原生编组、形状、文字和内嵌图片，无 GUI 或缓存依赖 | internal |
 | native-acceptance.mjs | Ego Page 上逐步比对 RP/1 模型与原生预览，保存首错与删除最小反例 | internal |
 | native-repeater.mjs | RP/1 原生 Repeater 模型、初始数据与行模板装配库 | internal |
+| native-widget-synthesizer.mjs | 净室原生控件合成器：不依赖本机 Axure 教学件或 Default.rplib 直接构建 DynamicPanel/PanelState（RP9/RP11）、Repeater 与 5 类原生表单控件 | internal |
 | native-forms.mjs | RP/1 原生表单控件、选项、初态与交互状态样式装配库 | internal |
 | runtime-expr.mjs | RP/1 有类型运行期 AST 到 Axure 原生变量、控件、行与目标行作用域表达式 | internal |
 | proto.mjs | 声明式直接原型生成与双通道混合编译入口（支持 --spec <spec.json> 与 --preset、Web/Mobile 多主题、设备外框自动合成、多页装配与动态面板/原生控件/跨页交互离线装填），封装 proto.py | channel-a |

@@ -59,7 +59,7 @@ const solidStyleFill = ({ fields, string }, color) =>
   fields({ 'fill-type': string('solid'), 'fill-color': integer(color) });
 
 // Default native widget properties also seed the unchecked style values in newly written widgets.
-function defaultStyleValues(version, context, styleId, typefaceId) {
+export function defaultStyleValues(version, context, styleId, typefaceId) {
   const { fields, string } = context;
   const fill = color => solidStyleFill(context, color);
   const shadow = (x, y, color) => fields({
@@ -98,7 +98,7 @@ function styleProperties(fields, values, enabled) {
   })));
 }
 
-function defaultStyleProperties(version, context, styleId, typefaceId) {
+export function defaultStyleProperties(version, context, styleId, typefaceId) {
   return styleProperties(context.fields, defaultStyleValues(version, context, styleId, typefaceId));
 }
 

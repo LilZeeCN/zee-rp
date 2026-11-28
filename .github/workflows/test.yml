@@ -45,6 +45,7 @@ jobs:
         env:
           CHROME_BIN: /usr/bin/google-chrome
       - run: npm run test:diff-rp
+      - run: npm run test:template-free
       - run: npm run test:repair-rp
       - run: npm run test:downgrade-rp
       - run: npm run test:build-library
