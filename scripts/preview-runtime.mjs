@@ -468,6 +468,46 @@ function isPlainObject(v) {
   return Boolean(v) && typeof v === 'object' && !Array.isArray(v);
 }
 
+export function parseInlineRowTarget(rawTarget) {
+  if (typeof rawTarget !== 'string') return { target: rawTarget, rowIndex: undefined, leaf: undefined };
+  const raw = rawTarget.trim();
+  // Pattern 1: "pick[0]" / "page/pick[0]" / "pick[rowIndex=0]"
+  let m = raw.match(/^(.+?)\[(?:rowIndex\s*=\s*)?(\d+)\]$/);
+  if (m) {
+    const cleaned = m[1].trim();
+    const leaf = cleaned.includes('/') ? cleaned.split('/').pop() : undefined;
+    return { target: cleaned, rowIndex: Number(m[2]), leaf };
+  }
+  // Pattern 2: "board/items/item[rowIndex=0]/pick" / "items[0]/pick" / "items[0].pick"
+  m = raw.match(/^(.*?)\[(?:rowIndex\s*=\s*)?(\d+)\][/.](.+)$/);
+  if (m) {
+    const prefix = m[1].trim();
+    const leaf = m[3].trim();
+    const cleaned = prefix ? `${prefix}/${leaf}` : leaf;
+    return { target: cleaned, rowIndex: Number(m[2]), leaf };
+  }
+  // Pattern 3: "items/0/pick" or "board/items/0/pick"
+  m = raw.match(/^(.+?)\/(\d+)\/([^/]+)$/);
+  if (m) {
+    const prefix = m[1].trim();
+    const leaf = m[3].trim();
+    return { target: `${prefix}/item/${leaf}`, rowIndex: Number(m[2]), leaf };
+  }
+  return { target: raw, rowIndex: undefined, leaf: undefined };
+}
+
+function applyInlineRowTarget(step) {
+  if (!step || typeof step.target !== 'string') return step;
+  const parsed = parseInlineRowTarget(step.target);
+  if (parsed.rowIndex === undefined) return step;
+  return {
+    ...step,
+    target: parsed.target,
+    rowIndex: step.rowIndex ?? parsed.rowIndex,
+    ...(parsed.leaf && parsed.leaf !== parsed.target ? { _leafTarget: parsed.leaf } : {}),
+  };
+}
+
 function normalizeVerifySteps(rawSteps = []) {
   const out = [];
   for (const step of rawSteps || []) {
@@ -482,12 +522,12 @@ function normalizeVerifySteps(rawSteps = []) {
       || (isPlainObject(exp.text) && !Object.hasOwn(exp.text, 'includes') && !Object.hasOwn(exp.text, 'contains'))
     );
     if (!hasStudioExpectMaps) {
-      out.push(rawAction === step.action ? step : { ...step, action: rawAction });
+      out.push(applyInlineRowTarget(rawAction === step.action ? step : { ...step, action: rawAction }));
       continue;
     }
     if (rawAction !== 'expect') {
       const { expect: _dropped, ...actionOnly } = step;
-      out.push({ ...actionOnly, action: rawAction });
+      out.push(applyInlineRowTarget({ ...actionOnly, action: rawAction }));
     }
     if ('page' in exp) {
       out.push({ action: 'expect', expect: { page: exp.page } });
@@ -499,22 +539,22 @@ function normalizeVerifySteps(rawSteps = []) {
     }
     if (isPlainObject(exp.visible)) {
       for (const [target, visible] of Object.entries(exp.visible)) {
-        out.push({ action: 'expect', target, expect: { visible } });
+        out.push(applyInlineRowTarget({ action: 'expect', target, expect: { visible } }));
       }
     }
     if (isPlainObject(exp.text)) {
       for (const [target, text] of Object.entries(exp.text)) {
-        out.push({ action: 'expect', target, expect: { text } });
+        out.push(applyInlineRowTarget({ action: 'expect', target, expect: { text } }));
       }
     }
     if (isPlainObject(exp.checked)) {
       for (const [target, checked] of Object.entries(exp.checked)) {
-        out.push({ action: 'expect', target, expect: { checked } });
+        out.push(applyInlineRowTarget({ action: 'expect', target, expect: { checked } }));
       }
     }
     if (isPlainObject(exp.panelState)) {
       for (const [target, panelState] of Object.entries(exp.panelState)) {
-        out.push({ action: 'expect', target, expect: { panelState } });
+        out.push(applyInlineRowTarget({ action: 'expect', target, expect: { panelState } }));
       }
     }
   }
@@ -1259,6 +1299,11 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
       message: error.message,
       stepIndex: index,
       target: step?.target ?? null,
+      ...(error.rule ? { rule: error.rule } : {}),
+      ...(error.remedy ? { remedy: error.remedy } : {}),
+      ...(error.matchedRows?.length ? { matchedRows: error.matchedRows } : {}),
+      ...(error.fixStep ? { fixStep: error.fixStep } : {}),
+      ...(error.queryMore ? { queryMore: error.queryMore } : {}),
       ...(error.candidates?.length ? { candidates: error.candidates } : {}),
       ...(error.symbol?.context?.line ? { sourceSpan: { line: error.symbol.context.line, column: error.symbol.context.column, snippet: error.symbol.context.snippet } } : {}),
       expected: step?.expect ?? null,
@@ -1274,7 +1319,7 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
         })),
         errors: observed.errors,
       } : null,
-      nextAction: error.code === 'E_PREVIEW_OUTSIDE_VIEWPORT' ? '增大 viewport，让目标中心进入浏览器可见范围。' : isCenterHint
+      nextAction: error.remedy ? error.remedy : error.code === 'E_PREVIEW_OUTSIDE_VIEWPORT' ? '增大 viewport，让目标中心进入浏览器可见范围。' : isCenterHint
         ? `检测到 Axure Web 页面在 ${vp.width}px 视口中居中产生了 +${centerShift}px 水平偏移；请传 viewport: { width: ${canvasW}, height: ${Math.max(320, Math.round(canvasH ?? 700))}, dpr: 1 } 以 1:1 对齐画布坐标。`
         : '对照 actual 与 availableTargets 中的真实目标、面板状态、坐标与变量，调整 RP/1 交互或步骤目标后重新验证。',
     }];
@@ -1393,10 +1438,18 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
         };
         let symbol = null;
         if (step.target) {
-          try { symbol = explicitPreviewTarget(map, step.target) ?? (map?.symbols.length ? resolvePreviewSymbol(map, step.target, { activePageName: before.page, activePageId: before.pageId }) : null); }
-          catch (err) {
-            const direct = before.widgets.find(w => [w.name, w.id].includes(step.target));
-            if (!direct) throw Object.assign(err, { stepIndex: i });
+          const tryResolve = targetName => explicitPreviewTarget(map, targetName)
+            ?? (map?.symbols.length ? resolvePreviewSymbol(map, targetName, { activePageName: before.page, activePageId: before.pageId }) : null);
+          try {
+            symbol = tryResolve(step.target);
+          } catch (err) {
+            if (step._leafTarget) {
+              try { symbol = tryResolve(step._leafTarget); } catch {}
+            }
+            if (!symbol) {
+              const direct = before.widgets.find(w => [w.name, w.id].includes(step.target) || (step._leafTarget && [w.name, w.id].includes(step._leafTarget)));
+              if (!direct) throw Object.assign(err, { stepIndex: i });
+            }
           }
         }
         if (symbol?.id) { entry.resolvedTarget = symbol.id; entry.target = symbol.id; }
@@ -1424,7 +1477,17 @@ export async function verifyOfficialPreview(input, { runWorkflow, exportHtml }) 
           ? findWidgetMatch(before, symbol, step.target, { allowHidden, rowIndex: step.rowIndex })
           : { candidates: [], widget: null };
         if (step.target && step.rowIndex === undefined && candidates.length > 1) {
-          throw Object.assign(new Error(`目标 "${step.target}" 在预览中匹配到 ${candidates.length} 个实例，请指定 rowIndex。`), { code: 'E_PREVIEW_AMBIGUOUS', stepIndex: i });
+          const { _leafTarget: _dropLeaf, ...cleanStep } = step;
+          const matchedRows = candidates.slice(0, 8).map((w, idx) => ({ rowIndex: idx, text: w.text ?? '', visible: w.visible }));
+          throw Object.assign(new Error(`目标 "${step.target}" 在预览中匹配到 ${candidates.length} 个实例，请指定 rowIndex。`), {
+            code: 'E_PREVIEW_AMBIGUOUS',
+            stepIndex: i,
+            rule: '中继器行模板元件在预览中存在多个行实例，须通过 rowIndex（从 0 开始）或内联下标指定具体行。',
+            remedy: `在步骤中补充 rowIndex（如 ${JSON.stringify({ ...cleanStep, rowIndex: 0 })}），或使用内联写法 target: "${step.target}[0]"。`,
+            matchedRows,
+            fixStep: { ...cleanStep, rowIndex: 0 },
+            queryMore: { tool: 'diagnose_prototype', arguments: { mode: 'capabilities', topic: 'addressing' } },
+          });
         }
         if (step.target && !widget && !allowHidden) {
           throw Object.assign(new Error(`当前页未找到可见目标 "${step.target}"。`), { code: 'E_PREVIEW_NOT_VISIBLE', stepIndex: i });

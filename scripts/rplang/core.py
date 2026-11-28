@@ -2,7 +2,143 @@ import copy
 import difflib
 import json
 import math
+from pathlib import Path
 import re
+
+_FUNCTIONS_DATA = json.loads(Path(__file__).with_name("functions.json").read_text(encoding="utf-8"))
+FUNCTION_DEFS = tuple(_FUNCTIONS_DATA["functions"])
+FUNCTION_REGISTRY = {entry["name"]: entry for entry in FUNCTION_DEFS}
+FUNCTION_ALIASES = {}
+for _fentry in FUNCTION_DEFS:
+    for _alias in _fentry.get("aliases", []):
+        FUNCTION_ALIASES[_alias.lower()] = _fentry["name"]
+
+
+def suggest_function_names(fn, limit=3):
+    if not isinstance(fn, str) or not fn:
+        return []
+    out = []
+    mapped = FUNCTION_ALIASES.get(fn.lower())
+    if mapped:
+        out.append(mapped)
+    for cand in difflib.get_close_matches(fn, sorted(FUNCTION_REGISTRY), n=limit, cutoff=0.5):
+        if cand not in out:
+            out.append(cand)
+    return out[:limit]
+
+
+def is_inline_expr_text(value):
+    if not isinstance(value, str):
+        return False
+    if value.startswith("[[") and value.endswith("]]"):
+        return True
+    if not value.startswith("=") or value.startswith("=="):
+        return False
+    body = value[1:].strip()
+    if not body:
+        return False
+    first = body[0]
+    return first in "$@!('\"-+" or first.isdigit() or (first.isascii() and (first.isalpha() or first == "_"))
+
+
+def unescape_literal_text(value):
+    if isinstance(value, str) and value.startswith("\\="):
+        return "=" + value[2:]
+    return value
+
+
+def _js_round(value):
+    num = float(value)
+    return int(math.floor(num + 0.5))
+
+
+def _js_slice(text, start, end=None):
+    s = str(text)
+    st = int(start)
+    if end is None:
+        return s[st:]
+    return s[st:int(end)]
+
+
+def _js_substr(text, start, length=None):
+    s = str(text)
+    n = len(s)
+    st = int(start)
+    if st < 0:
+        st = max(n + st, 0)
+    if length is None:
+        return s[st:]
+    ln = max(0, int(length))
+    return s[st:st + ln]
+
+
+def eval_builtin_function(fn, args, *, time_ms=0):
+    if fn == "text":
+        v = args[0]
+        return str(v).lower() if type(v) is bool else str(int(v)) if type(v) is float and v.is_integer() else str(v)
+    if fn == "concat":
+        return "".join(
+            str(a).lower() if type(a) is bool else str(int(a)) if type(a) is float and a.is_integer() else str(a)
+            for a in args
+        )
+    if fn == "lower":
+        return str(args[0]).lower()
+    if fn == "upper":
+        return str(args[0]).upper()
+    if fn == "trim":
+        return str(args[0]).strip()
+    if fn == "length":
+        return len(str(args[0]).encode("utf-16-le")) // 2
+    if fn == "fixed":
+        return fixed_decimal(args[0], int(args[1]))
+    if fn == "nowMs":
+        return time_ms
+    if fn == "contains":
+        return str(args[1]) in str(args[0])
+    if fn == "remove":
+        return str(args[0]).replace(str(args[1]), "", 1)
+    if fn == "replace":
+        return str(args[0]).replace(str(args[1]), str(args[2]))
+    if fn == "slice":
+        return _js_slice(args[0], args[1], args[2] if len(args) > 2 else None)
+    if fn == "substr":
+        return _js_substr(args[0], args[1], args[2] if len(args) > 2 else None)
+    if fn == "left":
+        cnt = max(0, int(args[1]))
+        return str(args[0])[:cnt]
+    if fn == "right":
+        cnt = int(args[1])
+        return "" if cnt <= 0 else str(args[0])[-cnt:]
+    if fn == "abs":
+        v = abs(args[0])
+        return int(v) if isinstance(v, float) and v.is_integer() else v
+    if fn == "round":
+        return _js_round(args[0])
+    if fn == "floor":
+        return int(math.floor(args[0]))
+    if fn == "ceil":
+        return int(math.ceil(args[0]))
+    if fn == "min":
+        v = min(args)
+        return int(v) if isinstance(v, float) and v.is_integer() else v
+    if fn == "max":
+        v = max(args)
+        return int(v) if isinstance(v, float) and v.is_integer() else v
+    if fn == "not":
+        return not bool(args[0])
+    if fn == "number":
+        v = args[0]
+        if type(v) in (int, float) and not isinstance(v, bool):
+            return v
+        s = str(v).strip()
+        if re.fullmatch(r"0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+", s):
+            return int(s, 0)
+        try:
+            num = float(s) if s else 0
+            return 0 if math.isnan(num) else (int(num) if num.is_integer() else num)
+        except ValueError:
+            return 0
+    return None
 
 def fixed_decimal(value, digits):
     from decimal import Decimal, ROUND_HALF_UP, localcontext
@@ -550,10 +686,20 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
             return {"fn": "lower", "args": [recv]}
         if m_name == "toUpperCase" and len(args) == 0:
             return {"fn": "upper", "args": [recv]}
+        if m_name == "trim" and len(args) == 0:
+            return {"fn": "trim", "args": [recv]}
         if m_name == "concat" and len(args) >= 1:
             return {"fn": "concat", "args": [recv, *args]}
         if m_name == "replace" and len(args) == 2 and args[1] == "":
             return {"fn": "remove", "args": [recv, args[0]]}
+        if m_name in ("replace", "replaceAll") and len(args) == 2:
+            return {"fn": "replace", "args": [recv, args[0], args[1]]}
+        if m_name in ("slice", "substring") and len(args) in (1, 2):
+            return {"fn": "slice", "args": [recv, *args]}
+        if m_name == "substr" and len(args) in (1, 2):
+            return {"fn": "substr", "args": [recv, *args]}
+        if m_name == "includes" and len(args) == 1:
+            return {"fn": "contains", "args": [recv, args[0]]}
         if m_name == "indexOf" and len(args) == 1:
             return {"_index_of": (recv, args[0])}
         fail("E_EXPRESSION", path, f"Unsupported method '.{m_name}()' in expression")
@@ -616,7 +762,7 @@ def parse_inline_expr(expr_text, path, prefer_condition=False):
             op = consume()[1]
             right = parse_unary()
             if op == "*" and right == 1 and isinstance(left, dict) and (
-                "widget" in left or left.get("fn") in ("text", "lower", "upper", "concat", "remove")
+                "widget" in left or left.get("fn") in ("text", "lower", "upper", "trim", "concat", "remove", "replace", "slice", "substr", "left", "right", "fixed")
             ):
                 left = {"fn": "number", "args": [left]}
             else:

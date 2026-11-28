@@ -8,7 +8,7 @@ import re
 import string
 from .core import fixed_decimal
 from .core import BOUND_OPS, BOUND_SIDES, DRAG_MODES, MOVE_EASINGS, MOVE_MODES, PANEL_ANIMATIONS, PANEL_GESTURES, PANEL_MODES, WIDGET_GEOM_ACCESSORS
-from .core import ACTION_PROPS, BOX_ALIGN_ALIASES, BOX_TEXT_CONTAINER_KEYS, BOX_TEXT_STYLE_KEYS, CARD_CONTENT_KEYS, CHECK_KINDS, COLOR_TOKENS, DEVICE_CANVAS_PRESETS, EVENTS, EVENT_SHORTHANDS, FORM_KINDS, GEOMETRY, INLINE_EXPR_HINT_RE, JUSTIFY_ALIASES, LanguageError, MACRO_ITEM_PROPS, MACRO_PROPS, MACRO_SLOTS, NODE_PROPS, NODE_SOURCE_ALIASES, OPTION_KINDS, SCALARS, SHORTHAND_NODE_KINDS, STATE_STYLE_KEYS, TEXT_ALIGN_ALIASES, TEXT_INPUT_KINDS, THEMES, _estimate_visual_px, _resolve_pointer, are_when_asts_mutually_exclusive, expand_carousel_macro, expand_data_table_macro, expand_detail_card_macro, expand_form_card_macro, expand_kv_list_macro, expand_list_item_macro, expand_master_detail_macro, expand_nav_bar_macro, expand_phone_shell_macro, expand_progress_bar_macro, expand_searchable_list_macro, expand_slider_captcha_macro, expand_stat_row_macro, expand_tab_bar_macro, expand_wizard_card_macro, fail, fields, ident, normalize_color_token, normalize_font_weight, normalize_panel_state_dict, normalize_panel_states_in_tree, parse_domain_type, parse_font_shorthand, parse_inline_expr, parse_template_string, ptr, sanitize_dingbats, validate_device, validate_font_size, validate_source_tree, validate_statecharts
+from .core import ACTION_PROPS, BOX_ALIGN_ALIASES, BOX_TEXT_CONTAINER_KEYS, BOX_TEXT_STYLE_KEYS, CARD_CONTENT_KEYS, CHECK_KINDS, COLOR_TOKENS, DEVICE_CANVAS_PRESETS, EVENTS, EVENT_SHORTHANDS, FORM_KINDS, FUNCTION_REGISTRY, GEOMETRY, INLINE_EXPR_HINT_RE, JUSTIFY_ALIASES, LanguageError, MACRO_ITEM_PROPS, MACRO_PROPS, MACRO_SLOTS, NODE_PROPS, NODE_SOURCE_ALIASES, OPTION_KINDS, SCALARS, SHORTHAND_NODE_KINDS, STATE_STYLE_KEYS, TEXT_ALIGN_ALIASES, TEXT_INPUT_KINDS, THEMES, _estimate_visual_px, _resolve_pointer, are_when_asts_mutually_exclusive, eval_builtin_function, expand_carousel_macro, expand_data_table_macro, expand_detail_card_macro, expand_form_card_macro, expand_kv_list_macro, expand_list_item_macro, expand_master_detail_macro, expand_nav_bar_macro, expand_phone_shell_macro, expand_progress_bar_macro, expand_searchable_list_macro, expand_slider_captcha_macro, expand_stat_row_macro, expand_tab_bar_macro, expand_wizard_card_macro, fail, fields, ident, is_inline_expr_text, normalize_color_token, normalize_font_weight, normalize_panel_state_dict, normalize_panel_states_in_tree, parse_domain_type, parse_font_shorthand, parse_inline_expr, parse_template_string, ptr, sanitize_dingbats, suggest_function_names, unescape_literal_text, validate_device, validate_font_size, validate_source_tree, validate_statecharts
 
 class Frontend:
     def __init__(self, spec):
@@ -205,11 +205,11 @@ class Frontend:
                 elif type(v) in (int, float) and math.isfinite(v):
                     raw_vars[k] = {"type": "number", "value": v}
                 elif type(v) is str:
-                    if v.strip().startswith("=") and not v.strip().startswith("=="):
+                    if is_inline_expr_text(v.strip()):
                         self.computed_vars[k] = {"compute": v.strip(), "pointer": ptr("/variables", k)}
                         raw_vars[k] = {"type": "number", "value": 0}
                     else:
-                        raw_vars[k] = {"type": "text", "value": sanitize_dingbats(v)}
+                        raw_vars[k] = {"type": "text", "value": sanitize_dingbats(unescape_literal_text(v))}
                 elif isinstance(v, dict):
                     if "type" in v:
                         st, _ = parse_domain_type(v["type"], ptr(ptr("/variables", k), "type"))
@@ -1500,31 +1500,41 @@ class Frontend:
             if "fn" in node and isinstance(node.get("args"), list) and set(node.keys()) == {"fn", "args"}:
                 args = [self._fold_compile_ast(a, ptr(ptr(path, "args"), i)) for i, a in enumerate(node["args"])]
                 fn = node["fn"]
-                if all(type(a) in (str, int, float, bool) for a in args):
-                    if fn == "not" and len(args) == 1 and type(args[0]) is bool:
-                        return not args[0]
-                    if fn == "text" and len(args) == 1:
-                        return self._format_scalar(args[0])
-                    if fn == "lower" and len(args) == 1 and type(args[0]) is str:
-                        return args[0].lower()
-                    if fn == "upper" and len(args) == 1 and type(args[0]) is str:
-                        return args[0].upper()
-                    if fn == "length" and len(args) == 1 and type(args[0]) is str:
-                        return len(args[0].encode("utf-16-le")) // 2
-                    if fn == "contains" and len(args) == 2 and all(type(a) is str for a in args):
-                        return args[1] in args[0]
-                    if fn == "remove" and len(args) == 2 and all(type(a) is str for a in args):
-                        return args[0].replace(args[1], "", 1)
-                    if fn == "concat" and len(args) >= 2 and all(type(a) in (str, int, float, bool) for a in args):
-                        return "".join(self._format_scalar(a) for a in args)
+                fspec = FUNCTION_REGISTRY.get(fn)
+                if fspec and "compile-fold" in fspec.get("contexts", []) and all(type(a) in (str, int, float, bool) for a in args):
+                    min_a = fspec["minArity"]
+                    max_a = fspec["maxArity"]
+                    if len(args) >= min_a and (max_a is None or len(args) <= max_a):
+                        if fn == "not" and type(args[0]) is not bool:
+                            return {"fn": fn, "args": args}
+                        if fn == "fixed" and (type(args[0]) not in (int, float) or isinstance(args[0], bool) or type(args[1]) is not int or not 0 <= args[1] <= 12):
+                            return {"fn": fn, "args": args}
+                        arg_types = fspec.get("argTypes", [])
+                        type_ok = True
+                        for idx_a, aval in enumerate(args):
+                            want = arg_types[idx_a] if idx_a < len(arg_types) else (arg_types[-1] if arg_types else "any")
+                            if want == "text" and type(aval) is not str:
+                                type_ok = False
+                            elif want == "number" and (type(aval) not in (int, float) or isinstance(aval, bool)):
+                                type_ok = False
+                            elif want == "boolean" and type(aval) is not bool:
+                                type_ok = False
+                            elif want == "text|number" and (type(aval) not in (str, int, float) or isinstance(aval, bool)):
+                                type_ok = False
+                        if type_ok:
+                            folded = eval_builtin_function(fn, args)
+                            if folded is not None:
+                                return folded
                 return {"fn": fn, "args": args}
         return node
 
     def expression(self, value, env, path):
         if isinstance(value, str):
+            if value.startswith("\\="):
+                return unescape_literal_text(value)
             if "${" in value:
                 return self.expression(parse_template_string(value, path), env, path)
-            if (value.startswith("=") and not value.startswith("==")) or (value.startswith("[[") and value.endswith("]]")):
+            if is_inline_expr_text(value):
                 return self.expression(parse_inline_expr(value, path), env, path)
             if value.startswith("$") and len(value) > 1 and "." not in value:
                 vname = value[1:]
@@ -1913,8 +1923,10 @@ class Frontend:
             source = {**source, "fontSize": source["size"]}
         if "weight" in source and "fontWeight" not in source:
             source = {**source, "fontWeight": source["weight"]}
-        values = self.expression({k: ("" if k == "text" and runtime_text is not None else (eval_text if k == "text" else v)) for k, v in source.items()
-                                  if k not in {"children", "states", "on", "id", "name", "when", "size", "weight"}}, env, path)
+        values = self.expression({k: v for k, v in source.items()
+                                  if k not in {"children", "states", "on", "id", "name", "when", "size", "weight", "text"}}, env, path)
+        if "text" in source:
+            values["text"] = "" if runtime_text is not None else eval_text
         if kind == "icon" and isinstance(values.get("icon"), str) and values["icon"].strip().lower() not in ICON_NAMES:
             fail("E_ICON_NAME", ptr(path, "icon"), f"Unknown built-in icon '{values['icon']}'",
                  suggestions=sorted(ICON_NAMES))
@@ -2384,25 +2396,7 @@ class Frontend:
         fn = ast["fn"]
         if fn == "isOver": return False
         if fn == "isNotOver": return True
-        if fn == "text": return str(args[0]).lower() if type(args[0]) is bool else str(int(args[0])) if type(args[0]) is float and args[0].is_integer() else str(args[0])
-        if fn == "concat": return "".join(self._format_scalar(a) if type(a) in (str, int, float, bool) else str(a) for a in args)
-        if fn == "lower": return args[0].lower()
-        if fn == "upper": return args[0].upper()
-        if fn == "length": return len(args[0].encode("utf-16-le")) // 2
-        if fn == "fixed": return fixed_decimal(*args)
-        if fn == "nowMs": return 0
-        if fn == "contains": return args[1] in args[0]
-        if fn == "remove": return args[0].replace(args[1], "", 1)
-        if fn == "not": return not args[0]
-        if fn == "number":
-            if type(args[0]) in (int, float): return args[0]
-            value = args[0].strip()
-            if re.fullmatch(r"0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+", value):
-                return int(value, 0)
-            try:
-                number = float(value) if value else 0
-                return 0 if math.isnan(number) else number
-            except ValueError: return 0
+        return eval_builtin_function(fn, args, time_ms=0)
 
     def prepare_computed_vars(self):
         self.compiled_aggregates = []
@@ -2910,12 +2904,12 @@ class Frontend:
         if isinstance(value, dict) and set(value) == {"_program_literal"}:
             value = value["_program_literal"]
         elif isinstance(value, str):
-            if "${" in value:
+            if value.startswith("\\="):
+                value = unescape_literal_text(value)
+            elif "${" in value:
                 parsed = self.expression(parse_template_string(value, path), {}, path)
                 return self.runtime(parsed, scope, path, expected=expected, row=row)
-            if (value.startswith("=") and not value.startswith("==")) or (
-                value.startswith("[[") and value.endswith("]]")
-            ) or (
+            elif is_inline_expr_text(value) or (
                 expected in ("boolean", "number") and INLINE_EXPR_HINT_RE.search(value)
             ):
                 parsed = self.expression(parse_inline_expr(value, path), {}, path)
@@ -3095,16 +3089,24 @@ class Frontend:
                     typ = "boolean"
                     out = {"kind": "call", "fn": fn, "args": refs_compiled, "valueType": "boolean"}
                 else:
-                    signatures = {"text": (None, "text"), "number": (None, "number"), "not": ("boolean", "boolean"),
-                                  "lower": ("text", "text"), "upper": ("text", "text"), "length": ("text", "number"),
-                                  "contains": ("text", "boolean"), "remove": ("text", "text"), "fixed": ("number", "text"), "nowMs": (None, "number")}
-                    arity = {"contains": 2, "remove": 2, "fixed": 2, "nowMs": 0}.get(fn, 1)
-                    if not isinstance(args, list) or (fn == "concat" and len(args) < 2) or (fn != "concat" and len(args) != arity):
-                        fail("E_ARGUMENT", path, f"concat needs at least two values; {fn} needs {arity}")
-                    if fn != "concat" and fn not in signatures:
-                        fail("E_FUNCTION", path, f"Unknown runtime function '{fn}'")
-                    arg_type, typ = (None, "text") if fn == "concat" else signatures[fn]
-                    compiled = [self.runtime(v, scope, ptr(ptr(path, "args"), i), expected=arg_type, row=row) for i, v in enumerate(args)]
+                    fspec = FUNCTION_REGISTRY.get(fn)
+                    if fspec is None:
+                        sugg = suggest_function_names(fn)
+                        sugg_hint = f"; did you mean {', '.join(sugg)}?" if sugg else ""
+                        fail("E_FUNCTION", path, f"Unknown runtime function '{fn}'{sugg_hint}", suggestions=sugg)
+                    min_a = fspec["minArity"]
+                    max_a = fspec["maxArity"]
+                    if not isinstance(args, list) or len(args) < min_a or (max_a is not None and len(args) > max_a):
+                        arity_desc = f"at least {min_a}" if max_a is None else (str(min_a) if min_a == max_a else f"{min_a}..{max_a}")
+                        got_n = len(args) if isinstance(args, list) else 0
+                        fail("E_ARGUMENT", path, f"Function '{fn}' expects {arity_desc} argument(s), got {got_n} (signature: {fspec['signature']})")
+                    arg_types = fspec.get("argTypes", [])
+                    typ = fspec["returnType"]
+                    compiled = []
+                    for i, v in enumerate(args):
+                        spec_t = arg_types[i] if i < len(arg_types) else (arg_types[-1] if arg_types else "any")
+                        exp_t = None if spec_t in ("any", "text|number") else spec_t
+                        compiled.append(self.runtime(v, scope, ptr(ptr(path, "args"), i), expected=exp_t, row=row))
                     if fn == "fixed":
                         digits = compiled[1]
                         if digits["kind"] != "literal" or type(digits["value"]) is not int or not 0 <= digits["value"] <= 12:
@@ -3516,10 +3518,7 @@ class Frontend:
                     fail("E_OPTIONS", ptr(path, key), "Selected option must exist on the target")
         if kind == "set-text":
             raw_act_text = action.get("text")
-            if isinstance(raw_act_text, str) and (
-                (raw_act_text.startswith("=") and not raw_act_text.startswith("=="))
-                or (raw_act_text.startswith("[[") and raw_act_text.endswith("]]"))
-            ):
+            if isinstance(raw_act_text, str) and is_inline_expr_text(raw_act_text):
                 raw_act_text = {"_coerce_text": raw_act_text}
             value = self.runtime(raw_act_text, scope, ptr(path, "text"), expected="text")
             if value["kind"] != "literal": out["runtime"] = value

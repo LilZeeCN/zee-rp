@@ -268,7 +268,22 @@ export function runtimeInfo(toolList) {
   const compilerHashes = Object.fromEntries(compilerKeys.filter(k => disk[k] || loadedFiles[k]).map(k => [k, { loaded: loadedFiles[k] ?? null, disk: disk[k] ?? null }]));
   return { status: 'completed', name: 'zee-rp', version: packageVersion, root: ROOT, pid: process.pid, startedAt,
     capabilitiesMatrixPath: join(ROOT, 'references', 'versioned-capabilities.md'),
-    languageFeatureVersion: '0.4.5',
+    languageFeatureVersion: packageVersion,
+    quickstart: {
+      capabilitiesCall: { tool: 'diagnose_prototype', arguments: { mode: 'capabilities', topic: 'summary' } },
+      expressionProbeCall: { tool: 'diagnose_prototype', arguments: { expressions: ["left('hello', 2)", 'round(2.5)'] } },
+      recipeRouter: {
+        calculator: { tool: 'prototype_recipe', arguments: { recipe: 'native-calculator', includeSource: true } },
+        listDetail: { tool: 'prototype_recipe', arguments: { recipe: 'list-detail', includeSource: true } },
+        stepForm: { tool: 'prototype_recipe', arguments: { recipe: 'step-form', includeSource: true } },
+        studioCanvas: { tool: 'studio_describe', arguments: { topic: 'workflow' } },
+      },
+      hardBoundaries: [
+        '中继器行内目标传 rowIndex（如 { target: "pick", rowIndex: 0 }）或内联下标 target: "pick[0]"。',
+        '运行期文本与数字混算显式用 number(...) / text(...)；纯 "=" 按钮文案直接按字面量保留，强制字面量用 "\\="。',
+        '单次 diagnose_prototype 返回全文件错误与可执行修法，支持 expressions:[...] 批量求值探针。',
+      ],
+    },
     fingerprint: loadedFingerprint, diskFingerprint: digest(JSON.stringify(disk)),
     trackedFileCount: Object.keys(disk).length, compilerHashes,
     restartRequired: changedFiles.length > 0, changedFiles,
@@ -652,9 +667,11 @@ export function authoringTools({ generate, sync, listTools }) {
     { name: 'prototype_recipe', description: '查看 RP/1 创作范例与语法速查表（只读）。',
       inputSchema: { type: 'object', properties: { recipe: { type: 'string', enum: recipes.map(r => r.id) }, includeSource: { type: 'boolean' } }, additionalProperties: false },
       handler: recipeCatalog, readOnly: true },
-    { name: 'diagnose_prototype', description: '静态诊断 RP/1、查询能力、追踪绑定和审阅图片分层。',
+    { name: 'diagnose_prototype', description: '静态体检 RP/1（全量错误收集）、查编译器能力矩阵、批量探针求值、追踪绑定和审阅图片分层。',
       inputSchema: { type: 'object', properties: {
-        mode: { type: 'string', enum: ['diagnose', 'binding', 'image', 'capabilities'] },
+        mode: { type: 'string', enum: ['diagnose', 'binding', 'image', 'capabilities', 'expression-probe'] },
+        topic: { type: 'string', enum: ['summary', 'functions', 'syntax', 'addressing', 'properties', 'recipes', 'all'] },
+        expressions: { type: 'array', items: { type: 'string' }, maxItems: 50 },
         rp1: { type: 'string' },
         source: sourceSchema,
         target: { type: 'string' },
@@ -666,11 +683,9 @@ export function authoringTools({ generate, sync, listTools }) {
         cwd: { type: 'string' },
         projectDir: { type: 'string' },
       }, additionalProperties: false },
-      handler: ({ mode, rp1, source, target, query, spec, limit, cwd, projectDir, baseline, exemptReviewed } = {}) => {
+      handler: ({ mode, topic, expressions, rp1, source, target, query, spec, limit, cwd, projectDir, baseline, exemptReviewed } = {}) => {
         if (mode === 'capabilities') {
-          const registry = JSON.parse(readFileSync(join(ROOT, 'scripts', 'surface-capabilities.json'), 'utf8'));
-          return { ok: true, ...registry, properties: registry.properties.filter(entry =>
-            !query || entry.property.toLowerCase().includes(query.toLowerCase())).slice(0, limit ?? registry.properties.length) };
+          return runWorkflow('capabilities', null, { topic, query, limit, cwd, projectDir });
         }
         const workDir = resolveWorkDir(cwd ?? projectDir);
         const resolveInput = val => {
@@ -678,7 +693,18 @@ export function authoringTools({ generate, sync, listTools }) {
           if (val.trimStart().startsWith('{')) return JSON.parse(val);
           return isAbsolute(val) ? resolve(val) : resolve(workDir, val);
         };
-        const effectiveMode = mode ?? (target !== undefined ? 'binding' : (rp1 === undefined && source === undefined && spec !== undefined ? 'image' : 'diagnose'));
+        const effectiveMode = mode ?? (Array.isArray(expressions) ? 'expression-probe' : target !== undefined ? 'binding' : (rp1 === undefined && source === undefined && spec !== undefined ? 'image' : 'diagnose'));
+        if (effectiveMode === 'expression-probe') {
+          if (!Array.isArray(expressions) || !expressions.length) {
+            throw new Error('diagnose_prototype(mode="expression-probe") 需要提供非空 expressions 数组。');
+          }
+          const inlineProbeRp1 = rp1 ?? (isInlineRp1Text(source) ? source : null);
+          if (inlineProbeRp1 !== null) {
+            return withTempRp1File(inlineProbeRp1, tempRp1 => runWorkflow('expression-probe', tempRp1, { expressions, cwd, projectDir }));
+          }
+          const probeSource = source !== undefined ? resolveInput(source) : (spec !== undefined ? resolveInput(spec) : null);
+          return runWorkflow('expression-probe', probeSource, { expressions, cwd, projectDir });
+        }
         if (effectiveMode === 'image') {
           if (exemptReviewed) {
             const path = resolveInput(baseline);

@@ -1,8 +1,7 @@
 import copy
 import math
 import re
-from .core import fixed_decimal
-from .core import CHECK_KINDS, EVENTS, FORM_KINDS, OPTION_KINDS, TEXT_INPUT_KINDS, WIDGET_GEOM_ACCESSORS, fail
+from .core import CHECK_KINDS, EVENTS, FORM_KINDS, OPTION_KINDS, TEXT_INPUT_KINDS, WIDGET_GEOM_ACCESSORS, eval_builtin_function, fail, fixed_decimal
 from .frontend import compile_language
 
 class ReferenceRuntime:
@@ -203,27 +202,9 @@ class ReferenceRuntime:
                 over = (ax < bx + bw and ax + aw > bx and ay < by + bh and ay + ah > by)
                 return over if fn == "isOver" else not over
             args = [self.eval_expr(a, row=row) for a in ast.get("args", [])]
-            if fn == "text":
-                v = args[0]
-                return str(v).lower() if type(v) is bool else str(int(v)) if type(v) is float and v.is_integer() else str(v)
-            if fn == "concat": return "".join(str(a) for a in args)
-            if fn == "lower": return str(args[0]).lower()
-            if fn == "upper": return str(args[0]).upper()
-            if fn == "length": return len(str(args[0]).encode("utf-16-le")) // 2
-            if fn == "fixed": return fixed_decimal(*args)
-            if fn == "nowMs": return self.time_ms
-            if fn == "contains": return args[1] in args[0]
-            if fn == "remove": return args[0].replace(args[1], "", 1)
-            if fn == "not": return not bool(args[0])
-            if fn == "number":
-                v = args[0]
-                if type(v) in (int, float) and not isinstance(v, bool): return v
-                s = str(v).strip()
-                if re.fullmatch(r"0[xX][0-9a-fA-F]+|0[bB][01]+|0[oO][0-7]+", s): return int(s, 0)
-                try:
-                    num = float(s) if s else 0
-                    return 0 if math.isnan(num) else (int(num) if num.is_integer() else num)
-                except ValueError: return 0
+            evaluated = eval_builtin_function(fn, args, time_ms=self.time_ms)
+            if evaluated is not None:
+                return evaluated
         return ""
 
     def resolve_trigger_name(self, ref_or_name):

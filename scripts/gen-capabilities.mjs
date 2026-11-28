@@ -65,26 +65,43 @@ export function generateLanguageCapabilities() {
 import json
 import sys
 sys.path.insert(0, sys.argv[1])
-from rplang.core import ACTION_PROPS, MACRO_PROPS, NODE_PROPS, SHORTHAND_NODE_KINDS
+from rplang.core import ACTION_PROPS, FUNCTION_DEFS, MACRO_PROPS, NODE_PROPS, SHORTHAND_NODE_KINDS
 print(json.dumps({
   'nodes': sorted(set(NODE_PROPS) | set(SHORTHAND_NODE_KINDS)),
   'macros': sorted(MACRO_PROPS),
   'actions': sorted(ACTION_PROPS),
+  'functions': list(FUNCTION_DEFS),
 }))
 `, fileURLToPath(new URL('.', import.meta.url))], { encoding: 'utf8' });
   if (proc.status !== 0) throw new Error(proc.stderr || proc.error?.message || '读取 RP/1 词表失败');
-  const { nodes, macros, actions } = JSON.parse(proc.stdout);
+  const { nodes, macros, actions, functions } = JSON.parse(proc.stdout);
   const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
   const words = entries => entries.map(word => `\`${word}\``).join('、');
+  const fnRows = functions.map(fn =>
+    `| \`${fn.signature}\` | \`${fn.returnType}\` | ${fn.contexts.join(', ')} | ${fn.description} |`
+  );
   return [
     '# RP/1 编译器词表与版本',
     '',
-    `当前安装包版本 \`v${version}\`。本表由 RP/1 编译器公开词表生成。视觉属性的宿主证据见 [四消费面对照](surface-capabilities-matrix.md)。`,
+    `当前安装包版本 \`v${version}\`。本表由 RP/1 编译器公开词表与 \`scripts/rplang/functions.json\` 自动生成；运行时可用 \`diagnose_prototype({ mode: "capabilities", topic: "summary" | "functions" | "syntax" | "addressing" | "properties" | "all" })\` 直接查询。视觉属性的宿主证据见 [四消费面对照](surface-capabilities-matrix.md)。`,
     '',
     '## 语法版本',
     '',
     '- `v0.4.4` 支持同一事件块混排动作、连续条件、嵌套分支和等待后的续体。',
     '- `v0.4.5` 增加原生表单动作短写、同一事件内内联 JSON 动作、弃用提示及带前置守卫的事务。',
+    '- `v0.4.8` 统一四端表达式函数真源（25 函数）、消除纯 `=` 字面量误杀与 `rowIndex` 多态寻址、全量错误收集、批量表达式探针与零新增工具自描述能力矩阵。',
+    '',
+    '## 表达式函数总表（四端统一真源）',
+    '',
+    '| 签名 | 返回类型 | 可用上下文 | 说明 |',
+    '|---|---|---|---|',
+    ...fnRows,
+    '',
+    '## 语法消歧与寻址规则',
+    '',
+    '- **等号字面量**：纯 `"="`（如计算器等号按钮）与 `"= 合计"` 等非表达式前缀自动按字面文本保留；仅当 `=` 后紧跟合法表达式起始符才求值；强制字面量可用 `\\=` 转义。',
+    '- **中继器行寻址**：`verify_prototype` 支持标准 `{ target: "pick", rowIndex: 0 }` 及内联写法 `pick[0]`、`pick[rowIndex=0]`、`page/items/item[rowIndex=0]/pick`、`items[0]/pick`、`items/0/pick`。',
+    '- **批量表达式探针**：`diagnose_prototype({ expressions: ["left(\'hello\', 2)", "round(2.5)"] })` 独立逐条求值，不 fail-fast。',
     '',
     '## 元件类型与缩写',
     '', words(nodes), '',

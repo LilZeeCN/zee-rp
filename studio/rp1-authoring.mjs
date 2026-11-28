@@ -312,7 +312,7 @@ function checkReferences(doc, records, index, pageId, locate) {
   };
   const expression = (value, pointer) => {
     if (value && typeof value === 'object') fail('E_RP1_SOURCE_UNSUPPORTED', 'Studio 局部事件表达式只接受标量或 = 开头表达式，尚不支持完整 RP/1 运算 AST', { ...locate(pointer) });
-    if (typeof value !== 'string' || !value.startsWith('=')) return;
+    if (typeof value !== 'string' || !value.startsWith('=') || value.startsWith('==') || !/^[A-Za-z0-9_$@!('"+-]/.test(value.slice(1).trim())) return;
     const unquoted = value.slice(1).replace(/"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'/g, '""');
     for (const match of unquoted.matchAll(/\bvar\.([A-Za-z0-9_]+)|\$([A-Za-z0-9_]+)/g)) variable(match[1] || match[2], pointer);
     for (const match of unquoted.matchAll(/@([A-Za-z0-9_/-]+)|\bwidget\.([A-Za-z0-9_-]+)\.(?:text|checked|selected)\b/g)) target(match[1] || match[2], pointer);

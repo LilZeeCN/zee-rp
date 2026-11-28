@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.8 — 2026-11-29
+
+- **D1 消除冷启动语法陷阱**：重构 `=` 表达式消歧（纯 `"="` 计算器等号键与 `"= 合计"` 自动按字面文本保留，强制字面量可用 `\=` 转义）；修复未知函数先报 `concat needs...` 假错的校验顺序 Bug；`verify_prototype` 支持多态 `rowIndex` 内联写法（`pick[0]`、`pick[rowIndex=0]`、`items[0]/pick`、`page/items/item[rowIndex=0]/pick`、`items/0/pick`）并在 `E_PREVIEW_AMBIGUOUS` 附带 `matchedRows` 与可直接复用的 `fixStep`。
+- **D2 单一函数真源四端统一**：新增 `scripts/rplang/functions.json` 统一管理 25 个表达式函数，补齐 `trim`、`replace`、`slice`、`substr`、`left`、`right`、`abs`、`round`、`floor`、`ceil`、`min`、`max`（通过 Axure RP9 STO 编译器 + 官方 HTML 与 Studio HTML 28/28 双引擎实测）。
+- **D3 全量错误收集、批量探针与可执行诊断**：升级 `DiagnosticFrontend` 为节点/动作/表达式三层恢复（单次 `diagnose_prototype` 吐出全文件错误，不 fail-fast）；新增 `diagnose_prototype({ expressions: [...] })` 独立批量求值探针；为所有 `E_*` 诊断挂接 `rule` / `remedy` / `queryMore` 与顶层 JIT `microCard`。
+- **D4 零新增工具自描述能力矩阵**：扩展 `diagnose_prototype({ mode: "capabilities", topic })` 由编译器真源直接生成函数/语法/寻址/属性/模板路由矩阵，保住 30 工具与 35k Schema 预算；`runtime_info` 动态对齐 `languageFeatureVersion` 并提供紧凑 `quickstart`；自动生成包含完整 25 函数表的 `references/versioned-capabilities.md`。
+- **D5 Gate F1 可发现性契约门禁**：新增 `npm run test:discoverability` 并接入 `Public tests` 与 `Desktop tests` CI，永久守住零死链、四端函数真源一致、零假报错、多诊断恢复与盲测对抗语料。
+
 ## 0.4.7 — 2026-11-28
 
 - 同步生成 `references/rp-language-capabilities.md` 编译器版本词表与发版清单，全平台 `Public tests` 与 `Desktop tests` 门禁一致通过。

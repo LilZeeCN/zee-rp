@@ -353,7 +353,7 @@ function collectRawVisibilityMap(doc) {
     map.set(scopedId, ownVis);
     if (node.when !== undefined) map.set(`when:${scopedId}`, node.when);
     map.set(`sizing:${scopedId}`, Object.fromEntries(['w', 'h', 'minW', 'maxW', 'minH', 'maxH', 'layout', 'justify', 'align'].filter(key => node[key] !== undefined).map(key => [key, node[key]])));
-    if (node.text && typeof node.text === 'object' || typeof node.text === 'string' && node.text.startsWith('=')) {
+    if (node.text && typeof node.text === 'object' || (typeof node.text === 'string' && (node.text.startsWith('\\=') || (node.text.startsWith('=') && !node.text.startsWith('==') && /^[A-Za-z0-9_$@!('"+-]/.test(node.text.slice(1).trim()))))) {
       map.set(`rawText:${scopedId}`, node.text);
     }
     if (Array.isArray(node.children)) {
@@ -963,7 +963,7 @@ function buildAppJs(bundlePayload) {
         return String(opts[node.selectedIndex ?? 0] ?? '');
       }
       const raw = node.rawText ?? node.text ?? node.value ?? '';
-      if (typeof raw === 'object' || typeof raw === 'string' && raw.startsWith('=')) {
+      if (typeof raw === 'object' || (typeof raw === 'string' && (raw.startsWith('=') || raw.startsWith('\\\\=')))) {
         return String(this.evaluateExpression(raw, null, { pageId: node.pageId, scopePrefix: this.nodeScope(node) }) ?? '');
       }
       return String(raw);

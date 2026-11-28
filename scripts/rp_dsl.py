@@ -388,8 +388,11 @@ def _parse_value(raw, line_no=1):
     if raw == "null":
         return None
     if raw[0] in ('"', "{", "["):
+        candidate = raw
+        if candidate.startswith('"\\='):
+            candidate = '"\\\\=' + candidate[3:]
         try:
-            return json.loads(raw)
+            return json.loads(candidate)
         except json.JSONDecodeError as e:
             raise _set_diag_span(LanguageError("E_DSL_SYNTAX", "/", f"Invalid literal at line {line_no}: {e.msg}"), line_no, e.colno)
     if re.fullmatch(r"-?\d+", raw):

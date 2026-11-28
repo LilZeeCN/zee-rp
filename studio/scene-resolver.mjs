@@ -872,6 +872,8 @@ export function measureAndLayoutTree(rootNode, canvasW, canvasH, doc, pageId, { 
     if (textKey !== null && textKey !== undefined) {
       node.text = String(values[textKey] ?? '');
       delete node.spans;
+    } else if (typeof node.text === 'string' && node.text.startsWith('\\=')) {
+      node.text = '=' + node.text.slice(2);
     } else if (runtimeState?.evaluateText && typeof node.text === 'string' && node.text.startsWith('=')) {
       node.text = String(runtimeState.evaluateText(node.text, { pageId, scopePrefix: prefix }));
     }

@@ -1,6 +1,6 @@
 {
   "name": "zee-rp",
-  "version": "0.4.7",
+  "version": "0.4.8",
   "private": false,
   "type": "module",
   "description": "AI-native engine and MCP server to read, surgically edit, and generate editable Axure (.rp) prototypes",
@@ -101,7 +101,8 @@
     "test:build-library": "node --test test/build-library-check.mjs",
     "test:template-free": "node --test test/template-free-synthesis-check.mjs",
     "test:verify-observability": "node --test test/verify-observability-check.mjs",
-    "test:mcp-budget": "node --test test/mcp-budget-check.mjs"
+    "test:mcp-budget": "node --test test/mcp-budget-check.mjs",
+    "test:discoverability": "node --test test/discoverability-gate-f-check.mjs"
   },
   "optionalDependencies": {
     "@modelcontextprotocol/sdk": "1.32.1",
@@ -758,7 +759,10 @@
     "test/mcp-budget-check.mjs",
     "scripts/native-widget-synthesizer.mjs",
     "test/template-free-synthesis-check.mjs",
-    "test/verify-observability-check.mjs"
+    "test/verify-observability-check.mjs",
+    "scripts/rplang/functions.json",
+    "scripts/rplang/capabilities.py",
+    "test/discoverability-gate-f-check.mjs"
   ],
   "repository": {
     "type": "git",

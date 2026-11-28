@@ -49,8 +49,12 @@ export function evaluatePrototypeExpression(expression, { variables, getWidgetTe
     };
     return evaluatePrototypeExpression('=' + encode(expression), args);
   }
-  const source = String(expression).trim();
-  if (!source.startsWith('=')) {
+  const rawStr = String(expression);
+  if (rawStr.startsWith('\\=')) return '=' + rawStr.slice(2);
+  const source = rawStr.trim();
+  const isInlineFormula = source.startsWith('=') && !source.startsWith('==')
+    && /^[A-Za-z0-9_$@!('"+-]/.test(source.slice(1).trim());
+  if (!isInlineFormula) {
     let out = itemRow ? source.replace(/\$\{\s*item\.([a-zA-Z0-9_]+)\s*\}|\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g,
       (_, itemField, templateField) => String(itemRow[itemField || templateField] ?? '')) : source;
     if (out.includes('${')) {
@@ -72,6 +76,8 @@ export function evaluatePrototypeExpression(expression, { variables, getWidgetTe
   const functions = {
     text: value => String(value ?? ''),
     number: value => Number(value) || 0,
+    fixed: (value, digits = 0) => (Number(value) || 0).toFixed(Math.max(0, Math.min(12, Math.trunc(Number(digits) || 0)))),
+    nowMs: () => (typeof window !== 'undefined' && window.__zeeClock?.timestamp ? window.__zeeClock.timestamp : Date.now()),
     concat: (...values) => values.map(value => String(value ?? '')).join(''),
     contains: (value, part) => String(value ?? '').includes(String(part ?? '')),
     length: value => String(value ?? '').length,
@@ -79,8 +85,12 @@ export function evaluatePrototypeExpression(expression, { variables, getWidgetTe
     upper: value => String(value ?? '').toUpperCase(),
     trim: value => String(value ?? '').trim(),
     not: value => !value,
-    remove: (value, part) => String(value ?? '').split(String(part ?? '')).join(''),
+    remove: (value, part) => String(value ?? '').replace(String(part ?? ''), ''),
     replace: (value, from, to) => String(value ?? '').split(String(from ?? '')).join(String(to ?? '')),
+    slice: (value, start, end) => end === undefined ? String(value ?? '').slice(Number(start) || 0) : String(value ?? '').slice(Number(start) || 0, Number(end) || 0),
+    substr: (value, start, len) => len === undefined ? String(value ?? '').substr(Number(start) || 0) : String(value ?? '').substr(Number(start) || 0, Number(len) || 0),
+    left: (value, count) => String(value ?? '').slice(0, Math.max(0, Math.trunc(Number(count) || 0))),
+    right: (value, count) => { const n = Math.trunc(Number(count) || 0); return n <= 0 ? '' : String(value ?? '').slice(-n); },
     min: (...values) => Math.min(...values.map(v => Number(v) || 0)),
     max: (...values) => Math.max(...values.map(v => Number(v) || 0)),
     abs: value => Math.abs(Number(value) || 0),

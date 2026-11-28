@@ -104,9 +104,21 @@ export function nativeRuntimeValue(ast, ctx, { targetRows = false } = {}) {
         case 'fixed': return `(${a}).toFixed(${args[1]})`;
         case 'lower': return `(${a}).toLowerCase()`;
         case 'upper': return `(${a}).toUpperCase()`;
+        case 'trim': return `(${a}).trim()`;
         case 'length': return `(${a}).length`;
         case 'contains': return `((${a}).indexOf(${args[1]})>=0)`;
         case 'remove': return `(${a}).replace(${args[1]},"")`;
+        case 'replace': return `(${a}).replace(${args[1]},${args[2]})`;
+        case 'slice': return args.length > 2 ? `(${a}).slice(${args[1]},${args[2]})` : `(${a}).slice(${args[1]})`;
+        case 'substr': return args.length > 2 ? `(${a}).substr(${args[1]},${args[2]})` : `(${a}).substr(${args[1]})`;
+        case 'left': return `(${a}).slice(0,Math.max(0,(${args[1]})*1))`;
+        case 'right': return `(${a}).slice(Math.max(0,(${a}).length-Math.max(0,(${args[1]})*1)))`;
+        case 'abs': return `Math.abs(${a})`;
+        case 'round': return `Math.floor(((${a})*1)+0.5)`;
+        case 'floor': return `Math.floor(${a})`;
+        case 'ceil': return `Math.ceil(${a})`;
+        case 'min': return `Math.min(${args.join(',')})`;
+        case 'max': return `Math.max(${args.join(',')})`;
         case 'isOver':
         case 'isNotOver': {
           const nameA = node.args[0]?.name;

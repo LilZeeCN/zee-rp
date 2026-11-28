@@ -3,6 +3,8 @@ import copy
 import json
 from pathlib import Path
 import re
+from rplang.capabilities import build_capabilities_response
+from rplang.core import FUNCTION_REGISTRY, parse_inline_expr
 from rplang.zh_messages import localize_diagnostic
 from rp_language import Frontend, LanguageError, NODE_PROPS, SHORTHAND_NODE_KINDS, EVENT_SHORTHANDS, _resolve_pointer, DEVICE_CANVAS_PRESETS, validate_source_tree, MAX_FONT_SIZE
 
@@ -129,6 +131,23 @@ def contextualize(diagnostic, spec, spans=None, source_text=None):
                 op.setdefault("oldValue", copy.deepcopy(_resolve_pointer(spec, op["path"])))
             except (LanguageError, KeyError, IndexError, TypeError, ValueError):
                 pass
+    rules = {
+        "E_FUNCTION": ("RP/1 表达式函数须来自四端统一函数表。", "functions"),
+        "E_ARGUMENT": ("函数实参数量与类型须匹配统一签名。", "functions"),
+        "E_EXPRESSION": ("内联表达式以 '=' 开头且紧跟合法表达式，模板插值用 '${...}'；纯 '=' 或 '= 中文' 自动按字面文本保留，强制字面量可用 '\\='。", "syntax"),
+        "E_REFERENCE": ("同页唯一短 ID 可直接引用；嵌套或跨页元件须使用 page/id 或 page/panel/state/id。", "addressing"),
+        "E_VARIABLE": ("变量须先在顶层声明（var name = ...），引用使用 var.name 或 $name；行字段用 item.field。", "addressing"),
+        "E_TYPE": ("字段或表达式值类型须与声明匹配；运行期文本与数值转换须显式使用 number(...) / text(...)。", "syntax"),
+        "E_NODE_TYPE": ("节点类型须为 RP/1 支持的基础元件、容器或内置宏。", "summary"),
+        "E_PROPERTY": ("节点仅接受自身契约内声明的合法属性。", "properties"),
+        "E_SIZE": ("几何宽高与间距须为非负有效数值；隐藏元件请使用 visible:false。", "properties"),
+        "E_ACTION": ("事件动作须使用合法动词及必填参数。", "summary"),
+        "E_ENUM_VARIANT": ("枚举值须严格匹配模型声明的候选值。", "syntax"),
+        "E_DATA_FIELD": ("中继器/绑定字段须在对应 model 中声明。", "addressing"),
+        "E_DATASET": ("中继器与聚合须引用已声明的 datasets 名称。", "addressing"),
+        "E_DSL_SYNTAX": ("缩进 DSL 块须保持一致缩进与闭合引号；事件块支持混排动作与嵌套 if/elif/else。", "syntax"),
+        "E_PATCH_CONFLICT": ("源码已变更，须基于最新 semanticHash 重新生成补丁。", "recipes"),
+    }
     hints = {
         "E_REFERENCE": "使用目标的逻辑 ID；嵌套元件使用完整 panel/state/widget 路径。",
         "E_TYPE": "检查该字段的期望类型；运行期文本数字须显式 number(...) 转换。",
@@ -137,20 +156,44 @@ def contextualize(diagnostic, spec, spans=None, source_text=None):
         "E_SIZE": "将宽高设为正数；隐藏元件请使用 visible:false。",
         "E_PATCH_CONFLICT": "重新读取当前源码及 semanticHash，再决定是否重做补丁。",
     }
+    rule_text, cap_topic = rules.get(code, ("按 RP/1 语法与类型契约修正源码。", "summary"))
+    out["rule"] = rule_text
+    out["queryMore"] = {"tool": "diagnose_prototype", "arguments": {"mode": "capabilities", "topic": cap_topic}}
     out["nextAction"] = hints.get(code, "按源码位置修正后重新诊断；编译通过后仍需验证实际交互。")
+    if code == "E_FUNCTION":
+        sugg = out.get("suggestions") or []
+        sigs = [FUNCTION_REGISTRY[s]["signature"] for s in sugg if s in FUNCTION_REGISTRY]
+        out["remedy"] = (
+            f"改用相近受支持函数：{' / '.join(sigs)}；或调用 diagnose_prototype(mode=\"capabilities\", topic=\"functions\") 查看完整函数表。"
+            if sigs else "调用 diagnose_prototype(mode=\"capabilities\", topic=\"functions\") 查看全部受支持函数签名。"
+        )
+        out["nextAction"] = out["remedy"]
+    elif code == "E_ARGUMENT":
+        out["remedy"] = f"按报错提示的签名补齐或精简实参；不确定用法可用 diagnose_prototype(expressions=[...]) 批量测试。"
+        out["nextAction"] = out["remedy"]
+    elif code == "E_EXPRESSION":
+        out["remedy"] = "检查括号/引号配对与运算符；若只需输出以 '=' 开头的字面文本，使用 '\\=' 转义或直接写纯 '='。"
+        out["nextAction"] = out["remedy"]
+    else:
+        out["remedy"] = out["nextAction"]
     if code == "E_SIZE" and out.get("field") in {"fontSize", "size", "headerFontSize", "titleFontSize"}:
         out["nextAction"] = f"将字号设为大于 0 且不超过 {MAX_FONT_SIZE} 的数值。"
+        out["remedy"] = out["nextAction"]
     if code == "E_SIZE" and out.get("field") == "letterSpacing":
         out["nextAction"] = "将 letterSpacing 设为非负数；0 表示默认字距。"
+        out["remedy"] = out["nextAction"]
     if out.get("field") == "right" and node and node.get("type") == "phone-shell":
         out["nextAction"] = "phone-shell.right 是数字几何约束；右侧状态栏用 statusRight，顶栏按钮文案用 rightText，事件用 onRight。"
+        out["remedy"] = out["nextAction"]
     if out.get("field") == "fontFamily":
         if code == "E_TYPE":
             out["nextAction"] = "fontFamily 须为非空字体族名称（如 \"Inter\" 或 \"PingFang SC\"）。"
         else:
             out["nextAction"] = "fontFamily 仅适用于文本与表单控件（label/paragraph/button/badge/checkbox/radio/combobox/listbox 或带 text 的 box/card）；纯容器或图形元件请改在子文本节点或 styles 状态样式上设置。"
+        out["remedy"] = out["nextAction"]
     if "requires a native input" in out.get("message", ""):
         out["nextAction"] = "enable/disable/focus 用于原生表单控件（input/checkbox/radio/combobox/listbox）；普通按钮的提交拦截请使用条件 Case 守卫或显隐状态。"
+        out["remedy"] = out["nextAction"]
     out["location"] = " → ".join(str(v) for v in (out.get("pageName"), out.get("widgetName"), out.get("field")) if v)
     return localize_diagnostic(out)
 
@@ -207,6 +250,24 @@ def diagnose_spec(spec, max_diagnostics=20, spans=None, source_text=None):
                 return super().node({"type": "box", "id": nid, "w": 1, "h": 1}, scope, env,
                                     path + "/diagnostic-stub", stack, panel_depth)
 
+        def runtime(self, value, scope, path, expected=None, row=None):
+            try:
+                return super().runtime(value, scope, path, expected=expected, row=row)
+            except LanguageError as error:
+                self.issues.append(error.diagnostic)
+                if expected == "number":
+                    return {"kind": "literal", "value": 0, "valueType": "number"}
+                if expected == "boolean":
+                    return {"kind": "literal", "value": False, "valueType": "boolean"}
+                return {"kind": "literal", "value": "", "valueType": "text"}
+
+        def action(self, action, scope, path):
+            try:
+                return super().action(action, scope, path)
+            except LanguageError as error:
+                self.issues.append(error.diagnostic)
+                return {"type": "wait", "ms": 0}
+
     frontend = None
     ir = None
     issues = []
@@ -214,15 +275,32 @@ def diagnose_spec(spec, max_diagnostics=20, spans=None, source_text=None):
         frontend = DiagnosticFrontend(spec)
         _, ir = frontend.compile()
     except LanguageError as error:
-        if not frontend or not frontend.issues:
+        if frontend and frontend.issues:
+            issues = [*frontend.issues, error.diagnostic]
+        else:
             issues.append(error.diagnostic)
-    if frontend and frontend.issues:
+    if frontend and frontend.issues and not issues:
         issues = frontend.issues
     unique = {(d.get("code"), d.get("pointer"), d.get("message")): d for d in issues}
     errors = [contextualize(d, spec, spans, source_text) for d in unique.values()]
     warnings = [contextualize(d, spec, spans, source_text)
                 for d in [*getattr(spans, "warnings", []), *branch_mutation_hints(spec)]]
     diagnostics = errors + warnings
+    micro_card = None
+    if errors:
+        seen_topics = []
+        tips = []
+        for err in errors:
+            t = (err.get("queryMore") or {}).get("arguments", {}).get("topic", "summary")
+            if t not in seen_topics:
+                seen_topics.append(t)
+                tips.append(f"[{err['code']}] {err.get('rule', '')}")
+            if len(tips) >= 3:
+                break
+        micro_card = {
+            "tips": tips,
+            "queryMore": {"tool": "diagnose_prototype", "arguments": {"mode": "capabilities", "topic": seen_topics[0] if len(seen_topics) == 1 else "summary"}},
+        }
     return {
         "ok": not errors,
         "stage": "semantic-check",
@@ -233,6 +311,53 @@ def diagnose_spec(spec, max_diagnostics=20, spans=None, source_text=None):
         "verification": {"semantic": not errors, "nativePreview": False},
         "audit": {"degradations": source_degradations(spec)},
         "hints": authoring_hints(spec, spans, source_text)[:max_diagnostics],
+        **({"microCard": micro_card} if micro_card else {}),
+    }
+
+
+def probe_expressions(expressions, spec=None):
+    base_spec = copy.deepcopy(spec) if isinstance(spec, dict) and spec.get("pages") else {
+        "language": "rp/1",
+        "target": 9,
+        "variables": {},
+        "pages": [{"id": "probe", "root": {"type": "box", "id": "root", "w": 300, "h": 300, "children": []}}],
+    }
+    frontend = Frontend(base_spec)
+    frontend.compile()
+    scope = base_spec["pages"][0]["id"]
+    results = []
+    passed = 0
+    for idx, raw_expr in enumerate(expressions):
+        pointer = f"/expressions/{idx}"
+        if not isinstance(raw_expr, str):
+            diag = contextualize({"severity": "error", "code": "E_TYPE", "pointer": pointer, "message": "Expected expression string"}, base_spec)
+            results.append({"index": idx, "expr": raw_expr, "ok": False, "diagnostic": diag})
+            continue
+        try:
+            text = raw_expr.strip()
+            if "${" in text:
+                ast = frontend.expression(text, {}, pointer)
+            else:
+                ast = frontend.expression(parse_inline_expr(text, pointer), {}, pointer)
+            compiled = frontend.runtime(ast, scope, pointer)
+            preview = frontend._eval_static_ast(compiled)
+            results.append({
+                "index": idx,
+                "expr": raw_expr,
+                "ok": True,
+                "valueType": compiled.get("valueType"),
+                "previewValue": preview,
+            })
+            passed += 1
+        except LanguageError as error:
+            diag = contextualize(error.diagnostic, base_spec)
+            results.append({"index": idx, "expr": raw_expr, "ok": False, "diagnostic": diag})
+    failed = len(results) - passed
+    return {
+        "ok": failed == 0,
+        "mode": "expression-probe",
+        "summary": {"total": len(results), "passed": passed, "failed": failed},
+        "results": results,
     }
 
 
@@ -307,6 +432,27 @@ def main():
     from rp_dsl import dsl_to_spec
     from pathlib import Path
     request = json.load(sys.stdin)
+    if request["command"] == "capabilities":
+        result = build_capabilities_response(
+            topic=request.get("topic"),
+            query=request.get("query"),
+            limit=request.get("limit"),
+        )
+        print(json.dumps(result, ensure_ascii=False))
+        return
+    if request["command"] == "expression-probe":
+        exprs = request.get("expressions")
+        if not isinstance(exprs, list) or not exprs:
+            raise LanguageError("E_TOOL_INPUT", "/expressions", "Expected a nonempty list of expression strings")
+        src = request.get("source")
+        ctx_spec = None
+        if src is not None:
+            if not isinstance(src, str):
+                validate_source_tree(src)
+            ctx_spec = cli.read_source(src) if isinstance(src, str) else copy.deepcopy(src)
+        result = probe_expressions(exprs, ctx_spec)
+        print(json.dumps(result, ensure_ascii=False))
+        return
     source = request["source"]
     if not isinstance(source, str):
         validate_source_tree(source)
