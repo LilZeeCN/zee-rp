@@ -628,7 +628,7 @@ export function authoringTools({ generate, sync, listTools }) {
         noCache: { type: 'boolean' },
         stepDetail: { enum: ['failures-only', 'compact', 'full'] },
         clockScope: { enum: ['page', 'global'] },
-        steps: { type: 'array', minItems: 0, maxItems: 120, items: compactVerifyStepSchema },
+        steps: { type: 'array', minItems: 0, maxItems: 120, description: '验收步骤（≤120）', items: compactVerifyStepSchema },
       }, additionalProperties: false },
       handler: input => verifyOfficialPreview({ compact: true, ...input }, { runWorkflow, exportHtml: exportPrototype }), readOnly: false },
     { name: 'preview_prototype', description: '在 ego lite 空间验证真实 Axure 预览（优先使用 export_prototype + verify_prototype 做无头 Chrome 验收）。',

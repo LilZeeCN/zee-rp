@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.6 — 2026-11-28
+
+- 修复 `studio-html` 导出运行时初始化期注册的定时任务在虚拟时钟按页推进（`advanceTime`）时因 `window.__STUDIO_EXPORT_APP__` 尚未挂载导致页面归属错位的问题。
+- 修复 Windows 环境下 `generate_prototype` / `sync_prototype(mode="relocate")` 重定位临时构建目录路径时硬编码正斜杠与未匹配 JSON 转义反斜杠的问题，确保发布的 `source.json` 与资产路径跨平台一致。
+- 恢复 `verify_prototype` Schema 中 `steps` 字段的上限说明（`≤120`），全平台 CI 门禁与 Schema 预算双绿。
+
 ## 0.4.5 — 2026-11-28
 
 - 统一 RP/1 表单短写、事件块 JSON 动作、Repeaters、规则守卫、事务和 Studio 数据宏。按当前页面解析短 ID，原生与 Studio HTML 依据可见行位置读取中继器。

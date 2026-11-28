@@ -710,6 +710,7 @@ function buildAppJs(bundlePayload) {
   class ExportRuntimeApp {
     constructor(bundle) {
       this.bundle = bundle;
+      if (typeof window !== 'undefined') window.__STUDIO_EXPORT_APP__ = this;
       this.reset();
     }
 

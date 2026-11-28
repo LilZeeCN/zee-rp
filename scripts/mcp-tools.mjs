@@ -1579,8 +1579,14 @@ function cleanLegacyArtifacts(output) {
   return removed;
 }
 
+function isUnderPath(candidate, dir) {
+  return typeof candidate === 'string' && typeof dir === 'string' && (
+    candidate === dir || candidate.startsWith(dir + '/') || candidate.startsWith(dir + '\\')
+  );
+}
+
 function relocateArtifactValue(value, from, to) {
-  if (typeof value === 'string' && (value === from || value.startsWith(from + '/'))) return to + value.slice(from.length);
+  if (isUnderPath(value, from)) return to + value.slice(from.length);
   if (Array.isArray(value)) return value.map(item => relocateArtifactValue(item, from, to));
   if (value && typeof value === 'object') {
     return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, relocateArtifactValue(item, from, to)]));
@@ -1627,7 +1633,10 @@ function publishBuildDirectory(stage, target) {
         if (entry.isDirectory()) rewrite(path);
         else if (entry.isFile() && entry.name.endsWith('.json')) {
           const json = readFileSync(path, 'utf8');
-          if (json.includes(stage)) writeFileSync(path, JSON.stringify(relocateArtifactValue(JSON.parse(json), stage, target), null, 2) + '\n');
+          const escapedStage = JSON.stringify(stage).slice(1, -1);
+          if (json.includes(stage) || (escapedStage !== stage && json.includes(escapedStage))) {
+            writeFileSync(path, JSON.stringify(relocateArtifactValue(JSON.parse(json), stage, target), null, 2) + '\n');
+          }
         }
       }
     };
@@ -2092,7 +2101,7 @@ function relocatePrototype(from, to) {
     const fromStem = basename(from, '.rp');
     const toStem = basename(to, '.rp');
     const companion = oldSource && dirname(oldSource) === dirname(from) && basename(oldSource, extname(oldSource)) === fromStem;
-    const inAssets = oldSource?.startsWith(oldAssets + '/');
+    const inAssets = isUnderPath(oldSource, oldAssets) && oldSource !== oldAssets;
     const newSource = companion ? join(dirname(to), toStem + extname(oldSource)) : inAssets ? newAssets + oldSource.slice(oldAssets.length) : oldSource;
     const alreadyMoved = !existsSync(from) && existsSync(to);
     const rpSource = alreadyMoved ? to : from;

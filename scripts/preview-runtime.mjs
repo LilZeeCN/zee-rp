@@ -31,8 +31,16 @@ const VIRTUAL_CLOCK_SHIM = `(() => {
   const queue = [];
   const ownerPage = () => {
     try {
-      return window.__STUDIO_EXPORT_APP__?.getCurrentPage()?.name
-        || window.$axure?.internal?.(api => api.pageData?.page?.name)
+      const studioPage = window.__STUDIO_EXPORT_APP__?.getCurrentPage?.();
+      if (studioPage) return studioPage.name || studioPage.id || null;
+      const bundlePages = window.__STUDIO_EXPORT_BUNDLE__?.pages;
+      if (Array.isArray(bundlePages) && bundlePages.length) {
+        const m = typeof location !== 'undefined' ? String(location.hash || '').match(/#p=([^&]+)/) : null;
+        const decoded = m ? decodeURIComponent(m[1]) : null;
+        const found = decoded ? bundlePages.find(p => p.id === decoded || p.name === decoded) : bundlePages[0];
+        if (found) return found.name || found.id || null;
+      }
+      return window.$axure?.internal?.(api => api.pageData?.page?.name)
         || document.title
         || null;
     } catch { return document.title || null; }
